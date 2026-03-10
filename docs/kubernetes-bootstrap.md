@@ -24,3 +24,4 @@ Bootstrap summary:
 5. `node01` and `node02` joined successfully via `kubeadm join`.
 6. Smoke pods scheduled successfully on `node01` and `node02` and were removed.
 7. `node02` was labeled as the first GPU candidate worker.
+8. GPU automation was split into a separate preflight path because `node02` does not currently enumerate an NVIDIA PCI device.

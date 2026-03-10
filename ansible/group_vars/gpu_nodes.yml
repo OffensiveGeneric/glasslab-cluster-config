@@ -1,0 +1,9 @@
+ansible_become: true
+gpu_support_packages:
+  - alsa-utils
+  - mokutil
+  - pciutils
+  - ubuntu-drivers-common
+gpu_driver_install_enabled: false
+gpu_driver_strategy: ubuntu-drivers
+gpu_nvidia_container_toolkit_enabled: false

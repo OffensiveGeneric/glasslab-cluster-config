@@ -1,0 +1,73 @@
+---
+- name: Prepare GPU-capable Kubernetes nodes
+  hosts: "{{ gpu_target_group | default('gpu_nodes') }}"
+  gather_facts: true
+  become: true
+  vars_files:
+    - ../group_vars/all.yml
+    - ../group_vars/gpu_nodes.yml
+  tasks:
+    - name: Install GPU support packages
+      ansible.builtin.apt:
+        name: "{{ gpu_support_packages }}"
+        state: present
+        update_cache: true
+
+    - name: Check Secure Boot state
+      ansible.builtin.command: mokutil --sb-state
+      register: gpu_secure_boot
+      changed_when: false
+      failed_when: false
+
+    - name: Detect NVIDIA PCI devices
+      ansible.builtin.command:
+        cmd: "lspci -Dnnd 10de:"
+      register: gpu_nvidia_lspci
+      changed_when: false
+      failed_when: false
+
+    - name: Capture ubuntu-drivers recommendation output
+      ansible.builtin.command: ubuntu-drivers devices
+      register: gpu_ubuntu_drivers
+      changed_when: false
+      failed_when: false
+
+    - name: Fail when no NVIDIA device is visible to Linux
+      ansible.builtin.fail:
+        msg: |
+          No NVIDIA PCI device is visible on {{ inventory_hostname }}.
+          Refusing driver installation because this is a hardware or firmware visibility issue, not a package issue.
+          Check card seating, auxiliary PCIe power, BIOS slot enablement, and primary display settings.
+      when: gpu_nvidia_lspci.stdout | trim == ''
+
+    - name: Fail when Secure Boot is enabled and driver install was requested
+      ansible.builtin.fail:
+        msg: |
+          Secure Boot appears to be enabled on {{ inventory_hostname }}.
+          Disable Secure Boot or complete MOK enrollment before installing NVIDIA drivers.
+      when:
+        - gpu_driver_install_enabled | bool
+        - gpu_secure_boot.stdout is search('enabled')
+
+    - name: Show detected NVIDIA devices
+      ansible.builtin.debug:
+        var: gpu_nvidia_lspci.stdout_lines
+
+    - name: Show ubuntu-drivers recommendation output
+      ansible.builtin.debug:
+        var: gpu_ubuntu_drivers.stdout_lines
+
+    - name: Install the Ubuntu-recommended NVIDIA driver
+      ansible.builtin.command: ubuntu-drivers install --gpgpu
+      register: gpu_driver_install
+      changed_when: >-
+        'No drivers found for installation' not in gpu_driver_install.stdout
+      when: gpu_driver_install_enabled | bool
+
+    - name: Explain next step when driver install is intentionally disabled
+      ansible.builtin.debug:
+        msg: >-
+          NVIDIA hardware is visible on {{ inventory_hostname }}.
+          Driver install is disabled by default. Re-run with
+          -e gpu_driver_install_enabled=true once hardware visibility is confirmed and Secure Boot policy is settled.
+      when: not gpu_driver_install_enabled | bool

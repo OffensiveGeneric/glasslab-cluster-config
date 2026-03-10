@@ -13,13 +13,15 @@ Current cluster design:
 - Workers remain separate from the provisioner.
 - Pod networking is Calico with `10.244.0.0/16` to avoid overlap with the lab LAN `192.168.1.0/24`.
 - Additional workers can be added with the existing PXE + Ansible + `kubeadm join` flow.
+- GPU workers are managed separately from generic workers through the `gpu_nodes` inventory group.
 
 GPU note:
 
 - `node02` is labeled as a GPU candidate in Kubernetes and inventory.
 - The base OS is joined and schedulable.
 - NVIDIA driver/runtime enablement is intentionally deferred until after cluster bring-up.
-- Current package-free PCI probes did not expose an NVIDIA device to the OS yet, so hardware visibility still needs confirmation on `node02` before driver rollout.
+- Current package-free PCI probes and `lspci` do not expose an NVIDIA device to the OS yet, so hardware visibility still needs confirmation on `node02` before driver rollout.
+- The first automation entry point for this path is `ansible/playbooks/prepare-gpu-node.yml`.
 
 Scaling note:
 
