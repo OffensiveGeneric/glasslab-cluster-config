@@ -1,19 +1,44 @@
 #!ipxe
 set server http://192.168.1.44
-set cloud_path /pxe/cloud-init/default
 
-# Dedicated profile for the known node (check multiple iPXE vars for compatibility).
-iseq ${mac} 90:b1:1c:90:22:50 && set cloud_path /pxe/cloud-init/node48
-iseq ${ip} 192.168.1.48 && set cloud_path /pxe/cloud-init/node48
-iseq ${net0/mac} 90:b1:1c:90:22:50 && set cloud_path /pxe/cloud-init/node48
-iseq ${net0/ip} 192.168.1.48 && set cloud_path /pxe/cloud-init/node48
+# Installed worker node should prefer local disk.
+iseq ${mac} 90:b1:1c:90:22:50 && goto localboot48 ||
+iseq ${ip} 192.168.1.48 && goto localboot48 ||
+iseq ${net0/mac} 90:b1:1c:90:22:50 && goto localboot48 ||
+iseq ${net0/ip} 192.168.1.48 && goto localboot48 ||
 
-# Try booting local disk first to avoid PXE reinstall loops after first install.
-sanboot --no-describe --drive 0x80 || goto install
+# Control-plane candidate should also try local disk first after its first install.
+iseq ${mac} 18:66:da:23:44:38 && goto localboot49 ||
+iseq ${ip} 192.168.1.49 && goto localboot49 ||
+iseq ${net0/mac} 18:66:da:23:44:38 && goto localboot49 ||
+iseq ${net0/ip} 192.168.1.49 && goto localboot49 ||
 
-:install
-kernel ${server}/pxe/ubuntu/vmlinuz ip=dhcp boot=casper nomodeset nosplash --- \
-  url=${server}/pxe/iso/ubuntu-24.04.4-live-server-amd64.iso \
-  autoinstall ds=nocloud-net;s=${server}${cloud_path}/ ---
-initrd ${server}/pxe/ubuntu/initrd
-boot
+goto install_default
+
+:localboot48
+sanboot --no-describe --drive 0x80 || goto install48
+
+:localboot49
+sanboot --no-describe --drive 0x80 || goto install49
+
+:install48
+echo Installing node48 profile
+kernel ${server}/k/vmlinuz ip=dhcp boot=casper --- url=${server}/u.iso autoinstall ds=nocloud-net;s=${server}/c/node48/ || goto debug
+initrd ${server}/k/initrd || goto debug
+boot || goto debug
+
+:install49
+echo Installing cp01 profile
+kernel ${server}/k/vmlinuz ip=dhcp boot=casper --- url=${server}/u.iso autoinstall ds=nocloud-net;s=${server}/c/node49/ || goto debug
+initrd ${server}/k/initrd || goto debug
+boot || goto debug
+
+:install_default
+echo Installing default profile
+kernel ${server}/k/vmlinuz ip=dhcp boot=casper --- url=${server}/u.iso autoinstall ds=nocloud-net;s=${server}/c/default/ || goto debug
+initrd ${server}/k/initrd || goto debug
+boot || goto debug
+
+:debug
+echo PXE install path failed; dropping to shell
+shell

@@ -1,14 +1,14 @@
 # Recommended Next Step
 
-Provision one more Ubuntu node as the first dedicated control-plane machine.
+Initialize Kubernetes on `cp01` (`192.168.1.49`) and then join `node01`.
 
 Suggested sequence:
 
-1. PXE-provision the new host so it receives the same cluster SSH key.
-2. Add the new host to `ansible/inventory/hosts.yml` under the `control_plane` group.
-3. Run `scripts/bootstrap-control-plane.sh` from `192.168.1.44` to apply Kubernetes prerequisites.
-4. Run `kubeadm init` on the dedicated control-plane node.
-5. Copy `admin.conf` back to `/home/glasslab/.kube/config` on `192.168.1.44`.
-6. Generate a worker join command from the control plane and join `node01`.
+1. Run `kubeadm init` on `cp01` with an explicit pod CIDR and advertised address.
+2. Copy `/etc/kubernetes/admin.conf` from `cp01` to `/home/glasslab/.kube/config` on `192.168.1.44`.
+3. Install a CNI plugin after the control plane is up.
+4. Generate a worker join command from `cp01`.
+5. Join `node01` to the cluster.
+6. Validate `kubectl get nodes -o wide` from `192.168.1.44`.
 
-This preserves the intended architecture and avoids turning the provisioner into a cluster node.
+This preserves the intended architecture while moving the lab from prepared nodes to an actual cluster.
