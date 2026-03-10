@@ -2,4 +2,4 @@ kubernetes_node_role: worker
 expected_interface: eno1
 gpu_candidate: true
 gpu_vendor: nvidia
-gpu_model_hint: quadro-p4000
+gpu_model_hint: rtx-a4000
