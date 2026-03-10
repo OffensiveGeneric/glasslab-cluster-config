@@ -1,0 +1,10 @@
+*.bak-*
+*.retry
+*.swp
+*.swo
+*.tmp
+*.log
+*.iso
+*.img
+*.qcow2
+.ansible/

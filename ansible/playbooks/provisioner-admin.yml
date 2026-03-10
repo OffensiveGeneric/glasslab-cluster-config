@@ -1,0 +1,63 @@
+---
+- name: Prepare provisioner as cluster admin workstation
+  hosts: provisioner
+  gather_facts: true
+  become: true
+  vars_files:
+    - ../group_vars/all.yml
+  tasks:
+    - name: Install kubectl repository prerequisites
+      ansible.builtin.apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gpg
+          - gnupg
+        state: present
+        update_cache: true
+
+    - name: Ensure apt keyring directory exists
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Download Kubernetes repository release key
+      ansible.builtin.get_url:
+        url: "{{ kubernetes_repo_key_url }}"
+        dest: /tmp/kubernetes-release.key
+        mode: '0644'
+
+    - name: Install Kubernetes repository keyring
+      ansible.builtin.command:
+        cmd: gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg /tmp/kubernetes-release.key
+      args:
+        creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+    - name: Configure Kubernetes apt repository
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/kubernetes.list
+        mode: '0644'
+        backup: true
+        content: |
+          deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] {{ kubernetes_repo_base }} /
+
+    - name: Install kubectl on the provisioner host
+      ansible.builtin.apt:
+        name: kubectl
+        state: present
+        update_cache: true
+
+    - name: Ensure kubectl package stays pinned to the selected repo stream
+      ansible.builtin.dpkg_selections:
+        name: kubectl
+        selection: hold
+
+    - name: Ensure kube config directory exists for future admin.conf
+      ansible.builtin.file:
+        path: /home/glasslab/.kube
+        state: directory
+        owner: glasslab
+        group: glasslab
+        mode: '0700'

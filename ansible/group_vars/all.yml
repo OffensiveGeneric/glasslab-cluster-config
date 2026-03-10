@@ -1,0 +1,6 @@
+cluster_name: glasslab-lab
+kubernetes_minor_version: v1.35
+kubernetes_repo_base: https://pkgs.k8s.io/core:/stable:/v1.35/deb/
+kubernetes_repo_key_url: https://pkgs.k8s.io/core:/stable:/v1.35/deb/Release.key
+cluster_management_private_key: /home/glasslab/.ssh/id_ed25519
+cluster_management_public_key: /home/glasslab/.ssh/id_ed25519.pub

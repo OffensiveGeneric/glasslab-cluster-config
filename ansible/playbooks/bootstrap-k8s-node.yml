@@ -1,0 +1,153 @@
+---
+- name: Bootstrap Kubernetes prerequisites on target nodes
+  hosts: "{{ k8s_target_group | default('k8s_nodes') }}"
+  gather_facts: true
+  become: true
+  vars_files:
+    - ../group_vars/all.yml
+    - ../group_vars/k8s_nodes.yml
+  tasks:
+    - name: Install base support packages
+      ansible.builtin.apt:
+        name: "{{ kubernetes_support_packages }}"
+        state: present
+        update_cache: true
+
+    - name: Disable swap at runtime
+      ansible.builtin.command: swapoff -a
+      when: ansible_swaptotal_mb | int > 0
+      changed_when: ansible_swaptotal_mb | int > 0
+
+    - name: Disable swap persistently in /etc/fstab
+      ansible.builtin.replace:
+        path: /etc/fstab
+        regexp: '^([^#].*\sswap\s+.*)$'
+        replace: '# \1'
+        backup: true
+
+    - name: Ensure required kernel modules load at boot
+      ansible.builtin.copy:
+        dest: /etc/modules-load.d/k8s.conf
+        mode: '0644'
+        content: |
+          {% for module in kernel_modules %}
+          {{ module }}
+          {% endfor %}
+
+    - name: Load required kernel modules now
+      ansible.builtin.modprobe:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ kernel_modules }}"
+
+    - name: Configure Kubernetes sysctl settings
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/99-kubernetes-cri.conf
+        mode: '0644'
+        content: |
+          {% for key, value in k8s_sysctl.items() %}
+          {{ key }} = {{ value }}
+          {% endfor %}
+
+    - name: Apply sysctl settings
+      ansible.builtin.command: sysctl --system
+      changed_when: true
+
+    - name: Install containerd from Ubuntu packages
+      ansible.builtin.apt:
+        name: "{{ containerd_package }}"
+        state: present
+
+    - name: Ensure containerd config directory exists
+      ansible.builtin.file:
+        path: /etc/containerd
+        state: directory
+        mode: "0755"
+
+    - name: Check for existing containerd config
+      ansible.builtin.stat:
+        path: /etc/containerd/config.toml
+      register: containerd_config
+
+    - name: Generate default containerd config when missing
+      ansible.builtin.command: containerd config default
+      register: containerd_default_config
+      changed_when: false
+      when: not containerd_config.stat.exists
+
+    - name: Install default containerd config
+      ansible.builtin.copy:
+        dest: /etc/containerd/config.toml
+        content: "{{ containerd_default_config.stdout }}"
+        mode: '0644'
+        backup: true
+      when: not containerd_config.stat.exists
+
+    - name: Use systemd cgroups for containerd
+      ansible.builtin.replace:
+        path: /etc/containerd/config.toml
+        regexp: 'SystemdCgroup = false'
+        replace: 'SystemdCgroup = true'
+        backup: true
+
+    - name: Configure crictl to talk to containerd
+      ansible.builtin.copy:
+        dest: /etc/crictl.yaml
+        mode: '0644'
+        content: |
+          runtime-endpoint: {{ container_runtime_socket }}
+          image-endpoint: {{ container_runtime_socket }}
+          timeout: 10
+          debug: false
+
+    - name: Ensure containerd service is enabled and running
+      ansible.builtin.systemd:
+        name: containerd
+        enabled: true
+        state: restarted
+        daemon_reload: true
+
+    - name: Ensure apt keyring directory exists
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Download Kubernetes repository release key
+      ansible.builtin.get_url:
+        url: "{{ kubernetes_repo_key_url }}"
+        dest: /tmp/kubernetes-release.key
+        mode: '0644'
+
+    - name: Install Kubernetes repository keyring
+      ansible.builtin.command:
+        cmd: gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg /tmp/kubernetes-release.key
+      args:
+        creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+    - name: Configure Kubernetes apt repository
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/kubernetes.list
+        mode: '0644'
+        backup: true
+        content: |
+          deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] {{ kubernetes_repo_base }} /
+
+    - name: Install Kubernetes node packages
+      ansible.builtin.apt:
+        name: "{{ kubernetes_packages }}"
+        state: present
+        update_cache: true
+
+    - name: Hold Kubernetes packages to the selected stream
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop: "{{ kubernetes_packages }}"
+
+    - name: Ensure kubelet service is enabled
+      ansible.builtin.systemd:
+        name: kubelet
+        enabled: true
+        state: started
+        daemon_reload: true

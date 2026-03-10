@@ -1,0 +1,2 @@
+kubernetes_node_role: worker_candidate
+expected_interface: eno1

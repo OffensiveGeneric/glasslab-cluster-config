@@ -1,0 +1,115 @@
+#cloud-config
+autoinstall:
+  version: 1
+  identity:
+    hostname: node01
+    username: clusteradmin
+    password: $6$7u0tSdZJplZv953Q$MRDBJsKwTNhX3FtLx3Ek0oq2EerjbWAhJSGygi/XBM7X0RHmHKkVD25KWrOKRDPBecjjqrZn5pNggA9cpJIxr0
+  ssh:
+    install-server: true
+    allow-pw: true
+    authorized-keys:
+    - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcgFpfLo5xYrSB3Nonbm9wD9ldnN7kpOIW0sZlcER4Z
+      glasslab@glasslab-PXE-01
+  user-data:
+    ssh_pwauth: true
+    chpasswd:
+      expire: false
+    write_files:
+    - path: /etc/ssh/sshd_config.d/99-debug-password-auth.conf
+      permissions: '0644'
+      owner: root:root
+      content: 'PasswordAuthentication yes
+
+        KbdInteractiveAuthentication yes
+
+        UsePAM yes
+
+        '
+    runcmd:
+    - - systemctl
+      - restart
+      - ssh
+  early-commands:
+  - "set -eux\nmdadm --stop --scan || true\nfor md in /dev/md/* /dev/md1* /dev/md12*\
+    \ /dev/md127 /dev/md126; do\n  [ -e \"$md\" ] && mdadm --stop \"$md\" || true\n\
+    done\nfor d in /dev/sd? /dev/nvme?n?; do\n  [ -b \"$d\" ] || continue\n  mdadm\
+    \ --zero-superblock \"$d\" || true\n  wipefs -a \"$d\" || true\n  sgdisk --zap-all\
+    \ \"$d\" || true\ndone\n"
+  storage:
+    config:
+    - id: disk-a
+      type: disk
+      match:
+        name: sda
+      wipe: superblock-recursive
+      ptable: gpt
+      grub_device: true
+    - id: disk-b
+      type: disk
+      match:
+        name: sdb
+      wipe: superblock-recursive
+      ptable: gpt
+      grub_device: true
+    - id: part-a-bios
+      type: partition
+      device: disk-a
+      size: 1M
+      flag: bios_grub
+    - id: part-a-raid
+      type: partition
+      device: disk-a
+      size: -1
+    - id: part-b-bios
+      type: partition
+      device: disk-b
+      size: 1M
+      flag: bios_grub
+    - id: part-b-raid
+      type: partition
+      device: disk-b
+      size: -1
+    - id: md-root
+      type: raid
+      name: md0
+      raidlevel: 1
+      devices:
+      - part-a-raid
+      - part-b-raid
+    - id: fs-root
+      type: format
+      volume: md-root
+      fstype: ext4
+    - id: mnt-root
+      type: mount
+      device: fs-root
+      path: /
+  packages:
+  - openssh-server
+  late-commands:
+  - "curtin in-target --target=/target -- bash -c \"cat > /etc/netplan/01-provisioner.yaml\
+    \ <<'EONP'\nnetwork:\n  version: 2\n  ethernets:\n    uplink0:\n      match:\n\
+    \        macaddress: 90:b1:1c:90:22:50\n      set-name: eno1\n      dhcp4: true\n\
+    EONP\nnetplan generate || true\""
+  - curtin in-target --target=/target -- bash -c "id -u clusteradmin >/dev/null 2>&1
+    || useradd -m -s /bin/bash -G sudo clusteradmin"
+  - curtin in-target --target=/target -- bash -c "echo 'clusteradmin:Glasslab@7311'
+    | chpasswd"
+  - curtin in-target --target=/target -- bash -c "install -d -m 700 -o clusteradmin
+    -g clusteradmin /home/clusteradmin/.ssh"
+  - curtin in-target --target=/target -- bash -c "printf '%s\n' 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcgFpfLo5xYrSB3Nonbm9wD9ldnN7kpOIW0sZlcER4Z
+    glasslab@glasslab-PXE-01' > /home/clusteradmin/.ssh/authorized_keys"
+  - curtin in-target --target=/target -- bash -c "chown clusteradmin:clusteradmin
+    /home/clusteradmin/.ssh/authorized_keys && chmod 600 /home/clusteradmin/.ssh/authorized_keys"
+  - curtin in-target --target=/target -- bash -c "printf '%s\n' 'PasswordAuthentication
+    yes' 'KbdInteractiveAuthentication yes' 'UsePAM yes' > /etc/ssh/sshd_config.d/99-debug-password-auth.conf"
+  - curtin in-target --target=/target -- systemctl restart ssh || true
+  network:
+    version: 2
+    ethernets:
+      uplink0:
+        match:
+          macaddress: 90:b1:1c:90:22:50
+        set-name: eno1
+        dhcp4: true

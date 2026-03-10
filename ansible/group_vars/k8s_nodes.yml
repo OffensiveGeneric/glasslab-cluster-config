@@ -1,0 +1,21 @@
+ansible_become: true
+containerd_package: containerd
+container_runtime_socket: unix:///run/containerd/containerd.sock
+kernel_modules:
+  - overlay
+  - br_netfilter
+k8s_sysctl:
+  net.bridge.bridge-nf-call-iptables: 1
+  net.bridge.bridge-nf-call-ip6tables: 1
+  net.ipv4.ip_forward: 1
+kubernetes_packages:
+  - kubelet
+  - kubeadm
+  - kubectl
+kubernetes_support_packages:
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - gpg
+  - gnupg
+  - software-properties-common

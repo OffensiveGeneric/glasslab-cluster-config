@@ -1,0 +1,47 @@
+---
+- name: Verify provisioner admin workstation
+  hosts: provisioner
+  gather_facts: false
+  tasks:
+    - name: Check kubectl client version
+      ansible.builtin.command: kubectl version --client
+      register: kubectl_client
+      changed_when: false
+
+    - name: Show provisioner kubectl version
+      ansible.builtin.debug:
+        var: kubectl_client.stdout_lines
+
+- name: Verify Kubernetes node candidates
+  hosts: k8s_nodes
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Gather kubeadm version
+      ansible.builtin.command: kubeadm version
+      register: kubeadm_version
+      changed_when: false
+
+    - name: Gather kubelet version
+      ansible.builtin.command: kubelet --version
+      register: kubelet_version
+      changed_when: false
+
+    - name: Gather containerd version
+      ansible.builtin.command: containerd --version
+      register: containerd_version
+      changed_when: false
+
+    - name: Check service state summary
+      ansible.builtin.command: systemctl is-enabled --quiet containerd kubelet
+      register: service_enablement
+      changed_when: false
+      failed_when: false
+
+    - name: Show node readiness summary
+      ansible.builtin.debug:
+        msg:
+          - "{{ inventory_hostname }} kubeadm: {{ kubeadm_version.stdout }}"
+          - "{{ inventory_hostname }} kubelet: {{ kubelet_version.stdout }}"
+          - "{{ inventory_hostname }} containerd: {{ containerd_version.stdout }}"
+          - "{{ inventory_hostname }} service check rc={{ service_enablement.rc }}"

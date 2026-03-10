@@ -1,0 +1,19 @@
+#!ipxe
+set server http://192.168.1.44
+set cloud_path /pxe/cloud-init/default
+
+# Dedicated profile for the known node (check multiple iPXE vars for compatibility).
+iseq ${mac} 90:b1:1c:90:22:50 && set cloud_path /pxe/cloud-init/node48
+iseq ${ip} 192.168.1.48 && set cloud_path /pxe/cloud-init/node48
+iseq ${net0/mac} 90:b1:1c:90:22:50 && set cloud_path /pxe/cloud-init/node48
+iseq ${net0/ip} 192.168.1.48 && set cloud_path /pxe/cloud-init/node48
+
+# Try booting local disk first to avoid PXE reinstall loops after first install.
+sanboot --no-describe --drive 0x80 || goto install
+
+:install
+kernel ${server}/pxe/ubuntu/vmlinuz ip=dhcp boot=casper nomodeset nosplash --- \
+  url=${server}/pxe/iso/ubuntu-24.04.4-live-server-amd64.iso \
+  autoinstall ds=nocloud-net;s=${server}${cloud_path}/ ---
+initrd ${server}/pxe/ubuntu/initrd
+boot

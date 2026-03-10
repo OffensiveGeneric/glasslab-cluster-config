@@ -1,0 +1,4 @@
+---
+- import_playbook: bootstrap-k8s-node.yml
+  vars:
+    k8s_target_group: control_plane
