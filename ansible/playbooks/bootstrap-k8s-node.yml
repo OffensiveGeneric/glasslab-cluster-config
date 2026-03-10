@@ -62,7 +62,7 @@
       ansible.builtin.file:
         path: /etc/containerd
         state: directory
-        mode: "0755"
+        mode: '0755'
 
     - name: Check for existing containerd config
       ansible.builtin.stat:
@@ -88,6 +88,13 @@
         path: /etc/containerd/config.toml
         regexp: 'SystemdCgroup = false'
         replace: 'SystemdCgroup = true'
+        backup: true
+
+    - name: Align containerd sandbox image with kubeadm
+      ansible.builtin.replace:
+        path: /etc/containerd/config.toml
+        regexp: 'sandbox_image = ".*"'
+        replace: 'sandbox_image = "{{ containerd_sandbox_image }}"'
         backup: true
 
     - name: Configure crictl to talk to containerd

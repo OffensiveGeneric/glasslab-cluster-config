@@ -1,2 +1,2 @@
-kubernetes_node_role: control_plane_candidate
+kubernetes_node_role: control_plane
 expected_interface: enp0s25

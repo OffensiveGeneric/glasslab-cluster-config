@@ -1,14 +1,11 @@
 # Recommended Next Step
 
-Initialize Kubernetes on `cp01` (`192.168.1.49`) and then join `node01`.
+Initial bootstrap is complete.
 
-Suggested sequence:
+Suggested next steps:
 
-1. Run `kubeadm init` on `cp01` with an explicit pod CIDR and advertised address.
-2. Copy `/etc/kubernetes/admin.conf` from `cp01` to `/home/glasslab/.kube/config` on `192.168.1.44`.
-3. Install a CNI plugin after the control plane is up.
-4. Generate a worker join command from `cp01`.
-5. Join `node01` to the cluster.
-6. Validate `kubectl get nodes -o wide` from `192.168.1.44`.
-
-This preserves the intended architecture while moving the lab from prepared nodes to an actual cluster.
+1. Keep DHCP reservations fixed so `cp01` stays `192.168.1.49` and `node01` stays `192.168.1.48`.
+2. Remove the temporary debug SSH/password allowances from the PXE autoinstall profiles once you no longer need them.
+3. Decide the next cluster primitives you want to standardize, such as ingress, software load balancing, and storage.
+4. Add more worker nodes by PXE-provisioning them, bootstrapping with Ansible, and joining them from `cp01`.
+5. If you intend to add more control-plane nodes later, introduce a proper stable control-plane endpoint before doing so.

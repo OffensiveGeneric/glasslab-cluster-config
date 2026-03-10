@@ -1,6 +1,7 @@
 ansible_become: true
 containerd_package: containerd
 container_runtime_socket: unix:///run/containerd/containerd.sock
+containerd_sandbox_image: registry.k8s.io/pause:3.10.1
 kernel_modules:
   - overlay
   - br_netfilter
