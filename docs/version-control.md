@@ -12,12 +12,18 @@ What is intentionally not tracked:
 - Large binary artifacts such as ISOs and kernel/initrd images
 - Timestamped `.bak-*` files created for safety during edits
 
+Git remote:
+
+- `origin` is reserved for `git@github-cluster-config:OffensiveGeneric/glasslab-cluster-config.git`
+- SSH uses the dedicated provisioner key `~/.ssh/id_ed25519_github_cluster_config`
+
 Typical workflow:
 
 1. Edit the live system files or Ansible content.
 2. Run `scripts/snapshot-provisioner-config.sh` to copy active provisioner configs into the repo.
 3. Review with `git status` and `git diff`.
 4. Commit with a meaningful message.
+5. Push with `git push` once the GitHub repo and key trust are in place.
 
 Rollback workflow:
 
