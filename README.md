@@ -4,7 +4,7 @@ Canonical cluster management lives here.
 
 - `ansible/`: inventory, variables, and playbooks
 - `docs/`: architecture, bootstrap, GPU, version-control, and next-step notes
-- `kubeadm/`: versioned cluster init and network manifests
+- `kubeadm/`: versioned cluster init, network, and cluster add-on manifests
 - `live-config/`: tracked snapshots of active provisioner configuration
 - `scripts/`: helper wrappers for repeatable operations
 
@@ -22,5 +22,7 @@ Current cluster state:
 - Calico is installed with a non-overlapping pod CIDR of `10.244.0.0/16`.
 - Smoke pods were scheduled successfully onto `node01` and `node02` and removed.
 - `node02` is labeled `glasslab.io/gpu-candidate=true` and `glasslab.io/gpu-vendor=nvidia`.
-- GPU preparation now has a dedicated Ansible path in `ansible/playbooks/prepare-gpu-node.yml`.
-- Current GPU blocker: the `node02` OS does not yet see any NVIDIA PCI device.
+- GPU preflight lives in `ansible/playbooks/prepare-gpu-node.yml`.
+- GPU enablement lives in `ansible/playbooks/enable-gpu-node.yml`.
+- `node02` now runs the NVIDIA 580-open driver stack with `nvidia-smi` working on-host.
+- Kubernetes now advertises `nvidia.com/gpu=1` on `node02`.

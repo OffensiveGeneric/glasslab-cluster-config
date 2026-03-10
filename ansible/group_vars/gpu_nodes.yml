@@ -5,5 +5,14 @@ gpu_support_packages:
   - pciutils
   - ubuntu-drivers-common
 gpu_driver_install_enabled: false
+gpu_driver_package: nvidia-driver-580-open
 gpu_driver_strategy: ubuntu-drivers
 gpu_nvidia_container_toolkit_enabled: false
+gpu_nvidia_container_repo_key_url: https://nvidia.github.io/libnvidia-container/gpgkey
+gpu_nvidia_container_repo_base: https://nvidia.github.io/libnvidia-container/stable/deb/amd64
+gpu_nvidia_container_repo_list: /etc/apt/sources.list.d/nvidia-container-toolkit.list
+gpu_nvidia_container_keyring: /etc/apt/keyrings/nvidia-container-toolkit-keyring.gpg
+gpu_nvidia_container_toolkit_package: nvidia-container-toolkit
+gpu_runtime_class_name: nvidia
+gpu_device_plugin_version: v0.18.2
+gpu_reboot_timeout: 1800
