@@ -13,10 +13,12 @@ Current roles:
 - `192.168.1.44` (`glasslab-PXE-01`): provisioner, bastion, Ansible control host, kubectl admin workstation
 - `192.168.1.49` (`cp01`): Kubernetes control plane
 - `192.168.1.48` (`node01`): Kubernetes worker
+- `192.168.1.11` (`node02`): Kubernetes worker and first GPU candidate
 
 Current cluster state:
 
-- `cp01` and `node01` are PXE-provisioned and reachable by SSH.
+- `cp01`, `node01`, and `node02` are PXE-provisioned and reachable by SSH.
 - `kubectl` on the provisioner is wired to the live cluster.
 - Calico is installed with a non-overlapping pod CIDR of `10.244.0.0/16`.
-- A smoke pod was scheduled successfully onto `node01` and removed.
+- Smoke pods were scheduled successfully onto `node01` and `node02` and removed.
+- `node02` is labeled `glasslab.io/gpu-candidate=true` and `glasslab.io/gpu-vendor=nvidia`.

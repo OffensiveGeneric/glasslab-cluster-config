@@ -1,2 +1,2 @@
-instance-id: 1773159052-node01
-local-hostname: node01
+instance-id: 1773159052-bootstrap-node
+local-hostname: bootstrap-node

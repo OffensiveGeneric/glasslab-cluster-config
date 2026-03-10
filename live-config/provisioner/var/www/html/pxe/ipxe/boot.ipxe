@@ -7,6 +7,12 @@ iseq ${ip} 192.168.1.48 && goto localboot48 ||
 iseq ${net0/mac} 90:b1:1c:90:22:50 && goto localboot48 ||
 iseq ${net0/ip} 192.168.1.48 && goto localboot48 ||
 
+# Newly discovered worker should prefer local disk after its first install.
+iseq ${mac} 90:b1:1c:90:ad:18 && goto localboot02 ||
+iseq ${ip} 192.168.1.11 && goto localboot02 ||
+iseq ${net0/mac} 90:b1:1c:90:ad:18 && goto localboot02 ||
+iseq ${net0/ip} 192.168.1.11 && goto localboot02 ||
+
 # Control-plane candidate should also try local disk first after its first install.
 iseq ${mac} 18:66:da:23:44:38 && goto localboot49 ||
 iseq ${ip} 192.168.1.49 && goto localboot49 ||
@@ -21,6 +27,9 @@ sanboot --no-describe --drive 0x80 || goto install48
 :localboot49
 sanboot --no-describe --drive 0x80 || goto install49
 
+:localboot02
+sanboot --no-describe --drive 0x80 || goto install02
+
 :install48
 echo Installing node48 profile
 kernel ${server}/k/vmlinuz ip=dhcp boot=casper --- url=${server}/u.iso autoinstall ds=nocloud-net;s=${server}/c/node48/ || goto debug
@@ -30,6 +39,12 @@ boot || goto debug
 :install49
 echo Installing cp01 profile
 kernel ${server}/k/vmlinuz ip=dhcp boot=casper --- url=${server}/u.iso autoinstall ds=nocloud-net;s=${server}/c/node49/ || goto debug
+initrd ${server}/k/initrd || goto debug
+boot || goto debug
+
+:install02
+echo Installing node02 profile
+kernel ${server}/k/vmlinuz ip=dhcp boot=casper --- url=${server}/u.iso autoinstall ds=nocloud-net;s=${server}/c/node02/ || goto debug
 initrd ${server}/k/initrd || goto debug
 boot || goto debug
 

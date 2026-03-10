@@ -2,7 +2,7 @@
 autoinstall:
   version: 1
   identity:
-    hostname: bootstrap-node
+    hostname: node02
     username: clusteradmin
     password: "$6$7u0tSdZJplZv953Q$MRDBJsKwTNhX3FtLx3Ek0oq2EerjbWAhJSGygi/XBM7X0RHmHKkVD25KWrOKRDPBecjjqrZn5pNggA9cpJIxr0"
   ssh:

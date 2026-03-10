@@ -24,8 +24,11 @@ copy_file /etc/default/tftpd-hpa etc/default/tftpd-hpa
 copy_file /etc/nginx/sites-available/default etc/nginx/sites-available/default
 copy_file /srv/tftp/autoexec.ipxe srv/tftp/autoexec.ipxe
 copy_file /var/www/html/pxe/ipxe/boot.ipxe var/www/html/pxe/ipxe/boot.ipxe
-copy_tree /var/www/html/pxe/cloud-init/default var/www/html/pxe/cloud-init/default
-copy_tree /var/www/html/pxe/cloud-init/node48 var/www/html/pxe/cloud-init/node48
+
+while IFS= read -r dir; do
+  name="$(basename "$dir")"
+  copy_tree "$dir" "var/www/html/pxe/cloud-init/$name"
+done < <(sudo find /var/www/html/pxe/cloud-init -mindepth 1 -maxdepth 1 -type d | sort)
 
 sudo chown -R "$USER":"$USER" "$SNAPROOT"
 printf 'Snapshot updated under %s\n' "$SNAPROOT"
