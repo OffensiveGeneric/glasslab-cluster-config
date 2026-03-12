@@ -12,18 +12,21 @@ Current roles:
 
 - `192.168.1.44` (`glasslab-PXE-01`): provisioner, bastion, Ansible control host, kubectl admin workstation
 - `192.168.1.49` (`cp01`): Kubernetes control plane
-- `192.168.1.48` (`node01`): Kubernetes worker and NVIDIA GPU candidate
+- `192.168.1.48` (`node01`): Kubernetes worker and active NVIDIA GPU worker
 - `192.168.1.11` (`node02`): Kubernetes worker and active NVIDIA GPU worker
+- `192.168.1.50` (`node03`): Kubernetes worker
+- `192.168.1.47` (`node05`): Kubernetes worker
 
 Current cluster state:
 
-- `cp01`, `node01`, and `node02` are PXE-provisioned and reachable by SSH.
+- `cp01`, `node01`, `node02`, `node03`, and `node05` are reachable by SSH and part of the live cluster.
 - `kubectl` on the provisioner is wired to the live cluster.
 - Calico is installed with a non-overlapping pod CIDR of `10.244.0.0/16`.
-- Smoke pods were scheduled successfully onto `node01` and `node02` and removed.
 - SSH password auth is disabled on the current Kubernetes nodes; provisioner access is still local-password based.
 - GPU preflight lives in `ansible/playbooks/prepare-gpu-node.yml`.
 - GPU enablement lives in `ansible/playbooks/enable-gpu-node.yml`.
-- `node02` runs the NVIDIA 580-open driver stack with `nvidia-smi` working on-host.
-- Kubernetes advertises `nvidia.com/gpu=1` on `node02`.
+- `node01` runs the NVIDIA stack for its Quadro P4000 and advertises `nvidia.com/gpu=1`.
+- `node02` runs the NVIDIA stack for its RTX A4000 and advertises `nvidia.com/gpu=1`.
+- `node05` has a visible Quadro K2000 but remains CPU-only because it would require a legacy NVIDIA 470 driver path.
+- `node04` is still being provisioned separately through the PXE flow.
 - Package maintenance lives in `ansible/playbooks/maintain-packages.yml` and `docs/package-maintenance.md`.

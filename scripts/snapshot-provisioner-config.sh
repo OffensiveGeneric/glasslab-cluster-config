@@ -23,6 +23,7 @@ copy_file /etc/dnsmasq.proxy-pxe.conf etc/dnsmasq.proxy-pxe.conf
 copy_file /etc/default/tftpd-hpa etc/default/tftpd-hpa
 copy_file /etc/nginx/sites-available/default etc/nginx/sites-available/default
 copy_file /srv/tftp/autoexec.ipxe srv/tftp/autoexec.ipxe
+copy_file /srv/tftp/node51/pxelinux.cfg/default srv/tftp/node51/pxelinux.cfg/default
 copy_file /var/www/html/pxe/ipxe/boot.ipxe var/www/html/pxe/ipxe/boot.ipxe
 
 while IFS= read -r dir; do

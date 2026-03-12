@@ -19,6 +19,24 @@ iseq ${ip} 192.168.1.49 && goto localboot49 ||
 iseq ${net0/mac} 18:66:da:23:44:38 && goto localboot49 ||
 iseq ${net0/ip} 192.168.1.49 && goto localboot49 ||
 
+# New worker node03 should prefer local disk after its first install.
+iseq ${mac} 18:66:da:23:12:05 && goto localboot03 ||
+iseq ${ip} 192.168.1.50 && goto localboot03 ||
+iseq ${net0/mac} 18:66:da:23:12:05 && goto localboot03 ||
+iseq ${net0/ip} 192.168.1.50 && goto localboot03 ||
+
+# New worker node04 should prefer local disk after its first install.
+iseq ${mac} 18:66:da:24:44:de && goto localboot04 ||
+iseq ${ip} 192.168.1.51 && goto localboot04 ||
+iseq ${net0/mac} 18:66:da:24:44:de && goto localboot04 ||
+iseq ${net0/ip} 192.168.1.51 && goto localboot04 ||
+
+# New worker node05 should prefer local disk after its first install.
+iseq ${mac} 34:17:eb:a3:e6:c1 && goto localboot05 ||
+iseq ${ip} 192.168.1.47 && goto localboot05 ||
+iseq ${net0/mac} 34:17:eb:a3:e6:c1 && goto localboot05 ||
+iseq ${net0/ip} 192.168.1.47 && goto localboot05 ||
+
 goto install_default
 
 :localboot48
@@ -29,6 +47,15 @@ sanboot --no-describe --drive 0x80 || goto install49
 
 :localboot02
 sanboot --no-describe --drive 0x80 || goto install02
+
+:localboot03
+sanboot --no-describe --drive 0x80 || goto install03
+
+:localboot04
+sanboot --no-describe --drive 0x80 || goto install04
+
+:localboot05
+sanboot --no-describe --drive 0x80 || goto install05
 
 :install48
 echo Installing node48 profile
@@ -45,6 +72,24 @@ boot || goto debug
 :install02
 echo Installing node02 profile
 kernel ${server}/k/vmlinuz ip=dhcp boot=casper --- url=${server}/u.iso autoinstall ds=nocloud-net;s=${server}/c/node02/ || goto debug
+initrd ${server}/k/initrd || goto debug
+boot || goto debug
+
+:install03
+echo Installing node03 profile
+kernel ${server}/k/vmlinuz ip=dhcp boot=casper --- url=${server}/u.iso autoinstall ds=nocloud-net;s=${server}/c/node03/ || goto debug
+initrd ${server}/k/initrd || goto debug
+boot || goto debug
+
+:install04
+echo Installing node04 profile
+kernel ${server}/k/vmlinuz ip=dhcp boot=casper --- url=${server}/u.iso autoinstall ds=nocloud-net;s=${server}/c/node04/ || goto debug
+initrd ${server}/k/initrd || goto debug
+boot || goto debug
+
+:install05
+echo Installing node05 profile
+kernel ${server}/k/vmlinuz ip=dhcp boot=casper --- url=${server}/u.iso autoinstall ds=nocloud-net;s=${server}/c/node05/ || goto debug
 initrd ${server}/k/initrd || goto debug
 boot || goto debug
 

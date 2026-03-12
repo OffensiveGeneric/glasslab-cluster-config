@@ -2,10 +2,12 @@
 
 This lab keeps infrastructure and Kubernetes roles separated.
 
-- `192.168.1.44` (`glasslab-PXE-01`) is the PXE host, bastion, Ansible control machine, Git remote sync point, and kubectl workstation.
+- `192.168.1.44` (`glasslab-PXE-01`) is the PXE host, bastion, Ansible control machine, Git sync point, and kubectl workstation.
 - `192.168.1.49` (`cp01`) is the active Kubernetes control plane.
-- `192.168.1.48` (`node01`) is a general Kubernetes worker.
-- `192.168.1.11` (`node02`) is a Kubernetes worker reserved as the first GPU candidate.
+- `192.168.1.48` (`node01`) is a general Kubernetes worker with a usable NVIDIA Quadro P4000.
+- `192.168.1.11` (`node02`) is a Kubernetes worker with a usable NVIDIA RTX A4000.
+- `192.168.1.50` (`node03`) is a general Kubernetes worker.
+- `192.168.1.47` (`node05`) is a general Kubernetes worker with a legacy Quadro K2000 present but not enabled for CUDA.
 
 Current cluster design:
 
@@ -17,11 +19,9 @@ Current cluster design:
 
 GPU note:
 
-- `node02` is labeled as a GPU candidate in Kubernetes and inventory.
-- The base OS is joined and schedulable.
-- NVIDIA driver/runtime enablement is intentionally deferred until after cluster bring-up.
-- Current package-free PCI probes and `lspci` do not expose an NVIDIA device to the OS yet, so hardware visibility still needs confirmation on `node02` before driver rollout.
-- The first automation entry point for this path is `ansible/playbooks/prepare-gpu-node.yml`.
+- `node01` and `node02` are the useful CUDA-capable workers today.
+- `node05` has an older Quadro K2000 that Ubuntu 24.04 recommends on the legacy `nvidia-driver-470` branch; it is intentionally left CPU-only for now.
+- The current automation entry points are `ansible/playbooks/prepare-gpu-node.yml` and `ansible/playbooks/enable-gpu-node.yml`.
 
 Scaling note:
 

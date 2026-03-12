@@ -1,0 +1,2 @@
+kubernetes_node_role: worker
+expected_interface: enp0s25
