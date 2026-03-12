@@ -1,0 +1,88 @@
+---
+- name: Maintain Ubuntu packages on cluster hosts
+  hosts: "{{ package_maintenance_target_group | default('k8s_nodes') }}"
+  gather_facts: true
+  serial: "{{ package_maintenance_serial | default(1) }}"
+  become: true
+  vars:
+    maintenance_support_packages:
+      - unattended-upgrades
+      - update-notifier-common
+    unattended_allowed_origins:
+      - "${distro_id}:${distro_codename}-security"
+  tasks:
+    - name: Install package maintenance support packages
+      ansible.builtin.apt:
+        name: "{{ maintenance_support_packages }}"
+        state: present
+        update_cache: true
+
+    - name: Always include phased updates on managed hosts
+      ansible.builtin.copy:
+        dest: /etc/apt/apt.conf.d/51glasslab-phased-updates
+        mode: '0644'
+        backup: true
+        content: |
+          APT::Get::Always-Include-Phased-Updates "true";
+          Update-Manager::Always-Include-Phased-Updates "true";
+
+    - name: Configure periodic apt activity
+      ansible.builtin.copy:
+        dest: /etc/apt/apt.conf.d/20auto-upgrades
+        mode: '0644'
+        backup: true
+        content: |
+          APT::Periodic::Update-Package-Lists "1";
+          APT::Periodic::Download-Upgradeable-Packages "1";
+          APT::Periodic::AutocleanInterval "7";
+          APT::Periodic::Unattended-Upgrade "1";
+
+    - name: Configure unattended security upgrades
+      ansible.builtin.copy:
+        dest: /etc/apt/apt.conf.d/52glasslab-unattended-upgrades
+        mode: '0644'
+        backup: true
+        content: |
+          Unattended-Upgrade::Allowed-Origins {
+          {% for origin in unattended_allowed_origins %}
+              "{{ origin }}";
+          {% endfor %}
+          };
+          Unattended-Upgrade::Remove-Unused-Dependencies "true";
+          Unattended-Upgrade::Automatic-Reboot "false";
+
+    - name: Ensure apt maintenance timers are enabled
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop:
+        - apt-daily.timer
+        - apt-daily-upgrade.timer
+
+    - name: Refresh apt cache and apply package upgrades
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 0
+        upgrade: dist
+        autoremove: true
+        autoclean: true
+      register: package_upgrade
+
+    - name: Check whether a reboot is required
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: reboot_required
+
+    - name: Capture held packages
+      ansible.builtin.command: apt-mark showhold
+      register: held_packages
+      changed_when: false
+
+    - name: Summarize package maintenance result
+      ansible.builtin.debug:
+        msg:
+          host: "{{ inventory_hostname }}"
+          packages_changed: "{{ package_upgrade.changed }}"
+          reboot_required: "{{ reboot_required.stat.exists | default(false) }}"
+          held_packages: "{{ held_packages.stdout_lines }}"

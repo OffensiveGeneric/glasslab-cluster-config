@@ -1,0 +1,50 @@
+---
+- name: Enforce key-only SSH access on cluster nodes
+  hosts: "{{ ssh_hardening_target_group | default('k8s_nodes') }}"
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Remove obsolete late-order SSH overrides
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/ssh/sshd_config.d/99-debug-password-auth.conf
+        - /etc/ssh/sshd_config.d/99-key-only-auth.conf
+
+    - name: Install early key-only SSH override
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/00-key-only-auth.conf
+        mode: '0644'
+        backup: true
+        content: |
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          PubkeyAuthentication yes
+          UsePAM yes
+
+    - name: Validate sshd configuration
+      ansible.builtin.command: sshd -t
+      changed_when: false
+
+    - name: Restart ssh service
+      ansible.builtin.systemd:
+        name: ssh
+        state: restarted
+        enabled: true
+
+    - name: Reset SSH connection after restart
+      ansible.builtin.meta: reset_connection
+
+    - name: Capture effective sshd configuration
+      ansible.builtin.command: sshd -T
+      register: sshd_effective
+      changed_when: false
+
+    - name: Assert password auth is disabled
+      ansible.builtin.assert:
+        that:
+          - "'passwordauthentication no' in sshd_effective.stdout"
+          - "'kbdinteractiveauthentication no' in sshd_effective.stdout"
+          - "'pubkeyauthentication yes' in sshd_effective.stdout"
+        fail_msg: SSH hardening did not take effect as expected.
