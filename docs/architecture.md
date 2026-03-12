@@ -8,6 +8,7 @@ This lab keeps infrastructure and Kubernetes roles separated.
 - `192.168.1.11` (`node02`) is a Kubernetes worker with a usable NVIDIA RTX A4000.
 - `192.168.1.50` (`node03`) is a general Kubernetes worker.
 - `192.168.1.47` (`node05`) is a general Kubernetes worker with a legacy Quadro K2000 present but not enabled for CUDA.
+- `192.168.1.51` (`node04`) is a general Kubernetes worker with a visible GeForce GTX 1060 6GB.
 
 Current cluster design:
 
@@ -19,7 +20,8 @@ Current cluster design:
 
 GPU note:
 
-- `node01` and `node02` are the useful CUDA-capable workers today.
+- `node01` and `node02` are the currently enabled CUDA-capable workers today.
+- `node04` has a visible GTX 1060 and can be enabled next if you want another GPU worker.
 - `node05` has an older Quadro K2000 that Ubuntu 24.04 recommends on the legacy `nvidia-driver-470` branch; it is intentionally left CPU-only for now.
 - The current automation entry points are `ansible/playbooks/prepare-gpu-node.yml` and `ansible/playbooks/enable-gpu-node.yml`.
 

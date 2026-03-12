@@ -46,17 +46,13 @@ autoinstall:
       match:
         serial: ST1000DM003-1SB102*
       wipe: superblock-recursive
-      ptable: gpt
+      ptable: msdos
       grub_device: true
-    - id: part-biosgrub
-      type: partition
-      device: disk-a
-      size: 1M
-      flag: bios_grub
     - id: part-root
       type: partition
       device: disk-a
       size: -1
+      flag: boot
     - id: fs-root
       type: format
       volume: part-root
