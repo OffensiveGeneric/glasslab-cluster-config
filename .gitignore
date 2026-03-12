@@ -14,3 +14,4 @@ __pycache__/
 *.pyo
 *.db
 .venv/
+kubeadm/agent-stack/12-agent-secrets.yaml
