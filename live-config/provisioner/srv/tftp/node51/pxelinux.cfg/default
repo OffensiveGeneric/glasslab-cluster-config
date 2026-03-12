@@ -1,12 +1,12 @@
-DEFAULT local
+DEFAULT install
 PROMPT 1
 TIMEOUT 300
-ONTIMEOUT local
-
-LABEL local
-  LOCALBOOT 0
+ONTIMEOUT install
 
 LABEL install
   KERNEL http://192.168.1.44/k/vmlinuz
   INITRD http://192.168.1.44/k/initrd
   APPEND ip=dhcp boot=casper url=http://192.168.1.44/u.iso autoinstall ds=nocloud-net;s=http://192.168.1.44/c/node04/ ---
+
+LABEL local
+  LOCALBOOT 0

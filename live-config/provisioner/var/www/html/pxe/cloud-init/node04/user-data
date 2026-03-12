@@ -44,7 +44,7 @@ autoinstall:
     - id: disk-a
       type: disk
       match:
-        name: sda
+        serial: ST1000DM003-1SB102*
       wipe: superblock-recursive
       ptable: gpt
       grub_device: true
