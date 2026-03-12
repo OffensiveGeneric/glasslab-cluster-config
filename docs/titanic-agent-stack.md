@@ -1,0 +1,212 @@
+# Titanic Agent Stack
+
+## Scope
+
+This is the first narrow local agent scaffold for the Glasslab cluster.
+
+Supported v1 workflow only:
+
+- Kaggle Titanic baseline
+- request normalization through local Qwen on vLLM
+- registry validation
+- Kubernetes Job submission
+- Job monitoring and artifact collection
+- short run summary back to the caller
+
+Out of scope for this repo change:
+
+- frontend work
+- arbitrary code execution
+- notebook generation
+- vector databases
+- broad AutoML
+- Ray or a multi-agent platform
+
+## Box-And-Arrow Flow
+
+```text
+plain-English request
+        |
+        v
+FastAPI agent API
+        |
+        +--> Qwen via vLLM /v1/chat/completions
+        |         |
+        |         v
+        |    strict JSON planner output
+        |
+        v
+non-LLM validator / registry gate
+        |
+        v
+Kubernetes Job submission
+        |
+        v
+Titanic runner container
+        |
+        +--> metrics.json
+        +--> feature_summary.json
+        +--> model_comparison.json
+        +--> submission.csv (when test.csv exists)
+        +--> result_payload.json
+        |
+        v
+agent status refresh + summary
+```
+
+## Repo Fit
+
+The implementation stays inside the existing repo structure:
+
+- `services/agent-api/`: FastAPI control plane, planner, validator, SQLite state store, Kubernetes Job orchestration
+- `services/runner/`: fixed Titanic baseline runner image
+- `kubeadm/agent-stack/`: deployable manifests for namespace, RBAC, vLLM, agent API, PVCs, and optional MLflow
+- `scripts/`: deploy, test, and sample API helpers
+- `docs/`: deployment, workflow, and troubleshooting notes
+
+## Required Input Files
+
+The runner expects the standard Kaggle Titanic dataset layout under the mounted dataset path:
+
+- `train.csv`
+- `test.csv`
+- optional `gender_submission.csv`
+- optional `sample_submission.csv`
+
+`train.csv` must include:
+
+- `Survived`
+
+`test.csv` must include:
+
+- `PassengerId`
+
+## Output Files
+
+The runner writes artifacts under `/mnt/artifacts/<experiment-id>/` inside the cluster.
+
+Expected files:
+
+- `metrics.json`
+- `feature_summary.json`
+- `model_comparison.json`
+- `result_payload.json`
+- `submission.csv` when `test.csv` exists and `produce_submission=true`
+
+`submission.csv` is written with exactly these columns:
+
+- `PassengerId`
+- `Survived`
+
+## Deployment From The Provisioner
+
+1. Build and publish the images you want the cluster to pull.
+
+```bash
+cd /home/glasslab/cluster-config
+sudo docker build -t ghcr.io/offensivegeneric/glasslab-agent-api:0.1.0 services/agent-api
+sudo docker build -t ghcr.io/offensivegeneric/glasslab-titanic-runner:0.1.0 services/runner
+sudo docker push ghcr.io/offensivegeneric/glasslab-agent-api:0.1.0
+sudo docker push ghcr.io/offensivegeneric/glasslab-titanic-runner:0.1.0
+```
+
+2. Copy the example secret manifest and replace the placeholder values.
+
+```bash
+cd /home/glasslab/cluster-config
+cp kubeadm/agent-stack/12-agent-secrets.example.yaml kubeadm/agent-stack/12-agent-secrets.yaml
+vi kubeadm/agent-stack/12-agent-secrets.yaml
+```
+
+3. Confirm the dataset PVC plan and populate the Titanic files after the claim binds.
+
+4. Deploy model serving.
+
+```bash
+/home/glasslab/cluster-config/scripts/deploy-vllm.sh
+/home/glasslab/cluster-config/scripts/port-forward-vllm.sh
+/home/glasslab/cluster-config/scripts/test-vllm.sh
+```
+
+5. Deploy the full agent stack.
+
+```bash
+/home/glasslab/cluster-config/scripts/deploy-agent-stack.sh
+```
+
+6. Optional: deploy MLflow.
+
+```bash
+/home/glasslab/cluster-config/scripts/deploy-agent-stack.sh --with-mlflow
+```
+
+7. Port-forward the agent API when you want to use curl from the provisioner.
+
+```bash
+kubectl -n glasslab-agents port-forward svc/glasslab-agent-api 8080:8080
+```
+
+## API Usage
+
+List supported pipelines:
+
+```bash
+curl -sS http://127.0.0.1:8080/pipelines
+```
+
+Submit the first supported workflow:
+
+```bash
+/home/glasslab/cluster-config/scripts/submit-sample-experiment.sh
+```
+
+Fetch a run:
+
+```bash
+/home/glasslab/cluster-config/scripts/get-experiment-status.sh <experiment-id>
+```
+
+Example request body:
+
+```json
+{
+  "request_text": "Run a Titanic baseline with logistic regression and random forest, compare them, and prepare a submission file."
+}
+```
+
+## Where State, Logs, And Artifacts Live
+
+Inside the cluster:
+
+- agent SQLite state: `/var/lib/glasslab-agent/state/agent.db`
+- runner artifacts: `/mnt/artifacts/<experiment-id>/`
+- vLLM model cache: `/root/.cache/huggingface`
+
+Through the API:
+
+- experiment record: `GET /experiments/{id}`
+- control-loop logs: `GET /experiments/{id}/logs`
+- artifact references: `GET /experiments/{id}/artifacts`
+
+## Operations And Troubleshooting
+
+- If `POST /experiments` rejects a request, inspect the returned validation errors first. Unknown fields and unsupported models are blocked before Job submission.
+- If the planner output is invalid, the API falls back to deterministic parsing for common Titanic requests instead of executing unsafe output.
+- If a Job stays pending, check PVC binding, image pull success, and whether the requested GPU node selector matches current worker labels.
+- If a Job fails, inspect `GET /experiments/{id}` for the stored error message and `kubectl -n glasslab-agents logs job/<job-name>` for the pod log tail.
+- If `submission.csv` is missing, verify that `test.csv` exists in the mounted Titanic dataset path and that `produce_submission` was true in the normalized spec.
+- If vLLM is up but planning fails, test `/v1/models` and `/v1/chat/completions` directly before debugging the FastAPI layer.
+
+## Tomorrow Edits You Must Review
+
+These are the lab-specific values to confirm before a real deployment:
+
+- namespace name assumptions in `kubeadm/agent-stack/*.yaml`
+- storage class behavior or PVC backing for `glasslab-agent-state`, `glasslab-agent-artifacts`, `vllm-model-cache`, and `titanic-datasets`
+- GPU node selector and labels: `glasslab.io/gpu-candidate=true`
+- NVIDIA resource key assumption: `nvidia.com/gpu`
+- image names and tags for `vllm`, `glasslab-agent-api`, `glasslab-titanic-runner`, and optional `mlflow`
+- Hugging Face token handling in `glasslab-agent-secrets`
+- vLLM API key handling in `glasslab-agent-secrets`
+- Titanic dataset mount path and PVC population plan
+- service exposure assumptions: current scripts expect `ClusterIP` plus `kubectl port-forward`

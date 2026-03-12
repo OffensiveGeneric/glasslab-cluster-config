@@ -7,6 +7,8 @@ Canonical cluster management lives here.
 - `kubeadm/`: versioned cluster init, network, and cluster add-on manifests
 - `live-config/`: tracked snapshots of active provisioner configuration
 - `scripts/`: helper wrappers for repeatable operations
+- `services/`: agent API and fixed-purpose runner workloads
+- `kubeadm/agent-stack/`: manifests for the local Titanic agent stack, including vLLM and FastAPI
 
 Current roles:
 
