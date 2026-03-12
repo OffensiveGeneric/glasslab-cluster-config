@@ -1,2 +1,6 @@
 kubernetes_node_role: worker
 expected_interface: enp0s25
+gpu_candidate: true
+gpu_vendor: nvidia
+gpu_model_hint: geforce-gtx-1060-6gb
+gpu_driver_package_override: nvidia-driver-535

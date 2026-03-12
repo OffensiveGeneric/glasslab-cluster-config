@@ -16,7 +16,7 @@ Current roles:
 - `192.168.1.11` (`node02`): Kubernetes worker and active NVIDIA GPU worker
 - `192.168.1.50` (`node03`): Kubernetes worker
 - `192.168.1.47` (`node05`): Kubernetes worker
-- `192.168.1.51` (`node04`): Kubernetes worker with a visible GeForce GTX 1060 6GB
+- `192.168.1.51` (`node04`): Kubernetes worker and active NVIDIA GPU worker
 
 Current cluster state:
 
@@ -29,5 +29,5 @@ Current cluster state:
 - `node01` runs the NVIDIA stack for its Quadro P4000 and advertises `nvidia.com/gpu=1`.
 - `node02` runs the NVIDIA stack for its RTX A4000 and advertises `nvidia.com/gpu=1`.
 - `node05` has a visible Quadro K2000 but remains CPU-only because it would require a legacy NVIDIA 470 driver path.
-- `node04` has a visible GeForce GTX 1060 6GB and is a candidate for later NVIDIA enablement.
+- `node04` runs the NVIDIA stack for its GeForce GTX 1060 6GB and advertises `nvidia.com/gpu=1`.
 - Package maintenance lives in `ansible/playbooks/maintain-packages.yml` and `docs/package-maintenance.md`.
