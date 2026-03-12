@@ -1,4 +1,3 @@
-#cloud-config
 autoinstall:
   version: 1
   identity:
@@ -7,21 +6,23 @@ autoinstall:
     password: $6$7u0tSdZJplZv953Q$MRDBJsKwTNhX3FtLx3Ek0oq2EerjbWAhJSGygi/XBM7X0RHmHKkVD25KWrOKRDPBecjjqrZn5pNggA9cpJIxr0
   ssh:
     install-server: true
-    allow-pw: true
+    allow-pw: false
     authorized-keys:
     - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcgFpfLo5xYrSB3Nonbm9wD9ldnN7kpOIW0sZlcER4Z
       glasslab@glasslab-PXE-01
   user-data:
-    ssh_pwauth: true
+    ssh_pwauth: false
     chpasswd:
       expire: false
     write_files:
-    - path: /etc/ssh/sshd_config.d/99-debug-password-auth.conf
+    - path: /etc/ssh/sshd_config.d/00-key-only-auth.conf
       permissions: '0644'
       owner: root:root
-      content: 'PasswordAuthentication yes
+      content: 'PasswordAuthentication no
 
-        KbdInteractiveAuthentication yes
+        KbdInteractiveAuthentication no
+
+        PubkeyAuthentication yes
 
         UsePAM yes
 
@@ -103,7 +104,8 @@ autoinstall:
   - curtin in-target --target=/target -- bash -c "chown clusteradmin:clusteradmin
     /home/clusteradmin/.ssh/authorized_keys && chmod 600 /home/clusteradmin/.ssh/authorized_keys"
   - curtin in-target --target=/target -- bash -c "printf '%s\n' 'PasswordAuthentication
-    yes' 'KbdInteractiveAuthentication yes' 'UsePAM yes' > /etc/ssh/sshd_config.d/99-debug-password-auth.conf"
+    no' 'KbdInteractiveAuthentication no' 'PubkeyAuthentication yes' 'UsePAM yes'
+    > /etc/ssh/sshd_config.d/00-key-only-auth.conf"
   - curtin in-target --target=/target -- systemctl restart ssh || true
   network:
     version: 2

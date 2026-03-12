@@ -1,78 +1,68 @@
-#cloud-config
 autoinstall:
   version: 1
   identity:
     hostname: node02
     username: clusteradmin
-    password: "$6$7u0tSdZJplZv953Q$MRDBJsKwTNhX3FtLx3Ek0oq2EerjbWAhJSGygi/XBM7X0RHmHKkVD25KWrOKRDPBecjjqrZn5pNggA9cpJIxr0"
+    password: $6$7u0tSdZJplZv953Q$MRDBJsKwTNhX3FtLx3Ek0oq2EerjbWAhJSGygi/XBM7X0RHmHKkVD25KWrOKRDPBecjjqrZn5pNggA9cpJIxr0
   ssh:
     install-server: true
-    allow-pw: true
+    allow-pw: false
     authorized-keys:
-      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcgFpfLo5xYrSB3Nonbm9wD9ldnN7kpOIW0sZlcER4Z glasslab@glasslab-PXE-01"
+    - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcgFpfLo5xYrSB3Nonbm9wD9ldnN7kpOIW0sZlcER4Z
+      glasslab@glasslab-PXE-01
   user-data:
-    ssh_pwauth: true
+    ssh_pwauth: false
     chpasswd:
       expire: false
     write_files:
-      - path: /etc/ssh/sshd_config.d/99-debug-password-auth.conf
-        permissions: '0644'
-        owner: root:root
-        content: |
-          PasswordAuthentication yes
-          KbdInteractiveAuthentication yes
-          UsePAM yes
+    - path: /etc/ssh/sshd_config.d/00-key-only-auth.conf
+      permissions: '0644'
+      owner: root:root
+      content: 'PasswordAuthentication no
+
+        KbdInteractiveAuthentication no
+
+        PubkeyAuthentication yes
+
+        UsePAM yes
+
+        '
     runcmd:
-      - [ systemctl, restart, ssh ]
-
+    - - systemctl
+      - restart
+      - ssh
   early-commands:
-    # Stop any auto-assembled Intel/MD RAID and wipe metadata from *all* disks we can see
-    - |
-      set -eux
-      mdadm --stop --scan || true
-      # Kill IMSM containers/volumes if present
-      for md in /dev/md/* /dev/md1* /dev/md12* /dev/md127 /dev/md126; do
-        [ -e "$md" ] && mdadm --stop "$md" || true
-      done
-      # Wipe RAID/LVM/GPT from all candidate disks (sdX + nvmeXnY)
-      for d in /dev/sd? /dev/nvme?n?; do
-        [ -b "$d" ] || continue
-        mdadm --zero-superblock "$d" || true
-        wipefs -a "$d" || true
-        sgdisk --zap-all "$d" || true
-      done
-
+  - "set -eux\nmdadm --stop --scan || true\n# Kill IMSM containers/volumes if present\n\
+    for md in /dev/md/* /dev/md1* /dev/md12* /dev/md127 /dev/md126; do\n  [ -e \"\
+    $md\" ] && mdadm --stop \"$md\" || true\ndone\n# Wipe RAID/LVM/GPT from all candidate\
+    \ disks (sdX + nvmeXnY)\nfor d in /dev/sd? /dev/nvme?n?; do\n  [ -b \"$d\" ] ||\
+    \ continue\n  mdadm --zero-superblock \"$d\" || true\n  wipefs -a \"$d\" || true\n\
+    \  sgdisk --zap-all \"$d\" || true\ndone\n"
   storage:
     config:
-      # Install to sda (legacy BIOS on GPT needs bios_grub)
-      - id: disk-a
-        type: disk
-        match:
-          name: sda
-        wipe: superblock-recursive
-        ptable: gpt
-        grub_device: true
-
-      - id: part-biosgrub
-        type: partition
-        device: disk-a
-        size: 1M
-        flag: bios_grub
-
-      - id: part-root
-        type: partition
-        device: disk-a
-        size: -1
-
-      - id: fs-root
-        type: format
-        volume: part-root
-        fstype: ext4
-
-      - id: mnt-root
-        type: mount
-        device: fs-root
-        path: /
-
+    - id: disk-a
+      type: disk
+      match:
+        name: sda
+      wipe: superblock-recursive
+      ptable: gpt
+      grub_device: true
+    - id: part-biosgrub
+      type: partition
+      device: disk-a
+      size: 1M
+      flag: bios_grub
+    - id: part-root
+      type: partition
+      device: disk-a
+      size: -1
+    - id: fs-root
+      type: format
+      volume: part-root
+      fstype: ext4
+    - id: mnt-root
+      type: mount
+      device: fs-root
+      path: /
   packages:
-    - openssh-server
+  - openssh-server
