@@ -28,7 +28,7 @@
 
     - name: Install pinned NVIDIA driver package
       ansible.builtin.apt:
-        name: "{{ gpu_driver_package }}"
+        name: "{{ gpu_driver_package_override | default(gpu_driver_package) }}"
         state: present
       when: gpu_driver_install_enabled | bool
 
@@ -46,7 +46,7 @@
     - name: Install NVIDIA container toolkit keyring
       ansible.builtin.shell: |
         set -euo pipefail
-        curl -fsSL "{{ gpu_nvidia_container_repo_key_url }}" | gpg --dearmor -o "{{ gpu_nvidia_container_keyring }}"
+        curl -fsSL "{{ gpu_nvidia_container_repo_key_url }}" | gpg --dearmor --batch --yes -o "{{ gpu_nvidia_container_keyring }}"
       args:
         executable: /bin/bash
       when: gpu_nvidia_container_toolkit_enabled | bool

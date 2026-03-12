@@ -5,3 +5,4 @@ gpu_vendor: nvidia
 gpu_model_hint: quadro-p4000
 legacy_gpu_models_present:
   - nvs-310
+gpu_driver_package_override: nvidia-driver-535
