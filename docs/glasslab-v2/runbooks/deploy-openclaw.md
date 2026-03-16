@@ -85,6 +85,7 @@ Operator note:
 - a raw `kubectl apply -f kubeadm/glasslab-v2/openclaw/` should not silently turn on the gateway
 - scaling to `1` is a separate deliberate validation or operating step
 - if the live deployment is already at `1`, a future raw apply will scale it back to `0` unless you scale it up again on purpose
+- if you update the exported runtime bundle for a live pod, run `kubectl -n glasslab-v2 rollout restart deploy/glasslab-openclaw` so the init container unpacks the new bundle into the pod's `emptyDir`
 
 8. Verify the pre-scale state.
 
@@ -152,11 +153,71 @@ Observed live validation on 2026-03-16:
 kubectl -n glasslab-v2 logs deploy/glasslab-workflow-api --since=2m | grep 'GET /workflow-families'
 ```
 
+12. Validate the first backend-backed run lifecycle through the deployed OpenClaw pod.
+
+This repo exports two additional narrow workflow-api tools for bounded run lifecycle validation:
+- `workflow_api_create_validation_run`
+- `workflow_api_get_last_validation_run`
+
+The validation run payload is repo-managed under `services/openclaw-config/bindings/workflow-api.yaml` as `validation_run_request`. The current validation request is a minimal Tier 2 `generic-tabular-benchmark` run with one approved model.
+The create tool records the resulting `run_id` under `OPENCLAW_STATE_DIR/workflow-api-tool/last-validation-run.json`, and the retrieval tool uses that stored value to call `GET /runs/{id}`.
+
+Create the validation run:
+
+```bash
+kubectl -n glasslab-v2 exec deploy/glasslab-openclaw -- \
+  openclaw agent --local --agent operator --json \
+  --message "Create the bounded Glasslab v2 validation run and report the run_id, acceptance status, and job submission receipt."
+kubectl -n glasslab-v2 logs deploy/glasslab-workflow-api --since=2m | grep 'POST /runs'
+```
+
+Expected create-run request path:
+- operator agent
+- `workflow_api_create_validation_run`
+- `POST http://glasslab-workflow-api.glasslab-v2.svc.cluster.local:8080/runs`
+
+Expected create-run response shape:
+- `payloads[].text` summarizes the accepted run
+- `payloads[].text` includes the created `run_id`
+- `meta.systemPromptReport.tools.entries[]` contains `workflow_api_create_validation_run`
+- the plugin result contains:
+  - `endpoint`
+  - `request`
+  - `run_id`
+  - `run`
+
+Retrieve the same run:
+
+```bash
+kubectl -n glasslab-v2 exec deploy/glasslab-openclaw -- \
+  openclaw agent --local --agent operator --json \
+  --message "Fetch the last validation run and summarize its workflow, accepted status, and job submission receipt."
+kubectl -n glasslab-v2 logs deploy/glasslab-workflow-api --since=2m | grep '/runs/'
+```
+
+Expected get-run request path:
+- operator agent
+- `workflow_api_get_last_validation_run`
+- `GET http://glasslab-workflow-api.glasslab-v2.svc.cluster.local:8080/runs/<run_id>`
+
+Expected get-run response shape:
+- `payloads[].text` summarizes the run record
+- `meta.systemPromptReport.tools.entries[]` contains `workflow_api_get_last_validation_run`
+- the plugin result contains:
+  - `endpoint`
+  - `run_id`
+  - `run`
+
+Success proof:
+- `workflow-api` logs show both `POST /runs` and `GET /runs/<run_id>`
+- the operator returns the same `run_id` on creation and retrieval
+- the retrieved run record shows `status.status: accepted` unless a later backend implementation mutates it
+
 Client caveat:
 - the separate helper pod may still show `Unknown agent id "operator"` with some CLI flows
-- treat that as a client-side caveat unless the deployed OpenClaw pod itself cannot complete the validation command above
+- treat that as a client-side caveat unless the deployed OpenClaw pod itself cannot complete the validation commands above
 
-12. If startup fails, scale back to `0`, inspect the logs, and re-export the runtime bundle before trying again.
+13. If startup fails, scale back to `0`, inspect the logs, and re-export the runtime bundle before trying again.
 
 ```bash
 kubectl -n glasslab-v2 scale deploy/glasslab-openclaw --replicas=0
@@ -164,7 +225,7 @@ kubectl -n glasslab-v2 logs deploy/glasslab-openclaw --tail=200 || true
 ./scripts/export-openclaw-config.sh --output-dir /tmp/openclaw-runtime --no-apply
 ```
 
-13. Roll back by disabling the deployment and restoring the prior runtime bundle.
+14. Roll back by disabling the deployment and restoring the prior runtime bundle.
 
 ```bash
 kubectl -n glasslab-v2 scale deploy/glasslab-openclaw --replicas=0

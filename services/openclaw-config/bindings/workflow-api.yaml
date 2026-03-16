@@ -6,6 +6,16 @@ routes:
   get_run: GET /runs/{run_id}
   get_artifacts: GET /runs/{run_id}/artifacts
   get_logs: GET /runs/{run_id}/logs
+validation_run_request:
+  workflow_id: generic-tabular-benchmark
+  objective: Benchmark logistic regression on the seeded Titanic fixture dataset.
+  inputs:
+    dataset_name: titanic-fixture
+    train_uri: s3://datasets/titanic/train.csv
+    test_uri: s3://datasets/titanic/test.csv
+    target_column: Survived
+  models:
+    - logistic_regression
 notes:
   - Use only approved workflow IDs from the registry.
   - Route Tier 3 workflows for human approval before submitting runs.

@@ -11,5 +11,7 @@ runtime_tools_profile: full
 runtime_tools_allow:
   - web_fetch
   - workflow_api_get_families
+  - workflow_api_create_validation_run
+  - workflow_api_get_last_validation_run
 runtime_tools_deny:
   - web_fetch

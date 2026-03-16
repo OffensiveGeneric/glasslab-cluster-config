@@ -1,7 +1,7 @@
 {
   "id": "workflow-api-tool",
   "name": "Workflow API Tool",
-  "description": "Read-only workflow-api helper for Glasslab v2 operator validation.",
+  "description": "Narrow workflow-api helper for Glasslab v2 operator validation and bounded run lifecycle.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -9,7 +9,12 @@
       "baseUrl": {
         "type": "string",
         "minLength": 1,
-        "description": "Approved workflow-api base URL for internal Glasslab v2 reads."
+        "description": "Approved workflow-api base URL for internal Glasslab v2 reads and bounded run submission."
+      },
+      "validationRunRequest": {
+        "type": "object",
+        "additionalProperties": true,
+        "description": "Repo-managed bounded POST /runs payload used for first operator validation."
       },
       "timeoutSeconds": {
         "type": "number",
@@ -18,6 +23,6 @@
         "default": 10
       }
     },
-    "required": ["baseUrl"]
+    "required": ["baseUrl", "validationRunRequest"]
   }
 }
