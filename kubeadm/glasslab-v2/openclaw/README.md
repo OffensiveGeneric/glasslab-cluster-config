@@ -17,3 +17,10 @@ Runtime contract:
 Required local secret manifest:
 
 - `kubeadm/glasslab-v2/secrets/30-openclaw.local.yaml`
+
+Channel notes:
+
+- the first validated chat channel is WhatsApp
+- enabling it requires `OPENCLAW_WHATSAPP_OWNER` in `kubeadm/glasslab-v2/secrets/30-openclaw.local.yaml`
+- linked WhatsApp credentials are written under `/var/lib/openclaw/state/credentials/whatsapp/default/`
+- the current Deployment keeps `/var/lib/openclaw/state` on `emptyDir`, so WhatsApp login state is not durable yet

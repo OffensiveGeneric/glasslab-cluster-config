@@ -43,3 +43,19 @@ OpenClaw should only submit approved internal API calls and only after the reque
 - `vLLM`: `http://vllm.glasslab-agents.svc.cluster.local:8000/v1`
 
 These URLs are generated into the native runtime config by `scripts/export-openclaw-config.sh` and should never be replaced with localhost or port-forward addresses in the committed manifests.
+
+## First chat channel
+
+WhatsApp is the first validation target.
+
+Rationale:
+
+- the bundled OpenClaw docs in the deployed image mark WhatsApp as production-ready
+- the live image contains native WhatsApp Web channel support and routing guidance
+- the current stack already supports a narrow direct-message allowlist and self-chat mode without expanding tool scope
+- Signal remains a deferred option until there is a concrete operational reason to prefer it over the built-in WhatsApp path
+
+Validation gate:
+
+- the WhatsApp channel is exported into the live runtime only when `kubeadm/glasslab-v2/secrets/30-openclaw.local.yaml` defines `OPENCLAW_WHATSAPP_OWNER`
+- this keeps the default repo path safe and prevents accidental broad DM exposure when the owner number is not explicitly set

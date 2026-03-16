@@ -35,6 +35,11 @@ Required keys:
 - `OPENCLAW_GATEWAY_TOKEN`
 - `OPENCLAW_VLLM_API_KEY`
 
+Channel note:
+- the first WhatsApp validation path requires `OPENCLAW_WHATSAPP_OWNER` in `kubeadm/glasslab-v2/secrets/30-openclaw.local.yaml`
+- linked WhatsApp credentials are created at runtime under `/var/lib/openclaw/state/credentials/whatsapp/default/`
+- because `/var/lib/openclaw/state` is currently `emptyDir`, a pod replacement clears the linked WhatsApp session and requires a fresh login
+
 Example creation flow:
 
 ```bash
@@ -247,4 +252,10 @@ kubectl -n glasslab-v2 scale deploy/glasslab-openclaw --replicas=0
 kubectl -n glasslab-v2 delete configmap glasslab-openclaw-config
 ./scripts/export-openclaw-config.sh
 kubectl -n glasslab-v2 rollout undo deploy/glasslab-openclaw || true
+```
+
+16. For the first real chat-channel front door, follow the dedicated validation runbook.
+
+```bash
+sed -n '1,240p' docs/glasslab-v2/runbooks/validate-chat-channel.md
 ```

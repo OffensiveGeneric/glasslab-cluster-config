@@ -58,6 +58,12 @@ spec:
                 secretKeyRef:
                   name: glasslab-openclaw
                   key: OPENCLAW_VLLM_API_KEY
+            - name: OPENCLAW_WHATSAPP_OWNER
+              valueFrom:
+                secretKeyRef:
+                  name: glasslab-openclaw
+                  key: OPENCLAW_WHATSAPP_OWNER
+                  optional: true
           resources:
             requests:
               cpu: "1"
