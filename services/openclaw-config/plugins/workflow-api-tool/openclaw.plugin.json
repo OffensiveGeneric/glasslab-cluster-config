@@ -1,7 +1,7 @@
 {
   "id": "workflow-api-tool",
   "name": "Workflow API Tool",
-  "description": "Narrow workflow-api helper for Glasslab v2 operator validation and bounded run lifecycle.",
+  "description": "Narrow workflow-api helper for Glasslab v2 validation.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -16,6 +16,15 @@
         "additionalProperties": true,
         "description": "Repo-managed bounded POST /runs payload used for first operator validation."
       },
+      "knownWorkflowIds": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1
+        },
+        "minItems": 1,
+        "description": "Approved workflow_ids exposed to the tiny experimental lookup tool."
+      },
       "timeoutSeconds": {
         "type": "number",
         "minimum": 1,
@@ -23,6 +32,6 @@
         "default": 10
       }
     },
-    "required": ["baseUrl", "validationRunRequest"]
+    "required": ["baseUrl", "validationRunRequest", "knownWorkflowIds"]
   }
 }

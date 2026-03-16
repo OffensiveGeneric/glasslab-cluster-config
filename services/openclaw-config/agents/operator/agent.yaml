@@ -13,5 +13,6 @@ runtime_tools_allow:
   - workflow_api_get_families
   - workflow_api_create_validation_run
   - workflow_api_get_last_validation_run
+  - workflow_api_get_family_by_id
 runtime_tools_deny:
   - web_fetch
