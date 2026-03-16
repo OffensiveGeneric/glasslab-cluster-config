@@ -213,11 +213,26 @@ Success proof:
 - the operator returns the same `run_id` on creation and retrieval
 - the retrieved run record shows `status.status: accepted` unless a later backend implementation mutates it
 
+13. Run the repeatable tool-calling reliability check from the provisioner host.
+
+This check keeps the current no-arg state-changing path as the regression baseline and treats the tiny argumented lookup tool as experimental.
+
+```bash
+./scripts/check-openclaw-tool-calling.sh --attempts 5
+```
+
+What it verifies:
+- the no-arg create-validation-run tool still succeeds
+- the no-arg get-last-validation-run tool still succeeds
+- the experimental `workflow_api_get_family_by_id` path is measured separately
+- backend proof is captured from `workflow-api` logs
+- tool execution metadata is captured from `/var/lib/openclaw/state/workflow-api-tool/tool-call-audit.jsonl`
+
 Client caveat:
 - the separate helper pod may still show `Unknown agent id "operator"` with some CLI flows
 - treat that as a client-side caveat unless the deployed OpenClaw pod itself cannot complete the validation commands above
 
-13. If startup fails, scale back to `0`, inspect the logs, and re-export the runtime bundle before trying again.
+14. If startup fails, scale back to `0`, inspect the logs, and re-export the runtime bundle before trying again.
 
 ```bash
 kubectl -n glasslab-v2 scale deploy/glasslab-openclaw --replicas=0
@@ -225,7 +240,7 @@ kubectl -n glasslab-v2 logs deploy/glasslab-openclaw --tail=200 || true
 ./scripts/export-openclaw-config.sh --output-dir /tmp/openclaw-runtime --no-apply
 ```
 
-14. Roll back by disabling the deployment and restoring the prior runtime bundle.
+15. Roll back by disabling the deployment and restoring the prior runtime bundle.
 
 ```bash
 kubectl -n glasslab-v2 scale deploy/glasslab-openclaw --replicas=0
