@@ -120,6 +120,20 @@ vi kubeadm/agent-stack/12-agent-secrets.yaml
 
 3. Confirm the dataset PVC plan and populate the Titanic files after the claim binds.
 
+Use the provisioner helper to pull the official Kaggle competition files and sync them onto `node03`:
+
+```bash
+cd /home/glasslab/cluster-config
+mkdir -p ~/.kaggle && chmod 700 ~/.kaggle
+vi ~/.kaggle/kaggle.json
+chmod 600 ~/.kaggle/kaggle.json
+./scripts/sync-titanic-dataset.sh
+```
+
+The helper bootstraps a user-local Kaggle CLI under `/home/glasslab/.local/share/glasslab/kaggle-cli` when needed, prompts for the `clusteradmin` sudo password on `node03` unless `NODE_SUDO_PASSWORD` is already exported, and writes a timestamped backup under `/var/lib/glasslab-agent/datasets/_sync_backup_*` before replacing the live dataset.
+
+You can avoid storing the Kaggle credential file on disk by exporting `KAGGLE_USERNAME` and `KAGGLE_KEY` for the command instead.
+
 4. Deploy model serving.
 
 ```bash
@@ -194,6 +208,7 @@ Through the API:
 - If the planner output is invalid, the API falls back to deterministic parsing for common Titanic requests instead of executing unsafe output.
 - If a Job stays pending, check PVC binding, image pull success, and whether the requested GPU node selector matches current worker labels.
 - If a Job fails, inspect `GET /experiments/{id}` for the stored error message and `kubectl -n glasslab-agents logs job/<job-name>` for the pod log tail.
+- If dataset sync fails before the copy step, confirm the provisioner has valid Kaggle credentials in `~/.kaggle/kaggle.json` or in the `KAGGLE_USERNAME` and `KAGGLE_KEY` environment variables.
 - If `submission.csv` is missing, verify that `test.csv` exists in the mounted Titanic dataset path and that `produce_submission` was true in the normalized spec.
 - If vLLM is up but planning fails, test `/v1/models` and `/v1/chat/completions` directly before debugging the FastAPI layer.
 
