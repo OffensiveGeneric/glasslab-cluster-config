@@ -5,7 +5,7 @@ KUBECTL="${KUBECTL:-kubectl}"
 CURL="${CURL:-curl}"
 NAMESPACE="${GLASSLAB_V2_NAMESPACE:-glasslab-v2}"
 HEALTH_PORT="${GLASSLAB_V2_HEALTH_PORT:-18081}"
-EXPECTED_SERVICES=(glasslab-workflow-api glasslab-postgres glasslab-nats glasslab-minio)
+EXPECTED_SERVICES=(glasslab-workflow-api glasslab-postgres glasslab-nats glasslab-minio glasslab-openclaw)
 PORT_FORWARD_PID=""
 PORT_FORWARD_LOG=""
 
@@ -33,7 +33,7 @@ need_cmd "$CURL"
 printf '[smoke-test-v2] checking namespace %s\n' "$NAMESPACE"
 "$KUBECTL" get namespace "$NAMESPACE" >/dev/null
 
-printf '[smoke-test-v2] checking rollout status\n'
+printf '[smoke-test-v2] checking rollout status for core services\n'
 "$KUBECTL" -n "$NAMESPACE" rollout status deployment/glasslab-nats --timeout=120s
 "$KUBECTL" -n "$NAMESPACE" rollout status deployment/glasslab-minio --timeout=120s
 "$KUBECTL" -n "$NAMESPACE" rollout status deployment/glasslab-workflow-api --timeout=120s
@@ -61,3 +61,9 @@ done
 printf '[smoke-test-v2] workflow-api health response\n'
 "$CURL" -fsS "http://127.0.0.1:${HEALTH_PORT}/healthz"
 printf '\n'
+
+printf '[smoke-test-v2] workflow-api family catalog\n'
+"$CURL" -fsS "http://127.0.0.1:${HEALTH_PORT}/workflow-families"
+printf '\n'
+
+printf '[smoke-test-v2] OpenClaw deployment is intentionally excluded from rollout gating until its image and secrets are live.\n'

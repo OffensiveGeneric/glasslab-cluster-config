@@ -1,0 +1,11 @@
+name: reporting
+artifact_contract:
+  required_inputs:
+    - run_manifest.json
+    - metrics.json
+  optional_inputs:
+    - comparison.json
+    - summary.md
+notes:
+  - Reporting bindings are read-only.
+  - Prefer deterministic summaries produced by repo-managed components.

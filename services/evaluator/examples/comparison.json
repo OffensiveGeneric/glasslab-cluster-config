@@ -1,0 +1,27 @@
+{
+  "compared_runs": [
+    {
+      "run_id": "run-20260316-001",
+      "workflow_id": "generic-tabular-benchmark",
+      "workflow_family": "tabular-benchmark",
+      "models": [
+        "logistic_regression",
+        "random_forest"
+      ],
+      "status": "succeeded",
+      "primary_metric_name": "validation_accuracy",
+      "primary_metric_value": 0.8125,
+      "primary_metric_direction": "maximize",
+      "runtime_seconds": 38.4
+    }
+  ],
+  "ranking": [
+    {
+      "position": 1,
+      "run_id": "run-20260316-001",
+      "reason": "ordered by succeeded status, metric, then runtime"
+    }
+  ],
+  "best_run_id": "run-20260316-001",
+  "comparison_basis": "succeeded status, primary metric, runtime seconds, run_id"
+}

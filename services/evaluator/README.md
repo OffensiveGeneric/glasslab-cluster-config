@@ -1,3 +1,3 @@
 # Evaluator
 
-The evaluator will compare multiple run artifact bundles and produce deterministic comparison output.
+The evaluator compares multiple completed run bundles and emits deterministic `comparison.json` and `summary.md` outputs.

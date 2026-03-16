@@ -1,0 +1,8 @@
+name: designer
+role: planner
+summary: Map structured requests onto approved Glasslab workflow families.
+default_provider: local-vllm-openai-compatible
+prompt_file: prompt.md
+allowed_bindings:
+  - workflow-api
+policy_profile: bounded-design

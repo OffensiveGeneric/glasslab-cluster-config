@@ -1,0 +1,9 @@
+name: operator
+role: gateway
+summary: Receive operator goals, keep session context, and route requests to approved backend paths.
+default_provider: local-vllm-openai-compatible
+prompt_file: prompt.md
+allowed_bindings:
+  - workflow-api
+  - reporting
+policy_profile: internal-default

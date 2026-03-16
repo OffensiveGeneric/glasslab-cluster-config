@@ -1,3 +1,3 @@
 # Reporter
 
-The reporter will convert manifests, metrics, and evaluator output into stable lab-facing summaries.
+The reporter turns run manifests, metrics, and optional evaluator output into stable Markdown memos for operators.

@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: glasslab-openclaw
+  namespace: glasslab-v2
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: glasslab-openclaw
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: glasslab-openclaw
+    spec:
+      serviceAccountName: glasslab-openclaw
+      initContainers:
+        - name: unpack-config
+          image: busybox:1.36
+          command:
+            - /bin/sh
+            - -c
+            - mkdir -p /config && tar -xzf /config-archive/openclaw-config.tar.gz -C /config
+          volumeMounts:
+            - name: exported-config
+              mountPath: /config-archive
+            - name: runtime-config
+              mountPath: /config
+      containers:
+        - name: openclaw
+          image: ghcr.io/offensivegeneric/openclaw:0.1.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: OPENCLAW_CONFIG_DIR
+              value: /etc/openclaw/config
+            - name: OPENCLAW_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: glasslab-openclaw
+                  key: OPENCLAW_AUTH_TOKEN
+            - name: OPENCLAW_SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: glasslab-openclaw
+                  key: OPENCLAW_SESSION_SECRET
+            - name: OPENCLAW_VLLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: glasslab-openclaw
+                  key: OPENCLAW_VLLM_API_KEY
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          volumeMounts:
+            - name: runtime-config
+              mountPath: /etc/openclaw/config
+      volumes:
+        - name: exported-config
+          configMap:
+            name: glasslab-openclaw-config
+        - name: runtime-config
+          emptyDir: {}

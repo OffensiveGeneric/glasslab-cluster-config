@@ -1,0 +1,11 @@
+name: workflow-api
+base_url: http://glasslab-workflow-api.glasslab-v2.svc.cluster.local:8080
+routes:
+  list_workflows: GET /workflow-families
+  create_run: POST /runs
+  get_run: GET /runs/{run_id}
+  get_artifacts: GET /runs/{run_id}/artifacts
+  get_logs: GET /runs/{run_id}/logs
+notes:
+  - Use only approved workflow IDs from the registry.
+  - Route Tier 3 workflows for human approval before submitting runs.

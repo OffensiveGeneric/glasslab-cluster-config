@@ -1,0 +1,10 @@
+approval_tiers:
+  tier-1-read-only:
+    description: Read-only autonomy for summaries, literature digestion, and status checks.
+    requires_human_approval: false
+  tier-2-approved-execution:
+    description: Bounded execution of reviewed workflows with approved models and runner images.
+    requires_human_approval: false
+  tier-3-human-approval:
+    description: Any action that changes approval scope, infrastructure state, or unreviewed execution paths.
+    requires_human_approval: true

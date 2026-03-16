@@ -27,10 +27,16 @@ apply_yaml_dir() {
 
 need_cmd "$KUBECTL"
 
+printf '[deploy-glasslab-v2] validating workflow registry definitions\n'
+"$ROOT_DIR/scripts/seed-registry.sh"
+
 apply_yaml_dir "$MANIFEST_ROOT/namespaces"
 apply_yaml_dir "$MANIFEST_ROOT/config"
 apply_yaml_dir "$MANIFEST_ROOT/postgres"
 apply_yaml_dir "$MANIFEST_ROOT/nats"
 apply_yaml_dir "$MANIFEST_ROOT/minio"
 apply_yaml_dir "$MANIFEST_ROOT/workflow-api"
+
+printf '[deploy-glasslab-v2] exporting repo-managed OpenClaw config\n'
+"$ROOT_DIR/scripts/export-openclaw-config.sh"
 apply_yaml_dir "$MANIFEST_ROOT/openclaw"

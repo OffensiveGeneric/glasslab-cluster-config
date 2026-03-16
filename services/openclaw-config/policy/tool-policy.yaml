@@ -1,0 +1,46 @@
+profile_defaults:
+  internal-default:
+    allow:
+      - http_get_internal
+      - http_post_internal_approved
+      - read_workspace
+      - read_artifacts
+    deny:
+      - shell_exec
+      - kubectl_mutate
+      - git_push
+      - filesystem_write_outside_workspace
+      - arbitrary_external_http
+  read-only-research:
+    allow:
+      - http_get_internal
+      - read_workspace
+      - read_artifacts
+    deny:
+      - http_post_internal_approved
+      - shell_exec
+      - kubectl_mutate
+      - git_push
+      - filesystem_write_outside_workspace
+      - arbitrary_external_http
+  bounded-design:
+    allow:
+      - http_get_internal
+      - http_post_internal_approved
+      - read_workspace
+    deny:
+      - shell_exec
+      - kubectl_mutate
+      - git_push
+      - arbitrary_external_http
+  read-only-reporting:
+    allow:
+      - http_get_internal
+      - read_workspace
+      - read_artifacts
+    deny:
+      - http_post_internal_approved
+      - shell_exec
+      - kubectl_mutate
+      - git_push
+      - arbitrary_external_http

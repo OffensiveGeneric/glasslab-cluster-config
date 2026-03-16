@@ -1,0 +1,10 @@
+name: local-vllm-openai-compatible
+provider_type: openai-compatible
+base_url: http://vllm.glasslab-agents.svc.cluster.local:8000/v1
+api_key_env: OPENCLAW_VLLM_API_KEY
+default_model: Qwen/Qwen3-4B-Instruct-2507
+timeout_seconds: 60
+temperature: 0.0
+notes:
+  - Internal cluster endpoint only.
+  - Keep requests deterministic by default.

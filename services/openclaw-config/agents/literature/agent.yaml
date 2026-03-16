@@ -1,0 +1,8 @@
+name: literature
+role: analysis
+summary: Read papers and notes, then extract structured method specifications for downstream workflows.
+default_provider: local-vllm-openai-compatible
+prompt_file: prompt.md
+allowed_bindings:
+  - reporting
+policy_profile: read-only-research

@@ -5,9 +5,10 @@ Glasslab v2 treats workflow execution as a contract-driven pipeline.
 ## Service placement
 
 - `workflow-api` owns request intake, registry lookup, validation, run manifest creation, persistence, and the job submission boundary.
-- `evaluator` compares multiple run artifact bundles after execution completes.
-- `reporter` converts manifests, metrics, and evaluator output into a stable Markdown memo.
+- `evaluator` reads multiple completed run bundles and produces deterministic `comparison.json` and `summary.md` outputs.
+- `reporter` converts manifests, metrics, and optional evaluator output into a stable Markdown memo for operators.
 - Kubernetes Jobs remain the bounded execution layer.
+- OpenClaw remains a gateway and session layer in front of these components rather than a replacement for them.
 
 ## Canonical artifact contract
 
@@ -23,6 +24,22 @@ Every workflow must emit these artifacts:
 
 Optional artifacts are declared per workflow definition under `expected_artifacts.optional` in the workflow registry.
 
-## Run manifest intent
+## Evaluator inputs
 
-The run manifest is the canonical record of what was requested, what was approved, and what runner image and resource profile were selected. Evaluators and reporters should rely on this record instead of reconstructing intent from logs.
+The evaluator expects each run bundle to contain at least:
+
+- `run_manifest.json`
+- `metrics.json`
+- `status.json`
+
+It compares workflow family, model choice, primary metrics, and runtime metadata, then emits deterministic comparison output.
+
+## Reporter inputs
+
+The reporter expects:
+
+- one `run_manifest.json`
+- one `metrics.json`
+- optional evaluator output such as `comparison.json`
+
+The first reporter version stays deterministic and does not require direct LLM access.
