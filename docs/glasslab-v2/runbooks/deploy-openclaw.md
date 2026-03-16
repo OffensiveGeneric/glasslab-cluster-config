@@ -14,6 +14,12 @@ kubectl -n glasslab-v2 get svc glasslab-workflow-api
 kubectl -n glasslab-agents get svc vllm
 ```
 
+For the backend-facing operator validation path, verify the live `vllm` deployment includes tool-call support:
+
+```bash
+kubectl -n glasslab-agents get deploy vllm -o yaml | grep -E 'enable-auto-tool-choice|tool-call-parser'
+```
+
 3. Review the example secret manifest.
 
 ```bash
@@ -74,6 +80,12 @@ kubectl apply -f kubeadm/glasslab-v2/openclaw/
 kubectl -n glasslab-v2 get deploy glasslab-openclaw -o jsonpath='{.spec.replicas}{"\n"}'
 ```
 
+Operator note:
+- the repo manifest intentionally keeps `glasslab-openclaw` at `replicas: 0`
+- a raw `kubectl apply -f kubeadm/glasslab-v2/openclaw/` should not silently turn on the gateway
+- scaling to `1` is a separate deliberate validation or operating step
+- if the live deployment is already at `1`, a future raw apply will scale it back to `0` unless you scale it up again on purpose
+
 8. Verify the pre-scale state.
 
 ```bash
@@ -105,7 +117,46 @@ kubectl -n glasslab-v2 exec deploy/glasslab-openclaw -- ls -R /var/lib/openclaw/
 kubectl -n glasslab-v2 exec deploy/glasslab-openclaw -- sed -n '1,200p' /var/lib/openclaw/runtime/RUNTIME-CONTRACT.md
 ```
 
-11. If startup fails, scale back to `0`, inspect the logs, and re-export the runtime bundle before trying again.
+11. Validate the first backend-backed operator path from the deployed OpenClaw pod.
+
+This repo exports the operator agent with a narrow runtime tool surface:
+- repo-managed `workflow_api_get_families` plugin tool for internal backend reads
+- no shell or filesystem mutation tools
+- no unattended execution tools
+
+Use the live pod to ask the operator for the approved workflow families.
+
+```bash
+kubectl -n glasslab-v2 exec deploy/glasslab-openclaw -- \
+  openclaw agent --local --agent operator --json \
+  --message 'List the approved Glasslab v2 workflow families and summarize each briefly.'
+kubectl -n glasslab-v2 logs deploy/glasslab-workflow-api --tail=50
+```
+
+Expected validation result:
+- the operator returns a backend-backed summary of the available workflow families
+- `workflow-api` logs show a live `GET /workflow-families` from the OpenClaw pod
+- the request path is:
+  - operator agent
+  - `workflow_api_get_families`
+  - `GET http://glasslab-workflow-api.glasslab-v2.svc.cluster.local:8080/workflow-families`
+  - plugin JSON result with `endpoint` and `workflow_families`
+  - operator summary in `payloads[0].text`
+- the response shape includes:
+  - `payloads[].text` with the human-facing summary
+  - `meta.systemPromptReport.tools.entries[]` containing `workflow_api_get_families`
+
+Observed live validation on 2026-03-16:
+
+```bash
+kubectl -n glasslab-v2 logs deploy/glasslab-workflow-api --since=2m | grep 'GET /workflow-families'
+```
+
+Client caveat:
+- the separate helper pod may still show `Unknown agent id "operator"` with some CLI flows
+- treat that as a client-side caveat unless the deployed OpenClaw pod itself cannot complete the validation command above
+
+12. If startup fails, scale back to `0`, inspect the logs, and re-export the runtime bundle before trying again.
 
 ```bash
 kubectl -n glasslab-v2 scale deploy/glasslab-openclaw --replicas=0
@@ -113,7 +164,7 @@ kubectl -n glasslab-v2 logs deploy/glasslab-openclaw --tail=200 || true
 ./scripts/export-openclaw-config.sh --output-dir /tmp/openclaw-runtime --no-apply
 ```
 
-12. Roll back by disabling the deployment and restoring the prior runtime bundle.
+13. Roll back by disabling the deployment and restoring the prior runtime bundle.
 
 ```bash
 kubectl -n glasslab-v2 scale deploy/glasslab-openclaw --replicas=0

@@ -7,3 +7,9 @@ allowed_bindings:
   - workflow-api
   - reporting
 policy_profile: internal-default
+runtime_tools_profile: full
+runtime_tools_allow:
+  - web_fetch
+  - workflow_api_get_families
+runtime_tools_deny:
+  - web_fetch

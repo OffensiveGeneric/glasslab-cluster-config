@@ -1,0 +1,5 @@
+{
+  "name": "@glasslab/workflow-api-tool",
+  "private": true,
+  "type": "module"
+}
