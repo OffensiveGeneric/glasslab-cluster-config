@@ -5,7 +5,7 @@ metadata:
   namespace: glasslab-agents
 data:
   MODEL_NAME: Qwen/Qwen3-4B-Instruct-2507
-  MAX_MODEL_LEN: "4096"
+  MAX_MODEL_LEN: "16384"
 ---
 apiVersion: v1
 kind: Service

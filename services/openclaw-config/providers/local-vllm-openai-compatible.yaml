@@ -3,6 +3,8 @@ provider_type: openai-compatible
 base_url: http://vllm.glasslab-agents.svc.cluster.local:8000/v1
 api_key_env: OPENCLAW_VLLM_API_KEY
 default_model: Qwen/Qwen3-4B-Instruct-2507
+context_window: 16384
+max_output_tokens: 4096
 timeout_seconds: 60
 temperature: 0.0
 notes:

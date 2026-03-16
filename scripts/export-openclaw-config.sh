@@ -159,6 +159,15 @@ default_model = provider.get("default_model")
 if not default_model:
     raise SystemExit("provider default_model is required")
 
+context_window = int(provider.get("context_window", 4096))
+max_output_tokens = int(provider.get("max_output_tokens", 4096))
+
+if context_window < 1:
+    raise SystemExit("provider context_window must be positive")
+
+if max_output_tokens < 1:
+    raise SystemExit("provider max_output_tokens must be positive")
+
 runtime_dir.mkdir(parents=True, exist_ok=True)
 workspaces_dir = runtime_dir / "workspaces"
 glasslab_config_dir = runtime_dir / "glasslab-config"
@@ -166,12 +175,14 @@ shutil.copytree(source_dir, glasslab_config_dir, dirs_exist_ok=True)
 container_runtime_root = Path("/var/lib/openclaw/runtime")
 container_workspaces_root = container_runtime_root / "workspaces"
 
+# Keep day-one turns on plain chat until the local vLLM path is validated for tool calls.
 dangerous_tools = [
     "exec",
     "process",
     "write",
     "edit",
     "apply_patch",
+    "session_status",
     "gateway",
     "cron",
     "nodes",
@@ -200,7 +211,8 @@ runtime_config = {
         },
     },
     "models": {
-        "customProviders": {
+        "mode": "merge",
+        "providers": {
             "glasslab-vllm": {
                 "baseUrl": provider["base_url"],
                 "apiKey": "${OPENCLAW_VLLM_API_KEY}",
@@ -217,8 +229,8 @@ runtime_config = {
                             "cacheRead": 0,
                             "cacheWrite": 0,
                         },
-                        "contextWindow": 4096,
-                        "maxTokens": 4096,
+                        "contextWindow": context_window,
+                        "maxTokens": max_output_tokens,
                     }
                 ],
             }

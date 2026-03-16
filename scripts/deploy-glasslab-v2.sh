@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MANIFEST_ROOT="$ROOT_DIR/kubeadm/glasslab-v2"
 KUBECTL="${KUBECTL:-kubectl}"
+NAMESPACE="${GLASSLAB_V2_NAMESPACE:-glasslab-v2}"
 INCLUDE_OPENCLAW=false
 
 usage() {
