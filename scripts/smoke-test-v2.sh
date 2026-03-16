@@ -80,8 +80,9 @@ PORT_FORWARD_LOG="$(mktemp)"
 "$KUBECTL" -n "$NAMESPACE" port-forward svc/glasslab-workflow-api "${HEALTH_PORT}:8080" >"$PORT_FORWARD_LOG" 2>&1 &
 PORT_FORWARD_PID="$!"
 
+sleep 2
 for _ in $(seq 1 20); do
-  if "$CURL" -fsS "http://127.0.0.1:${HEALTH_PORT}/healthz" >/dev/null; then
+  if "$CURL" -fsS "http://127.0.0.1:${HEALTH_PORT}/healthz" >/dev/null 2>&1; then
     break
   fi
   sleep 1

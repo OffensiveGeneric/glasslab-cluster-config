@@ -7,6 +7,8 @@ NODE_HOST="${GLASSLAB_WORKFLOW_API_NODE_HOST:-192.168.1.50}"
 NODE_USER="${GLASSLAB_WORKFLOW_API_NODE_USER:-clusteradmin}"
 NODE_SSH_KEY="${GLASSLAB_WORKFLOW_API_NODE_SSH_KEY:-/home/glasslab/.ssh/id_ed25519}"
 NODE_SUDO_PASSWORD="${NODE_SUDO_PASSWORD:-}"
+LOCAL_TAR=""
+REMOTE_TAR=""
 
 usage() {
   cat <<'USAGE'
@@ -15,6 +17,16 @@ Usage: build-import-workflow-api-image.sh [--node-host <host>] [--image-ref <ima
 Build the local workflow-api image on the provisioner with sudo docker and import it into node03 containerd.
 USAGE
 }
+
+cleanup() {
+  if [[ -n "$LOCAL_TAR" && -f "$LOCAL_TAR" ]]; then
+    rm -f "$LOCAL_TAR"
+  fi
+  if [[ -n "$REMOTE_TAR" ]]; then
+    ssh -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "${NODE_USER}@${NODE_HOST}" "rm -f '$REMOTE_TAR'" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -60,6 +72,7 @@ done
 need_cmd sudo
 need_cmd docker
 need_cmd ssh
+need_cmd scp
 need_cmd base64
 
 [[ -f "$NODE_SSH_KEY" ]] || {
@@ -71,17 +84,22 @@ printf '[build-import-workflow-api-image] building %s\n' "$IMAGE_REF"
 cd "$ROOT_DIR"
 sudo docker build -t "$IMAGE_REF" -f services/workflow-api/Dockerfile .
 
+LOCAL_TAR="$(mktemp /tmp/glasslab-workflow-api-XXXXXX.tar)"
+REMOTE_TAR="/tmp/$(basename "$LOCAL_TAR")"
+
+printf '[build-import-workflow-api-image] saving image archive to %s\n' "$LOCAL_TAR"
+sudo docker save -o "$LOCAL_TAR" "$IMAGE_REF"
+
+printf '[build-import-workflow-api-image] copying archive to %s:%s\n' "$NODE_HOST" "$REMOTE_TAR"
+scp -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "$LOCAL_TAR" "${NODE_USER}@${NODE_HOST}:${REMOTE_TAR}"
+
 prompt_node_password
 PASSWORD_B64="$(printf '%s' "$NODE_SUDO_PASSWORD" | base64 -w0)"
 
-printf '[build-import-workflow-api-image] priming sudo on %s\n' "$NODE_HOST"
-ssh -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "${NODE_USER}@${NODE_HOST}" \
-  "PASSWORD_B64='$PASSWORD_B64' bash -lc 'printf %s \"\$PASSWORD_B64\" | base64 -d | sudo -S -v >/dev/null'"
-
 printf '[build-import-workflow-api-image] importing image into %s\n' "$NODE_HOST"
-sudo docker save "$IMAGE_REF" | ssh -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "${NODE_USER}@${NODE_HOST}" \
-  "sudo ctr -n k8s.io images import -"
+ssh -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "${NODE_USER}@${NODE_HOST}" \
+  "PASSWORD_B64='$PASSWORD_B64' REMOTE_TAR='$REMOTE_TAR' bash -lc 'printf %s \"\$PASSWORD_B64\" | base64 -d | sudo -S ctr -n k8s.io images import \"\$REMOTE_TAR\"'"
 
 printf '[build-import-workflow-api-image] verifying image on %s\n' "$NODE_HOST"
 ssh -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "${NODE_USER}@${NODE_HOST}" \
-  "sudo ctr -n k8s.io images ls | grep -F \"$IMAGE_REF\""
+  "PASSWORD_B64='$PASSWORD_B64' bash -lc 'printf %s \"\$PASSWORD_B64\" | base64 -d | sudo -S ctr -n k8s.io images ls | grep -F \"$IMAGE_REF\"'"

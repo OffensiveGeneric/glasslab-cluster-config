@@ -39,6 +39,8 @@ Recommended files:
 ./scripts/deploy-glasslab-v2.sh
 ```
 
+The deploy script applies local files in `kubeadm/glasslab-v2/secrets/` and skips any `*.example.yaml` manifests.
+
 7. Verify rollout state and the workflow-api health endpoints.
 
 ```bash

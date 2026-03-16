@@ -20,6 +20,7 @@ Deploy the core Glasslab v2 services by default:
 - workflow-api
 
 OpenClaw is skipped unless --include-openclaw is supplied.
+Example manifests ending in .example.yaml are never applied.
 USAGE
 }
 
@@ -32,15 +33,15 @@ need_cmd() {
 
 apply_yaml_dir() {
   local dir="$1"
-  if ! find "$dir" -maxdepth 1 -type f -name '*.yaml' | grep -q .; then
-    printf '[deploy-glasslab-v2] skipping %s (no YAML manifests yet)\n' "$dir"
+  if ! find "$dir" -maxdepth 1 -type f -name '*.yaml' ! -name '*.example.yaml' | grep -q .; then
+    printf '[deploy-glasslab-v2] skipping %s (no deployable YAML manifests yet)\n' "$dir"
     return
   fi
 
   while IFS= read -r file; do
     printf '[deploy-glasslab-v2] applying %s\n' "$file"
     "$KUBECTL" apply -f "$file"
-  done < <(find "$dir" -maxdepth 1 -type f -name '*.yaml' | sort)
+  done < <(find "$dir" -maxdepth 1 -type f -name '*.yaml' ! -name '*.example.yaml' | sort)
 }
 
 while [[ $# -gt 0 ]]; do
