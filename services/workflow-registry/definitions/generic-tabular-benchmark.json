@@ -1,0 +1,67 @@
+{
+  "workflow_id": "generic-tabular-benchmark",
+  "display_name": "Generic Tabular Benchmark",
+  "workflow_family": "tabular-benchmark",
+  "description": "Run approved baseline models against a tabular dataset with a standard artifact contract.",
+  "required_inputs": [
+    {
+      "name": "dataset_name",
+      "input_type": "dataset",
+      "required": true,
+      "description": "Stable dataset identifier for operator and reporting use."
+    },
+    {
+      "name": "train_uri",
+      "input_type": "dataset",
+      "required": true,
+      "description": "Resolved URI for the training split."
+    },
+    {
+      "name": "test_uri",
+      "input_type": "dataset",
+      "required": true,
+      "description": "Resolved URI for the test or holdout split."
+    },
+    {
+      "name": "target_column",
+      "input_type": "parameter_set",
+      "required": true,
+      "description": "Name of the supervised target column."
+    }
+  ],
+  "allowed_models": [
+    "logistic_regression",
+    "random_forest",
+    "xgboost_optional"
+  ],
+  "runner_image": "ghcr.io/offensivegeneric/glasslab-tabular-runner:0.1.0",
+  "evaluator_type": "tabular-metric-max",
+  "expected_artifacts": {
+    "required": [
+      "run_manifest.json",
+      "config.json",
+      "metrics.json",
+      "artifacts_index.json",
+      "report.md",
+      "status.json",
+      "logs/"
+    ],
+    "optional": [
+      "submission.csv",
+      "feature_importance.csv"
+    ]
+  },
+  "resource_profile": {
+    "profile_name": "cpu-small",
+    "requests": {
+      "cpu": "500m",
+      "memory": "1Gi"
+    },
+    "limits": {
+      "cpu": "1",
+      "memory": "2Gi"
+    },
+    "node_selector": {}
+  },
+  "approval_tier": "tier-2-approved-execution"
+}

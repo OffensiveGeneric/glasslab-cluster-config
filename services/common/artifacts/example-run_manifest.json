@@ -1,0 +1,38 @@
+{
+  "run_id": "run-20260316-001",
+  "workflow_id": "generic-tabular-benchmark",
+  "workflow_family": "tabular-benchmark",
+  "display_name": "Generic Tabular Benchmark",
+  "objective": "Compare approved baseline models on a tabular dataset.",
+  "submitted_by": "glasslab-operator",
+  "submitted_at": "2026-03-16T18:00:00Z",
+  "inputs": {
+    "dataset_name": "titanic",
+    "train_uri": "s3://datasets/titanic/train.csv",
+    "test_uri": "s3://datasets/titanic/test.csv",
+    "target_column": "Survived"
+  },
+  "requested_models": [
+    "logistic_regression",
+    "random_forest"
+  ],
+  "resource_profile": "cpu-small",
+  "runner_image": "ghcr.io/offensivegeneric/glasslab-tabular-runner:0.1.0",
+  "evaluator_type": "tabular-metric-max",
+  "approval_tier": "tier-2-approved-execution",
+  "expected_artifacts": {
+    "required": [
+      "run_manifest.json",
+      "config.json",
+      "metrics.json",
+      "artifacts_index.json",
+      "report.md",
+      "status.json",
+      "logs/"
+    ],
+    "optional": [
+      "submission.csv",
+      "feature_importance.csv"
+    ]
+  }
+}

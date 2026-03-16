@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: glasslab-v2-workflow-api-config
+  namespace: glasslab-v2
+data:
+  GLASSLAB_WORKFLOW_API_REGISTRY_DIR: /app/services/workflow-registry/definitions
+  GLASSLAB_WORKFLOW_API_RUNNER_NAMESPACE: glasslab-v2
+  GLASSLAB_WORKFLOW_API_DEFAULT_SUBMITTED_BY: glasslab-operator

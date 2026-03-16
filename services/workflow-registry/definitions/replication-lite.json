@@ -1,0 +1,66 @@
+{
+  "workflow_id": "replication-lite",
+  "display_name": "Replication Lite",
+  "workflow_family": "replication-lite",
+  "description": "Re-run a narrow, approved subset of a paper or repository workflow with explicit constraints and reporting.",
+  "required_inputs": [
+    {
+      "name": "paper_id",
+      "input_type": "text",
+      "required": true,
+      "description": "Stable identifier for the source paper being replicated."
+    },
+    {
+      "name": "repository_url",
+      "input_type": "url",
+      "required": true,
+      "description": "Canonical source repository or archive for the replication target."
+    },
+    {
+      "name": "dataset_uri",
+      "input_type": "dataset",
+      "required": true,
+      "description": "Resolved dataset location for the replication attempt."
+    },
+    {
+      "name": "evaluation_target",
+      "input_type": "parameter_set",
+      "required": true,
+      "description": "Named metric or claim being checked in the replication run."
+    }
+  ],
+  "allowed_models": [
+    "replication-template-v1",
+    "qwen3-4b-instruct-2507"
+  ],
+  "runner_image": "ghcr.io/offensivegeneric/glasslab-replication-runner:0.1.0",
+  "evaluator_type": "replication-delta",
+  "expected_artifacts": {
+    "required": [
+      "run_manifest.json",
+      "config.json",
+      "metrics.json",
+      "artifacts_index.json",
+      "report.md",
+      "status.json",
+      "logs/"
+    ],
+    "optional": [
+      "replication_delta.json",
+      "environment_snapshot.txt"
+    ]
+  },
+  "resource_profile": {
+    "profile_name": "cpu-medium",
+    "requests": {
+      "cpu": "1",
+      "memory": "2Gi"
+    },
+    "limits": {
+      "cpu": "2",
+      "memory": "4Gi"
+    },
+    "node_selector": {}
+  },
+  "approval_tier": "tier-3-human-approval"
+}

@@ -1,0 +1,9 @@
+{
+  "dataset_name": "titanic",
+  "feature_profile": "basic",
+  "compare_to": "latest_successful",
+  "models": [
+    "logistic_regression",
+    "random_forest"
+  ]
+}

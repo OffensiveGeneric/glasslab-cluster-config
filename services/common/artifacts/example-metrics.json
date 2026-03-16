@@ -1,0 +1,21 @@
+{
+  "run_id": "run-20260316-001",
+  "primary_metric": "validation_accuracy",
+  "values": [
+    {
+      "name": "validation_accuracy",
+      "value": 0.8125,
+      "direction": "maximize",
+      "split": "validation"
+    },
+    {
+      "name": "runtime_seconds",
+      "value": 38.4,
+      "direction": "minimize"
+    }
+  ],
+  "runtime_seconds": 38.4,
+  "notes": [
+    "random_forest outperformed logistic_regression on the validation split"
+  ]
+}

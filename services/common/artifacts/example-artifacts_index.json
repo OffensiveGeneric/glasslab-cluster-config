@@ -1,0 +1,26 @@
+{
+  "run_id": "run-20260316-001",
+  "artifacts": [
+    {
+      "name": "run_manifest.json",
+      "path": "artifacts/run-20260316-001/run_manifest.json",
+      "media_type": "application/json",
+      "required": true,
+      "description": "Canonical run manifest"
+    },
+    {
+      "name": "report.md",
+      "path": "artifacts/run-20260316-001/report.md",
+      "media_type": "text/markdown",
+      "required": true,
+      "description": "Operator-facing result summary"
+    },
+    {
+      "name": "submission.csv",
+      "path": "artifacts/run-20260316-001/submission.csv",
+      "media_type": "text/csv",
+      "required": false,
+      "description": "Optional benchmark submission output"
+    }
+  ]
+}

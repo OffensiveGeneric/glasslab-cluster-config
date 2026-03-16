@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: glasslab-workflow-api
+  namespace: glasslab-v2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: glasslab-workflow-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: glasslab-workflow-api
+    spec:
+      containers:
+        - name: workflow-api
+          image: ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.0
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: glasslab-v2-workflow-api-config
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20

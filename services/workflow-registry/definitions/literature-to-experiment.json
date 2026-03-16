@@ -1,0 +1,60 @@
+{
+  "workflow_id": "literature-to-experiment",
+  "display_name": "Literature To Experiment",
+  "workflow_family": "literature-to-experiment",
+  "description": "Translate reviewed paper notes into a bounded experiment specification using approved templates.",
+  "required_inputs": [
+    {
+      "name": "paper_id",
+      "input_type": "text",
+      "required": true,
+      "description": "Stable identifier for the source paper or note bundle."
+    },
+    {
+      "name": "source_notes",
+      "input_type": "notes",
+      "required": true,
+      "description": "Curated notes or extracted method details to ground the run."
+    },
+    {
+      "name": "dataset_uri",
+      "input_type": "dataset",
+      "required": true,
+      "description": "Resolved dataset location for the derived experiment."
+    }
+  ],
+  "allowed_models": [
+    "qwen3-4b-instruct-2507",
+    "deterministic-template"
+  ],
+  "runner_image": "ghcr.io/offensivegeneric/glasslab-literature-runner:0.1.0",
+  "evaluator_type": "spec-comparison",
+  "expected_artifacts": {
+    "required": [
+      "run_manifest.json",
+      "config.json",
+      "metrics.json",
+      "artifacts_index.json",
+      "report.md",
+      "status.json",
+      "logs/"
+    ],
+    "optional": [
+      "method_spec.json",
+      "design_notes.md"
+    ]
+  },
+  "resource_profile": {
+    "profile_name": "cpu-medium",
+    "requests": {
+      "cpu": "1",
+      "memory": "2Gi"
+    },
+    "limits": {
+      "cpu": "2",
+      "memory": "4Gi"
+    },
+    "node_selector": {}
+  },
+  "approval_tier": "tier-2-approved-execution"
+}
