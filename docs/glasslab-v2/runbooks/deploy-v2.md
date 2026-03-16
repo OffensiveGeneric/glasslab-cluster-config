@@ -15,7 +15,11 @@ sed -n '1,200p' kubeadm/glasslab-v2/minio/10-secret.example.yaml
 sed -n '1,200p' kubeadm/glasslab-v2/openclaw/10-secret.example.yaml
 ```
 
-3. Create real secrets from those examples or apply locally edited copies that are not committed to Git.
+3. Create local non-committed core secret manifests under `kubeadm/glasslab-v2/secrets/`.
+
+Recommended files:
+- `kubeadm/glasslab-v2/secrets/10-postgres.local.yaml`
+- `kubeadm/glasslab-v2/secrets/20-minio.local.yaml`
 
 4. Validate the workflow registry definitions.
 
@@ -23,16 +27,16 @@ sed -n '1,200p' kubeadm/glasslab-v2/openclaw/10-secret.example.yaml
 ./scripts/seed-registry.sh
 ```
 
-5. Apply the initial v2 manifest tree in order.
+5. Build the `workflow-api` image on the provisioner and import it into `node03` containerd.
+
+```bash
+./scripts/build-import-workflow-api-image.sh
+```
+
+6. Apply the initial v2 core manifest tree.
 
 ```bash
 ./scripts/deploy-glasslab-v2.sh
-```
-
-6. The deploy script also exports the tracked OpenClaw config after the namespace is created. Re-run the export manually only when the config changes later.
-
-```bash
-./scripts/export-openclaw-config.sh
 ```
 
 7. Verify rollout state and the workflow-api health endpoints.
@@ -41,11 +45,11 @@ sed -n '1,200p' kubeadm/glasslab-v2/openclaw/10-secret.example.yaml
 ./scripts/smoke-test-v2.sh
 ```
 
-8. OpenClaw is applied as an internal-only skeleton. Confirm its image, secrets, and provider wiring before treating it as live traffic.
+8. OpenClaw is intentionally excluded from the default deploy path. Do not deploy it until the image, secrets, and provider wiring are confirmed.
 
 ```bash
-kubectl -n glasslab-v2 get deploy,svc -l app.kubernetes.io/name=glasslab-openclaw
-kubectl -n glasslab-v2 describe deploy/glasslab-openclaw
+./scripts/deploy-glasslab-v2.sh --include-openclaw
+./scripts/smoke-test-v2.sh --include-openclaw
 ```
 
 9. If the smoke test fails, inspect the namespace directly.

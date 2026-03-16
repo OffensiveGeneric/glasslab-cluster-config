@@ -13,6 +13,8 @@ spec:
       labels:
         app.kubernetes.io/name: glasslab-workflow-api
     spec:
+      nodeSelector:
+        kubernetes.io/hostname: node03
       containers:
         - name: workflow-api
           image: ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.0
@@ -23,6 +25,13 @@ spec:
           ports:
             - containerPort: 8080
               name: http
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
           readinessProbe:
             httpGet:
               path: /healthz

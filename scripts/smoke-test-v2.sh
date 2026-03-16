@@ -5,9 +5,19 @@ KUBECTL="${KUBECTL:-kubectl}"
 CURL="${CURL:-curl}"
 NAMESPACE="${GLASSLAB_V2_NAMESPACE:-glasslab-v2}"
 HEALTH_PORT="${GLASSLAB_V2_HEALTH_PORT:-18081}"
-EXPECTED_SERVICES=(glasslab-workflow-api glasslab-postgres glasslab-nats glasslab-minio glasslab-openclaw)
+INCLUDE_OPENCLAW=false
+EXPECTED_SERVICES=(glasslab-workflow-api glasslab-postgres glasslab-nats glasslab-minio)
 PORT_FORWARD_PID=""
 PORT_FORWARD_LOG=""
+
+usage() {
+  cat <<'USAGE'
+Usage: smoke-test-v2.sh [--include-openclaw]
+
+Validate the core Glasslab v2 services by default.
+OpenClaw checks are optional until that deployment is intentionally enabled.
+USAGE
+}
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -26,6 +36,25 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --include-openclaw)
+      INCLUDE_OPENCLAW=true
+      EXPECTED_SERVICES+=(glasslab-openclaw)
+      shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      printf '[smoke-test-v2] unknown argument: %s\n' "$1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
 
 need_cmd "$KUBECTL"
 need_cmd "$CURL"
@@ -66,4 +95,8 @@ printf '[smoke-test-v2] workflow-api family catalog\n'
 "$CURL" -fsS "http://127.0.0.1:${HEALTH_PORT}/workflow-families"
 printf '\n'
 
-printf '[smoke-test-v2] OpenClaw deployment is intentionally excluded from rollout gating until its image and secrets are live.\n'
+if [[ "$INCLUDE_OPENCLAW" == true ]]; then
+  printf '[smoke-test-v2] OpenClaw service presence checked because --include-openclaw was supplied.\n'
+else
+  printf '[smoke-test-v2] OpenClaw checks skipped by default.\n'
+fi
