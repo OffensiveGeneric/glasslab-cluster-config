@@ -21,6 +21,8 @@ Recommended files:
 - `kubeadm/glasslab-v2/secrets/10-postgres.local.yaml`
 - `kubeadm/glasslab-v2/secrets/20-minio.local.yaml`
 
+Back them up separately. Git and `scripts/snapshot-provisioner-config.sh` do not capture these files.
+
 4. Validate the workflow registry definitions.
 
 ```bash
@@ -33,6 +35,11 @@ Recommended files:
 ./scripts/build-import-workflow-api-image.sh
 ```
 
+Current limitation:
+- `workflow-api` is pinned to `node03`
+- the image import must be repeated after each rebuild
+- this is a temporary manual distribution path, not the steady-state release flow
+
 6. Apply the initial v2 core manifest tree.
 
 ```bash
@@ -40,6 +47,9 @@ Recommended files:
 ```
 
 The deploy script applies local files in `kubeadm/glasslab-v2/secrets/` and skips any `*.example.yaml` manifests.
+
+Current storage caveat:
+- Postgres and MinIO are still non-durable until the storage plan under `docs/glasslab-v2/storage-and-state.md` is implemented
 
 7. Verify rollout state and the workflow-api health endpoints.
 
