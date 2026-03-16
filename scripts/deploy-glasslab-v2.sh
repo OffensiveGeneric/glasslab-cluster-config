@@ -31,6 +31,16 @@ need_cmd() {
   }
 }
 
+require_k8s_object() {
+  local namespace="$1"
+  local kind="$2"
+  local name="$3"
+  if ! "$KUBECTL" -n "$namespace" get "$kind" "$name" >/dev/null 2>&1; then
+    printf '[deploy-glasslab-v2] required %s/%s not found in namespace %s\n' "$kind" "$name" "$namespace" >&2
+    exit 1
+  fi
+}
+
 apply_yaml_dir() {
   local dir="$1"
   if ! find "$dir" -maxdepth 1 -type f -name '*.yaml' ! -name '*.example.yaml' | grep -q .; then
@@ -76,6 +86,14 @@ apply_yaml_dir "$MANIFEST_ROOT/minio"
 apply_yaml_dir "$MANIFEST_ROOT/workflow-api"
 
 if [[ "$INCLUDE_OPENCLAW" == true ]]; then
+  if [[ ! -f "$MANIFEST_ROOT/secrets/30-openclaw.local.yaml" ]]; then
+    printf '[deploy-glasslab-v2] missing local OpenClaw secret manifest: %s\n' "$MANIFEST_ROOT/secrets/30-openclaw.local.yaml" >&2
+    exit 1
+  fi
+
+  require_k8s_object "$NAMESPACE" service glasslab-workflow-api
+  require_k8s_object glasslab-agents service vllm
+
   printf '[deploy-glasslab-v2] exporting repo-managed OpenClaw config\n'
   "$ROOT_DIR/scripts/export-openclaw-config.sh"
   apply_yaml_dir "$MANIFEST_ROOT/openclaw"

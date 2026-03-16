@@ -47,7 +47,15 @@ The deploy script applies local files in `kubeadm/glasslab-v2/secrets/` and skip
 ./scripts/smoke-test-v2.sh
 ```
 
-8. OpenClaw is intentionally excluded from the default deploy path. Do not deploy it until the image, secrets, and provider wiring are confirmed.
+8. OpenClaw is intentionally excluded from the default deploy path. Do not deploy it until the runtime bundle, local secret manifest, and in-cluster service references are confirmed.
+
+OpenClaw predeploy checklist:
+- create `kubeadm/glasslab-v2/secrets/30-openclaw.local.yaml`
+- confirm `kubectl -n glasslab-v2 get svc glasslab-workflow-api`
+- confirm `kubectl -n glasslab-agents get svc vllm`
+- inspect the generated runtime tree with `./scripts/export-openclaw-config.sh --output-dir /tmp/openclaw-runtime --no-apply`
+- verify `/tmp/openclaw-runtime/openclaw.json` contains the expected `workflow-api` and `vLLM` cluster URLs
+- keep `replicas: 0` until the predeploy checklist is complete
 
 ```bash
 ./scripts/deploy-glasslab-v2.sh --include-openclaw

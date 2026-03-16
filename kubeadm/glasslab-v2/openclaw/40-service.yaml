@@ -9,5 +9,5 @@ spec:
     app.kubernetes.io/name: glasslab-openclaw
   ports:
     - name: http
-      port: 8080
+      port: 18789
       targetPort: http

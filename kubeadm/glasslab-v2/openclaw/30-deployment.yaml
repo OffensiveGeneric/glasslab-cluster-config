@@ -13,6 +13,8 @@ spec:
       labels:
         app.kubernetes.io/name: glasslab-openclaw
     spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
       serviceAccountName: glasslab-openclaw
       initContainers:
         - name: unpack-config
@@ -20,53 +22,89 @@ spec:
           command:
             - /bin/sh
             - -c
-            - mkdir -p /config && tar -xzf /config-archive/openclaw-config.tar.gz -C /config
+            - |
+              set -eu
+              mkdir -p /runtime
+              tar -xzf /config-archive/openclaw-runtime.tar.gz -C /runtime
+              test -f /runtime/openclaw.json
+              test -f /runtime/RUNTIME-CONTRACT.md
+              test -f /runtime/workspaces/operator/IDENTITY.md
+              test -f /runtime/workspaces/literature/IDENTITY.md
+              test -f /runtime/workspaces/designer/IDENTITY.md
+              test -f /runtime/workspaces/reporter/IDENTITY.md
           volumeMounts:
             - name: exported-config
               mountPath: /config-archive
             - name: runtime-config
-              mountPath: /config
+              mountPath: /runtime
       containers:
         - name: openclaw
-          image: ghcr.io/offensivegeneric/openclaw:0.1.0
-          imagePullPolicy: IfNotPresent
+          image: ghcr.io/openclaw/openclaw:latest
+          imagePullPolicy: Always
           env:
-            - name: OPENCLAW_CONFIG_DIR
-              value: /etc/openclaw/config
-            - name: OPENCLAW_AUTH_TOKEN
+            - name: OPENCLAW_CONFIG_PATH
+              value: /var/lib/openclaw/runtime/openclaw.json
+            - name: OPENCLAW_STATE_DIR
+              value: /var/lib/openclaw/state
+            - name: OPENCLAW_GATEWAY_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: glasslab-openclaw
-                  key: OPENCLAW_AUTH_TOKEN
-            - name: OPENCLAW_SESSION_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: glasslab-openclaw
-                  key: OPENCLAW_SESSION_SECRET
+                  key: OPENCLAW_GATEWAY_TOKEN
             - name: OPENCLAW_VLLM_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: glasslab-openclaw
                   key: OPENCLAW_VLLM_API_KEY
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
           ports:
-            - containerPort: 8080
+            - containerPort: 18789
               name: http
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          startupProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 24
           readinessProbe:
             tcpSocket:
               port: http
-            initialDelaySeconds: 5
+            initialDelaySeconds: 10
             periodSeconds: 10
           livenessProbe:
             tcpSocket:
               port: http
-            initialDelaySeconds: 15
+            initialDelaySeconds: 20
             periodSeconds: 20
           volumeMounts:
             - name: runtime-config
-              mountPath: /etc/openclaw/config
+              mountPath: /var/lib/openclaw/runtime
+              readOnly: true
+            - name: state
+              mountPath: /var/lib/openclaw/state
+            - name: tmp
+              mountPath: /tmp
       volumes:
         - name: exported-config
           configMap:
             name: glasslab-openclaw-config
+            defaultMode: 0444
         - name: runtime-config
+          emptyDir: {}
+        - name: state
+          emptyDir: {}
+        - name: tmp
           emptyDir: {}

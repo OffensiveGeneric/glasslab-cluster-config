@@ -12,8 +12,10 @@ Glasslab v2 should assume unattended components will eventually run without a hu
 ## Sandboxing requirements
 
 - OpenClaw agents should run with a restricted service account and no cluster-admin privileges
+- disable automounted service-account tokens unless the gateway explicitly needs Kubernetes API access
 - do not mount host paths into OpenClaw pods
-- keep writable filesystem scope limited to explicit workspace or cache paths
+- keep writable filesystem scope limited to explicit state and tmp paths
+- mount the generated runtime config read-only
 - do not allow agent-driven arbitrary shell execution inside the cluster by default
 
 ## Restricted tools
@@ -21,7 +23,8 @@ Glasslab v2 should assume unattended components will eventually run without a hu
 Default-deny the following until a reviewed need exists:
 
 - `kubectl apply`, `patch`, `delete`, and equivalent mutating cluster actions
-- arbitrary shell commands
+- arbitrary shell commands such as `exec` and `process`
+- filesystem mutation tools such as `write`, `edit`, and `apply_patch`
 - arbitrary outbound HTTP requests
 - Git push or force-reset operations
 - execution of unapproved workflow families
