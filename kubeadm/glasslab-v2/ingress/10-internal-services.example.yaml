@@ -1,0 +1,32 @@
+# Example only.
+# This file documents the intended future internal-only ingress direction.
+# It is not part of the default deploy path.
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: glasslab-v2-internal-example
+  namespace: glasslab-v2
+spec:
+  ingressClassName: internal-nginx
+  rules:
+    - host: openclaw.glasslab.internal
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: glasslab-openclaw
+                port:
+                  number: 18789
+    - host: minio-console.glasslab.internal
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: glasslab-minio
+                port:
+                  number: 9001
