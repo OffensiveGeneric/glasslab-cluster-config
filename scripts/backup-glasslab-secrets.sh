@@ -7,9 +7,9 @@ OUTPUT_DIR="${OUTPUT_DIR:-$HOME/glasslab-secret-backups}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 WORKDIR="$(mktemp -d)"
 ARCHIVE_BASENAME="glasslab-secrets-${STAMP}.tar"
-ARCHIVE_PATH="$WORKDIR/$ARCHIVE_BASENAME"
-ENCRYPTED_PATH="$OUTPUT_DIR/${ARCHIVE_BASENAME}.gpg"
-MANIFEST_PATH="$OUTPUT_DIR/${ARCHIVE_BASENAME%.tar}.manifest.txt"
+ARCHIVE_PATH=""
+ENCRYPTED_PATH=""
+MANIFEST_PATH=""
 
 usage() {
   cat <<'EOF'
@@ -55,6 +55,10 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+ARCHIVE_PATH="$WORKDIR/$ARCHIVE_BASENAME"
+ENCRYPTED_PATH="$OUTPUT_DIR/${ARCHIVE_BASENAME}.gpg"
+MANIFEST_PATH="$OUTPUT_DIR/${ARCHIVE_BASENAME%.tar}.manifest.txt"
 
 cleanup() {
   rm -rf "$WORKDIR"
