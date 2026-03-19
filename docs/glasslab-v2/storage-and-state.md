@@ -5,13 +5,18 @@ Glasslab v2 is live, but its durable-storage story is still in the bring-up phas
 ## Current posture
 
 - the cluster has no `StorageClass`
-- `glasslab-v2` currently has no PVCs
-- Postgres uses `emptyDir`
-- MinIO uses `emptyDir`
+- `glasslab-v2` now has explicit PVCs for `Postgres` and `MinIO`
+- Postgres uses a static local PV/PVC on `node01`
+- MinIO uses a static local PV/PVC on `node01`
 - NATS uses `emptyDir`
 - OpenClaw writable state uses `emptyDir`
 
-This means the current live path is operational, not durable.
+This means the current live path is partially durable:
+
+- `Postgres`: durable on local disk
+- `MinIO`: durable on local disk
+- `NATS`: still ephemeral
+- OpenClaw writable state: still ephemeral
 
 Live placement reference from the 2026-03-19 validation:
 
@@ -33,6 +38,19 @@ The intended first durable v2 step is:
 - use explicit static local PV/PVC wiring for the first durable v2 services
 - store artifacts in MinIO instead of on per-run PVCs
 - revisit a shared CSI-backed default `StorageClass` only after the lab deliberately chooses and operates one
+
+Current committed first step:
+
+- `kubeadm/glasslab-v2/storage/10-static-local-pv.yaml` binds:
+  - `glasslab-postgres-data` to `/var/lib/glasslab-v2/postgres` on `node01`
+  - `glasslab-minio-data` to `/var/lib/glasslab-v2/minio` on `node01`
+
+Live validation on 2026-03-19:
+
+- both PVCs are bound
+- `glasslab-postgres` restarted and retained a marker row across restart
+- `glasslab-minio` restarted and retained a marker file across restart
+- `./scripts/smoke-test-v2.sh` still passed after the cutover
 
 This matches the existing v1 pattern in `kubeadm/agent-stack/02-persistent-volume-claims.yaml`, where single-node local PVs are explicit and reviewable.
 

@@ -115,6 +115,11 @@ Observed services:
 - `glasslab-postgres`
 - `glasslab-workflow-api`
 
+Observed PVC state after the storage cutover:
+
+- `glasslab-postgres-data`: `Bound`
+- `glasslab-minio-data`: `Bound`
+
 Observed placement:
 
 - `glasslab-minio` pod on `node01`
@@ -127,6 +132,8 @@ Important drift from repo-managed default assumptions:
 
 - OpenClaw is live at `1` replica right now
 - the committed manifest posture may still treat OpenClaw as “default off,” but live state is “on”
+- `Postgres` and `MinIO` are no longer on `emptyDir`
+- both now use retained local PV/PVC storage on `node01`
 
 ## Workflow API State
 

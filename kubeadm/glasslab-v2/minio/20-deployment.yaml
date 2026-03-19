@@ -55,4 +55,5 @@ spec:
               mountPath: /data
       volumes:
         - name: minio-data
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: glasslab-minio-data
