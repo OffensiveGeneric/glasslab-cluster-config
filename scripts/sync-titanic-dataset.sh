@@ -10,6 +10,7 @@ NODE_SSH_KEY="${GLASSLAB_DATASET_NODE_SSH_KEY:-/home/glasslab/.ssh/id_ed25519}"
 REMOTE_DATASET_DIR="${GLASSLAB_TITANIC_REMOTE_DIR:-/var/lib/glasslab-agent/datasets/titanic}"
 KEEP_STAGING=false
 USE_PASSWORDLESS_SUDO=false
+USE_WRAPPER_SUDO=false
 RUN_DIR=""
 KAGGLE_BIN=""
 
@@ -113,6 +114,13 @@ detect_node_sudo_mode() {
   if ssh -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "${NODE_USER}@${NODE_HOST}" "sudo -n true" >/dev/null 2>&1; then
     USE_PASSWORDLESS_SUDO=true
     log "using passwordless sudo on ${NODE_HOST}"
+    return
+  fi
+
+  if ssh -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "${NODE_USER}@${NODE_HOST}" \
+    "sudo -n /usr/local/sbin/glasslab-install-titanic-dataset --help >/dev/null 2>&1"; then
+    USE_WRAPPER_SUDO=true
+    log "using wrapper-based passwordless sudo on ${NODE_HOST}"
     return
   fi
 
@@ -237,6 +245,9 @@ printf 'REMOTE_BACKUP_DIR=%s
 wc -l "$REMOTE_DATASET_DIR/train.csv" "$REMOTE_DATASET_DIR/test.csv"
 INNER
 REMOTE
+elif [[ "$USE_WRAPPER_SUDO" == true ]]; then
+  ssh -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "${NODE_USER}@${NODE_HOST}" \
+    "sudo -n /usr/local/sbin/glasslab-install-titanic-dataset '$REMOTE_STAGE' '$REMOTE_DATASET_DIR'"
 else
 PASSWORD_B64="$(printf '%s' "$NODE_SUDO_PASSWORD" | base64 -w0)"
 ssh -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "${NODE_USER}@${NODE_HOST}" "PASSWORD_B64='$PASSWORD_B64' REMOTE_STAGE='$REMOTE_STAGE' REMOTE_DATASET_DIR='$REMOTE_DATASET_DIR' bash -s" <<'REMOTE'

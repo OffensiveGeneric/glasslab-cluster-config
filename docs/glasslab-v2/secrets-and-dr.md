@@ -58,6 +58,23 @@ cd /home/glasslab/cluster-config
 ./scripts/backup-glasslab-secrets.sh
 ```
 
+Example with explicit off-host copy to the operator laptop while on the lab network:
+
+```bash
+cd /home/glasslab/cluster-config
+./scripts/backup-glasslab-secrets.sh \
+  --copy-dest 'gr66ss@<laptop-ip>:/home/gr66ss/Downloads/glasslab-secret-backups/'
+```
+
+Example with a local staging directory on `.44` first:
+
+```bash
+cd /home/glasslab/cluster-config
+./scripts/backup-glasslab-secrets.sh \
+  --output-dir /home/glasslab/glasslab-secret-backups \
+  --copy-dest /mnt/encrypted-backups/glasslab/
+```
+
 Default output directory on `.44`:
 
 - `/home/glasslab/glasslab-secret-backups/`
@@ -73,6 +90,17 @@ The manifest records which files were included so the operator can confirm wheth
 
 - only v2 secret manifests were captured
 - the related v1 agent-stack secret was also captured
+
+Validated behavior as of 2026-03-19:
+
+- archive creation tested on `.44`
+- manifest creation tested on `.44`
+- decrypt-and-list of the archive tested on `.44`
+
+Remaining operator decision:
+
+- what the normal off-host destination should be in practice
+- for example: operator laptop, removable encrypted media, or a separate storage endpoint
 
 ## Rotation expectations
 

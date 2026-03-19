@@ -8,6 +8,7 @@ NODE_USER="${GLASSLAB_WORKFLOW_API_NODE_USER:-clusteradmin}"
 NODE_SSH_KEY="${GLASSLAB_WORKFLOW_API_NODE_SSH_KEY:-/home/glasslab/.ssh/id_ed25519}"
 NODE_SUDO_PASSWORD="${NODE_SUDO_PASSWORD:-}"
 USE_PASSWORDLESS_SUDO=false
+USE_WRAPPER_SUDO=false
 LOCAL_TAR=""
 REMOTE_TAR=""
 
@@ -52,6 +53,13 @@ detect_node_sudo_mode() {
   if ssh -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "${NODE_USER}@${NODE_HOST}" "sudo -n true" >/dev/null 2>&1; then
     USE_PASSWORDLESS_SUDO=true
     printf '[build-import-workflow-api-image] using passwordless sudo on %s\n' "$NODE_HOST"
+    return
+  fi
+
+  if ssh -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "${NODE_USER}@${NODE_HOST}" \
+    "sudo -n /usr/local/sbin/glasslab-import-k8s-image --help >/dev/null 2>&1 && sudo -n /usr/local/sbin/glasslab-has-k8s-image --help >/dev/null 2>&1"; then
+    USE_WRAPPER_SUDO=true
+    printf '[build-import-workflow-api-image] using wrapper-based passwordless sudo on %s\n' "$NODE_HOST"
     return
   fi
 
@@ -122,7 +130,17 @@ scp -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "$LOCAL_TAR" "${NODE_
 detect_node_sudo_mode
 
 printf '[build-import-workflow-api-image] importing image into %s\n' "$NODE_HOST"
-run_remote_root "ctr -n k8s.io images import \"$REMOTE_TAR\""
+if [[ "$USE_WRAPPER_SUDO" == true ]]; then
+  ssh -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "${NODE_USER}@${NODE_HOST}" \
+    "sudo -n /usr/local/sbin/glasslab-import-k8s-image \"$REMOTE_TAR\""
+else
+  run_remote_root "ctr -n k8s.io images import \"$REMOTE_TAR\""
+fi
 
 printf '[build-import-workflow-api-image] verifying image on %s\n' "$NODE_HOST"
-run_remote_root "ctr -n k8s.io images ls | grep -F \"$IMAGE_REF\""
+if [[ "$USE_WRAPPER_SUDO" == true ]]; then
+  ssh -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "${NODE_USER}@${NODE_HOST}" \
+    "sudo -n /usr/local/sbin/glasslab-has-k8s-image \"$IMAGE_REF\""
+else
+  run_remote_root "ctr -n k8s.io images ls | grep -F \"$IMAGE_REF\""
+fi

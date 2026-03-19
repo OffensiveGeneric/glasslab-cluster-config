@@ -39,6 +39,10 @@ Current status:
 
 - the helper scripts now prefer passwordless sudo when available
 - the remaining platform change is to decide whether the live nodes should gain a reviewed passwordless sudo path for these narrow maintenance operations
+- the repo now includes an implementation path for that reviewable model:
+  - `ansible/playbooks/enable-narrow-node-maintenance-sudo.yml`
+  - root-owned wrappers under `/usr/local/sbin/`
+  - a scoped sudoers drop-in for those wrappers only
 
 2. After those helpers are no longer password-dependent, update the tracked PXE/autoinstall snapshots.
 
