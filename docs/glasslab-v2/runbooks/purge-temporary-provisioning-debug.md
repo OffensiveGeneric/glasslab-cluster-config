@@ -21,11 +21,30 @@ Validated on 2026-03-19 from `.44`:
   - `node04`
   - `node05`
 - `clusteradmin` can now run the reviewed maintenance wrappers without a password on every worker
+- the active served NoCloud paths under `/var/www/html/c/` now resolve for:
+  - `default`
+  - `node48`
+  - `node49`
+  - `node02`
+  - `node03`
+  - `node04`
+  - `node05`
+- the cleaned active `user-data` files validate with `cloud-init schema`
 
 Implication:
 
 - the maintenance path that previously blocked cleanup has been replaced
 - tracked password-era PXE/autoinstall material is now safe to purge from the repo snapshots
+- the remaining gap is no longer config correctness, but access to a truly non-production PXE target for a destructive reinstall test
+
+## Validation boundary
+
+- `node51` is not a spare machine. It is the special PXELINUX workaround path for the live `node04` hardware.
+- A real PXE reprovision test through that path would therefore disrupt a live worker.
+- The current best safe validation is:
+  - active `user-data` served over HTTP
+  - `cloud-init schema` validation
+  - confirming that `boot.ipxe` and the `/var/www/html/c/` fanout agree
 
 ## Safe cleanup order
 

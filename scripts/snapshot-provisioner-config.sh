@@ -19,6 +19,18 @@ copy_tree() {
     -exec cp {} "$SNAPROOT/$rel/" \;
 }
 
+copy_symlink_tree() {
+  local src="$1"
+  local rel="$2"
+  mkdir -p "$SNAPROOT/$rel"
+  find "$SNAPROOT/$rel" -maxdepth 1 -type l -delete
+  while IFS= read -r link; do
+    name="$(basename "$link")"
+    target="$(sudo readlink "$link")"
+    ln -sfn "$target" "$SNAPROOT/$rel/$name"
+  done < <(sudo find "$src" -mindepth 1 -maxdepth 1 -type l | sort)
+}
+
 copy_file /etc/dnsmasq.proxy-pxe.conf etc/dnsmasq.proxy-pxe.conf
 copy_file /etc/default/tftpd-hpa etc/default/tftpd-hpa
 copy_file /etc/nginx/sites-available/default etc/nginx/sites-available/default
@@ -30,6 +42,8 @@ while IFS= read -r dir; do
   name="$(basename "$dir")"
   copy_tree "$dir" "var/www/html/pxe/cloud-init/$name"
 done < <(sudo find /var/www/html/pxe/cloud-init -mindepth 1 -maxdepth 1 -type d | sort)
+
+copy_symlink_tree /var/www/html/c var/www/html/c
 
 sudo chown -R "$USER":"$USER" "$SNAPROOT"
 printf 'Snapshot updated under %s\n' "$SNAPROOT"
