@@ -134,6 +134,7 @@ Important drift from repo-managed default assumptions:
 - the committed manifest posture may still treat OpenClaw as “default off,” but live state is “on”
 - `Postgres` and `MinIO` are no longer on `emptyDir`
 - both now use retained local PV/PVC storage on `node01`
+- OpenClaw writable state is also now on retained local PV/PVC storage on `node01`
 
 ## Workflow API State
 
@@ -174,6 +175,7 @@ Observed runtime facts:
   - `glasslab-vllm/Qwen/Qwen3-4B-Instruct-2507`
   - context window `16384`
 - WhatsApp channel appears live
+- restored WhatsApp/device/session state survived pod replacement on the local PVC
 - repeated log pattern shows the WhatsApp provider restarting after `stale-socket` and then resuming listening
 
 Observed WhatsApp behavior:
@@ -218,6 +220,7 @@ The biggest changes relative to the older March 12 handoff are:
 - `glasslab-v2` core services are live
 - OpenClaw is live at `1` replica
 - WhatsApp channel integration is active
+- OpenClaw writable state is no longer ephemeral
 - the workflow registry is exposed live through `workflow-api`
 - the tool-calling reliability conclusion still holds:
   - no-arg safe path works
@@ -227,7 +230,7 @@ The biggest changes relative to the older March 12 handoff are:
 
 - the current platform bottleneck is not “is vLLM up at all”
 - the current bottleneck is still structured tool-calling reliability on the local model/runtime path
-- storage and durability remain highly relevant because the platform has already advanced beyond a toy state
+- storage and durability remain highly relevant, but only NATS is still in the immediate `emptyDir` bucket for v2 core services
 
 ## Suggested Next Validations
 

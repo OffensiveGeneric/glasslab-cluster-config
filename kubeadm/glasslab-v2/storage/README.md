@@ -17,3 +17,4 @@ The current live durable-storage plan is:
 
 - `glasslab-postgres-data` on `node01` at `/var/lib/glasslab-v2/postgres`
 - `glasslab-minio-data` on `node01` at `/var/lib/glasslab-v2/minio`
+- `glasslab-openclaw-state` on `node01` at `/var/lib/glasslab-v2/openclaw-state`

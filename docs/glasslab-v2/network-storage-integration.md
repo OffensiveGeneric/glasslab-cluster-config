@@ -82,16 +82,16 @@ Possible pattern:
 
 ### OpenClaw State
 
-Possible candidate, but not first priority.
+Later candidate, no longer first priority.
 
 Why:
 
-- current OpenClaw state is `emptyDir`
-- moving the WhatsApp session and runtime state off ephemeral storage would make the operator path less fragile
+- current OpenClaw state is already on retained local PV/PVC storage on `node01`
+- that local step already removed the most immediate fragility around WhatsApp/device/session state
 
 Caution:
 
-- only move it after deciding whether the operational goal is “durable gateway state” or “still validation-grade gateway”
+- only move it again after deciding whether the operational goal is “shared failover-capable gateway state” or simply “good-enough local durability until NFS exists”
 
 ### Postgres
 

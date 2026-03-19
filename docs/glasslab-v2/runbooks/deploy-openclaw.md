@@ -38,7 +38,8 @@ Required keys:
 Channel note:
 - the first WhatsApp validation path requires `OPENCLAW_WHATSAPP_OWNER` in `kubeadm/glasslab-v2/secrets/30-openclaw.local.yaml`
 - linked WhatsApp credentials are created at runtime under `/var/lib/openclaw/state/credentials/whatsapp/default/`
-- because `/var/lib/openclaw/state` is currently `emptyDir`, a pod replacement clears the linked WhatsApp session and requires a fresh login
+- `/var/lib/openclaw/state` now uses a retained local PV/PVC on `node01`, so a normal pod replacement no longer clears the linked WhatsApp session
+- this is still a node-local durability step, not shared storage or failover-grade state
 
 Example creation flow:
 
@@ -90,7 +91,7 @@ Operator note:
 - a raw `kubectl apply -f kubeadm/glasslab-v2/openclaw/` should not silently turn on the gateway
 - scaling to `1` is a separate deliberate validation or operating step
 - if the live deployment is already at `1`, a future raw apply will scale it back to `0` unless you scale it up again on purpose
-- if you update the exported runtime bundle for a live pod, run `kubectl -n glasslab-v2 rollout restart deploy/glasslab-openclaw` so the init container unpacks the new bundle into the pod's `emptyDir`
+- if you update the exported runtime bundle for a live pod, run `kubectl -n glasslab-v2 rollout restart deploy/glasslab-openclaw` so the init container unpacks the new bundle into the pod's runtime `emptyDir`
 
 8. Verify the pre-scale state.
 

@@ -113,6 +113,7 @@ spec:
         - name: runtime-config
           emptyDir: {}
         - name: state
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: glasslab-openclaw-state
         - name: tmp
           emptyDir: {}

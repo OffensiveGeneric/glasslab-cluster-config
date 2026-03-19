@@ -9,8 +9,8 @@ This document records the remaining infrastructure primitives Glasslab v2 still 
 - `glasslab-v2` is live on the cluster. Postgres, NATS, MinIO, and `workflow-api` are healthy.
 - OpenClaw has been validated live as an internal-only service, but the committed Deployment manifest still defaults to `replicas: 0` so a raw manifest apply does not auto-enable it.
 - The cluster has no `StorageClass`.
-- `glasslab-v2` now has explicit PVCs for `Postgres` and `MinIO`, both backed by static local PVs on `node01`.
-- NATS and OpenClaw writable state still use `emptyDir`.
+- `glasslab-v2` now has explicit PVCs for `Postgres`, `MinIO`, and OpenClaw writable state, all backed by static local PVs on `node01`.
+- NATS still uses `emptyDir`.
 - All Glasslab v2 Services are `ClusterIP`. No `Ingress` objects exist in the cluster.
 - `workflow-api` is built on `.44`, imported into `node03` containerd, and pinned to `node03`.
 - Real v2 secret manifests exist only as ignored local files on `.44` under `kubeadm/glasslab-v2/secrets/*.local.yaml`.
@@ -23,8 +23,8 @@ This document records the remaining infrastructure primitives Glasslab v2 still 
 
 - `workflow-api` is stateless enough for the current loop.
 - `Postgres` and `MinIO` are now on explicit retained local PV/PVC storage and no longer depend on `emptyDir`.
+- OpenClaw state and session data are now on explicit retained local PV/PVC storage and survive pod replacement on `node01`.
 - NATS is running with JetStream enabled and an `emptyDir` volume. That is acceptable for short-lived development traffic, but not for durable queue or event retention.
-- OpenClaw state and session data are ephemeral. That is acceptable for first validation, but not for durable operator history.
 - The cluster still has no shared or default storage strategy beyond the new explicit local PVs.
 
 ### Internal service exposure
@@ -54,11 +54,11 @@ This document records the remaining infrastructure primitives Glasslab v2 still 
 
 ## Recommended next actions
 
-1. Decide whether NATS or OpenClaw state should be the next stateful services moved off `emptyDir`.
+1. Move NATS off `emptyDir` if JetStream durability becomes operationally important before shared storage is ready.
 2. Keep the cluster-wide default `StorageClass` unset until a shared storage backend is deliberately chosen and documented.
 3. Keep backend services `ClusterIP` only and standardize internal-only access rules in repo docs before adding any ingress controller.
 4. Publish custom v2 images to a pullable registry or internal registry mirror, then remove the `node03` pin from `workflow-api`.
-5. Add an encrypted off-host backup procedure for `.44`-local secret manifests and treat it as a required deploy dependency.
+5. Keep the encrypted off-host backup procedure for `.44`-local secret manifests as a required deploy dependency.
 6. Apply the same password-material cleanup on the live provisioner, then snapshot `.44` back into `live-config/provisioner`.
 
 ## Deferred items

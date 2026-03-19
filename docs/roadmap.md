@@ -48,13 +48,14 @@ Done means:
 Why second:
 
 - `glasslab-v2` is the current architecture direction
-- several services still depend on `emptyDir`
+- one core service still depends on `emptyDir`
 - durable state matters more than adding more workflows right now
 
 Done means:
 
 - `Postgres` has explicit durable storage
 - `MinIO` has explicit durable storage
+- OpenClaw writable state has explicit durable storage
 - the chosen local-PV or static PV plan is documented and repeatable
 - the repo clearly separates temporary from durable storage assumptions
 

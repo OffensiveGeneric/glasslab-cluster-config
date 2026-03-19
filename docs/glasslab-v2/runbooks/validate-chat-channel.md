@@ -156,6 +156,6 @@ kubectl -n glasslab-v2 rollout restart deploy/glasslab-openclaw
 ```
 
 Operational caveat:
-- `/var/lib/openclaw/state` is currently `emptyDir`
-- replacing the pod removes the linked WhatsApp credentials
-- until state is made durable, treat WhatsApp login as validation-only
+- `/var/lib/openclaw/state` now uses a retained local PV/PVC on `node01`
+- replacing the pod no longer removes the linked WhatsApp credentials
+- this is still local-node durability, not shared-storage failover
