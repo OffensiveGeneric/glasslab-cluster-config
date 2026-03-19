@@ -11,6 +11,7 @@ The important distinction:
 If you are trying to remember what this system is, start here:
 
 - `docs/operator-orientation.md`
+- `docs/glasslab-system-spec-for-research.md`
 
 ## The Short Version
 
