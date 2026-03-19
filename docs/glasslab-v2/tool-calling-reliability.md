@@ -2,6 +2,8 @@
 
 Last validated: 2026-03-16 on the live `.44` cluster path
 
+Updated with lower-level gateway probe: 2026-03-19
+
 ## Current reliable pattern
 
 The current reliable OpenClaw operator pattern for Glasslab v2 is:
@@ -165,7 +167,43 @@ Recommended operating policy today:
 
 The next useful experiments are incremental, not architectural:
 
-1. Test whether the deployed operator path can reach a lower-level OpenClaw or gateway interface that exposes explicit `tool_choice` for a named function.
+1. Patch or extend the deployed OpenClaw operator path so the gateway `agent` request schema accepts explicit `tool_choice` for a named function.
 2. Test a different local model or parser combination before widening any argumented tool surface.
 3. If a stronger model becomes available locally, rerun `scripts/check-openclaw-tool-calling.sh` unchanged so the comparison stays apples-to-apples.
 4. If a dedicated experimental operator agent is added later, keep it read-only and separate from the safe default operator path.
+
+## Lower-Level Gateway Probe On 2026-03-19
+
+The 2026-03-16 audit left one open question:
+
+- does a lower-level OpenClaw gateway path exist that would let Glasslab force `tool_choice` for a named function even though `openclaw agent` does not expose that flag?
+
+That was tested live on 2026-03-19 from the deployed OpenClaw pod.
+
+What was confirmed:
+
+- `openclaw gateway call` can call the gateway `agent` method directly
+- the gateway `agent` method works for normal turns
+- bundled OpenClaw code in `/app/dist` still clearly contains internal `tool_choice` handling, including:
+  - `"required"`
+  - pinned function mode via `{ "type": "function", "function": { "name": ... } }`
+
+What failed:
+
+- `openclaw gateway call agent --params ...` rejects `tool_choice` at request validation time with:
+  - `invalid agent params: at root: unexpected property 'tool_choice'`
+- `openclaw gateway call chat.send --params ...` also rejects `tool_choice` at request validation time with:
+  - `invalid chat.send params: ... unexpected property 'tool_choice'`
+
+Current conclusion:
+
+- the reachable gateway RPC surface does not currently expose `tool_choice` for the Glasslab operator path
+- the missing control is not just absent from the `openclaw agent` CLI wrapper
+- it is also absent from the validated gateway request schemas we can reach today
+
+Practical implication:
+
+- improving argumented tool reliability now likely requires one of:
+  - patching OpenClaw or its request schema exposure
+  - using a different local model/runtime path that succeeds under plain auto tool choice
+  - adding more no-arg wrappers instead of waiting for structured argument generation to improve
