@@ -6,14 +6,9 @@ SOURCE_ROOT="${SOURCE_ROOT:-$ROOT}"
 OUTPUT_DIR="${OUTPUT_DIR:-$HOME/glasslab-secret-backups}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 WORKDIR="$(mktemp -d)"
-ARCHIVE_BASENAME="glasslab-secrets-${STAMP}.tar"
-ARCHIVE_PATH=""
-ENCRYPTED_PATH=""
-MANIFEST_PATH=""
-
 usage() {
   cat <<'EOF'
-Usage: backup-glasslab-secrets.sh [--output-dir DIR] [--source-root DIR] [--passphrase-file FILE] [--copy-dest DEST]
+Usage: backup-glasslab-secrets.sh [--output-dir DIR] [--source-root DIR] [--passphrase-file FILE] [--copy-dest DEST] [--stamp STAMP]
 
 Creates an encrypted tar archive containing the ignored local secret manifests used by
 the Glasslab v1 and v2 stacks.
@@ -35,6 +30,7 @@ EOF
 
 PASSFILE=""
 COPY_DEST=""
+USER_STAMP=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -54,6 +50,10 @@ while [[ $# -gt 0 ]]; do
       COPY_DEST="$2"
       shift 2
       ;;
+    --stamp)
+      USER_STAMP="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -65,6 +65,15 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ -n "$USER_STAMP" ]]; then
+  STAMP="$USER_STAMP"
+fi
+
+ARCHIVE_BASENAME="glasslab-secrets-${STAMP}.tar"
+ARCHIVE_PATH=""
+ENCRYPTED_PATH=""
+MANIFEST_PATH=""
 
 ARCHIVE_PATH="$WORKDIR/$ARCHIVE_BASENAME"
 ENCRYPTED_PATH="$OUTPUT_DIR/${ARCHIVE_BASENAME}.gpg"

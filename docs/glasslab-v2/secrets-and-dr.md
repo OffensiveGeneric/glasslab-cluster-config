@@ -36,13 +36,15 @@ This is the current backup scope.
 Current repo-supported backup helper:
 
 - `scripts/backup-glasslab-secrets.sh`
+- `scripts/pull-glasslab-secrets-backup.sh`
 
 Recommended operator pattern:
 
-1. run the helper on `.44`
-2. copy the resulting `.tar.gpg` file and manifest off-host
-3. keep the decryption passphrase separate from the backup file
-4. verify the restore procedure before relying on it
+1. run the laptop-side pull helper while on the lab network
+2. let it trigger the encrypted backup on `.44`
+3. pull the resulting `.tar.gpg` file and manifest back to the laptop
+4. keep the decryption passphrase separate from the backup file
+5. verify the restore procedure before relying on it
 
 Important:
 
@@ -51,19 +53,33 @@ Important:
 
 ## Current encrypted backup flow
 
-From `.44`:
+Preferred path from the operator laptop on the lab network:
+
+```bash
+cd /home/gr66ss/cluster-config
+./scripts/pull-glasslab-secrets-backup.sh
+```
+
+Default local destination on the laptop:
+
+- `/home/gr66ss/glasslab-secret-backups/`
+
+This path does not require inbound access to the laptop. It uses SSH from the laptop to `.44`,
+runs the remote encrypted backup helper there, and then pulls the encrypted artifacts back with `scp`.
+
+Lower-level helper on `.44`:
 
 ```bash
 cd /home/glasslab/cluster-config
 ./scripts/backup-glasslab-secrets.sh
 ```
 
-Example with explicit off-host copy to the operator laptop while on the lab network:
+Example with an explicit remote passphrase file when doing a scripted validation run:
 
 ```bash
-cd /home/glasslab/cluster-config
-./scripts/backup-glasslab-secrets.sh \
-  --copy-dest 'gr66ss@<laptop-ip>:/home/gr66ss/Downloads/glasslab-secret-backups/'
+cd /home/gr66ss/cluster-config
+./scripts/pull-glasslab-secrets-backup.sh \
+  --passphrase-file /tmp/glasslab-secret-passphrase.txt
 ```
 
 Example with a local staging directory on `.44` first:
@@ -96,11 +112,19 @@ Validated behavior as of 2026-03-19:
 - archive creation tested on `.44`
 - manifest creation tested on `.44`
 - decrypt-and-list of the archive tested on `.44`
+- laptop-side pull flow tested end-to-end with:
+  - remote encrypted archive creation on `.44`
+  - encrypted archive and manifest copied back to the laptop
+  - local decrypt-and-list verification of the pulled archive
 
-Remaining operator decision:
+Chosen normal off-host destination:
 
-- what the normal off-host destination should be in practice
-- for example: operator laptop, removable encrypted media, or a separate storage endpoint
+- the operator laptop at `/home/gr66ss/glasslab-secret-backups/`
+
+Optional secondary destinations later:
+
+- removable encrypted media
+- a separate storage endpoint
 
 ## Rotation expectations
 
