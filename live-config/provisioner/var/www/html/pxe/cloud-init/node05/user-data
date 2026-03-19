@@ -4,7 +4,7 @@ autoinstall:
   identity:
     hostname: node05
     username: clusteradmin
-    password: $6$7u0tSdZJplZv953Q$MRDBJsKwTNhX3FtLx3Ek0oq2EerjbWAhJSGygi/XBM7X0RHmHKkVD25KWrOKRDPBecjjqrZn5pNggA9cpJIxr0
+    password: $6$MKsBXea03A2L1Jsb$Ujoqx4wKbn0uUkctp2ptT4wp0VGNd7w/KtBNtpNiaGfLtZDdPc04Ldv41bc3deJjnWt0gm2HdhbzO8ZcDNfCt/
   ssh:
     install-server: true
     allow-pw: false
@@ -13,8 +13,6 @@ autoinstall:
       glasslab@glasslab-PXE-01
   user-data:
     ssh_pwauth: false
-    chpasswd:
-      expire: false
     write_files:
     - path: /etc/ssh/sshd_config.d/00-key-only-auth.conf
       permissions: '0644'

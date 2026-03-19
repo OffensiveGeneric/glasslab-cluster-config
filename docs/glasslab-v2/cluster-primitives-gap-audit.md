@@ -46,9 +46,9 @@ This document records the remaining infrastructure primitives Glasslab v2 still 
 
 ### PXE and autoinstall cleanup
 
-- `live-config/provisioner/var/www/html/pxe/cloud-init/node48/user-data` still contains explicit `chpasswd` late-commands with the historical `clusteradmin` password.
-- Current default and newer node profiles already disable password SSH, but the repo still tracks shared password hashes in the autoinstall `identity.password` field.
-- Current helper scripts such as `scripts/build-import-workflow-api-image.sh` and `scripts/sync-titanic-dataset.sh` still assume a node sudo password may be needed, so full cleanup is not yet a safe one-line change.
+- The historical `clusteradmin` password injection has been removed from the tracked `node48` profile.
+- The tracked cloud-init profiles now use rotated non-shared placeholder hashes in `identity.password`, but the live provisioner still needs to be re-snapshotted after the same cleanup is applied on `.44`.
+- The reviewed wrapper-based maintenance sudo path now exists in the repo and has been deployed live to the worker nodes, which removes the earlier helper-side blocker to PXE cleanup.
 
 ## Recommended next actions
 
@@ -57,7 +57,7 @@ This document records the remaining infrastructure primitives Glasslab v2 still 
 3. Keep backend services `ClusterIP` only and standardize internal-only access rules in repo docs before adding any ingress controller.
 4. Publish custom v2 images to a pullable registry or internal registry mirror, then remove the `node03` pin from `workflow-api`.
 5. Add an encrypted off-host backup procedure for `.44`-local secret manifests and treat it as a required deploy dependency.
-6. Replace password-dependent node maintenance helpers before purging the remaining PXE/autoinstall password material from tracked config.
+6. Apply the same password-material cleanup on the live provisioner, then snapshot `.44` back into `live-config/provisioner`.
 
 ## Deferred items
 

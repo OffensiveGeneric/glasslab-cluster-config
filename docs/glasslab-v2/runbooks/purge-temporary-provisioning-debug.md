@@ -4,27 +4,28 @@ This runbook is intentionally separate from the live v2 bring-up because the rem
 
 ## Current tracked leftovers
 
-- `live-config/provisioner/var/www/html/pxe/cloud-init/node48/user-data` still contains explicit `chpasswd` late-commands for `clusteradmin`.
-- Multiple tracked cloud-init profiles still carry a shared `identity.password` hash even though SSH password login is disabled.
+- The tracked PXE snapshots were updated to remove the historical `clusteradmin` password injection from `node48`.
+- The tracked cloud-init profiles were updated to replace the old shared `identity.password` hash with rotated non-shared placeholders.
 - `docs/next-step-control-plane.md` still tracks this cleanup as unfinished work.
-- `scripts/build-import-workflow-api-image.sh` and `scripts/sync-titanic-dataset.sh` now attempt passwordless sudo first, but they still fall back to a node sudo password when the target host requires it.
+- The helper scripts now prefer passwordless sudo first and can use the reviewed wrapper-based sudo path on the live workers.
 
-## Current live blocker
+## Current live state
 
 Validated on 2026-03-19 from `.44`:
 
-- `clusteradmin` still requires a sudo password on the worker nodes checked:
+- the helper scripts were updated to prefer passwordless sudo first
+- the reviewed wrapper-based sudo path was deployed live to:
   - `node01`
   - `node02`
   - `node03`
   - `node04`
   - `node05`
+- `clusteradmin` can now run the reviewed maintenance wrappers without a password on every worker
 
 Implication:
 
-- helper scripts can now avoid prompting when passwordless sudo exists
-- but the current lab still does not provide passwordless sudo on the live worker path
-- removing the tracked password-era bootstrap material is therefore still premature
+- the maintenance path that previously blocked cleanup has been replaced
+- tracked password-era PXE/autoinstall material is now safe to purge from the repo snapshots
 
 ## Safe cleanup order
 
@@ -38,13 +39,13 @@ Preferred replacements:
 Current status:
 
 - the helper scripts now prefer passwordless sudo when available
-- the remaining platform change is to decide whether the live nodes should gain a reviewed passwordless sudo path for these narrow maintenance operations
+- the live workers now have the reviewed wrapper-based passwordless sudo path
 - the repo now includes an implementation path for that reviewable model:
   - `ansible/playbooks/enable-narrow-node-maintenance-sudo.yml`
   - root-owned wrappers under `/usr/local/sbin/`
   - a scoped sudoers drop-in for those wrappers only
 
-2. After those helpers are no longer password-dependent, update the tracked PXE/autoinstall snapshots.
+2. Update the tracked PXE/autoinstall snapshots.
 
 Target files:
 
@@ -56,9 +57,9 @@ Target files:
 - `live-config/provisioner/var/www/html/pxe/cloud-init/node04/user-data`
 - `live-config/provisioner/var/www/html/pxe/cloud-init/node05/user-data`
 
-3. Remove the explicit `chpasswd` late-commands from legacy profiles such as `node48`.
+3. Remove any remaining explicit password-setting late-commands from legacy profiles before the next provisioner snapshot. The tracked `node48` snapshot is already cleaned.
 
-4. Replace the shared autoinstall password hash with a rotated non-shared value or another reviewed noninteractive bootstrap approach.
+4. Replace the shared autoinstall password hash with a rotated non-shared placeholder or another reviewed noninteractive bootstrap approach.
 
 5. Snapshot the live provisioner config again.
 
@@ -72,5 +73,4 @@ git diff -- live-config/provisioner
 
 ## What not to do
 
-- Do not remove password-dependent provisioning material from the tracked snapshots while current node-maintenance scripts still rely on it.
-- Do not assume that changing the repo snapshot alone updates the live provisioner. The live files must be changed first and then re-snapshotted.
+- Do not assume the tracked snapshots alone update the live provisioner. The live files must still be changed on `.44` and then re-snapshotted.

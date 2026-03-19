@@ -1,5 +1,11 @@
 # Titanic Agent Stack
 
+Status:
+
+- this is now legacy/reference `v1` material
+- keep it as a useful example of the earlier end-to-end agent pattern
+- do not treat it as the main architectural direction for Glasslab going forward
+
 ## Scope
 
 This is the first narrow local agent scaffold for the Glasslab cluster.
@@ -63,6 +69,19 @@ The implementation stays inside the existing repo structure:
 - `kubeadm/agent-stack/`: deployable manifests for namespace, RBAC, vLLM, agent API, PVCs, and optional MLflow
 - `scripts/`: deploy, test, and sample API helpers
 - `docs/`: deployment, workflow, and troubleshooting notes
+
+## Why It Still Exists
+
+This stack is still worth keeping around because it shows:
+
+- an earlier complete request-to-artifacts loop
+- how the project originally used local model serving plus bounded execution
+- what `v2` is evolving out of rather than replacing blindly
+
+The important boundary is:
+
+- preserve it as reference, compatibility, and comparison material
+- do not let it drive new platform decisions unless the goal is explicitly about legacy support or regression checking
 
 ## Required Input Files
 

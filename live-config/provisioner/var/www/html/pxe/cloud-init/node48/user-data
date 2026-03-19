@@ -4,7 +4,7 @@ autoinstall:
   identity:
     hostname: node01
     username: clusteradmin
-    password: $6$7u0tSdZJplZv953Q$MRDBJsKwTNhX3FtLx3Ek0oq2EerjbWAhJSGygi/XBM7X0RHmHKkVD25KWrOKRDPBecjjqrZn5pNggA9cpJIxr0
+    password: $6$H4LiyV0p4Wb9rafF$lM2B8k7y3S6icEXxNWvbKNYX5OrgsrptINDabGAeZj2hmqZNJh.Ce5Es.Z3JsLB6Bk.X4zegRDXyYBhEbeIs/0
   ssh:
     install-server: true
     allow-pw: false
@@ -13,8 +13,6 @@ autoinstall:
       glasslab@glasslab-PXE-01
   user-data:
     ssh_pwauth: false
-    chpasswd:
-      expire: false
     write_files:
     - path: /etc/ssh/sshd_config.d/00-key-only-auth.conf
       permissions: '0644'
@@ -96,8 +94,6 @@ autoinstall:
     EONP\nnetplan generate || true\""
   - curtin in-target --target=/target -- bash -c "id -u clusteradmin >/dev/null 2>&1
     || useradd -m -s /bin/bash -G sudo clusteradmin"
-  - curtin in-target --target=/target -- bash -c "echo 'clusteradmin:Glasslab@7311'
-    | chpasswd"
   - curtin in-target --target=/target -- bash -c "install -d -m 700 -o clusteradmin
     -g clusteradmin /home/clusteradmin/.ssh"
   - curtin in-target --target=/target -- bash -c "printf '%s\n' 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcgFpfLo5xYrSB3Nonbm9wD9ldnN7kpOIW0sZlcER4Z

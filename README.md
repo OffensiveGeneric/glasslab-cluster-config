@@ -16,7 +16,7 @@ If you are trying to remember what this system is, start here:
 
 Glasslab currently contains two related stacks:
 
-- `v1`: a narrow Titanic experiment stack using a FastAPI agent API, vLLM, a fixed runner, and Kubernetes Jobs
+- `v1`: a legacy/reference Titanic experiment stack using a FastAPI agent API, vLLM, a fixed runner, and Kubernetes Jobs
 - `v2`: a cleaner workflow platform built around `workflow-api`, a Git-backed workflow registry, deterministic evaluator/reporter services, and OpenClaw as the operator gateway
 
 The repo is large because it includes both platform infrastructure and application-layer workflow services.
@@ -72,7 +72,7 @@ This is not a substitute for checking `.44`.
 
 - the cluster is a single-control-plane Kubernetes lab using Calico
 - `node01`, `node02`, and `node04` are documented as active NVIDIA workers
-- `glasslab-agents` contains the older Titanic stack
+- `glasslab-agents` contains the older Titanic stack, which should now be treated as legacy/reference scaffolding rather than the main platform direction
 - `glasslab-v2` contains the newer workflow platform direction
 - the current live-state report from `.44` is in `docs/live-state-2026-03-19.md`
 - OpenClaw is live in the cluster as of the 2026-03-19 validation, even though the committed Deployment manifest still keeps `replicas: 0` as the safe default posture

@@ -35,6 +35,7 @@ There are really two generations of application stack in this repo.
 ### v1: Titanic Agent Stack
 
 This was the first narrow proof-of-concept.
+It should now be treated as legacy/reference material, not the main future direction.
 
 Purpose:
 
@@ -56,8 +57,8 @@ Mental model:
 
 - this is a tightly scoped vertical slice
 - it proves that request -> validation -> job -> artifacts works
-- it is still useful
-- it is not the long-term architecture for a broader platform
+- it is still useful as a worked example and compatibility path
+- it is not the long-term architecture for a broader autonomous research platform
 
 ### v2: Workflow Platform
 
@@ -83,6 +84,7 @@ Main pieces:
 Mental model:
 
 - `v1` proved the loop
+- `v1` is now mostly useful as reference material for what the platform evolved out of
 - `v2` is the attempt to cleanly generalize it
 
 ## The Current Architecture In Plain English

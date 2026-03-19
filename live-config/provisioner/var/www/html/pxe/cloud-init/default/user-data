@@ -4,7 +4,7 @@ autoinstall:
   identity:
     hostname: bootstrap-node
     username: clusteradmin
-    password: $6$7u0tSdZJplZv953Q$MRDBJsKwTNhX3FtLx3Ek0oq2EerjbWAhJSGygi/XBM7X0RHmHKkVD25KWrOKRDPBecjjqrZn5pNggA9cpJIxr0
+    password: $6$4fT.UzwSm7c29CqH$j0rPbWnLYstfWlPNcuKi/eKJOqsJHB5fErlnuiAKIV356yydCLdeVx4Z2SZnK7ReNc/Z2MbivrJkqgXNLdb4z/
   ssh:
     install-server: true
     allow-pw: false
@@ -13,8 +13,6 @@ autoinstall:
       glasslab@glasslab-PXE-01
   user-data:
     ssh_pwauth: false
-    chpasswd:
-      expire: false
     write_files:
     - path: /etc/ssh/sshd_config.d/00-key-only-auth.conf
       permissions: '0644'
