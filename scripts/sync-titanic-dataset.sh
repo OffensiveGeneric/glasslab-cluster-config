@@ -9,6 +9,7 @@ NODE_USER="${GLASSLAB_DATASET_NODE_USER:-clusteradmin}"
 NODE_SSH_KEY="${GLASSLAB_DATASET_NODE_SSH_KEY:-/home/glasslab/.ssh/id_ed25519}"
 REMOTE_DATASET_DIR="${GLASSLAB_TITANIC_REMOTE_DIR:-/var/lib/glasslab-agent/datasets/titanic}"
 KEEP_STAGING=false
+USE_PASSWORDLESS_SUDO=false
 RUN_DIR=""
 KAGGLE_BIN=""
 
@@ -108,6 +109,16 @@ prompt_node_password() {
   [[ -n "$NODE_SUDO_PASSWORD" ]] || fail "node sudo password is required"
 }
 
+detect_node_sudo_mode() {
+  if ssh -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "${NODE_USER}@${NODE_HOST}" "sudo -n true" >/dev/null 2>&1; then
+    USE_PASSWORDLESS_SUDO=true
+    log "using passwordless sudo on ${NODE_HOST}"
+    return
+  fi
+
+  prompt_node_password
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --keep-staging)
@@ -189,10 +200,45 @@ ssh -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "${NODE_USER}@${NODE_
 log "copying $((${#LOCAL_FILES[@]})) files to ${NODE_HOST}:${REMOTE_STAGE}"
 scp -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "${LOCAL_FILES[@]}" "${NODE_USER}@${NODE_HOST}:${REMOTE_STAGE}/"
 
-prompt_node_password
-PASSWORD_B64="$(printf '%s' "$NODE_SUDO_PASSWORD" | base64 -w0)"
+detect_node_sudo_mode
 
 log "installing dataset into ${REMOTE_DATASET_DIR}"
+if [[ "$USE_PASSWORDLESS_SUDO" == true ]]; then
+  ssh -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "${NODE_USER}@${NODE_HOST}" "REMOTE_STAGE='$REMOTE_STAGE' REMOTE_DATASET_DIR='$REMOTE_DATASET_DIR' bash -s" <<'REMOTE'
+set -euo pipefail
+
+sudo -n env REMOTE_STAGE="$REMOTE_STAGE" REMOTE_DATASET_DIR="$REMOTE_DATASET_DIR" bash -s <<'INNER'
+set -euo pipefail
+
+SYNC_TS="$(date +%Y%m%d-%H%M%S)"
+BACKUP_ROOT="$(dirname "$REMOTE_DATASET_DIR")"
+BACKUP_DIR="$BACKUP_ROOT/_sync_backup_$SYNC_TS"
+
+install -d -m 0755 "$REMOTE_DATASET_DIR" "$BACKUP_DIR"
+
+for file in train.csv test.csv gender_submission.csv sample_submission.csv; do
+  if [[ -f "$REMOTE_DATASET_DIR/$file" ]]; then
+    cp -a "$REMOTE_DATASET_DIR/$file" "$BACKUP_DIR/$file"
+  fi
+  if [[ -f "$REMOTE_STAGE/$file" ]]; then
+    install -o root -g root -m 0644 "$REMOTE_STAGE/$file" "$REMOTE_DATASET_DIR/$file"
+  fi
+done
+
+printf 'official_source=kaggle
+competition=titanic
+synced_at_utc=%s
+' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$REMOTE_DATASET_DIR/.dataset-source"
+chmod 0644 "$REMOTE_DATASET_DIR/.dataset-source"
+rm -rf "$REMOTE_STAGE"
+
+printf 'REMOTE_BACKUP_DIR=%s
+' "$BACKUP_DIR"
+wc -l "$REMOTE_DATASET_DIR/train.csv" "$REMOTE_DATASET_DIR/test.csv"
+INNER
+REMOTE
+else
+PASSWORD_B64="$(printf '%s' "$NODE_SUDO_PASSWORD" | base64 -w0)"
 ssh -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "${NODE_USER}@${NODE_HOST}" "PASSWORD_B64='$PASSWORD_B64' REMOTE_STAGE='$REMOTE_STAGE' REMOTE_DATASET_DIR='$REMOTE_DATASET_DIR' bash -s" <<'REMOTE'
 set -euo pipefail
 
@@ -228,5 +274,6 @@ printf 'REMOTE_BACKUP_DIR=%s
 wc -l "$REMOTE_DATASET_DIR/train.csv" "$REMOTE_DATASET_DIR/test.csv"
 INNER
 REMOTE
+fi
 
 log "dataset sync complete"

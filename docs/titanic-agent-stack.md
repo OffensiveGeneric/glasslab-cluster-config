@@ -130,7 +130,7 @@ chmod 600 ~/.kaggle/kaggle.json
 ./scripts/sync-titanic-dataset.sh
 ```
 
-The helper bootstraps a user-local Kaggle CLI under `/home/glasslab/.local/share/glasslab/kaggle-cli` when needed, prompts for the `clusteradmin` sudo password on `node03` unless `NODE_SUDO_PASSWORD` is already exported, and writes a timestamped backup under `/var/lib/glasslab-agent/datasets/_sync_backup_*` before replacing the live dataset.
+The helper bootstraps a user-local Kaggle CLI under `/home/glasslab/.local/share/glasslab/kaggle-cli` when needed, first attempts passwordless sudo on `node03`, falls back to prompting for the `clusteradmin` sudo password only if required, and writes a timestamped backup under `/var/lib/glasslab-agent/datasets/_sync_backup_*` before replacing the live dataset.
 
 You can avoid storing the Kaggle credential file on disk by exporting `KAGGLE_USERNAME` and `KAGGLE_KEY` for the command instead.
 

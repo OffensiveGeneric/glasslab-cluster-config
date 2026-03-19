@@ -7,6 +7,7 @@ NODE_HOST="${GLASSLAB_WORKFLOW_API_NODE_HOST:-192.168.1.50}"
 NODE_USER="${GLASSLAB_WORKFLOW_API_NODE_USER:-clusteradmin}"
 NODE_SSH_KEY="${GLASSLAB_WORKFLOW_API_NODE_SSH_KEY:-/home/glasslab/.ssh/id_ed25519}"
 NODE_SUDO_PASSWORD="${NODE_SUDO_PASSWORD:-}"
+USE_PASSWORDLESS_SUDO=false
 LOCAL_TAR=""
 REMOTE_TAR=""
 
@@ -45,6 +46,31 @@ prompt_node_password() {
     printf '[build-import-workflow-api-image] node sudo password is required\n' >&2
     exit 1
   }
+}
+
+detect_node_sudo_mode() {
+  if ssh -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "${NODE_USER}@${NODE_HOST}" "sudo -n true" >/dev/null 2>&1; then
+    USE_PASSWORDLESS_SUDO=true
+    printf '[build-import-workflow-api-image] using passwordless sudo on %s\n' "$NODE_HOST"
+    return
+  fi
+
+  prompt_node_password
+}
+
+run_remote_root() {
+  local remote_cmd="$1"
+
+  if [[ "$USE_PASSWORDLESS_SUDO" == true ]]; then
+    ssh -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "${NODE_USER}@${NODE_HOST}" \
+      "sudo -n bash -lc $(printf '%q' "$remote_cmd")"
+    return
+  fi
+
+  local password_b64
+  password_b64="$(printf '%s' "$NODE_SUDO_PASSWORD" | base64 -w0)"
+  ssh -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "${NODE_USER}@${NODE_HOST}" \
+    "PASSWORD_B64='$password_b64' bash -lc 'printf %s \"\$PASSWORD_B64\" | base64 -d | sudo -S bash -lc $(printf '%q' "$remote_cmd")'"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -93,13 +119,10 @@ sudo docker save -o "$LOCAL_TAR" "$IMAGE_REF"
 printf '[build-import-workflow-api-image] copying archive to %s:%s\n' "$NODE_HOST" "$REMOTE_TAR"
 scp -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "$LOCAL_TAR" "${NODE_USER}@${NODE_HOST}:${REMOTE_TAR}"
 
-prompt_node_password
-PASSWORD_B64="$(printf '%s' "$NODE_SUDO_PASSWORD" | base64 -w0)"
+detect_node_sudo_mode
 
 printf '[build-import-workflow-api-image] importing image into %s\n' "$NODE_HOST"
-ssh -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "${NODE_USER}@${NODE_HOST}" \
-  "PASSWORD_B64='$PASSWORD_B64' REMOTE_TAR='$REMOTE_TAR' bash -lc 'printf %s \"\$PASSWORD_B64\" | base64 -d | sudo -S ctr -n k8s.io images import \"\$REMOTE_TAR\"'"
+run_remote_root "ctr -n k8s.io images import \"$REMOTE_TAR\""
 
 printf '[build-import-workflow-api-image] verifying image on %s\n' "$NODE_HOST"
-ssh -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "${NODE_USER}@${NODE_HOST}" \
-  "PASSWORD_B64='$PASSWORD_B64' bash -lc 'printf %s \"\$PASSWORD_B64\" | base64 -d | sudo -S ctr -n k8s.io images ls | grep -F \"$IMAGE_REF\"'"
+run_remote_root "ctr -n k8s.io images ls | grep -F \"$IMAGE_REF\""

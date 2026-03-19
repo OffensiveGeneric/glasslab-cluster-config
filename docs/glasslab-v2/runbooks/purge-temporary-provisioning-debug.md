@@ -7,7 +7,7 @@ This runbook is intentionally separate from the live v2 bring-up because the rem
 - `live-config/provisioner/var/www/html/pxe/cloud-init/node48/user-data` still contains explicit `chpasswd` late-commands for `clusteradmin`.
 - Multiple tracked cloud-init profiles still carry a shared `identity.password` hash even though SSH password login is disabled.
 - `docs/next-step-control-plane.md` still tracks this cleanup as unfinished work.
-- `scripts/build-import-workflow-api-image.sh` and `scripts/sync-titanic-dataset.sh` still assume a node sudo password may be required.
+- `scripts/build-import-workflow-api-image.sh` and `scripts/sync-titanic-dataset.sh` now attempt passwordless sudo first, but they still fall back to a node sudo password when the target host requires it.
 
 ## Safe cleanup order
 
