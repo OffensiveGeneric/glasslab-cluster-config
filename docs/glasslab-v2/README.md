@@ -12,6 +12,7 @@ Start here:
 - `services.md`: canonical run and artifact contract
 - `research-pipeline-target.md`: the intended end-state product shape for Glasslab research workflows
 - `no-arg-vs-argumented-tools.md`: why the current safe operator path is mostly no-arg tools and what argumented tools would need to prove
+- `next-no-arg-operator-actions.md`: the next operator actions worth adding while the safe path remains mostly no-arg
 - `cluster-primitives-gap-audit.md`: missing infrastructure primitives and next actions
 - `storage-and-state.md`: storage posture and persistence expectations
 - `storage-options.md`: where XFS, ZFS, and NFS fit in the stack
