@@ -13,6 +13,18 @@ Glasslab v2 is live, but its durable-storage story is still in the bring-up phas
 
 This means the current live path is operational, not durable.
 
+Live placement reference from the 2026-03-19 validation:
+
+- `workflow-api` on `node03`
+- `Postgres` on `node01`
+- `MinIO` on `node01`
+- `OpenClaw` on `node01`
+- `NATS` on `node05`
+
+Reference:
+
+- `../live-state-2026-03-19.md`
+
 ## Intended storage strategy
 
 The intended first durable v2 step is:
@@ -74,6 +86,25 @@ Tradeoffs:
 
 - introduces a new cluster primitive to operate
 - should not be made the default until it is intentionally chosen, tested, and documented
+
+### Shared network storage
+
+This is now a real near-term option worth evaluating.
+
+Good initial fits:
+
+- shared datasets
+- shared artifacts
+- optional durable OpenClaw state later
+
+Less attractive first fits:
+
+- Postgres on casual network storage without careful validation
+- MinIO on casual network storage without deciding the operational model first
+
+Reference:
+
+- `network-storage-integration.md`
 
 ## Expected internal DNS names
 
