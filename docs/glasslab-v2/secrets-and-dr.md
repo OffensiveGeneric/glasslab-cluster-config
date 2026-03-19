@@ -16,6 +16,8 @@ Related v1 secret manifest still used by the local vLLM path:
 
 These files are ignored by Git.
 
+This is the current backup scope.
+
 ## What is intentionally not committed
 
 - Postgres credentials
@@ -31,10 +33,46 @@ These files are ignored by Git.
 - Keep file permissions restrictive on `.44` and on the backup copy.
 - Record the restore location and procedure in operator docs, not in shell history only.
 
+Current repo-supported backup helper:
+
+- `scripts/backup-glasslab-secrets.sh`
+
+Recommended operator pattern:
+
+1. run the helper on `.44`
+2. copy the resulting `.tar.gpg` file and manifest off-host
+3. keep the decryption passphrase separate from the backup file
+4. verify the restore procedure before relying on it
+
 Important:
 
 - `scripts/snapshot-provisioner-config.sh` does not capture ignored secret manifests.
 - A Git clone plus `live-config/provisioner/` snapshot is not enough to rebuild v2 secrets.
+
+## Current encrypted backup flow
+
+From `.44`:
+
+```bash
+cd /home/glasslab/cluster-config
+./scripts/backup-glasslab-secrets.sh
+```
+
+Default output directory on `.44`:
+
+- `/home/glasslab/glasslab-secret-backups/`
+
+Outputs:
+
+- encrypted archive:
+  - `glasslab-secrets-<timestamp>.tar.gpg`
+- manifest file:
+  - `glasslab-secrets-<timestamp>.manifest.txt`
+
+The manifest records which files were included so the operator can confirm whether:
+
+- only v2 secret manifests were captured
+- the related v1 agent-stack secret was also captured
 
 ## Rotation expectations
 

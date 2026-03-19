@@ -9,6 +9,16 @@ cd /home/glasslab/cluster-config
 
 2. Restore the encrypted backup contents into the local secret paths.
 
+If using the repo helper output:
+
+```bash
+mkdir -p /tmp/glasslab-secret-restore
+gpg --decrypt /path/to/glasslab-secrets-<timestamp>.tar.gpg > /tmp/glasslab-secret-restore/glasslab-secrets.tar
+tar -xf /tmp/glasslab-secret-restore/glasslab-secrets.tar -C /tmp/glasslab-secret-restore
+cp /tmp/glasslab-secret-restore/kubeadm/glasslab-v2/secrets/*.local.yaml kubeadm/glasslab-v2/secrets/ 2>/dev/null || true
+cp /tmp/glasslab-secret-restore/kubeadm/agent-stack/12-agent-secrets.yaml kubeadm/agent-stack/12-agent-secrets.yaml 2>/dev/null || true
+```
+
 Required files:
 
 - `kubeadm/glasslab-v2/secrets/10-postgres.local.yaml`
