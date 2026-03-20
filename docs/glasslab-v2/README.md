@@ -15,6 +15,7 @@ Start here:
 - `next-no-arg-operator-actions.md`: the next operator actions worth adding while the safe path remains mostly no-arg
 - `bounded-agent-architecture.md`: how to move toward multi-agent workflows without depending on broad live tool orchestration
 - `intake-design-run-implementation-plan.md`: first concrete backend plan for intake -> design draft -> validation run
+- `model-improvement-options.md`: stronger model vs ranker vs control-surface vs backend decomposition
 - `cluster-primitives-gap-audit.md`: missing infrastructure primitives and next actions
 - `storage-and-state.md`: storage posture and persistence expectations
 - `storage-options.md`: where XFS, ZFS, and NFS fit in the stack
