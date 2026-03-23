@@ -192,7 +192,7 @@ Given the current live state, the best immediate use of new network storage woul
 
 That is now the committed first integration step:
 
-- explicit RWX NFS PV/PVCs for datasets and artifacts
+- explicit RWX NFS PV/PVCs for datasets and artifacts, now sized to reserve `5Ti` total
 - no immediate cutover of Postgres, MinIO, or NATS
 
 The best immediate use would probably not be:

@@ -4,7 +4,7 @@ metadata:
   name: glasslab-v2-shared-datasets-pv
 spec:
   capacity:
-    storage: 100Gi
+    storage: 2Ti
   accessModes:
     - ReadWriteMany
   persistentVolumeReclaimPolicy: Retain
@@ -30,7 +30,7 @@ spec:
     - ReadWriteMany
   resources:
     requests:
-      storage: 100Gi
+      storage: 2Ti
 ---
 apiVersion: v1
 kind: PersistentVolume
@@ -38,7 +38,7 @@ metadata:
   name: glasslab-v2-shared-artifacts-pv
 spec:
   capacity:
-    storage: 100Gi
+    storage: 3Ti
   accessModes:
     - ReadWriteMany
   persistentVolumeReclaimPolicy: Retain
@@ -64,4 +64,4 @@ spec:
     - ReadWriteMany
   resources:
     requests:
-      storage: 100Gi
+      storage: 3Ti

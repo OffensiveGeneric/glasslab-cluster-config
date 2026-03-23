@@ -20,14 +20,14 @@ Important interpretation:
 
 - the earlier `100Gi + 100Gi` PV sizes were only Kubernetes claims
 - they were not the actual capacity of the NFS server
-- the real shared pool available to Glasslab is much larger than `200Gi`
+- the real shared pool available to Glasslab is much larger than the initial `5Ti` reservation
 
 ## Kubernetes NFS Claims
 
 Current tracked shared claims:
 
-- `glasslab-shared-datasets`: `100Gi`
-- `glasslab-shared-artifacts`: `100Gi`
+- `glasslab-shared-datasets`: `2Ti`
+- `glasslab-shared-artifacts`: `3Ti`
 
 These should be treated as conservative first allocations, not the storage ceiling.
 

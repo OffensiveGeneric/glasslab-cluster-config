@@ -22,6 +22,7 @@ Start here:
 - `network-storage-integration.md`: how shared network storage could fit the current live services
 - `storage-capacity-inventory-2026-03-23.md`: observed NFS and local-node storage capacity snapshot
 - `node-loss-tolerance-options.md`: realistic paths from restart durability toward node-loss tolerance
+- `node-loss-tolerance-next-steps.md`: concrete near-term path for backup/restore and OpenClaw relocation work
 - `internal-service-exposure.md`: internal-only service access model
 - `image-distribution.md`: current image import path and registry migration plan
 - `secrets-and-dr.md`: local secret handling and disaster recovery notes
