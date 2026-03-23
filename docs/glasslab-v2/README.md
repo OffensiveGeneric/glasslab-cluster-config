@@ -4,7 +4,7 @@ Glasslab v2 turns the current Titanic-specific path into an explicit, registry-d
 
 Current live validation reference:
 
-- `../live-state-2026-03-19.md`
+- `../live-state-2026-03-23.md`
 
 Start here:
 - `overview.md`: repo-level architecture and control flow

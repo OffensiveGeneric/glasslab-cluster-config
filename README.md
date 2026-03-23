@@ -55,7 +55,7 @@ If you want the deeper explanation, read:
 - `docs/operator-orientation.md`
 - `docs/glasslab-v2/overview.md`
 - `docs/glasslab-v2/cluster-primitives-gap-audit.md`
-- `docs/live-state-2026-03-19.md`
+- `docs/live-state-2026-03-23.md`
 - `docs/glasslab-v2/network-storage-integration.md`
 - `docs/glasslab-v2/intake-design-run-implementation-plan.md`
 
@@ -77,7 +77,7 @@ This is not a substitute for checking `.44`.
 - `node01`, `node02`, and `node04` are documented as active NVIDIA workers
 - `glasslab-agents` contains the older Titanic stack, which should now be treated as legacy/reference scaffolding rather than the main platform direction
 - `glasslab-v2` contains the newer workflow platform direction
-- the current live-state report from `.44` is in `docs/live-state-2026-03-19.md`
+- the current live-state report from `.44` is in `docs/live-state-2026-03-23.md`
 - OpenClaw is live in the cluster as an internal operator gateway, even though the committed Deployment manifest still keeps `replicas: 0` as the safe default posture
 - WhatsApp is active in the live OpenClaw path
 - shared NFS-backed datasets and artifacts are now available in `glasslab-v2`, with a tracked 5Ti reservation split across datasets and artifacts
@@ -91,7 +91,7 @@ If you are resuming work:
 
 1. `docs/operator-orientation.md`
 2. `docs/glasslab-v2/README.md`
-3. `docs/live-state-2026-03-19.md`
+3. `docs/live-state-2026-03-23.md`
 4. `docs/titanic-agent-stack.md`
 5. `docs/gpu-workers.md`
 
