@@ -181,6 +181,16 @@ if provider.get("base_url") != expected_vllm:
         f"{expected_vllm}, found {provider.get('base_url')!r}"
     )
 
+paper_intake_request = workflow_binding.get("paper_intake_request")
+if not isinstance(paper_intake_request, dict):
+    raise SystemExit("workflow-api binding must define paper_intake_request")
+
+for key in ("raw_request",):
+    if key not in paper_intake_request:
+        raise SystemExit(
+            f"workflow-api paper_intake_request is missing required key {key!r}"
+        )
+
 validation_run_request = workflow_binding.get("validation_run_request")
 if not isinstance(validation_run_request, dict):
     raise SystemExit("workflow-api binding must define validation_run_request")
@@ -248,6 +258,11 @@ model_ref = f"glasslab-vllm/{default_model}"
 
 allowed_runtime_tools = {
     "web_fetch",
+    "workflow_api_start_paper_intake",
+    "workflow_api_get_last_intake",
+    "workflow_api_create_design_draft_from_last_intake",
+    "workflow_api_get_last_design_draft",
+    "workflow_api_create_validation_run_from_last_design",
     "workflow_api_get_families",
     "workflow_api_create_validation_run",
     "workflow_api_get_last_validation_run",
@@ -343,6 +358,7 @@ runtime_config = {
                 "enabled": True,
                 "config": {
                     "baseUrl": workflow_binding["base_url"],
+                    "paperIntakeRequest": paper_intake_request,
                     "validationRunRequest": validation_run_request,
                     "knownWorkflowIds": known_workflow_ids,
                 },

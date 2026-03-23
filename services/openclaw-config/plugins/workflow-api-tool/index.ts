@@ -31,6 +31,16 @@ function buildJsonResult(payload: unknown) {
   };
 }
 
+function resolvePaperIntakeRequest(api: any): Record<string, unknown> {
+  const value = api?.pluginConfig?.paperIntakeRequest;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(
+      "plugins.entries.workflow-api-tool.config.paperIntakeRequest is required"
+    );
+  }
+  return value;
+}
+
 function resolveValidationRunRequest(api: any): Record<string, unknown> {
   const value = api?.pluginConfig?.validationRunRequest;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -168,6 +178,203 @@ const plugin = {
           } catch (error) {
             await appendAuditEvent({
               tool: "workflow_api_get_families",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
+        name: "workflow_api_start_paper_intake",
+        description: "Create the repo-managed paper intake record.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          const requestBody = resolvePaperIntakeRequest(api);
+          try {
+            const { endpoint, payload } = await requestJson(api, "/intakes", {
+              method: "POST",
+              body: JSON.stringify(requestBody)
+            });
+            await appendAuditEvent({
+              tool: "workflow_api_start_paper_intake",
+              status: "ok",
+              endpoint,
+              intake_id: payload?.intake_id ?? null,
+              source_type: payload?.source_type ?? null
+            });
+            return buildJsonResult({
+              endpoint,
+              request: requestBody,
+              intake: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_start_paper_intake",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
+        name: "workflow_api_get_last_intake",
+        description: "Fetch the most recent intake record.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const { endpoint, payload } = await requestJson(api, "/intakes/latest");
+            await appendAuditEvent({
+              tool: "workflow_api_get_last_intake",
+              status: "ok",
+              endpoint,
+              intake_id: payload?.intake_id ?? null,
+              intake_status: payload?.status ?? null
+            });
+            return buildJsonResult({
+              endpoint,
+              intake: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_get_last_intake",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
+        name: "workflow_api_create_design_draft_from_last_intake",
+        description: "Create a design draft from the latest intake record.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const { endpoint, payload } = await requestJson(api, "/design-drafts/from-latest-intake", {
+              method: "POST"
+            });
+            await appendAuditEvent({
+              tool: "workflow_api_create_design_draft_from_last_intake",
+              status: "ok",
+              endpoint,
+              design_id: payload?.design_id ?? null,
+              design_status: payload?.status ?? null,
+              workflow_id: payload?.workflow_id ?? null
+            });
+            return buildJsonResult({
+              endpoint,
+              design_draft: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_create_design_draft_from_last_intake",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
+        name: "workflow_api_get_last_design_draft",
+        description: "Fetch the most recent design draft.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const { endpoint, payload } = await requestJson(api, "/design-drafts/latest");
+            await appendAuditEvent({
+              tool: "workflow_api_get_last_design_draft",
+              status: "ok",
+              endpoint,
+              design_id: payload?.design_id ?? null,
+              design_status: payload?.status ?? null,
+              workflow_id: payload?.workflow_id ?? null
+            });
+            return buildJsonResult({
+              endpoint,
+              design_draft: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_get_last_design_draft",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
+        name: "workflow_api_create_validation_run_from_last_design",
+        description: "Create a validation run from the latest design draft.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const { endpoint, payload } = await requestJson(api, "/runs/from-latest-design-draft", {
+              method: "POST"
+            });
+            const runId = String(payload?.run_id || "").trim();
+            if (runId) {
+              await saveLastRunId(runId);
+            }
+            await appendAuditEvent({
+              tool: "workflow_api_create_validation_run_from_last_design",
+              status: "ok",
+              endpoint,
+              run_id: runId || null,
+              source_design_id: payload?.source_design_id ?? null,
+              source_intake_id: payload?.source_intake_id ?? null
+            });
+            return buildJsonResult({
+              endpoint,
+              run_id: runId || null,
+              run: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_create_validation_run_from_last_design",
               status: "error",
               error: error instanceof Error ? error.message : String(error)
             });

@@ -16,6 +16,11 @@
         "additionalProperties": true,
         "description": "Repo-managed bounded POST /runs payload used for first operator validation."
       },
+      "paperIntakeRequest": {
+        "type": "object",
+        "additionalProperties": true,
+        "description": "Repo-managed POST /intakes payload used for the first intake-to-design operator path."
+      },
       "knownWorkflowIds": {
         "type": "array",
         "items": {
@@ -32,6 +37,6 @@
         "default": 10
       }
     },
-    "required": ["baseUrl", "validationRunRequest", "knownWorkflowIds"]
+    "required": ["baseUrl", "validationRunRequest", "paperIntakeRequest", "knownWorkflowIds"]
   }
 }

@@ -2,10 +2,24 @@ name: workflow-api
 base_url: http://glasslab-workflow-api.glasslab-v2.svc.cluster.local:8080
 routes:
   list_workflows: GET /workflow-families
+  create_intake: POST /intakes
+  get_latest_intake: GET /intakes/latest
+  create_design_draft_from_latest_intake: POST /design-drafts/from-latest-intake
+  get_latest_design_draft: GET /design-drafts/latest
+  create_run_from_latest_design_draft: POST /runs/from-latest-design-draft
   create_run: POST /runs
   get_run: GET /runs/{run_id}
   get_artifacts: GET /runs/{run_id}/artifacts
   get_logs: GET /runs/{run_id}/logs
+paper_intake_request:
+  raw_request: Start a bounded paper-to-validation intake for the approved Titanic benchmark path.
+  source_refs:
+    - https://www.kaggle.com/competitions/titanic
+  source_type: paper-link
+  notes:
+    - Use the approved Titanic dataset path for the first intake-to-design validation.
+    - Keep the workflow family inside the approved Glasslab registry.
+  submitted_by: openclaw-operator
 validation_run_request:
   workflow_id: generic-tabular-benchmark
   objective: Benchmark logistic regression on the seeded Titanic fixture dataset.
@@ -19,3 +33,4 @@ validation_run_request:
 notes:
   - Use only approved workflow IDs from the registry.
   - Route Tier 3 workflows for human approval before submitting runs.
+  - Keep the first intake-to-design operator path repo-managed and no-arg.
