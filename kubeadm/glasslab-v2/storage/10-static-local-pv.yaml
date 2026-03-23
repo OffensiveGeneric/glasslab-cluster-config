@@ -114,3 +114,42 @@ spec:
   resources:
     requests:
       storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: glasslab-v2-nats-data-pv
+spec:
+  capacity:
+    storage: 5Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  claimRef:
+    namespace: glasslab-v2
+    name: glasslab-nats-data
+  local:
+    path: /var/lib/glasslab-v2/nats
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - node05
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: glasslab-nats-data
+  namespace: glasslab-v2
+spec:
+  storageClassName: ""
+  volumeName: glasslab-v2-nats-data-pv
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi

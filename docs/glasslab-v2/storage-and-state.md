@@ -11,14 +11,14 @@ Glasslab v2 is live, but its durable-storage story is still in the bring-up phas
 - Postgres uses a static local PV/PVC on `node01`
 - MinIO uses a static local PV/PVC on `node01`
 - OpenClaw writable state uses a static local PV/PVC on `node01`
-- NATS uses `emptyDir`
+- NATS uses an explicit static local PV/PVC on `node05`
 
 This means the current live path is partially durable:
 
 - `Postgres`: durable on local disk
 - `MinIO`: durable on local disk
 - OpenClaw writable state: durable on local disk
-- `NATS`: still ephemeral
+- `NATS`: durable on local disk
 
 Live placement reference from the 2026-03-19 validation:
 
@@ -47,6 +47,7 @@ Current committed first step:
   - `glasslab-postgres-data` to `/var/lib/glasslab-v2/postgres` on `node01`
   - `glasslab-minio-data` to `/var/lib/glasslab-v2/minio` on `node01`
   - `glasslab-openclaw-state` to `/var/lib/glasslab-v2/openclaw-state` on `node01`
+  - `glasslab-nats-data` to `/var/lib/glasslab-v2/nats` on `node05`
 - `kubeadm/glasslab-v2/storage/20-nfs-static-pv.yaml` binds:
   - `glasslab-shared-datasets` to `192.168.1.207:/volume1/backup/glasslab-v2/shared-datasets`
   - `glasslab-shared-artifacts` to `192.168.1.207:/volume1/backup/glasslab-v2/shared-artifacts`
@@ -75,7 +76,7 @@ Future storage placeholders live under `kubeadm/glasslab-v2/storage/`.
 - `workflow-api`: stateless deployment
 - OpenClaw runtime bundle: generated from ConfigMap
 - OpenClaw tmp/state: acceptable as ephemeral for first validation
-- NATS: acceptable as ephemeral while v2 does not rely on JetStream as a durable source of truth
+- NATS: single-instance JetStream on retained local storage on `node05`
 
 ### Artifact direction
 

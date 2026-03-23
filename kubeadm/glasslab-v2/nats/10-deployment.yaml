@@ -5,6 +5,8 @@ metadata:
   namespace: glasslab-v2
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: glasslab-nats
@@ -13,6 +15,8 @@ spec:
       labels:
         app.kubernetes.io/name: glasslab-nats
     spec:
+      nodeSelector:
+        kubernetes.io/hostname: node05
       containers:
         - name: nats
           image: nats:2.10-alpine
@@ -41,4 +45,5 @@ spec:
               mountPath: /data
       volumes:
         - name: nats-data
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: glasslab-nats-data
