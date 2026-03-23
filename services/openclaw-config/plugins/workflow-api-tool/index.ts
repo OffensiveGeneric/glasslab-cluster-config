@@ -435,6 +435,48 @@ const plugin = {
 
     api.registerTool(
       {
+        name: "workflow_api_get_last_run_status",
+        description: "Fetch the latest stored run record and focus on status.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const runId = await loadLastRunId();
+            const { endpoint, payload } = await requestJson(
+              api,
+              `/runs/${encodeURIComponent(runId)}`
+            );
+            await appendAuditEvent({
+              tool: "workflow_api_get_last_run_status",
+              status: "ok",
+              endpoint,
+              run_id: runId,
+              run_status: payload?.status?.status ?? null
+            });
+            return buildJsonResult({
+              endpoint,
+              run_id: runId,
+              status: payload?.status ?? null,
+              run: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_get_last_run_status",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
         name: "workflow_api_get_last_validation_run",
         description: "Fetch the last validation run.",
         parameters: {
@@ -474,6 +516,92 @@ const plugin = {
     );
 
     const knownWorkflowIds = resolveKnownWorkflowIds(api);
+    api.registerTool(
+      {
+        name: "workflow_api_get_last_run_artifacts",
+        description: "Fetch the artifact index for the latest stored run.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const runId = await loadLastRunId();
+            const { endpoint, payload } = await requestJson(
+              api,
+              `/runs/${encodeURIComponent(runId)}/artifacts`
+            );
+            const artifactCount = Array.isArray(payload?.artifacts?.artifacts)
+              ? payload.artifacts.artifacts.length
+              : null;
+            await appendAuditEvent({
+              tool: "workflow_api_get_last_run_artifacts",
+              status: "ok",
+              endpoint,
+              run_id: runId,
+              artifact_count: artifactCount
+            });
+            return buildJsonResult({
+              endpoint,
+              run_id: runId,
+              artifacts: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_get_last_run_artifacts",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
+        name: "workflow_api_get_last_run_logs",
+        description: "Fetch the logs for the latest stored run.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const runId = await loadLastRunId();
+            const { endpoint, payload } = await requestJson(
+              api,
+              `/runs/${encodeURIComponent(runId)}/logs`
+            );
+            const logCount = Array.isArray(payload?.logs) ? payload.logs.length : null;
+            await appendAuditEvent({
+              tool: "workflow_api_get_last_run_logs",
+              status: "ok",
+              endpoint,
+              run_id: runId,
+              log_count: logCount
+            });
+            return buildJsonResult({
+              endpoint,
+              run_id: runId,
+              logs: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_get_last_run_logs",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
     api.registerTool(
       {
         name: "workflow_api_get_family_by_id",

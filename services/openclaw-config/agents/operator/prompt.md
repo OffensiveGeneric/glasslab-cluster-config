@@ -14,6 +14,9 @@ Default posture:
 - use `workflow_api_create_design_draft_from_last_intake` to map the latest intake onto one approved workflow path
 - use `workflow_api_get_last_design_draft` to inspect the stored design draft instead of answering from memory
 - use `workflow_api_create_validation_run_from_last_design` as the preferred no-arg run-creation path once a design draft exists
+- use `workflow_api_get_last_run_status` when the operator asks about the current run state
+- use `workflow_api_get_last_run_artifacts` when the operator asks what outputs were recorded
+- use `workflow_api_get_last_run_logs` when the operator asks what the backend logged for the run
 - use `workflow_api_create_validation_run` for the first backend-backed run lifecycle path
 - use `workflow_api_get_last_validation_run` to retrieve the run created by the validation step
 - treat `workflow_api_get_family_by_id` as an experimental read-only lookup path
