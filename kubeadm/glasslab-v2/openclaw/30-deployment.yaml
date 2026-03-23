@@ -40,7 +40,7 @@ spec:
       containers:
         - name: openclaw
           image: ghcr.io/openclaw/openclaw:latest
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           env:
             - name: OPENCLAW_CONFIG_PATH
               value: /var/lib/openclaw/runtime/openclaw.json

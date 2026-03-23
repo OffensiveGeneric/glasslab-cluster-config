@@ -103,6 +103,31 @@ def test_create_and_fetch_design_draft_from_latest_titanic_intake() -> None:
     assert fetched.json()['candidate_models'] == ['logistic_regression', 'random_forest']
 
 
+def test_create_design_draft_prefers_benchmark_for_titanic_paper_intake() -> None:
+    client = build_client()
+
+    create_intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Start a bounded paper-to-validation intake for the approved Titanic benchmark path.',
+            'source_refs': ['https://www.kaggle.com/competitions/titanic'],
+            'source_type': 'paper-link',
+            'notes': [
+                'Use the approved Titanic dataset path for the first intake-to-design validation.',
+                'Keep the workflow family inside the approved Glasslab registry.',
+            ],
+        },
+    )
+    assert create_intake.status_code == 201
+
+    create_design = client.post('/design-drafts/from-latest-intake')
+    assert create_design.status_code == 201
+    payload = create_design.json()
+    assert payload['workflow_id'] == 'generic-tabular-benchmark'
+    assert payload['status'] == 'ready_for_run'
+    assert payload['unresolved_inputs'] == []
+
+
 def test_create_design_draft_requires_intake() -> None:
     client = build_client()
 

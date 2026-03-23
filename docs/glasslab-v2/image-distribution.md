@@ -4,7 +4,7 @@ Glasslab v2 currently mixes pull-based upstream images with one private-registry
 
 ## Current state
 
-- `workflow-api` uses `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.1`.
+- `workflow-api` uses `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.2`.
 - The steady-state path is now:
   - build and push the image to private GHCR with `scripts/push-workflow-api-image.sh`
   - create or refresh the in-cluster pull secret with `scripts/create-ghcr-pull-secret.sh`

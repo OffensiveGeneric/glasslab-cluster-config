@@ -71,7 +71,13 @@ def infer_workflow_candidates(raw_request: str) -> list[str]:
 
 
 def choose_workflow_for_intake(intake: IntakeRecord, registry: WorkflowRegistry) -> WorkflowRegistryEntry | None:
-    for workflow_id in intake.workflow_family_candidates:
+    lowered = ' '.join([intake.raw_request, intake.normalized_summary, *intake.notes, *intake.source_refs]).lower()
+    candidate_ids = list(intake.workflow_family_candidates)
+
+    if 'titanic' in lowered and 'generic-tabular-benchmark' in candidate_ids:
+        candidate_ids = ['generic-tabular-benchmark', *[item for item in candidate_ids if item != 'generic-tabular-benchmark']]
+
+    for workflow_id in candidate_ids:
         workflow = registry.get_workflow(workflow_id)
         if workflow is not None:
             return workflow
