@@ -2,16 +2,16 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-IMAGE_REF="${GLASSLAB_WORKFLOW_API_IMAGE_REF:-ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.3}"
-REGISTRY_HOST="${GLASSLAB_WORKFLOW_API_REGISTRY_HOST:-ghcr.io}"
+IMAGE_REF="${GLASSLAB_TABULAR_RUNNER_IMAGE_REF:-ghcr.io/offensivegeneric/glasslab-tabular-runner:0.1.0}"
+REGISTRY_HOST="${GLASSLAB_TABULAR_RUNNER_REGISTRY_HOST:-ghcr.io}"
 REGISTRY_USERNAME="${GHCR_USERNAME:-${GITHUB_ACTOR:-OffensiveGeneric}}"
 REGISTRY_TOKEN="${GHCR_TOKEN:-}"
 
 usage() {
   cat <<'USAGE'
-Usage: push-workflow-api-image.sh [--image-ref <image>] [--username <user>]
+Usage: push-tabular-runner-image.sh [--image-ref <image>] [--username <user>]
 
-Build the workflow-api image locally and push it to GHCR.
+Build the tabular runner image locally and push it to GHCR.
 
 Environment:
   GHCR_TOKEN    GitHub token with package write access
@@ -34,7 +34,7 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     *)
-      printf '[push-workflow-api-image] unknown argument: %s\n' "$1" >&2
+      printf '[push-tabular-runner-image] unknown argument: %s\n' "$1" >&2
       usage >&2
       exit 1
       ;;
@@ -42,17 +42,17 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$REGISTRY_TOKEN" ]]; then
-  printf '[push-workflow-api-image] GHCR_TOKEN is required\n' >&2
+  printf '[push-tabular-runner-image] GHCR_TOKEN is required\n' >&2
   exit 1
 fi
 
-printf '[push-workflow-api-image] logging into %s as %s\n' "$REGISTRY_HOST" "$REGISTRY_USERNAME"
+printf '[push-tabular-runner-image] logging into %s as %s\n' "$REGISTRY_HOST" "$REGISTRY_USERNAME"
 printf '%s' "$REGISTRY_TOKEN" | docker login "$REGISTRY_HOST" -u "$REGISTRY_USERNAME" --password-stdin >/dev/null
 
-printf '[push-workflow-api-image] building %s\n' "$IMAGE_REF"
-docker build -t "$IMAGE_REF" -f "$ROOT_DIR/services/workflow-api/Dockerfile" "$ROOT_DIR"
+printf '[push-tabular-runner-image] building %s\n' "$IMAGE_REF"
+docker build -t "$IMAGE_REF" "$ROOT_DIR/services/runner"
 
-printf '[push-workflow-api-image] pushing %s\n' "$IMAGE_REF"
+printf '[push-tabular-runner-image] pushing %s\n' "$IMAGE_REF"
 docker push "$IMAGE_REF"
 
-printf '[push-workflow-api-image] done\n'
+printf '[push-tabular-runner-image] done\n'

@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, status
 from services.common.schemas import ArtifactIndexEntry, ArtifactsIndex, RunManifest, RunStatus, WorkflowRegistryEntry
 
 from .config import Settings, get_settings
-from .job_submission import JobSubmitter, NullJobSubmitter
+from .job_submission import JobSubmitter, create_job_submitter
 from .persistence import InMemoryRunStore, RunStore
 from .registry import WorkflowRegistry
 from .schemas import (
@@ -239,7 +239,7 @@ def create_app(
     settings = settings or get_settings()
     registry = registry or WorkflowRegistry(settings.registry_dir)
     store = store or InMemoryRunStore()
-    submitter = submitter or NullJobSubmitter(namespace=settings.runner_namespace)
+    submitter = submitter or create_job_submitter(settings)
 
     app = FastAPI(title=settings.app_name, version=settings.app_version)
     app.state.settings = settings

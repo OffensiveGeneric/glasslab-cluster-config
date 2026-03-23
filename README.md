@@ -18,7 +18,7 @@ If you are trying to remember what this system is, start here:
 Glasslab currently contains two related stacks:
 
 - `v1`: a legacy/reference Titanic experiment stack using a FastAPI agent API, vLLM, a fixed runner, and Kubernetes Jobs
-- `v2`: a cleaner workflow platform built around `workflow-api`, a Git-backed workflow registry, deterministic evaluator/reporter services, and OpenClaw as the operator gateway
+- `v2`: a cleaner workflow platform built around `workflow-api`, a Git-backed workflow registry, deterministic evaluator/reporter services, OpenClaw as the operator gateway, persistent core service state, shared NFS-backed datasets/artifacts, and a live no-arg intake -> design -> run operator path
 
 The repo is large because it includes both platform infrastructure and application-layer workflow services.
 
@@ -56,6 +56,8 @@ If you want the deeper explanation, read:
 - `docs/glasslab-v2/overview.md`
 - `docs/glasslab-v2/cluster-primitives-gap-audit.md`
 - `docs/live-state-2026-03-19.md`
+- `docs/glasslab-v2/network-storage-integration.md`
+- `docs/glasslab-v2/intake-design-run-implementation-plan.md`
 
 ## Current Machines
 
@@ -76,8 +78,12 @@ This is not a substitute for checking `.44`.
 - `glasslab-agents` contains the older Titanic stack, which should now be treated as legacy/reference scaffolding rather than the main platform direction
 - `glasslab-v2` contains the newer workflow platform direction
 - the current live-state report from `.44` is in `docs/live-state-2026-03-19.md`
-- OpenClaw is live in the cluster as of the 2026-03-19 validation, even though the committed Deployment manifest still keeps `replicas: 0` as the safe default posture
-- WhatsApp is active in the live OpenClaw path as of the 2026-03-19 validation
+- OpenClaw is live in the cluster as an internal operator gateway, even though the committed Deployment manifest still keeps `replicas: 0` as the safe default posture
+- WhatsApp is active in the live OpenClaw path
+- shared NFS-backed datasets and artifacts are now available in `glasslab-v2`, with a tracked 5Ti reservation split across datasets and artifacts
+- Postgres, MinIO, OpenClaw state, and NATS now persist across pod replacement instead of depending on `emptyDir`
+- `workflow-api` now pulls from private GHCR instead of depending on `node03`-local image import
+- the first no-arg OpenClaw path now covers intake, design draft creation, accepted run creation, and follow-up status/artifact/log inspection
 
 ## Best Entry Points
 

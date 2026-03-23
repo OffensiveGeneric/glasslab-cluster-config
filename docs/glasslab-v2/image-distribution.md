@@ -1,12 +1,15 @@
 # Image Distribution
 
-Glasslab v2 currently mixes pull-based upstream images with one private-registry path for the custom backend.
+Glasslab v2 currently mixes pull-based upstream images with private GHCR paths for the custom backend and runner images.
 
 ## Current state
 
-- `workflow-api` uses `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.2`.
+- `workflow-api` uses `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.3`.
+- `generic-tabular-benchmark` runs use `ghcr.io/offensivegeneric/glasslab-tabular-runner:0.1.0`.
+- The first real execution path now depends on both images being pullable from private GHCR.
 - The steady-state path is now:
-  - build and push the image to private GHCR with `scripts/push-workflow-api-image.sh`
+  - build and push `workflow-api` with `scripts/push-workflow-api-image.sh`
+  - build and push the tabular runner with `scripts/push-tabular-runner-image.sh`
   - create or refresh the in-cluster pull secret with `scripts/create-ghcr-pull-secret.sh`
   - let Kubernetes pull the image on whichever worker schedules the pod
 - live validation on 2026-03-23 confirmed the deployment could pull and run on `node05` instead of `node03`
@@ -28,7 +31,7 @@ Glasslab v2 currently mixes pull-based upstream images with one private-registry
 
 ## Current private-registry strategy
 
-1. Build and push `workflow-api` to private GHCR.
+1. Build and push `workflow-api` and the runner images to private GHCR.
 2. Maintain a `glasslab-ghcr-pull` Docker registry secret in the `glasslab-v2` namespace.
 3. Pin operator-managed images to explicit tags and then to digests once the release flow is stable.
 4. Keep the old import helper only as a break-glass fallback.
@@ -37,7 +40,7 @@ Glasslab v2 currently mixes pull-based upstream images with one private-registry
 ## Migration path
 
 1. Log Docker into `ghcr.io` with a GitHub token that can write packages.
-2. Push the image with `scripts/push-workflow-api-image.sh`.
+2. Push `workflow-api` with `scripts/push-workflow-api-image.sh` and the runner with `scripts/push-tabular-runner-image.sh`.
 3. Create or refresh the pull secret with `scripts/create-ghcr-pull-secret.sh`.
 4. Update the Deployment to use the pushed image tag or digest.
 5. Validate that at least one non-`node03` worker can pull and start the image.

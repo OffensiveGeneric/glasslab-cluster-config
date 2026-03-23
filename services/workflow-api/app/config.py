@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -23,6 +24,16 @@ class Settings(BaseSettings):
     registry_dir: str = str(DEFAULT_REGISTRY_DIR)
     runner_namespace: str = 'glasslab-v2'
     default_submitted_by: str = 'glasslab-operator'
+    job_submission_mode: Literal['null', 'kubernetes'] = 'null'
+    runner_service_account_name: str = 'default'
+    runner_image_pull_policy: str = 'IfNotPresent'
+    runner_backoff_limit: int = 0
+    runner_job_ttl_seconds: int = 86400
+    dataset_pvc_name: str = 'glasslab-shared-datasets'
+    dataset_mount_path: str = '/mnt/datasets'
+    artifacts_pvc_name: str = 'glasslab-shared-artifacts'
+    artifacts_mount_path: str = '/mnt/artifacts'
+    image_pull_secret_name: str = 'glasslab-ghcr-pull'
 
 
 @lru_cache(maxsize=1)
