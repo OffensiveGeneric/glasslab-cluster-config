@@ -20,6 +20,7 @@ class Settings(BaseSettings):
         '{"pipeline":"titanic_baseline","dataset":"titanic","models":["logistic_regression","random_forest"],'
         '"feature_profile":"basic","resource_profile":"cpu-small","compare_to":"none","produce_submission":true}'
     )
+    manifest_json: str = ''
     dataset_root: str = '/mnt/datasets/titanic'
     artifacts_root: str = '/mnt/artifacts'
     validation_size: float = 0.25

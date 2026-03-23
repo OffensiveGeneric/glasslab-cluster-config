@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -17,19 +18,48 @@ from .mlflow_client import MlflowRunLogger
 
 
 LOGGER = logging.getLogger('glasslab.runner')
+MEDIA_TYPES = {
+    '.json': 'application/json',
+    '.md': 'text/markdown',
+    '.csv': 'text/csv',
+    '.log': 'text/plain',
+    '.txt': 'text/plain',
+}
+REQUIRED_ARTIFACTS = {
+    'run_manifest.json',
+    'config.json',
+    'metrics.json',
+    'artifacts_index.json',
+    'report.md',
+    'status.json',
+    'logs/',
+    'logs/runner.log',
+}
 
 
-def configure_logging(level: str) -> None:
-    logging.basicConfig(level=level.upper(), format='%(asctime)s %(levelname)s %(name)s %(message)s')
+def configure_logging(level: str, log_path: Path) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    root_logger.setLevel(level.upper())
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    root_logger.addHandler(stream_handler)
+
+    file_handler = logging.FileHandler(log_path)
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
 
 
 def run_experiment(settings: Settings | None = None) -> dict:
     settings = settings or Settings()
-    configure_logging(settings.log_level)
 
     spec = settings.parsed_spec
     artifact_dir = settings.artifact_dir
     artifact_dir.mkdir(parents=True, exist_ok=True)
+    configure_logging(settings.log_level, artifact_dir / 'logs' / 'runner.log')
 
     dataset_root = Path(settings.dataset_root)
     train_path = dataset_root / 'train.csv'
@@ -150,6 +180,87 @@ def run_experiment(settings: Settings | None = None) -> dict:
         return result_payload
 
 
+def build_artifacts_index(settings: Settings, status: str) -> dict:
+    artifact_dir = settings.artifact_dir
+    entries: list[dict] = []
+    for path in sorted(artifact_dir.rglob('*')):
+        if path == artifact_dir:
+            continue
+        relative = path.relative_to(artifact_dir).as_posix()
+        if path.is_dir():
+            entries.append(
+                {
+                    'name': f'{relative}/',
+                    'path': f'artifacts/{settings.experiment_id}/{relative}/',
+                    'media_type': 'inode/directory',
+                    'required': f'{relative}/' in REQUIRED_ARTIFACTS,
+                    'description': 'Runner-created directory',
+                }
+            )
+            continue
+        entries.append(
+            {
+                'name': relative,
+                'path': f'artifacts/{settings.experiment_id}/{relative}',
+                'media_type': MEDIA_TYPES.get(path.suffix.lower(), 'application/octet-stream'),
+                'required': relative in REQUIRED_ARTIFACTS,
+                'description': f'Runner-generated artifact ({status})',
+                'size_bytes': path.stat().st_size,
+            }
+        )
+    return {'run_id': settings.experiment_id, 'artifacts': entries}
+
+
+def write_supporting_artifacts(settings: Settings, result_payload: dict, status: str, error: str | None = None) -> None:
+    artifact_dir = settings.artifact_dir
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    (artifact_dir / 'logs').mkdir(parents=True, exist_ok=True)
+
+    config_payload = {
+        'experiment_id': settings.experiment_id,
+        'trace_id': settings.trace_id,
+        'dataset_root': settings.dataset_root,
+        'artifacts_root': settings.artifacts_root,
+        'spec': settings.parsed_spec,
+    }
+    write_json(artifact_dir / 'config.json', config_payload)
+
+    if settings.manifest_json:
+        try:
+            write_json(artifact_dir / 'run_manifest.json', json.loads(settings.manifest_json))
+        except json.JSONDecodeError:
+            write_json(
+                artifact_dir / 'run_manifest.json',
+                {'run_id': settings.experiment_id, 'raw_manifest_json': settings.manifest_json},
+            )
+
+    status_payload = {
+        'run_id': settings.experiment_id,
+        'status': status,
+        'updated_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+        'detail': error or f'Runner finished with status={status}.',
+    }
+    write_json(artifact_dir / 'status.json', status_payload)
+
+    report_lines = [
+        f'# Run {settings.experiment_id}',
+        '',
+        f'- status: `{status}`',
+        f'- trace_id: `{settings.trace_id}`',
+        f'- dataset: `{result_payload.get("dataset", settings.parsed_spec.get("dataset", "unknown"))}`',
+        f'- pipeline: `{result_payload.get("pipeline", settings.parsed_spec.get("pipeline", "unknown"))}`',
+    ]
+    if 'best_model' in result_payload:
+        report_lines.append(f'- best_model: `{result_payload["best_model"]}`')
+    if 'best_metric' in result_payload:
+        report_lines.append(f'- best_metric: `{result_payload["best_metric"]}`')
+    if error:
+        report_lines.extend(['', '## Error', '', error])
+    (artifact_dir / 'report.md').write_text('\n'.join(report_lines) + '\n')
+
+    write_json(artifact_dir / 'artifacts_index.json', build_artifacts_index(settings, status=status))
+
+
 def build_model_pipeline(model_name: str, feature_profile: str, random_state: int) -> tuple[Pipeline, dict]:
     preprocessor, feature_summary = build_preprocessor(feature_profile)
 
@@ -189,4 +300,4 @@ def build_model_pipeline(model_name: str, feature_profile: str, random_state: in
 
 
 def write_json(path: Path, payload: dict) -> None:
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + '\n')

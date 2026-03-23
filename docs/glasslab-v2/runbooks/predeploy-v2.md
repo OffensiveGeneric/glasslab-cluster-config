@@ -10,7 +10,7 @@ Complete these items before the first live Glasslab v2 deployment.
 
 ## Required image preparation
 
-- `workflow-api` uses `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.3`
+- `workflow-api` uses `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.4`
 - push the image to private GHCR before deployment
 - create or refresh the `glasslab-ghcr-pull` secret in the `glasslab-v2` namespace before deployment
 - the old `build-import-workflow-api-image.sh` helper is emergency fallback only

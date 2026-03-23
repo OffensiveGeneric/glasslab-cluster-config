@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-IMAGE_REF="${GLASSLAB_TABULAR_RUNNER_IMAGE_REF:-ghcr.io/offensivegeneric/glasslab-tabular-runner:0.1.0}"
+IMAGE_REF="${GLASSLAB_TABULAR_RUNNER_IMAGE_REF:-ghcr.io/offensivegeneric/glasslab-tabular-runner:0.1.1}"
 REGISTRY_HOST="${GLASSLAB_TABULAR_RUNNER_REGISTRY_HOST:-ghcr.io}"
 REGISTRY_USERNAME="${GHCR_USERNAME:-${GITHUB_ACTOR:-OffensiveGeneric}}"
 REGISTRY_TOKEN="${GHCR_TOKEN:-}"

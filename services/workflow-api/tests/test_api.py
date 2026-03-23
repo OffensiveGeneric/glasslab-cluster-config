@@ -218,3 +218,53 @@ def test_create_run_success() -> None:
     logs = client.get(f'/runs/{run_id}/logs')
     assert logs.status_code == 200
     assert logs.json()['logs'][0]['message'] == 'run accepted'
+
+
+def test_get_run_reflects_disk_artifacts_and_status(tmp_path) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        artifacts_mount_path=str(tmp_path),
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    response = client.post(
+        '/runs',
+        json={
+            'workflow_id': 'generic-tabular-benchmark',
+            'objective': 'Benchmark approved models on Titanic.',
+            'inputs': {
+                'dataset_name': 'titanic',
+                'train_uri': 's3://datasets/titanic/train.csv',
+                'test_uri': 's3://datasets/titanic/test.csv',
+                'target_column': 'Survived',
+            },
+            'models': ['logistic_regression', 'random_forest'],
+        },
+    )
+    assert response.status_code == 201
+    run_id = response.json()['run_id']
+
+    run_dir = tmp_path / run_id
+    (run_dir / 'logs').mkdir(parents=True)
+    (run_dir / 'status.json').write_text(
+        '{"run_id":"%s","status":"succeeded","updated_at":"2026-03-23T20:34:44Z","detail":"done"}' % run_id
+    )
+    (run_dir / 'artifacts_index.json').write_text(
+        '{"run_id":"%s","artifacts":[{"name":"status.json","path":"artifacts/%s/status.json","media_type":"application/json","required":true}]}'
+        % (run_id, run_id)
+    )
+    (run_dir / 'logs' / 'runner.log').write_text('2026-03-23 20:34:44,470 INFO glasslab.runner completed Titanic baseline run\n')
+
+    run = client.get(f'/runs/{run_id}')
+    assert run.status_code == 200
+    assert run.json()['status']['status'] == 'succeeded'
+
+    artifacts = client.get(f'/runs/{run_id}/artifacts')
+    assert artifacts.status_code == 200
+    assert artifacts.json()['artifacts']['artifacts'][0]['name'] == 'status.json'
+
+    logs = client.get(f'/runs/{run_id}/logs')
+    assert logs.status_code == 200
+    assert logs.json()['logs'][0]['message'] == 'completed Titanic baseline run'

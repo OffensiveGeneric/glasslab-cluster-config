@@ -7,16 +7,22 @@ import re
 
 from typing import Any
 
-from services.common.schemas import RunManifest
+from services.common.schemas import RunManifest, RunStatus
 
 from .config import Settings
-from .schemas import JobSubmissionReceipt
+from .schemas import JobSubmissionReceipt, LogEntry, RunRecord
 
 
 class JobSubmitter(ABC):
     @abstractmethod
     def submit_run(self, manifest: RunManifest) -> JobSubmissionReceipt:
         raise NotImplementedError
+
+    def get_live_status(self, record: RunRecord) -> RunStatus | None:
+        return None
+
+    def get_live_logs(self, record: RunRecord) -> list[LogEntry]:
+        return []
 
 
 class NullJobSubmitter(JobSubmitter):
@@ -33,12 +39,13 @@ class NullJobSubmitter(JobSubmitter):
         )
 
 
-def _load_kube_modules() -> tuple[Any, Any, type[Exception]]:
+def _load_kube_modules() -> tuple[Any, Any, type[Exception], type[Exception]]:
     from kubernetes import client as kube_client
     from kubernetes import config as kube_config
+    from kubernetes.client.exceptions import ApiException
     from kubernetes.config.config_exception import ConfigException as KubeConfigException
 
-    return kube_client, kube_config, KubeConfigException
+    return kube_client, kube_config, KubeConfigException, ApiException
 
 
 def _load_kube_config(kube_config: Any, config_exception: type[Exception]) -> None:
@@ -80,9 +87,10 @@ def _build_runner_spec(manifest: RunManifest) -> dict:
 class KubernetesJobSubmitter(JobSubmitter):
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.client, kube_config, config_exception = _load_kube_modules()
+        self.client, kube_config, config_exception, self.api_exception = _load_kube_modules()
         _load_kube_config(kube_config, config_exception)
         self.batch_api = self.client.BatchV1Api()
+        self.core_api = self.client.CoreV1Api()
 
     def submit_run(self, manifest: RunManifest) -> JobSubmissionReceipt:
         spec = _build_runner_spec(manifest)
@@ -97,6 +105,7 @@ class KubernetesJobSubmitter(JobSubmitter):
             self.client.V1EnvVar(name='GLASSLAB_RUNNER_EXPERIMENT_ID', value=manifest.run_id),
             self.client.V1EnvVar(name='GLASSLAB_RUNNER_TRACE_ID', value=manifest.run_id),
             self.client.V1EnvVar(name='GLASSLAB_RUNNER_SPEC_JSON', value=json.dumps(spec, sort_keys=True)),
+            self.client.V1EnvVar(name='GLASSLAB_RUNNER_MANIFEST_JSON', value=manifest.model_dump_json()),
             self.client.V1EnvVar(
                 name='GLASSLAB_RUNNER_DATASET_ROOT',
                 value=f"{self.settings.dataset_mount_path}/{spec['dataset']}",
@@ -165,6 +174,59 @@ class KubernetesJobSubmitter(JobSubmitter):
             status='submitted',
             detail='Run submitted to Kubernetes Job API.',
         )
+
+    def get_live_status(self, record: RunRecord) -> RunStatus | None:
+        try:
+            job = self.batch_api.read_namespaced_job(
+                name=record.job_submission.job_name,
+                namespace=record.job_submission.namespace,
+            )
+        except self.api_exception:
+            return None
+
+        now = datetime.now(timezone.utc)
+        status = job.status
+        detail = None
+        if status.conditions:
+            detail = '; '.join(filter(None, [condition.message for condition in status.conditions])) or None
+        if status.succeeded:
+            return RunStatus(run_id=record.run_id, status='succeeded', updated_at=now, detail=detail or 'Kubernetes Job completed successfully.')
+        if status.failed:
+            return RunStatus(run_id=record.run_id, status='failed', updated_at=now, detail=detail or 'Kubernetes Job reported failure.')
+        if status.active:
+            return RunStatus(run_id=record.run_id, status='running', updated_at=now, detail='Kubernetes Job is active.')
+        return RunStatus(run_id=record.run_id, status='queued', updated_at=now, detail='Kubernetes Job is queued.')
+
+    def get_live_logs(self, record: RunRecord) -> list[LogEntry]:
+        try:
+            pods = self.core_api.list_namespaced_pod(
+                namespace=record.job_submission.namespace,
+                label_selector=f'job-name={record.job_submission.job_name}',
+            )
+        except self.api_exception:
+            return []
+
+        entries: list[LogEntry] = []
+        for pod in pods.items:
+            try:
+                raw_log = self.core_api.read_namespaced_pod_log(
+                    name=pod.metadata.name,
+                    namespace=record.job_submission.namespace,
+                )
+            except self.api_exception:
+                continue
+            for line in raw_log.splitlines():
+                if not line.strip():
+                    continue
+                entries.append(
+                    LogEntry(
+                        timestamp=datetime.now(timezone.utc),
+                        level='INFO',
+                        message=line,
+                        payload={'pod_name': pod.metadata.name},
+                    )
+                )
+        return entries
 
 
 def create_job_submitter(settings: Settings) -> JobSubmitter:
