@@ -28,6 +28,42 @@ class RunCreateRequest(BaseModel):
         return value
 
 
+class IntakeCreateRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    raw_request: str = Field(min_length=10)
+    source_refs: list[str] = Field(default_factory=list)
+    source_type: str | None = None
+    notes: list[str] = Field(default_factory=list)
+    submitted_by: str | None = None
+    trace_id: str | None = None
+
+    @field_validator('source_refs', 'notes')
+    @classmethod
+    def validate_non_empty_unique_strings(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value if item.strip()]
+        deduped = list(dict.fromkeys(cleaned))
+        if len(deduped) != len(cleaned):
+            raise ValueError('list entries must be unique')
+        return deduped
+
+
+class IntakeRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    intake_id: str
+    created_at: datetime
+    updated_at: datetime
+    status: str
+    source_type: str
+    source_refs: list[str] = Field(default_factory=list)
+    raw_request: str
+    normalized_summary: str
+    workflow_family_candidates: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+    submitted_by: str
+
+
 class ValidationIssue(BaseModel):
     model_config = ConfigDict(extra='forbid')
 

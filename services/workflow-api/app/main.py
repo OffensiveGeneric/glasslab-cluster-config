@@ -13,6 +13,8 @@ from .job_submission import JobSubmitter, NullJobSubmitter
 from .persistence import InMemoryRunStore, RunStore
 from .registry import WorkflowRegistry
 from .schemas import (
+    IntakeCreateRequest,
+    IntakeRecord,
     LogEntry,
     RunArtifactsResponse,
     RunCreateRequest,
@@ -47,6 +49,38 @@ def create_app(
     app.state.store = store
     app.state.submitter = submitter
 
+    def summarize_intake(raw_request: str, notes: list[str]) -> str:
+        summary = ' '.join(raw_request.split())
+        if notes:
+            note_preview = '; '.join(' '.join(item.split()) for item in notes[:2])
+            summary = f'{summary} Notes: {note_preview}'
+        return summary[:500]
+
+    def infer_intake_source_type(request: IntakeCreateRequest) -> str:
+        if request.source_type:
+            return request.source_type.strip()
+        if any(ref.startswith(('http://', 'https://')) for ref in request.source_refs):
+            return 'paper-link'
+        lowered = request.raw_request.lower()
+        if 'http://' in lowered or 'https://' in lowered:
+            return 'paper-link'
+        if 'paper' in lowered or 'arxiv' in lowered:
+            return 'paper-note'
+        return 'plain-goal'
+
+    def infer_workflow_candidates(raw_request: str) -> list[str]:
+        lowered = raw_request.lower()
+        matches: list[str] = []
+        if any(token in lowered for token in ('replicate', 'replication', 'reproduce', 're-run')):
+            matches.append('replication-lite')
+        if any(token in lowered for token in ('paper', 'notes', 'literature', 'method', 'study')):
+            matches.append('literature-to-experiment')
+        if any(token in lowered for token in ('benchmark', 'tabular', 'dataset', 'csv', 'baseline')):
+            matches.append('generic-tabular-benchmark')
+        if not matches:
+            matches.append('literature-to-experiment')
+        return list(dict.fromkeys(matches))
+
     @app.get('/healthz')
     def healthz() -> dict:
         return {
@@ -55,6 +89,45 @@ def create_app(
             'version': settings.app_version,
             'workflow_count': len(registry.list_workflows()),
         }
+
+    @app.post('/intakes', response_model=IntakeRecord, status_code=status.HTTP_201_CREATED)
+    def create_intake(request: IntakeCreateRequest) -> IntakeRecord:
+        now = datetime.now(timezone.utc)
+        intake_id = uuid4().hex
+        candidates = [
+            workflow_id
+            for workflow_id in infer_workflow_candidates(request.raw_request)
+            if registry.get_workflow(workflow_id) is not None
+        ]
+        record = IntakeRecord(
+            intake_id=intake_id,
+            created_at=now,
+            updated_at=now,
+            status='ready_for_design',
+            source_type=infer_intake_source_type(request),
+            source_refs=request.source_refs,
+            raw_request=request.raw_request.strip(),
+            normalized_summary=summarize_intake(request.raw_request, request.notes),
+            workflow_family_candidates=candidates,
+            notes=request.notes,
+            submitted_by=request.submitted_by or settings.default_submitted_by,
+        )
+        store.save_intake(record)
+        return record
+
+    @app.get('/intakes/latest', response_model=IntakeRecord)
+    def get_latest_intake() -> IntakeRecord:
+        record = store.get_latest_intake()
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='intake not found')
+        return record
+
+    @app.get('/intakes/{intake_id}', response_model=IntakeRecord)
+    def get_intake(intake_id: str) -> IntakeRecord:
+        record = store.get_intake(intake_id)
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='intake not found')
+        return record
 
     @app.get('/workflow-families', response_model=list[WorkflowFamilySummary])
     def list_workflow_families() -> list[WorkflowFamilySummary]:

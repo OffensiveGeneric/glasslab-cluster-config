@@ -34,6 +34,43 @@ def test_healthz_and_workflow_families() -> None:
     }
 
 
+def test_create_and_fetch_latest_intake() -> None:
+    client = build_client()
+
+    create = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Take this paper note set and turn it into a bounded validation experiment on a tabular dataset.',
+            'source_refs': ['arxiv:2401.12345', 'https://example.org/paper-notes'],
+            'notes': ['Focus on the reported baseline and evaluation method.'],
+        },
+    )
+
+    assert create.status_code == 201
+    payload = create.json()
+    intake_id = payload['intake_id']
+    assert payload['status'] == 'ready_for_design'
+    assert payload['source_type'] == 'paper-link'
+    assert 'literature-to-experiment' in payload['workflow_family_candidates']
+    assert 'generic-tabular-benchmark' in payload['workflow_family_candidates']
+
+    latest = client.get('/intakes/latest')
+    assert latest.status_code == 200
+    assert latest.json()['intake_id'] == intake_id
+
+    fetched = client.get(f'/intakes/{intake_id}')
+    assert fetched.status_code == 200
+    assert fetched.json()['normalized_summary'].startswith('Take this paper note set')
+
+
+def test_get_latest_intake_missing() -> None:
+    client = build_client()
+
+    latest = client.get('/intakes/latest')
+    assert latest.status_code == 404
+    assert latest.json()['detail'] == 'intake not found'
+
+
 def test_create_run_success() -> None:
     client = build_client()
 
