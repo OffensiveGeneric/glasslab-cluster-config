@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: glasslab-nfs-smoke
+  namespace: glasslab-v2
+spec:
+  restartPolicy: Never
+  containers:
+    - name: smoke
+      image: busybox:1.36
+      command:
+        - sh
+        - -lc
+        - |
+          set -eu
+          date -Iseconds > /datasets/glasslab-nfs-datasets-marker.txt
+          date -Iseconds > /artifacts/glasslab-nfs-artifacts-marker.txt
+          echo ok
+      volumeMounts:
+        - name: datasets
+          mountPath: /datasets
+        - name: artifacts
+          mountPath: /artifacts
+  volumes:
+    - name: datasets
+      persistentVolumeClaim:
+        claimName: glasslab-shared-datasets
+    - name: artifacts
+      persistentVolumeClaim:
+        claimName: glasslab-shared-artifacts

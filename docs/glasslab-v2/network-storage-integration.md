@@ -28,6 +28,12 @@ Reference:
 - `glasslab-agent-api` on `node03`
 - `vLLM` on `node02`
 
+As of 2026-03-23, the lab also has a validated NFS target:
+
+- server: `192.168.1.207`
+- export root tested: `/volume1/backup`
+- worker validation confirmed from `node01` and `node03`
+
 This matters because any network storage plan should be evaluated against what is already pinned, already local, and already functioning.
 
 ## What Network Storage Can Help With
@@ -64,6 +70,10 @@ Best first use:
 - future workflow input corpora
 - literature or replication input bundles
 
+Current tracked path:
+
+- `/volume1/backup/glasslab-v2/shared-datasets`
+
 ### Artifacts
 
 Strong candidate for early network storage.
@@ -79,6 +89,10 @@ Possible pattern:
 - keep execution local
 - publish artifacts to MinIO
 - optionally stage or mirror shared artifact areas on network storage during the transition
+
+Current tracked path:
+
+- `/volume1/backup/glasslab-v2/shared-artifacts`
 
 ### OpenClaw State
 
@@ -175,6 +189,11 @@ Given the current live state, the best immediate use of new network storage woul
 
 - shared datasets
 - shared artifact review paths
+
+That is now the committed first integration step:
+
+- explicit RWX NFS PV/PVCs for datasets and artifacts
+- no immediate cutover of Postgres, MinIO, or NATS
 
 The best immediate use would probably not be:
 

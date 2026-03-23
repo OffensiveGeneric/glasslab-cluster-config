@@ -1,0 +1,12 @@
+---
+- name: Install NFS client packages on Kubernetes nodes
+  hosts: k8s_nodes
+  become: true
+  tasks:
+    - name: Ensure NFS client packages are present
+      ansible.builtin.apt:
+        name:
+          - nfs-common
+          - rpcbind
+        state: present
+        update_cache: true

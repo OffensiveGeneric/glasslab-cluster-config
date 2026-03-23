@@ -1,0 +1,67 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: glasslab-v2-shared-datasets-pv
+spec:
+  capacity:
+    storage: 100Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions:
+    - nfsvers=4.1
+  claimRef:
+    namespace: glasslab-v2
+    name: glasslab-shared-datasets
+  nfs:
+    server: 192.168.1.207
+    path: /volume1/backup/glasslab-v2/shared-datasets
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: glasslab-shared-datasets
+  namespace: glasslab-v2
+spec:
+  storageClassName: ""
+  volumeName: glasslab-v2-shared-datasets-pv
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: glasslab-v2-shared-artifacts-pv
+spec:
+  capacity:
+    storage: 100Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions:
+    - nfsvers=4.1
+  claimRef:
+    namespace: glasslab-v2
+    name: glasslab-shared-artifacts
+  nfs:
+    server: 192.168.1.207
+    path: /volume1/backup/glasslab-v2/shared-artifacts
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: glasslab-shared-artifacts
+  namespace: glasslab-v2
+spec:
+  storageClassName: ""
+  volumeName: glasslab-v2-shared-artifacts-pv
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 100Gi

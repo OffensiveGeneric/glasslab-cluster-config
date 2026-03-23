@@ -12,9 +12,18 @@ Current tracked manifests:
 
 - `10-static-local-pv.example.yaml`: example static local PV/PVC pattern
 - `10-static-local-pv.yaml`: current node01-backed static local PV/PVC wiring for Postgres and MinIO
+- `20-nfs-static-pv.yaml`: shared NFS-backed RWX PV/PVC wiring for datasets and artifacts
+- `90-nfs-smoke-test.yaml`: one-shot validation pod for the NFS-backed PVCs
 
 The current live durable-storage plan is:
 
 - `glasslab-postgres-data` on `node01` at `/var/lib/glasslab-v2/postgres`
 - `glasslab-minio-data` on `node01` at `/var/lib/glasslab-v2/minio`
 - `glasslab-openclaw-state` on `node01` at `/var/lib/glasslab-v2/openclaw-state`
+
+The current tracked shared-storage plan is:
+
+- NFS server `192.168.1.207`
+- export root `/volume1/backup`
+- `glasslab-shared-datasets` backed by `/volume1/backup/glasslab-v2/shared-datasets`
+- `glasslab-shared-artifacts` backed by `/volume1/backup/glasslab-v2/shared-artifacts`

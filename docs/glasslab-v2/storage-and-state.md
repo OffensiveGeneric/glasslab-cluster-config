@@ -7,6 +7,7 @@ Glasslab v2 is live, but its durable-storage story is still in the bring-up phas
 - the cluster has no `StorageClass`
 - `glasslab-v2` now has explicit PVCs for `Postgres` and `MinIO`
 - `glasslab-v2` now has an explicit PVC for OpenClaw writable state
+- the cluster now also has a tracked NFS-backed RWX path for shared datasets and artifacts
 - Postgres uses a static local PV/PVC on `node01`
 - MinIO uses a static local PV/PVC on `node01`
 - OpenClaw writable state uses a static local PV/PVC on `node01`
@@ -46,6 +47,9 @@ Current committed first step:
   - `glasslab-postgres-data` to `/var/lib/glasslab-v2/postgres` on `node01`
   - `glasslab-minio-data` to `/var/lib/glasslab-v2/minio` on `node01`
   - `glasslab-openclaw-state` to `/var/lib/glasslab-v2/openclaw-state` on `node01`
+- `kubeadm/glasslab-v2/storage/20-nfs-static-pv.yaml` binds:
+  - `glasslab-shared-datasets` to `192.168.1.207:/volume1/backup/glasslab-v2/shared-datasets`
+  - `glasslab-shared-artifacts` to `192.168.1.207:/volume1/backup/glasslab-v2/shared-artifacts`
 
 Live validation on 2026-03-19:
 
