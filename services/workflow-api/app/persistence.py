@@ -5,7 +5,7 @@ from threading import Lock
 
 from services.common.schemas import ArtifactsIndex
 
-from .schemas import IntakeRecord, LogEntry, RunRecord
+from .schemas import DesignDraftRecord, IntakeRecord, LogEntry, RunRecord
 
 
 class RunStore(ABC):
@@ -19,6 +19,18 @@ class RunStore(ABC):
 
     @abstractmethod
     def get_latest_intake(self) -> IntakeRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def save_design_draft(self, record: DesignDraftRecord) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_design_draft(self, design_id: str) -> DesignDraftRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_latest_design_draft(self) -> DesignDraftRecord | None:
         raise NotImplementedError
 
     @abstractmethod
@@ -50,6 +62,8 @@ class InMemoryRunStore(RunStore):
     def __init__(self) -> None:
         self._intakes: dict[str, IntakeRecord] = {}
         self._latest_intake_id: str | None = None
+        self._design_drafts: dict[str, DesignDraftRecord] = {}
+        self._latest_design_draft_id: str | None = None
         self._runs: dict[str, RunRecord] = {}
         self._artifacts: dict[str, ArtifactsIndex] = {}
         self._logs: dict[str, list[LogEntry]] = {}
@@ -69,6 +83,21 @@ class InMemoryRunStore(RunStore):
             if self._latest_intake_id is None:
                 return None
             return self._intakes.get(self._latest_intake_id)
+
+    def save_design_draft(self, record: DesignDraftRecord) -> None:
+        with self._lock:
+            self._design_drafts[record.design_id] = record
+            self._latest_design_draft_id = record.design_id
+
+    def get_design_draft(self, design_id: str) -> DesignDraftRecord | None:
+        with self._lock:
+            return self._design_drafts.get(design_id)
+
+    def get_latest_design_draft(self) -> DesignDraftRecord | None:
+        with self._lock:
+            if self._latest_design_draft_id is None:
+                return None
+            return self._design_drafts.get(self._latest_design_draft_id)
 
     def save_run(self, record: RunRecord) -> None:
         with self._lock:

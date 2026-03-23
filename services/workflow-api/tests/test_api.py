@@ -71,6 +71,93 @@ def test_get_latest_intake_missing() -> None:
     assert latest.json()['detail'] == 'intake not found'
 
 
+def test_create_and_fetch_design_draft_from_latest_titanic_intake() -> None:
+    client = build_client()
+
+    create_intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Benchmark the approved models on the Titanic dataset and validate the baseline results.',
+            'notes': ['Use the standard Titanic train/test splits.'],
+        },
+    )
+    assert create_intake.status_code == 201
+    intake_id = create_intake.json()['intake_id']
+
+    create_design = client.post('/design-drafts/from-latest-intake')
+    assert create_design.status_code == 201
+    payload = create_design.json()
+    design_id = payload['design_id']
+    assert payload['intake_id'] == intake_id
+    assert payload['workflow_id'] == 'generic-tabular-benchmark'
+    assert payload['status'] == 'ready_for_run'
+    assert payload['declared_inputs']['dataset_name'] == 'titanic'
+    assert payload['unresolved_inputs'] == []
+
+    latest = client.get('/design-drafts/latest')
+    assert latest.status_code == 200
+    assert latest.json()['design_id'] == design_id
+
+    fetched = client.get(f'/design-drafts/{design_id}')
+    assert fetched.status_code == 200
+    assert fetched.json()['candidate_models'] == ['logistic_regression', 'random_forest']
+
+
+def test_create_design_draft_requires_intake() -> None:
+    client = build_client()
+
+    create_design = client.post('/design-drafts/from-latest-intake')
+    assert create_design.status_code == 404
+    assert create_design.json()['detail'] == 'intake not found'
+
+
+def test_create_run_from_latest_ready_design_draft() -> None:
+    client = build_client()
+
+    intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Benchmark the approved models on Titanic and create a validation run.',
+            'notes': ['Use the standard Titanic train/test splits.'],
+        },
+    )
+    assert intake.status_code == 201
+
+    design = client.post('/design-drafts/from-latest-intake')
+    assert design.status_code == 201
+    design_payload = design.json()
+
+    run = client.post('/runs/from-latest-design-draft')
+    assert run.status_code == 201
+    payload = run.json()
+    assert payload['source_design_id'] == design_payload['design_id']
+    assert payload['source_intake_id'] == design_payload['intake_id']
+    assert payload['run_purpose'] == 'validation'
+    assert payload['manifest']['inputs']['dataset_name'] == 'titanic'
+
+
+def test_create_run_from_latest_design_draft_blocks_non_ready_design() -> None:
+    client = build_client()
+
+    intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Turn this paper into a bounded experiment design based on the linked notes.',
+            'source_refs': ['https://example.org/paper-notes'],
+            'notes': ['Focus on the method section and reported metrics.'],
+        },
+    )
+    assert intake.status_code == 201
+
+    design = client.post('/design-drafts/from-latest-intake')
+    assert design.status_code == 201
+    assert design.json()['status'] == 'needs_review'
+
+    run = client.post('/runs/from-latest-design-draft')
+    assert run.status_code == 409
+    assert run.json()['detail'] == 'design draft is not ready_for_run'
+
+
 def test_create_run_success() -> None:
     client = build_client()
 

@@ -64,6 +64,27 @@ class IntakeRecord(BaseModel):
     submitted_by: str
 
 
+class DesignDraftRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    design_id: str
+    intake_id: str
+    created_at: datetime
+    updated_at: datetime
+    status: str
+    workflow_id: str
+    workflow_family: str
+    objective: str
+    declared_inputs: dict[str, Any] = Field(default_factory=dict)
+    unresolved_inputs: list[str] = Field(default_factory=list)
+    candidate_models: list[str] = Field(default_factory=list)
+    resource_profile: str
+    expected_artifacts: dict[str, list[str]]
+    approval_tier: str
+    design_notes: list[str] = Field(default_factory=list)
+    submitted_by: str
+
+
 class ValidationIssue(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -103,6 +124,9 @@ class RunRecord(BaseModel):
     manifest: RunManifest
     status: RunStatus
     job_submission: JobSubmissionReceipt
+    source_design_id: str | None = None
+    source_intake_id: str | None = None
+    run_purpose: str | None = None
     validation_issues: list[ValidationIssue] = Field(default_factory=list)
 
 
