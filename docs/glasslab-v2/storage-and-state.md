@@ -22,7 +22,7 @@ This means the current live path is partially durable:
 
 Live placement reference from the 2026-03-19 validation:
 
-- `workflow-api` on `node03`
+- `workflow-api` is now validated live on pull-based scheduling and is currently running on `node05`
 - `Postgres` on `node01`
 - `MinIO` on `node01`
 - `OpenClaw` on `node01`
@@ -73,7 +73,7 @@ Future storage placeholders live under `kubeadm/glasslab-v2/storage/`.
 
 ### Ephemeral is acceptable for now
 
-- `workflow-api`: stateless deployment
+- `workflow-api`: stateless deployment with private GHCR image pulls via `glasslab-ghcr-pull`
 - OpenClaw runtime bundle: generated from ConfigMap
 - OpenClaw tmp/state: acceptable as ephemeral for first validation
 - NATS: single-instance JetStream on retained local storage on `node05`

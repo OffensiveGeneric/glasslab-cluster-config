@@ -10,10 +10,10 @@ Complete these items before the first live Glasslab v2 deployment.
 
 ## Required image preparation
 
-- `workflow-api` uses `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.0`
-- that image is not assumed to be published
-- build it on the provisioner and import it into `node03` before deployment
-- `workflow-api` is pinned to `node03` for this first deployment path
+- `workflow-api` uses `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.1`
+- push the image to private GHCR before deployment
+- create or refresh the `glasslab-ghcr-pull` secret in the `glasslab-v2` namespace before deployment
+- the old `build-import-workflow-api-image.sh` helper is emergency fallback only
 
 ## Expected first-live compromises
 
@@ -26,7 +26,8 @@ Complete these items before the first live Glasslab v2 deployment.
 
 ```bash
 ./scripts/seed-registry.sh
-./scripts/build-import-workflow-api-image.sh
+GHCR_TOKEN="$(gh auth token)" ./scripts/push-workflow-api-image.sh
+GHCR_TOKEN="$(gh auth token)" ./scripts/create-ghcr-pull-secret.sh
 ./scripts/deploy-glasslab-v2.sh
 ./scripts/smoke-test-v2.sh
 ```

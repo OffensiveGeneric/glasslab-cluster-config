@@ -1,48 +1,52 @@
 # Image Distribution
 
-Glasslab v2 currently mixes pull-based upstream images with one manual import path for the custom backend.
+Glasslab v2 currently mixes pull-based upstream images with one private-registry path for the custom backend.
 
 ## Current state
 
-- `workflow-api` uses `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.0`.
-- The repo currently builds that image on `.44` with `scripts/build-import-workflow-api-image.sh`.
-- The script saves a tarball, copies it to `node03`, and imports it into `containerd` with `ctr -n k8s.io images import`.
-- The committed `workflow-api` Deployment is pinned to `node03`.
+- `workflow-api` uses `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.1`.
+- The steady-state path is now:
+  - build and push the image to private GHCR with `scripts/push-workflow-api-image.sh`
+  - create or refresh the in-cluster pull secret with `scripts/create-ghcr-pull-secret.sh`
+  - let Kubernetes pull the image on whichever worker schedules the pod
+- live validation on 2026-03-23 confirmed the deployment could pull and run on `node05` instead of `node03`
+- The old `.44` import helper still exists as an emergency fallback, not the primary deployment path.
 - Postgres, NATS, MinIO, and OpenClaw currently pull their images directly.
 
-## Why node03 pinning exists
+## Why node03 pinning existed
 
-- The custom `workflow-api` image is not yet guaranteed to be pullable by every node.
-- Pinning the Deployment to `node03` keeps the first live path deterministic because the image was imported there directly.
-- This is a valid bring-up compromise, not a steady-state design.
+- The first live path predated any cluster pull secret.
+- Importing directly into `node03` containerd kept the initial bring-up deterministic.
+- That was a valid bring-up compromise, not a steady-state design.
 
-## Risks of the current path
+## Why the private GHCR path is better
 
-- A reschedule away from `node03` will fail unless the image is imported on the new node too.
-- Manual import is easy to forget after image rebuilds.
-- Rollback and disaster recovery depend on operator memory instead of a pullable artifact.
-- The current pattern does not scale to multiple custom v2 workloads.
+- A reschedule no longer depends on node-local image import.
+- Rollback and disaster recovery can use a pullable artifact instead of remembered `ctr import` steps.
+- The same pattern can be reused for other private Glasslab images.
+- The cluster only needs read access to the package, not full GitHub repo access.
 
-## Recommended future strategy
+## Current private-registry strategy
 
-1. Publish custom Glasslab images to a pullable registry.
-2. Pin operator-managed images to explicit tags and then to digests once the release flow is stable.
-3. Remove `node03` pinning after at least one non-`node03` worker can pull and start the image successfully.
-4. Optionally add an internal registry mirror if the lab needs faster pulls or less dependence on public registry availability.
+1. Build and push `workflow-api` to private GHCR.
+2. Maintain a `glasslab-ghcr-pull` Docker registry secret in the `glasslab-v2` namespace.
+3. Pin operator-managed images to explicit tags and then to digests once the release flow is stable.
+4. Keep the old import helper only as a break-glass fallback.
+5. Optionally add an internal registry mirror later if the lab wants faster pulls or less dependence on GitHub availability.
 
 ## Migration path
 
-1. Build the image on `.44` as today.
-2. Push it to the chosen registry instead of stopping at `ctr import`.
-3. Update the Deployment to use the pushed image tag or digest.
-4. Validate that multiple nodes can pull it.
-5. Remove the `nodeSelector` from `kubeadm/glasslab-v2/workflow-api/20-deployment.yaml`.
+1. Log Docker into `ghcr.io` with a GitHub token that can write packages.
+2. Push the image with `scripts/push-workflow-api-image.sh`.
+3. Create or refresh the pull secret with `scripts/create-ghcr-pull-secret.sh`.
+4. Update the Deployment to use the pushed image tag or digest.
+5. Validate that at least one non-`node03` worker can pull and start the image.
 6. Retire the manual import step from the primary runbook.
 
 ## Operator note
 
-Until that migration happens, treat the following as a hard current limitation:
+Current assumptions:
 
-- `workflow-api` is tied to `node03`
-- image rebuilds require a fresh import on `node03`
-- disaster recovery must include the custom image workflow, not just manifests
+- the cluster needs a valid `glasslab-ghcr-pull` secret in `glasslab-v2`
+- image rebuilds should produce a new GHCR tag before rollout
+- the old import helper remains available if GHCR is temporarily unavailable or credentials need recovery

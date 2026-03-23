@@ -29,16 +29,17 @@ Back them up separately. Git and `scripts/snapshot-provisioner-config.sh` do not
 ./scripts/seed-registry.sh
 ```
 
-5. Build the `workflow-api` image on the provisioner and import it into `node03` containerd.
+5. Build and push the `workflow-api` image to private GHCR, then create or refresh the in-cluster pull secret.
 
 ```bash
-./scripts/build-import-workflow-api-image.sh
+GHCR_TOKEN="$(gh auth token)" ./scripts/push-workflow-api-image.sh
+GHCR_TOKEN="$(gh auth token)" ./scripts/create-ghcr-pull-secret.sh
 ```
 
-Current limitation:
-- `workflow-api` is pinned to `node03`
-- the image import must be repeated after each rebuild
-- this is a temporary manual distribution path, not the steady-state release flow
+Current assumptions:
+- the `glasslab-v2` namespace contains a `glasslab-ghcr-pull` Docker registry secret
+- the `workflow-api` Deployment pulls `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.1`
+- the old import helper remains available as a fallback if GHCR is unavailable
 
 6. Apply the initial v2 core manifest tree.
 
@@ -81,4 +82,11 @@ kubectl -n glasslab-v2 describe statefulset/glasslab-postgres
 kubectl -n glasslab-v2 logs deploy/glasslab-workflow-api --tail=200
 ```
 
-10. Do not expose v2 publicly yet. Keep access internal until OpenClaw posture, auth, and policy manifests are in place.
+10. If the rollout fails with image pull errors, verify the private registry secret before falling back to a manual import.
+
+```bash
+kubectl -n glasslab-v2 get secret glasslab-ghcr-pull
+kubectl -n glasslab-v2 describe pod -l app.kubernetes.io/name=glasslab-workflow-api
+```
+
+11. Do not expose v2 publicly yet. Keep access internal until OpenClaw posture, auth, and policy manifests are in place.

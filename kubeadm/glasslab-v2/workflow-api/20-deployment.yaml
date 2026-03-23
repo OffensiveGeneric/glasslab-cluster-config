@@ -13,11 +13,11 @@ spec:
       labels:
         app.kubernetes.io/name: glasslab-workflow-api
     spec:
-      nodeSelector:
-        kubernetes.io/hostname: node03
+      imagePullSecrets:
+        - name: glasslab-ghcr-pull
       containers:
         - name: workflow-api
-          image: ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.0
+          image: ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.1
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:

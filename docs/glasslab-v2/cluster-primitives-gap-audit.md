@@ -12,7 +12,7 @@ This document records the remaining infrastructure primitives Glasslab v2 still 
 - `glasslab-v2` now has explicit PVCs for `Postgres`, `MinIO`, and OpenClaw writable state, all backed by static local PVs on `node01`.
 - `glasslab-v2` now also has an explicit PVC for NATS JetStream data, backed by a static local PV on `node05`.
 - All Glasslab v2 Services are `ClusterIP`. No `Ingress` objects exist in the cluster.
-- `workflow-api` is built on `.44`, imported into `node03` containerd, and pinned to `node03`.
+- `workflow-api` now targets a private GHCR image pull path via the in-cluster `glasslab-ghcr-pull` secret and has been revalidated live on `node05`.
 - Real v2 secret manifests exist only as ignored local files on `.44` under `kubeadm/glasslab-v2/secrets/*.local.yaml`.
 - The repo snapshots tracked provisioner PXE/autoinstall config under `live-config/provisioner/`.
 - Most tracked autoinstall profiles already enforce key-only SSH, but legacy password material still exists in tracked provisioning snapshots.
@@ -35,9 +35,8 @@ This document records the remaining infrastructure primitives Glasslab v2 still 
 
 ### Image distribution
 
-- `workflow-api` depends on a local build/import path on `.44` and is pinned to `node03`.
-- This blocks clean failover or rescheduling to another node.
-- The repo does not yet document a migration from manual `ctr import` to pull-based deployment.
+- `workflow-api` now uses a private GHCR pull path with the in-cluster `glasslab-ghcr-pull` secret and no longer depends on node-local import or `node03` pinning.
+- `workflow-api` no longer depends on `node03`-local image import and can reschedule onto other workers that can reach GHCR.
 - OpenClaw currently uses `ghcr.io/openclaw/openclaw:latest`; that is acceptable for validation, but not as a long-term pinning strategy.
 
 ### Secrets durability and disaster recovery
@@ -56,7 +55,7 @@ This document records the remaining infrastructure primitives Glasslab v2 still 
 
 1. Keep the cluster-wide default `StorageClass` unset until a shared storage backend is deliberately chosen and documented.
 2. Keep backend services `ClusterIP` only and standardize internal-only access rules in repo docs before adding any ingress controller.
-3. Publish custom v2 images to a pullable registry or internal registry mirror, then remove the `node03` pin from `workflow-api`.
+3. Keep the private GHCR pull path healthy and reuse it for the next custom Glasslab images so `.44`-local imports stop being the default pattern.
 4. Keep the encrypted off-host backup procedure for `.44`-local secret manifests as a required deploy dependency.
 5. Apply the same password-material cleanup on the live provisioner, then snapshot `.44` back into `live-config/provisioner`.
 
