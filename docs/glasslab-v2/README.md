@@ -11,7 +11,7 @@ Start here:
 - `workflow-registry.md`: approved workflow family format
 - `services.md`: canonical run and artifact contract
 - `research-pipeline-target.md`: the intended end-state product shape for Glasslab research workflows
-- `no-arg-vs-argumented-tools.md`: why the current safe operator path is mostly no-arg tools and what argumented tools would need to prove
+- `no-arg-vs-argumented-tools.md`: why the current safe operator path is mostly no-arg tools, what argumented tools would need to prove, and the current safety rules for repo-managed intake templates
 - `next-no-arg-operator-actions.md`: the next operator actions worth adding while the safe path remains mostly no-arg
 - `bounded-agent-architecture.md`: how to move toward multi-agent workflows without depending on broad live tool orchestration
 - `stage-agent-pipeline.md`: specialized backend agent roles, handoffs, and why OpenClaw should stay at the edge

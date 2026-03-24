@@ -152,6 +152,26 @@ For now:
 - promote argumented tools only after they pass repeated harness validation
 - prefer backend-owned templates over model-synthesized execution payloads
 
+## Safe No-Arg Intake Template Rules
+
+Repo-managed intake templates are only worth exporting when they stay narrow and predictable.
+
+For Glasslab v2, a safe no-arg intake template should:
+
+- map deterministically onto one intended approved workflow family
+- carry only repo-reviewed references and notes, not free-form operator-supplied arguments
+- be allowed to leave execution-critical fields unresolved when backend review is expected later
+- stop at the intake boundary instead of pretending to approve execution automatically
+- keep Tier 3 workflows review-gated even when the template itself is repo-managed
+
+The current template set reflects that rule:
+
+- `workflow_api_start_paper_intake`: bounded Titanic benchmark intake
+- `workflow_api_start_literature_intake`: bounded literature-to-experiment intake
+- `workflow_api_start_replication_intake`: bounded replication-lite intake
+
+These templates broaden the operator path without asking the model to invent control payloads.
+
 ## Decision Test
 
 When a new idea comes up, ask:
