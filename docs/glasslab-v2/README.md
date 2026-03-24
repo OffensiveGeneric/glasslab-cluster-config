@@ -29,4 +29,5 @@ Start here:
 - `internal-service-exposure.md`: internal-only service access model
 - `image-distribution.md`: current image import path and registry migration plan
 - `secrets-and-dr.md`: local secret handling and disaster recovery notes
+- `runbooks/backup-restore-local-pv-services.md`: validated first backup/restore path for the local-PV-backed v2 services
 - `runbooks/`: operational steps once manifests and services land

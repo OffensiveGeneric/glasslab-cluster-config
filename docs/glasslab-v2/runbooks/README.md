@@ -6,6 +6,7 @@ Key runbooks:
 
 - `deploy-v2.md`
 - `deploy-openclaw.md`
+- `backup-restore-local-pv-services.md`
 - `rollback-v2.md`
 - `restore-v2-secrets.md`
 - `purge-temporary-provisioning-debug.md`
