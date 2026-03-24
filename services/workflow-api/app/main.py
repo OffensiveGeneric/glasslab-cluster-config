@@ -18,15 +18,18 @@ from .registry import WorkflowRegistry
 from .schemas import (
     DesignDraftRecord,
     DesignDraftReviewRequest,
+    DigestScheduleCreateRequest,
     IntakeCreateRequest,
     IntakeRecord,
     InterpretationRecord,
     LogEntry,
+    ApprovedRerunScheduleCreateRequest,
     ReplicabilityAssessmentRecord,
     RunArtifactsResponse,
     RunCreateRequest,
     RunLogsResponse,
     RunRecord,
+    ScheduledOperationRecord,
     WorkflowFamilySummary,
 )
 from .validation import validate_run_request
@@ -358,6 +361,78 @@ def review_design_draft(
             'unresolved_inputs': unresolved_inputs,
             'design_notes': design_notes,
             'status': status_value,
+        }
+    )
+
+
+def build_digest_schedule(request: DigestScheduleCreateRequest, settings: Settings) -> ScheduledOperationRecord:
+    now = datetime.now(timezone.utc)
+    return ScheduledOperationRecord(
+        schedule_id=uuid4().hex,
+        created_at=now,
+        updated_at=now,
+        status='active',
+        operation_type='digest',
+        approval_tier='tier-1-read-only',
+        owner=request.owner or settings.default_submitted_by,
+        cron_expr=request.cron_expr.strip(),
+        scope_filter=request.scope_filter,
+        digest_kind=request.digest_kind.strip(),
+    )
+
+
+def build_approved_rerun_schedule(
+    request: ApprovedRerunScheduleCreateRequest,
+    run: RunRecord,
+    settings: Settings,
+) -> ScheduledOperationRecord:
+    if run.manifest.approval_tier != 'tier-2-approved-execution':
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail='latest run is not eligible for approved rerun scheduling',
+        )
+    if run.status.status != 'succeeded':
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail='latest run must be succeeded before creating an approved rerun schedule',
+        )
+
+    dataset_uri = None
+    for candidate in ('dataset_uri', 'train_uri'):
+        value = run.manifest.inputs.get(candidate)
+        if isinstance(value, str) and value.strip():
+            dataset_uri = value.strip()
+            break
+
+    now = datetime.now(timezone.utc)
+    return ScheduledOperationRecord(
+        schedule_id=uuid4().hex,
+        created_at=now,
+        updated_at=now,
+        status='active',
+        operation_type='approved-rerun',
+        approval_tier=run.manifest.approval_tier,
+        owner=request.owner or settings.default_submitted_by,
+        cron_expr=request.cron_expr.strip(),
+        scope_filter={'workflow_id': run.workflow_id, 'source_run_id': run.run_id},
+        source_design_id=run.source_design_id,
+        source_run_id=run.run_id,
+        workflow_id=run.workflow_id,
+        allowed_dataset_uri=dataset_uri,
+        allowed_model_ids=list(run.manifest.requested_models),
+        allowed_runner_image=run.manifest.runner_image,
+        resource_profile=run.manifest.resource_profile,
+    )
+
+
+def disable_schedule(record: ScheduledOperationRecord) -> ScheduledOperationRecord:
+    now = datetime.now(timezone.utc)
+    return record.model_copy(
+        update={
+            'status': 'disabled',
+            'updated_at': now,
+            'last_result_status': record.last_result_status or 'disabled',
+            'last_result_detail': record.last_result_detail or 'Disabled by operator action.',
         }
     )
 
@@ -699,6 +774,50 @@ def create_app(
             )
             for entry in registry.list_workflows()
         ]
+
+    @app.post('/digest-schedules', response_model=ScheduledOperationRecord, status_code=status.HTTP_201_CREATED)
+    def create_digest_schedule(request: DigestScheduleCreateRequest) -> ScheduledOperationRecord:
+        record = build_digest_schedule(request, settings)
+        store.save_schedule(record)
+        return record
+
+    @app.get('/digest-schedules', response_model=list[ScheduledOperationRecord])
+    def list_digest_schedules() -> list[ScheduledOperationRecord]:
+        return store.list_schedules(operation_type='digest')
+
+    @app.post('/digest-schedules/{schedule_id}/disable', response_model=ScheduledOperationRecord)
+    def disable_digest_schedule(schedule_id: str) -> ScheduledOperationRecord:
+        record = store.get_schedule(schedule_id)
+        if record is None or record.operation_type != 'digest':
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='digest schedule not found')
+        updated = disable_schedule(record)
+        store.save_schedule(updated)
+        return updated
+
+    @app.post('/approved-rerun-schedules/from-latest-run', response_model=ScheduledOperationRecord, status_code=status.HTTP_201_CREATED)
+    def create_approved_rerun_schedule_from_latest_run(
+        request: ApprovedRerunScheduleCreateRequest,
+    ) -> ScheduledOperationRecord:
+        run = store.get_latest_run()
+        if run is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='run not found')
+        resolved_run = run.model_copy(update={'status': resolve_run_status(run, settings, submitter)})
+        record = build_approved_rerun_schedule(request, resolved_run, settings)
+        store.save_schedule(record)
+        return record
+
+    @app.get('/approved-rerun-schedules', response_model=list[ScheduledOperationRecord])
+    def list_approved_rerun_schedules() -> list[ScheduledOperationRecord]:
+        return store.list_schedules(operation_type='approved-rerun')
+
+    @app.post('/approved-rerun-schedules/{schedule_id}/disable', response_model=ScheduledOperationRecord)
+    def disable_approved_rerun_schedule(schedule_id: str) -> ScheduledOperationRecord:
+        record = store.get_schedule(schedule_id)
+        if record is None or record.operation_type != 'approved-rerun':
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='approved rerun schedule not found')
+        updated = disable_schedule(record)
+        store.save_schedule(updated)
+        return updated
 
     @app.post('/runs', response_model=RunRecord, status_code=status.HTTP_201_CREATED)
     def create_run(request: RunCreateRequest) -> RunRecord:

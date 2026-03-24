@@ -140,6 +140,47 @@ class DesignDraftReviewRequest(BaseModel):
         return deduped
 
 
+class DigestScheduleCreateRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    cron_expr: str = Field(min_length=5)
+    digest_kind: str = Field(min_length=3)
+    scope_filter: dict[str, Any] = Field(default_factory=dict)
+    owner: str | None = None
+
+
+class ApprovedRerunScheduleCreateRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    cron_expr: str = Field(min_length=5)
+    owner: str | None = None
+
+
+class ScheduledOperationRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    schedule_id: str
+    created_at: datetime
+    updated_at: datetime
+    status: str
+    operation_type: str
+    approval_tier: str
+    owner: str
+    cron_expr: str
+    scope_filter: dict[str, Any] = Field(default_factory=dict)
+    digest_kind: str | None = None
+    source_design_id: str | None = None
+    source_run_id: str | None = None
+    workflow_id: str | None = None
+    allowed_dataset_uri: str | None = None
+    allowed_model_ids: list[str] = Field(default_factory=list)
+    allowed_runner_image: str | None = None
+    resource_profile: str | None = None
+    last_execution_at: datetime | None = None
+    last_result_status: str | None = None
+    last_result_detail: str | None = None
+
+
 class ValidationIssue(BaseModel):
     model_config = ConfigDict(extra='forbid')
 

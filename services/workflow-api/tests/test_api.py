@@ -338,6 +338,114 @@ def test_create_design_draft_requires_intake() -> None:
     assert create_design.json()['detail'] == 'intake not found'
 
 
+def test_digest_schedule_lifecycle() -> None:
+    client = build_client()
+
+    created = client.post(
+        '/digest-schedules',
+        json={
+            'cron_expr': '0 6 * * *',
+            'digest_kind': 'daily-run-summary',
+            'scope_filter': {'workflow_id': 'generic-tabular-benchmark'},
+        },
+    )
+    assert created.status_code == 201
+    payload = created.json()
+    schedule_id = payload['schedule_id']
+    assert payload['operation_type'] == 'digest'
+    assert payload['approval_tier'] == 'tier-1-read-only'
+    assert payload['status'] == 'active'
+
+    listed = client.get('/digest-schedules')
+    assert listed.status_code == 200
+    assert [item['schedule_id'] for item in listed.json()] == [schedule_id]
+
+    disabled = client.post(f'/digest-schedules/{schedule_id}/disable')
+    assert disabled.status_code == 200
+    assert disabled.json()['status'] == 'disabled'
+
+
+def test_create_approved_rerun_schedule_from_latest_run() -> None:
+    client = build_client()
+
+    create_run = client.post(
+        '/runs',
+        json={
+            'workflow_id': 'generic-tabular-benchmark',
+            'objective': 'Create a reviewed benchmark run suitable for scheduled reruns.',
+            'inputs': {
+                'dataset_name': 'titanic',
+                'train_uri': 's3://datasets/titanic/train.csv',
+                'test_uri': 's3://datasets/titanic/test.csv',
+                'target_column': 'Survived',
+            },
+            'models': ['logistic_regression', 'random_forest'],
+            'resource_profile': 'cpu-small',
+        },
+    )
+    assert create_run.status_code == 201
+    run_id = create_run.json()['run_id']
+
+    store = client.app.state.store
+    record = store.get_run(run_id)
+    succeeded_record = record.model_copy(update={'status': record.status.model_copy(update={'status': 'succeeded'})})
+    store.save_run(succeeded_record)
+
+    created = client.post(
+        '/approved-rerun-schedules/from-latest-run',
+        json={'cron_expr': '30 2 * * 1'},
+    )
+    assert created.status_code == 201
+    payload = created.json()
+    schedule_id = payload['schedule_id']
+    assert payload['operation_type'] == 'approved-rerun'
+    assert payload['workflow_id'] == 'generic-tabular-benchmark'
+    assert payload['source_run_id'] == run_id
+    assert payload['allowed_dataset_uri'] == 's3://datasets/titanic/train.csv'
+    assert payload['allowed_model_ids'] == ['logistic_regression', 'random_forest']
+
+    listed = client.get('/approved-rerun-schedules')
+    assert listed.status_code == 200
+    assert [item['schedule_id'] for item in listed.json()] == [schedule_id]
+
+    disabled = client.post(f'/approved-rerun-schedules/{schedule_id}/disable')
+    assert disabled.status_code == 200
+    assert disabled.json()['status'] == 'disabled'
+
+
+def test_approved_rerun_schedule_requires_succeeded_tier_two_run() -> None:
+    client = build_client()
+
+    created = client.post(
+        '/runs',
+        json={
+            'workflow_id': 'literature-to-experiment',
+            'objective': 'Create a run and then force it into a failed state for schedule rejection testing.',
+            'inputs': {
+                'paper_id': 'https://example.org/paper-notes',
+                'source_notes': 'Focus on the reviewed method and evaluation section.',
+                'dataset_uri': 's3://datasets/paper-derived/train.csv',
+            },
+            'models': ['deterministic-template'],
+            'resource_profile': 'cpu-medium',
+        },
+    )
+    assert created.status_code == 201
+    run_id = created.json()['run_id']
+
+    store = client.app.state.store
+    record = store.get_run(run_id)
+    failed_record = record.model_copy(update={'status': record.status.model_copy(update={'status': 'failed'})})
+    store.save_run(failed_record)
+
+    rerun = client.post(
+        '/approved-rerun-schedules/from-latest-run',
+        json={'cron_expr': '15 4 * * *'},
+    )
+    assert rerun.status_code == 409
+    assert rerun.json()['detail'] == 'latest run must be succeeded before creating an approved rerun schedule'
+
+
 def test_create_run_from_latest_ready_design_draft() -> None:
     client = build_client()
 

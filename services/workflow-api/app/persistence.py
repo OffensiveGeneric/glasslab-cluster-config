@@ -5,7 +5,15 @@ from threading import Lock
 
 from services.common.schemas import ArtifactsIndex
 
-from .schemas import DesignDraftRecord, IntakeRecord, InterpretationRecord, LogEntry, ReplicabilityAssessmentRecord, RunRecord
+from .schemas import (
+    DesignDraftRecord,
+    IntakeRecord,
+    InterpretationRecord,
+    LogEntry,
+    ReplicabilityAssessmentRecord,
+    RunRecord,
+    ScheduledOperationRecord,
+)
 
 
 class RunStore(ABC):
@@ -66,6 +74,22 @@ class RunStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def get_latest_run(self) -> RunRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def save_schedule(self, record: ScheduledOperationRecord) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_schedule(self, schedule_id: str) -> ScheduledOperationRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_schedules(self, operation_type: str | None = None) -> list[ScheduledOperationRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
     def save_artifacts(self, run_id: str, artifacts: ArtifactsIndex) -> None:
         raise NotImplementedError
 
@@ -93,6 +117,8 @@ class InMemoryRunStore(RunStore):
         self._design_drafts: dict[str, DesignDraftRecord] = {}
         self._latest_design_draft_id: str | None = None
         self._runs: dict[str, RunRecord] = {}
+        self._latest_run_id: str | None = None
+        self._schedules: dict[str, ScheduledOperationRecord] = {}
         self._artifacts: dict[str, ArtifactsIndex] = {}
         self._logs: dict[str, list[LogEntry]] = {}
         self._lock = Lock()
@@ -160,10 +186,32 @@ class InMemoryRunStore(RunStore):
     def save_run(self, record: RunRecord) -> None:
         with self._lock:
             self._runs[record.run_id] = record
+            self._latest_run_id = record.run_id
 
     def get_run(self, run_id: str) -> RunRecord | None:
         with self._lock:
             return self._runs.get(run_id)
+
+    def get_latest_run(self) -> RunRecord | None:
+        with self._lock:
+            if self._latest_run_id is None:
+                return None
+            return self._runs.get(self._latest_run_id)
+
+    def save_schedule(self, record: ScheduledOperationRecord) -> None:
+        with self._lock:
+            self._schedules[record.schedule_id] = record
+
+    def get_schedule(self, schedule_id: str) -> ScheduledOperationRecord | None:
+        with self._lock:
+            return self._schedules.get(schedule_id)
+
+    def list_schedules(self, operation_type: str | None = None) -> list[ScheduledOperationRecord]:
+        with self._lock:
+            records = list(self._schedules.values())
+        if operation_type is not None:
+            records = [record for record in records if record.operation_type == operation_type]
+        return sorted(records, key=lambda record: record.created_at)
 
     def save_artifacts(self, run_id: str, artifacts: ArtifactsIndex) -> None:
         with self._lock:
