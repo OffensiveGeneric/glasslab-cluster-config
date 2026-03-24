@@ -71,6 +71,49 @@ def test_get_latest_intake_missing() -> None:
     assert latest.json()['detail'] == 'intake not found'
 
 
+def test_create_and_fetch_interpretation_from_latest_intake() -> None:
+    client = build_client()
+
+    create_intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Read this paper intake and determine whether the approved Titanic benchmark path is a good fit.',
+            'source_refs': ['https://example.org/titanic-paper'],
+            'notes': [
+                'The paper compares a baseline on Titanic.',
+                'Focus on the reported metrics and dataset assumptions.',
+            ],
+        },
+    )
+    assert create_intake.status_code == 201
+    intake_id = create_intake.json()['intake_id']
+
+    create_interpretation = client.post('/interpretations/from-latest-intake')
+    assert create_interpretation.status_code == 201
+    payload = create_interpretation.json()
+    interpretation_id = payload['interpretation_id']
+    assert payload['intake_id'] == intake_id
+    assert 'generic-tabular-benchmark' in payload['candidate_workflow_families']
+    assert 'titanic' in payload['dataset_hints']
+    assert payload['status'] in {'ready_for_assessment', 'needs_review'}
+
+    latest = client.get('/interpretations/latest')
+    assert latest.status_code == 200
+    assert latest.json()['interpretation_id'] == interpretation_id
+
+    fetched = client.get(f'/interpretations/{interpretation_id}')
+    assert fetched.status_code == 200
+    assert fetched.json()['extracted_claims'][0].startswith('The paper compares')
+
+
+def test_create_interpretation_requires_intake() -> None:
+    client = build_client()
+
+    create_interpretation = client.post('/interpretations/from-latest-intake')
+    assert create_interpretation.status_code == 404
+    assert create_interpretation.json()['detail'] == 'intake not found'
+
+
 def test_create_and_fetch_design_draft_from_latest_titanic_intake() -> None:
     client = build_client()
 

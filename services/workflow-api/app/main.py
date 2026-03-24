@@ -19,6 +19,7 @@ from .schemas import (
     DesignDraftRecord,
     IntakeCreateRequest,
     IntakeRecord,
+    InterpretationRecord,
     LogEntry,
     RunArtifactsResponse,
     RunCreateRequest,
@@ -72,6 +73,84 @@ def infer_workflow_candidates(raw_request: str) -> list[str]:
     if not matches:
         matches.append('literature-to-experiment')
     return list(dict.fromkeys(matches))
+
+
+def infer_dataset_hints(intake: IntakeRecord) -> list[str]:
+    lowered = ' '.join([intake.raw_request, intake.normalized_summary, *intake.notes, *intake.source_refs]).lower()
+    hints: list[str] = []
+    if 'titanic' in lowered:
+        hints.append('titanic')
+    if 'csv' in lowered:
+        hints.append('csv-backed dataset')
+    if 'tabular' in lowered:
+        hints.append('tabular dataset')
+    return list(dict.fromkeys(hints))
+
+
+def infer_evaluation_targets(intake: IntakeRecord) -> list[str]:
+    lowered = ' '.join([intake.raw_request, intake.normalized_summary, *intake.notes]).lower()
+    targets: list[str] = []
+    if any(token in lowered for token in ('baseline', 'benchmark', 'compare')):
+        targets.append('baseline comparison')
+    if any(token in lowered for token in ('accuracy', 'auc', 'metric')):
+        targets.append('reported metrics')
+    if 'survived' in lowered:
+        targets.append('Survived prediction target')
+    if not targets and 'paper' in lowered:
+        targets.append('paper-claimed evaluation')
+    return list(dict.fromkeys(targets))
+
+
+def infer_extracted_claims(intake: IntakeRecord) -> list[str]:
+    claims: list[str] = []
+    for item in intake.notes:
+        cleaned = ' '.join(item.split())
+        if cleaned:
+            claims.append(cleaned[:240])
+    if not claims:
+        claims.append(intake.normalized_summary[:240])
+    return claims[:3]
+
+
+def infer_unresolved_questions(intake: IntakeRecord, candidates: list[str], dataset_hints: list[str], evaluation_targets: list[str]) -> list[str]:
+    unresolved: list[str] = []
+    if not candidates:
+        unresolved.append('Which approved workflow family should this request map to?')
+    if not dataset_hints:
+        unresolved.append('Which concrete dataset should the backend use?')
+    if not evaluation_targets:
+        unresolved.append('Which evaluation target or metric should be treated as canonical?')
+    if intake.source_type == 'paper-link' and not intake.source_refs:
+        unresolved.append('Which source reference should be treated as canonical for this paper intake?')
+    return unresolved
+
+
+def build_interpretation_record(intake: IntakeRecord) -> InterpretationRecord:
+    now = datetime.now(timezone.utc)
+    candidate_workflows = list(dict.fromkeys([workflow for workflow in intake.workflow_family_candidates if workflow]))
+    dataset_hints = infer_dataset_hints(intake)
+    evaluation_targets = infer_evaluation_targets(intake)
+    extracted_claims = infer_extracted_claims(intake)
+    unresolved_questions = infer_unresolved_questions(intake, candidate_workflows, dataset_hints, evaluation_targets)
+    return InterpretationRecord(
+        interpretation_id=uuid4().hex,
+        intake_id=intake.intake_id,
+        created_at=now,
+        updated_at=now,
+        status='ready_for_assessment' if not unresolved_questions else 'needs_review',
+        source_type=intake.source_type,
+        normalized_summary=intake.normalized_summary,
+        extracted_method_summary=(
+            f"Interpreted intake as {', '.join(candidate_workflows) or 'unmapped research work'} "
+            f"with source type {intake.source_type}."
+        ),
+        candidate_workflow_families=candidate_workflows,
+        dataset_hints=dataset_hints,
+        evaluation_targets=evaluation_targets,
+        extracted_claims=extracted_claims,
+        unresolved_questions=unresolved_questions,
+        submitted_by=intake.submitted_by,
+    )
 
 
 def choose_workflow_for_intake(intake: IntakeRecord, registry: WorkflowRegistry) -> WorkflowRegistryEntry | None:
@@ -373,6 +452,29 @@ def create_app(
         record = store.get_intake(intake_id)
         if record is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='intake not found')
+        return record
+
+    @app.post('/interpretations/from-latest-intake', response_model=InterpretationRecord, status_code=status.HTTP_201_CREATED)
+    def create_interpretation_from_latest_intake() -> InterpretationRecord:
+        intake = store.get_latest_intake()
+        if intake is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='intake not found')
+        record = build_interpretation_record(intake)
+        store.save_interpretation(record)
+        return record
+
+    @app.get('/interpretations/latest', response_model=InterpretationRecord)
+    def get_latest_interpretation() -> InterpretationRecord:
+        record = store.get_latest_interpretation()
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='interpretation not found')
+        return record
+
+    @app.get('/interpretations/{interpretation_id}', response_model=InterpretationRecord)
+    def get_interpretation(interpretation_id: str) -> InterpretationRecord:
+        record = store.get_interpretation(interpretation_id)
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='interpretation not found')
         return record
 
     @app.post('/design-drafts/from-latest-intake', response_model=DesignDraftRecord, status_code=status.HTTP_201_CREATED)

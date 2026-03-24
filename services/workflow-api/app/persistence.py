@@ -5,7 +5,7 @@ from threading import Lock
 
 from services.common.schemas import ArtifactsIndex
 
-from .schemas import DesignDraftRecord, IntakeRecord, LogEntry, RunRecord
+from .schemas import DesignDraftRecord, IntakeRecord, InterpretationRecord, LogEntry, RunRecord
 
 
 class RunStore(ABC):
@@ -31,6 +31,18 @@ class RunStore(ABC):
 
     @abstractmethod
     def get_latest_design_draft(self) -> DesignDraftRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def save_interpretation(self, record: InterpretationRecord) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_interpretation(self, interpretation_id: str) -> InterpretationRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_latest_interpretation(self) -> InterpretationRecord | None:
         raise NotImplementedError
 
     @abstractmethod
@@ -62,6 +74,8 @@ class InMemoryRunStore(RunStore):
     def __init__(self) -> None:
         self._intakes: dict[str, IntakeRecord] = {}
         self._latest_intake_id: str | None = None
+        self._interpretations: dict[str, InterpretationRecord] = {}
+        self._latest_interpretation_id: str | None = None
         self._design_drafts: dict[str, DesignDraftRecord] = {}
         self._latest_design_draft_id: str | None = None
         self._runs: dict[str, RunRecord] = {}
@@ -83,6 +97,21 @@ class InMemoryRunStore(RunStore):
             if self._latest_intake_id is None:
                 return None
             return self._intakes.get(self._latest_intake_id)
+
+    def save_interpretation(self, record: InterpretationRecord) -> None:
+        with self._lock:
+            self._interpretations[record.interpretation_id] = record
+            self._latest_interpretation_id = record.interpretation_id
+
+    def get_interpretation(self, interpretation_id: str) -> InterpretationRecord | None:
+        with self._lock:
+            return self._interpretations.get(interpretation_id)
+
+    def get_latest_interpretation(self) -> InterpretationRecord | None:
+        with self._lock:
+            if self._latest_interpretation_id is None:
+                return None
+            return self._interpretations.get(self._latest_interpretation_id)
 
     def save_design_draft(self, record: DesignDraftRecord) -> None:
         with self._lock:

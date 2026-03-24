@@ -64,6 +64,25 @@ class IntakeRecord(BaseModel):
     submitted_by: str
 
 
+class InterpretationRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    interpretation_id: str
+    intake_id: str
+    created_at: datetime
+    updated_at: datetime
+    status: str
+    source_type: str
+    normalized_summary: str
+    extracted_method_summary: str
+    candidate_workflow_families: list[str] = Field(default_factory=list)
+    dataset_hints: list[str] = Field(default_factory=list)
+    evaluation_targets: list[str] = Field(default_factory=list)
+    extracted_claims: list[str] = Field(default_factory=list)
+    unresolved_questions: list[str] = Field(default_factory=list)
+    submitted_by: str
+
+
 class DesignDraftRecord(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
