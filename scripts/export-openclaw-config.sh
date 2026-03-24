@@ -191,6 +191,26 @@ for key in ("raw_request",):
             f"workflow-api paper_intake_request is missing required key {key!r}"
         )
 
+literature_intake_request = workflow_binding.get("literature_intake_request")
+if not isinstance(literature_intake_request, dict):
+    raise SystemExit("workflow-api binding must define literature_intake_request")
+
+for key in ("raw_request",):
+    if key not in literature_intake_request:
+        raise SystemExit(
+            f"workflow-api literature_intake_request is missing required key {key!r}"
+        )
+
+replication_intake_request = workflow_binding.get("replication_intake_request")
+if not isinstance(replication_intake_request, dict):
+    raise SystemExit("workflow-api binding must define replication_intake_request")
+
+for key in ("raw_request",):
+    if key not in replication_intake_request:
+        raise SystemExit(
+            f"workflow-api replication_intake_request is missing required key {key!r}"
+        )
+
 validation_run_request = workflow_binding.get("validation_run_request")
 if not isinstance(validation_run_request, dict):
     raise SystemExit("workflow-api binding must define validation_run_request")
@@ -259,6 +279,8 @@ model_ref = f"glasslab-vllm/{default_model}"
 allowed_runtime_tools = {
     "web_fetch",
     "workflow_api_start_paper_intake",
+    "workflow_api_start_literature_intake",
+    "workflow_api_start_replication_intake",
     "workflow_api_get_last_intake",
     "workflow_api_create_design_draft_from_last_intake",
     "workflow_api_get_last_design_draft",
@@ -362,6 +384,8 @@ runtime_config = {
                 "config": {
                     "baseUrl": workflow_binding["base_url"],
                     "paperIntakeRequest": paper_intake_request,
+                    "literatureIntakeRequest": literature_intake_request,
+                    "replicationIntakeRequest": replication_intake_request,
                     "validationRunRequest": validation_run_request,
                     "knownWorkflowIds": known_workflow_ids,
                 },

@@ -21,6 +21,16 @@
         "additionalProperties": true,
         "description": "Repo-managed POST /intakes payload used for the first intake-to-design operator path."
       },
+      "literatureIntakeRequest": {
+        "type": "object",
+        "additionalProperties": true,
+        "description": "Repo-managed POST /intakes payload used for the literature-to-experiment no-arg path."
+      },
+      "replicationIntakeRequest": {
+        "type": "object",
+        "additionalProperties": true,
+        "description": "Repo-managed POST /intakes payload used for the replication-lite no-arg path."
+      },
       "knownWorkflowIds": {
         "type": "array",
         "items": {
@@ -37,6 +47,13 @@
         "default": 10
       }
     },
-    "required": ["baseUrl", "validationRunRequest", "paperIntakeRequest", "knownWorkflowIds"]
+    "required": [
+      "baseUrl",
+      "validationRunRequest",
+      "paperIntakeRequest",
+      "literatureIntakeRequest",
+      "replicationIntakeRequest",
+      "knownWorkflowIds"
+    ]
   }
 }

@@ -20,6 +20,25 @@ paper_intake_request:
     - Use the approved Titanic dataset path for the first intake-to-design validation.
     - Keep the workflow family inside the approved Glasslab registry.
   submitted_by: openclaw-operator
+literature_intake_request:
+  raw_request: Start a bounded literature-to-experiment intake for an approved paper-derived experiment path.
+  source_refs:
+    - https://example.org/approved-paper-source
+  source_type: paper-link
+  notes:
+    - Keep the request mapped to the approved literature-to-experiment workflow family.
+    - Expect dataset selection to remain unresolved until backend review resolves it explicitly.
+  submitted_by: openclaw-operator
+replication_intake_request:
+  raw_request: Start a bounded replication intake for an approved replication-lite path.
+  source_refs:
+    - https://example.org/approved-paper-source
+    - https://github.com/example/approved-replication
+  source_type: paper-link
+  notes:
+    - Keep the request mapped to the approved replication-lite workflow family.
+    - Expect repository, dataset, and evaluation inputs to require explicit review before execution.
+  submitted_by: openclaw-operator
 validation_run_request:
   workflow_id: generic-tabular-benchmark
   objective: Benchmark logistic regression on the seeded Titanic fixture dataset.

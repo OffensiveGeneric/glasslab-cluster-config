@@ -41,6 +41,26 @@ function resolvePaperIntakeRequest(api: any): Record<string, unknown> {
   return value;
 }
 
+function resolveLiteratureIntakeRequest(api: any): Record<string, unknown> {
+  const value = api?.pluginConfig?.literatureIntakeRequest;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(
+      "plugins.entries.workflow-api-tool.config.literatureIntakeRequest is required"
+    );
+  }
+  return value;
+}
+
+function resolveReplicationIntakeRequest(api: any): Record<string, unknown> {
+  const value = api?.pluginConfig?.replicationIntakeRequest;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(
+      "plugins.entries.workflow-api-tool.config.replicationIntakeRequest is required"
+    );
+  }
+  return value;
+}
+
 function resolveValidationRunRequest(api: any): Record<string, unknown> {
   const value = api?.pluginConfig?.validationRunRequest;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -219,6 +239,88 @@ const plugin = {
           } catch (error) {
             await appendAuditEvent({
               tool: "workflow_api_start_paper_intake",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
+        name: "workflow_api_start_literature_intake",
+        description: "Create the repo-managed literature-to-experiment intake record.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          const requestBody = resolveLiteratureIntakeRequest(api);
+          try {
+            const { endpoint, payload } = await requestJson(api, "/intakes", {
+              method: "POST",
+              body: JSON.stringify(requestBody)
+            });
+            await appendAuditEvent({
+              tool: "workflow_api_start_literature_intake",
+              status: "ok",
+              endpoint,
+              intake_id: payload?.intake_id ?? null,
+              source_type: payload?.source_type ?? null
+            });
+            return buildJsonResult({
+              endpoint,
+              request: requestBody,
+              intake: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_start_literature_intake",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
+        name: "workflow_api_start_replication_intake",
+        description: "Create the repo-managed replication-lite intake record.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          const requestBody = resolveReplicationIntakeRequest(api);
+          try {
+            const { endpoint, payload } = await requestJson(api, "/intakes", {
+              method: "POST",
+              body: JSON.stringify(requestBody)
+            });
+            await appendAuditEvent({
+              tool: "workflow_api_start_replication_intake",
+              status: "ok",
+              endpoint,
+              intake_id: payload?.intake_id ?? null,
+              source_type: payload?.source_type ?? null
+            });
+            return buildJsonResult({
+              endpoint,
+              request: requestBody,
+              intake: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_start_replication_intake",
               status: "error",
               error: error instanceof Error ? error.message : String(error)
             });

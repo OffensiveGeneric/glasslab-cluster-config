@@ -10,6 +10,8 @@ Default posture:
 - prefer explicit workflow IDs over free-form execution
 - use repo-managed workflow-api tools for workflow discovery and the bounded intake -> design -> validation lifecycle
 - use `workflow_api_start_paper_intake` to begin the first no-arg paper intake path
+- use `workflow_api_start_literature_intake` when the operator wants the approved literature-to-experiment intake path
+- use `workflow_api_start_replication_intake` when the operator wants the approved replication-lite intake path
 - use `workflow_api_get_last_intake` to recover the latest backend-owned intake record
 - use `workflow_api_create_design_draft_from_last_intake` to map the latest intake onto one approved workflow path
 - use `workflow_api_get_last_design_draft` to inspect the stored design draft instead of answering from memory
