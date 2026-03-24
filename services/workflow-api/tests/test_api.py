@@ -233,6 +233,78 @@ def test_create_design_draft_from_latest_assessment_requires_assessment() -> Non
     assert create_design.json()['detail'] == 'replicability assessment not found'
 
 
+def test_review_latest_design_draft_resolves_literature_inputs() -> None:
+    client = build_client()
+
+    intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Turn this paper into a bounded experiment design based on the linked notes.',
+            'source_refs': ['https://example.org/paper-notes'],
+            'notes': ['Focus on the method section and reported metrics.'],
+        },
+    )
+    assert intake.status_code == 201
+
+    design = client.post('/design-drafts/from-latest-intake')
+    assert design.status_code == 201
+    payload = design.json()
+    assert payload['workflow_id'] == 'literature-to-experiment'
+    assert payload['status'] == 'needs_review'
+    assert payload['unresolved_inputs'] == ['dataset_uri']
+
+    reviewed = client.post(
+        '/design-drafts/latest/review',
+        json={
+            'resolved_inputs': {'dataset_uri': 's3://datasets/paper-derived/train.csv'},
+            'review_notes': ['Dataset location was approved during backend review.'],
+        },
+    )
+    assert reviewed.status_code == 200
+    reviewed_payload = reviewed.json()
+    assert reviewed_payload['status'] == 'ready_for_run'
+    assert reviewed_payload['declared_inputs']['dataset_uri'] == 's3://datasets/paper-derived/train.csv'
+    assert reviewed_payload['unresolved_inputs'] == []
+    assert 'Dataset location was approved during backend review.' in reviewed_payload['design_notes']
+
+
+def test_review_existing_replication_design_stays_blocked_by_approval_tier() -> None:
+    client = build_client()
+
+    intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Replicate this published result from the linked repository and reported evaluation target.',
+            'source_refs': ['https://example.org/paper', 'https://github.com/example/repo'],
+            'notes': ['Re-run the published baseline exactly once with the approved environment.'],
+        },
+    )
+    assert intake.status_code == 201
+
+    design = client.post('/design-drafts/from-latest-intake')
+    assert design.status_code == 201
+    payload = design.json()
+    assert payload['workflow_id'] == 'replication-lite'
+    assert payload['status'] == 'needs_review'
+
+    reviewed = client.post(
+        f"/design-drafts/{payload['design_id']}/review",
+        json={
+            'resolved_inputs': {
+                'repository_url': 'https://github.com/example/repo',
+                'dataset_uri': 's3://datasets/replication-lite/input.csv',
+                'evaluation_target': 'accuracy',
+            },
+            'review_notes': ['Resolved execution inputs, but keep approval-tier gate in place.'],
+        },
+    )
+    assert reviewed.status_code == 200
+    reviewed_payload = reviewed.json()
+    assert reviewed_payload['status'] == 'needs_review'
+    assert reviewed_payload['unresolved_inputs'] == []
+    assert any('Approval tier tier-3-human-approval' in note for note in reviewed_payload['design_notes'])
+
+
 def test_create_design_draft_prefers_benchmark_for_titanic_paper_intake() -> None:
     client = build_client()
 

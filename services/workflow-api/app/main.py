@@ -17,6 +17,7 @@ from .persistence import InMemoryRunStore, RunStore
 from .registry import WorkflowRegistry
 from .schemas import (
     DesignDraftRecord,
+    DesignDraftReviewRequest,
     IntakeCreateRequest,
     IntakeRecord,
     InterpretationRecord,
@@ -281,6 +282,12 @@ def derive_design_from_intake(intake: IntakeRecord, workflow: WorkflowRegistryEn
     return declared_inputs, unresolved_inputs, design_notes
 
 
+def compute_unresolved_inputs(declared_inputs: dict[str, Any]) -> list[str]:
+    return [
+        name for name, value in declared_inputs.items() if isinstance(value, str) and value.startswith(UNRESOLVED_PREFIX)
+    ]
+
+
 def build_design_draft(
     intake: IntakeRecord,
     workflow: WorkflowRegistryEntry,
@@ -318,6 +325,40 @@ def build_design_draft(
         approval_tier=workflow.approval_tier,
         design_notes=design_notes,
         submitted_by=submitted_by,
+    )
+
+
+def review_design_draft(
+    design: DesignDraftRecord,
+    request: DesignDraftReviewRequest,
+) -> DesignDraftRecord:
+    now = datetime.now(timezone.utc)
+    declared_inputs = dict(design.declared_inputs)
+    declared_inputs.update(request.resolved_inputs)
+    unresolved_inputs = compute_unresolved_inputs(declared_inputs)
+    design_notes = list(design.design_notes)
+
+    for key in sorted(request.resolved_inputs):
+        design_notes.append(f'Review resolved input: {key}.')
+    design_notes.extend(request.review_notes)
+
+    status_value = 'ready_for_run'
+    if unresolved_inputs:
+        status_value = 'needs_review'
+    if design.approval_tier != 'tier-2-approved-execution':
+        status_value = 'needs_review'
+        note = f'Approval tier {design.approval_tier} still requires operator review before run creation.'
+        if note not in design_notes:
+            design_notes.append(note)
+
+    return design.model_copy(
+        update={
+            'updated_at': now,
+            'declared_inputs': declared_inputs,
+            'unresolved_inputs': unresolved_inputs,
+            'design_notes': design_notes,
+            'status': status_value,
+        }
     )
 
 
@@ -625,6 +666,24 @@ def create_app(
         if record is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='design draft not found')
         return record
+
+    @app.post('/design-drafts/latest/review', response_model=DesignDraftRecord)
+    def review_latest_design_draft(request: DesignDraftReviewRequest) -> DesignDraftRecord:
+        record = store.get_latest_design_draft()
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='design draft not found')
+        updated = review_design_draft(record, request)
+        store.save_design_draft(updated)
+        return updated
+
+    @app.post('/design-drafts/{design_id}/review', response_model=DesignDraftRecord)
+    def review_existing_design_draft(design_id: str, request: DesignDraftReviewRequest) -> DesignDraftRecord:
+        record = store.get_design_draft(design_id)
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='design draft not found')
+        updated = review_design_draft(record, request)
+        store.save_design_draft(updated)
+        return updated
 
     @app.get('/workflow-families', response_model=list[WorkflowFamilySummary])
     def list_workflow_families() -> list[WorkflowFamilySummary]:

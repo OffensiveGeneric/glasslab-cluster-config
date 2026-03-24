@@ -4,7 +4,7 @@ Glasslab v2 currently mixes pull-based upstream images with private GHCR paths f
 
 ## Current state
 
-- `workflow-api` uses `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.4`.
+- `workflow-api` uses `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.8`.
 - `generic-tabular-benchmark` runs use `ghcr.io/offensivegeneric/glasslab-tabular-runner:0.1.1`.
 - The first real execution path now depends on both images being pullable from private GHCR.
 - The steady-state path is now:

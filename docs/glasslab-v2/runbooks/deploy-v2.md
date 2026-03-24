@@ -38,7 +38,7 @@ GHCR_TOKEN="$(gh auth token)" ./scripts/create-ghcr-pull-secret.sh
 
 Current assumptions:
 - the `glasslab-v2` namespace contains a `glasslab-ghcr-pull` Docker registry secret
-- the `workflow-api` Deployment pulls `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.4`
+- the `workflow-api` Deployment pulls `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.8`
 - the old import helper remains available as a fallback if GHCR is unavailable
 
 6. Apply the initial v2 core manifest tree.

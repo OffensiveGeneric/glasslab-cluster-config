@@ -124,6 +124,22 @@ class DesignDraftRecord(BaseModel):
     submitted_by: str
 
 
+class DesignDraftReviewRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    resolved_inputs: dict[str, Any] = Field(default_factory=dict)
+    review_notes: list[str] = Field(default_factory=list)
+
+    @field_validator('review_notes')
+    @classmethod
+    def validate_unique_review_notes(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value if item.strip()]
+        deduped = list(dict.fromkeys(cleaned))
+        if len(deduped) != len(cleaned):
+            raise ValueError('review_notes entries must be unique')
+        return deduped
+
+
 class ValidationIssue(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
