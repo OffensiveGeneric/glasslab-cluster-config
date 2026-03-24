@@ -16,6 +16,7 @@ runtime_tools_allow:
   - workflow_api_get_last_intake
   - workflow_api_create_design_draft_from_last_intake
   - workflow_api_get_last_design_draft
+  - workflow_api_review_last_design_for_literature_path
   - workflow_api_create_validation_run_from_last_design
   - workflow_api_get_last_run_status
   - workflow_api_get_last_run_artifacts

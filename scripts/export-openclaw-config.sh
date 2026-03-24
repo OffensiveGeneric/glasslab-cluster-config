@@ -211,6 +211,16 @@ for key in ("raw_request",):
             f"workflow-api replication_intake_request is missing required key {key!r}"
         )
 
+literature_review_request = workflow_binding.get("literature_review_request")
+if not isinstance(literature_review_request, dict):
+    raise SystemExit("workflow-api binding must define literature_review_request")
+
+for key in ("resolved_inputs", "review_notes"):
+    if key not in literature_review_request:
+        raise SystemExit(
+            f"workflow-api literature_review_request is missing required key {key!r}"
+        )
+
 validation_run_request = workflow_binding.get("validation_run_request")
 if not isinstance(validation_run_request, dict):
     raise SystemExit("workflow-api binding must define validation_run_request")
@@ -284,6 +294,7 @@ allowed_runtime_tools = {
     "workflow_api_get_last_intake",
     "workflow_api_create_design_draft_from_last_intake",
     "workflow_api_get_last_design_draft",
+    "workflow_api_review_last_design_for_literature_path",
     "workflow_api_create_validation_run_from_last_design",
     "workflow_api_get_last_run_status",
     "workflow_api_get_last_run_artifacts",
@@ -386,6 +397,7 @@ runtime_config = {
                     "paperIntakeRequest": paper_intake_request,
                     "literatureIntakeRequest": literature_intake_request,
                     "replicationIntakeRequest": replication_intake_request,
+                    "literatureReviewRequest": literature_review_request,
                     "validationRunRequest": validation_run_request,
                     "knownWorkflowIds": known_workflow_ids,
                 },

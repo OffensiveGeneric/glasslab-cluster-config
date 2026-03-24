@@ -385,6 +385,42 @@ def test_create_run_from_latest_design_draft_blocks_non_ready_design() -> None:
     assert run.json()['detail'] == 'design draft is not ready_for_run'
 
 
+def test_create_run_from_reviewed_literature_design_draft() -> None:
+    client = build_client()
+
+    intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Turn this paper into a bounded experiment design based on the linked notes.',
+            'source_refs': ['https://example.org/paper-notes'],
+            'notes': ['Focus on the method section and reported metrics.'],
+        },
+    )
+    assert intake.status_code == 201
+
+    design = client.post('/design-drafts/from-latest-intake')
+    assert design.status_code == 201
+    assert design.json()['status'] == 'needs_review'
+
+    review = client.post(
+        '/design-drafts/latest/review',
+        json={
+            'resolved_inputs': {'dataset_uri': 's3://datasets/paper-derived/train.csv'},
+            'review_notes': ['Dataset location was approved during backend review.'],
+        },
+    )
+    assert review.status_code == 200
+    assert review.json()['status'] == 'ready_for_run'
+    assert review.json()['workflow_id'] == 'literature-to-experiment'
+
+    run = client.post('/runs/from-latest-design-draft')
+    assert run.status_code == 201
+    payload = run.json()
+    assert payload['workflow_id'] == 'literature-to-experiment'
+    assert payload['source_design_id'] == review.json()['design_id']
+    assert payload['manifest']['inputs']['dataset_uri'] == 's3://datasets/paper-derived/train.csv'
+
+
 def test_create_run_success() -> None:
     client = build_client()
 

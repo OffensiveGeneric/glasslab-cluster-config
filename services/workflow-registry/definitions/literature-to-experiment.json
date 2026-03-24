@@ -27,7 +27,7 @@
     "qwen3-4b-instruct-2507",
     "deterministic-template"
   ],
-  "runner_image": "ghcr.io/offensivegeneric/glasslab-literature-runner:0.1.0",
+  "runner_image": "ghcr.io/offensivegeneric/glasslab-literature-runner:0.1.1",
   "evaluator_type": "spec-comparison",
   "expected_artifacts": {
     "required": [

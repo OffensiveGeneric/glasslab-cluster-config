@@ -31,6 +31,11 @@
         "additionalProperties": true,
         "description": "Repo-managed POST /intakes payload used for the replication-lite no-arg path."
       },
+      "literatureReviewRequest": {
+        "type": "object",
+        "additionalProperties": true,
+        "description": "Repo-managed POST /design-drafts/latest/review payload used for the literature-to-experiment no-arg review path."
+      },
       "knownWorkflowIds": {
         "type": "array",
         "items": {
@@ -53,6 +58,7 @@
       "paperIntakeRequest",
       "literatureIntakeRequest",
       "replicationIntakeRequest",
+      "literatureReviewRequest",
       "knownWorkflowIds"
     ]
   }

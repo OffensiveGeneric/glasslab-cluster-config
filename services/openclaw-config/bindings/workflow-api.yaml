@@ -5,6 +5,7 @@ routes:
   create_intake: POST /intakes
   get_latest_intake: GET /intakes/latest
   create_design_draft_from_latest_intake: POST /design-drafts/from-latest-intake
+  review_latest_design_draft: POST /design-drafts/latest/review
   get_latest_design_draft: GET /design-drafts/latest
   create_run_from_latest_design_draft: POST /runs/from-latest-design-draft
   create_run: POST /runs
@@ -39,6 +40,11 @@ replication_intake_request:
     - Keep the request mapped to the approved replication-lite workflow family.
     - Expect repository, dataset, and evaluation inputs to require explicit review before execution.
   submitted_by: openclaw-operator
+literature_review_request:
+  resolved_inputs:
+    dataset_uri: s3://datasets/paper-derived/train.csv
+  review_notes:
+    - Applied the approved literature-to-experiment dataset binding for the repo-managed path.
 validation_run_request:
   workflow_id: generic-tabular-benchmark
   objective: Benchmark logistic regression on the seeded Titanic fixture dataset.

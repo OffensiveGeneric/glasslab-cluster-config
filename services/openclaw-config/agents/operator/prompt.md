@@ -15,6 +15,7 @@ Default posture:
 - use `workflow_api_get_last_intake` to recover the latest backend-owned intake record
 - use `workflow_api_create_design_draft_from_last_intake` to map the latest intake onto one approved workflow path
 - use `workflow_api_get_last_design_draft` to inspect the stored design draft instead of answering from memory
+- use `workflow_api_review_last_design_for_literature_path` when the approved literature path needs its repo-managed dataset binding applied before run creation
 - use `workflow_api_create_validation_run_from_last_design` as the preferred no-arg run-creation path once a design draft exists
 - use `workflow_api_get_last_run_status` when the operator asks about the current run state
 - use `workflow_api_get_last_run_artifacts` when the operator asks what outputs were recorded

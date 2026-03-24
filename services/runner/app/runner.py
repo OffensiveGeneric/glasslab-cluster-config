@@ -37,6 +37,88 @@ REQUIRED_ARTIFACTS = {
 }
 
 
+def run_literature_to_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> dict:
+    paper_id = str(spec.get('paper_id', '')).strip()
+    source_notes = str(spec.get('source_notes', '')).strip()
+    dataset_uri = str(spec.get('dataset_uri', '')).strip()
+    requested_models = [str(item).strip() for item in spec.get('models', []) if str(item).strip()]
+    if not paper_id:
+        raise ValueError('literature_to_experiment requires paper_id')
+    if not source_notes:
+        raise ValueError('literature_to_experiment requires source_notes')
+    if not dataset_uri:
+        raise ValueError('literature_to_experiment requires dataset_uri')
+    if not requested_models:
+        raise ValueError('literature_to_experiment requires at least one requested model')
+
+    selected_model = requested_models[0]
+    method_spec = {
+        'paper_id': paper_id,
+        'dataset_uri': dataset_uri,
+        'selected_model': selected_model,
+        'requested_models': requested_models,
+        'resource_profile': spec.get('resource_profile'),
+        'execution_outline': [
+            'normalize reviewed paper notes',
+            'bind the resolved dataset URI',
+            f'prepare a bounded experiment draft using {selected_model}',
+            'emit deterministic artifacts for backend evaluation and reporting',
+        ],
+    }
+    design_notes = [
+        f'# Literature To Experiment Draft {settings.experiment_id}',
+        '',
+        f'- paper_id: `{paper_id}`',
+        f'- dataset_uri: `{dataset_uri}`',
+        f'- selected_model: `{selected_model}`',
+        '',
+        '## Source Notes',
+        '',
+        source_notes,
+        '',
+        '## Backend Summary',
+        '',
+        'This run produced a deterministic method specification from the reviewed literature intake.',
+    ]
+    metrics_payload = {
+        'metric_name': 'spec_readiness',
+        'best_model': selected_model,
+        'best_metric': 1.0,
+        'models': {
+            selected_model: {
+                'score': 1.0,
+                'score_name': 'spec_readiness',
+                'paper_id': paper_id,
+                'dataset_uri_present': True,
+            }
+        },
+        'paper_id': paper_id,
+        'dataset_uri': dataset_uri,
+    }
+    result_payload = {
+        'experiment_id': settings.experiment_id,
+        'trace_id': settings.trace_id,
+        'pipeline': spec['pipeline'],
+        'dataset': dataset_uri,
+        'paper_id': paper_id,
+        'selected_model': selected_model,
+        'metric_name': 'spec_readiness',
+        'best_metric': 1.0,
+        'artifact_dir': str(artifact_dir),
+    }
+
+    write_json(artifact_dir / 'metrics.json', metrics_payload)
+    write_json(artifact_dir / 'method_spec.json', method_spec)
+    write_json(artifact_dir / 'result_payload.json', result_payload)
+    (artifact_dir / 'design_notes.md').write_text('\n'.join(design_notes) + '\n')
+
+    LOGGER.info(
+        'completed literature-to-experiment draft run',
+        extra={'experiment_id': settings.experiment_id, 'paper_id': paper_id},
+    )
+    return result_payload
+
+
 def configure_logging(level: str, log_path: Path) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
@@ -61,6 +143,10 @@ def run_experiment(settings: Settings | None = None) -> dict:
     artifact_dir.mkdir(parents=True, exist_ok=True)
     configure_logging(settings.log_level, artifact_dir / 'logs' / 'runner.log')
 
+    feature_profile = spec['feature_profile']
+    if spec['pipeline'] == 'literature_to_experiment':
+        return run_literature_to_experiment(settings, spec, artifact_dir)
+
     dataset_root = Path(settings.dataset_root)
     train_path = dataset_root / 'train.csv'
     test_path = dataset_root / 'test.csv'
@@ -83,7 +169,6 @@ def run_experiment(settings: Settings | None = None) -> dict:
         stratify=y,
     )
 
-    feature_profile = spec['feature_profile']
     mlflow_logger = MlflowRunLogger(
         enabled=settings.mlflow_enabled,
         tracking_uri=settings.mlflow_tracking_uri,

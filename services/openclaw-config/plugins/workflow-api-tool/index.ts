@@ -61,6 +61,16 @@ function resolveReplicationIntakeRequest(api: any): Record<string, unknown> {
   return value;
 }
 
+function resolveLiteratureReviewRequest(api: any): Record<string, unknown> {
+  const value = api?.pluginConfig?.literatureReviewRequest;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(
+      "plugins.entries.workflow-api-tool.config.literatureReviewRequest is required"
+    );
+  }
+  return value;
+}
+
 function resolveValidationRunRequest(api: any): Record<string, unknown> {
   const value = api?.pluginConfig?.validationRunRequest;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -433,6 +443,48 @@ const plugin = {
           } catch (error) {
             await appendAuditEvent({
               tool: "workflow_api_get_last_design_draft",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
+        name: "workflow_api_review_last_design_for_literature_path",
+        description: "Apply the repo-managed literature review update to the latest design draft.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          const requestBody = resolveLiteratureReviewRequest(api);
+          try {
+            const { endpoint, payload } = await requestJson(api, "/design-drafts/latest/review", {
+              method: "POST",
+              body: JSON.stringify(requestBody)
+            });
+            await appendAuditEvent({
+              tool: "workflow_api_review_last_design_for_literature_path",
+              status: "ok",
+              endpoint,
+              design_id: payload?.design_id ?? null,
+              design_status: payload?.status ?? null,
+              workflow_id: payload?.workflow_id ?? null
+            });
+            return buildJsonResult({
+              endpoint,
+              request: requestBody,
+              design_draft: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_review_last_design_for_literature_path",
               status: "error",
               error: error instanceof Error ? error.message : String(error)
             });

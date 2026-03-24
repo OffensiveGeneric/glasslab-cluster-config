@@ -66,22 +66,46 @@ def _build_job_name(manifest: RunManifest) -> str:
 
 
 def _build_runner_spec(manifest: RunManifest) -> dict:
-    if manifest.workflow_id != 'generic-tabular-benchmark':
-        raise ValueError(f'workflow job submission is not implemented yet for {manifest.workflow_id}')
+    if manifest.workflow_id == 'generic-tabular-benchmark':
+        dataset_name = str(manifest.inputs.get('dataset_name', '')).strip()
+        if not dataset_name:
+            raise ValueError('generic-tabular-benchmark requires dataset_name for runner submission')
 
-    dataset_name = str(manifest.inputs.get('dataset_name', '')).strip()
-    if not dataset_name:
-        raise ValueError('generic-tabular-benchmark requires dataset_name for runner submission')
+        return {
+            'pipeline': 'titanic_baseline' if dataset_name == 'titanic' else 'generic_tabular_benchmark',
+            'dataset': dataset_name,
+            'models': manifest.requested_models,
+            'feature_profile': 'basic',
+            'resource_profile': manifest.resource_profile,
+            'compare_to': 'none',
+            'produce_submission': True,
+        }
 
-    return {
-        'pipeline': 'titanic_baseline' if dataset_name == 'titanic' else 'generic_tabular_benchmark',
-        'dataset': dataset_name,
-        'models': manifest.requested_models,
-        'feature_profile': 'basic',
-        'resource_profile': manifest.resource_profile,
-        'compare_to': 'none',
-        'produce_submission': True,
-    }
+    if manifest.workflow_id == 'literature-to-experiment':
+        paper_id = str(manifest.inputs.get('paper_id', '')).strip()
+        source_notes = str(manifest.inputs.get('source_notes', '')).strip()
+        dataset_uri = str(manifest.inputs.get('dataset_uri', '')).strip()
+        if not paper_id:
+            raise ValueError('literature-to-experiment requires paper_id for runner submission')
+        if not source_notes:
+            raise ValueError('literature-to-experiment requires source_notes for runner submission')
+        if not dataset_uri:
+            raise ValueError('literature-to-experiment requires dataset_uri for runner submission')
+
+        return {
+            'pipeline': 'literature_to_experiment',
+            'dataset': dataset_uri,
+            'paper_id': paper_id,
+            'source_notes': source_notes,
+            'dataset_uri': dataset_uri,
+            'models': manifest.requested_models,
+            'feature_profile': 'basic',
+            'resource_profile': manifest.resource_profile,
+            'compare_to': 'none',
+            'produce_submission': False,
+        }
+
+    raise ValueError(f'workflow job submission is not implemented yet for {manifest.workflow_id}')
 
 
 class KubernetesJobSubmitter(JobSubmitter):
