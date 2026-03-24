@@ -44,6 +44,7 @@ def test_runner_baseline_generates_expected_artifacts(tmp_path) -> None:
     assert (artifact_dir / 'result_payload.json').exists()
     assert (artifact_dir / 'status.json').exists()
     assert (artifact_dir / 'report.md').exists()
+    assert (artifact_dir / 'analysis_notebook.ipynb').exists()
     assert (artifact_dir / 'artifacts_index.json').exists()
     assert (artifact_dir / 'logs' / 'runner.log').exists()
     assert (artifact_dir / 'submission.csv').exists()
@@ -51,6 +52,9 @@ def test_runner_baseline_generates_expected_artifacts(tmp_path) -> None:
     submission = pd.read_csv(artifact_dir / 'submission.csv')
     assert list(submission.columns) == ['PassengerId', 'Survived']
     assert set(submission['Survived'].unique()).issubset({0, 1})
+    notebook = json.loads((artifact_dir / 'analysis_notebook.ipynb').read_text())
+    assert notebook['nbformat'] == 4
+    assert any('matplotlib.pyplot' in ''.join(cell.get('source', [])) for cell in notebook['cells'])
 
 
 def test_literature_runner_generates_expected_artifacts(tmp_path) -> None:
@@ -90,9 +94,12 @@ def test_literature_runner_generates_expected_artifacts(tmp_path) -> None:
     assert (artifact_dir / 'result_payload.json').exists()
     assert (artifact_dir / 'status.json').exists()
     assert (artifact_dir / 'report.md').exists()
+    assert (artifact_dir / 'analysis_notebook.ipynb').exists()
     assert (artifact_dir / 'artifacts_index.json').exists()
     assert (artifact_dir / 'logs' / 'runner.log').exists()
 
     method_spec = json.loads((artifact_dir / 'method_spec.json').read_text())
     assert method_spec['paper_id'] == 'https://example.org/paper-notes'
     assert method_spec['dataset_uri'] == 's3://datasets/paper-derived/train.csv'
+    notebook = json.loads((artifact_dir / 'analysis_notebook.ipynb').read_text())
+    assert any('method_spec.json' in ''.join(cell.get('source', [])) for cell in notebook['cells'])

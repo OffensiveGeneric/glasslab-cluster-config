@@ -24,6 +24,10 @@ Every workflow must emit these artifacts:
 
 Optional artifacts are declared per workflow definition under `expected_artifacts.optional` in the workflow registry.
 
+The first richer optional presentation artifact is:
+
+- `analysis_notebook.ipynb`: deterministic notebook scaffold for interactive review and simple visualizations where appropriate
+
 ## Evaluator inputs
 
 The evaluator expects each run bundle to contain at least:

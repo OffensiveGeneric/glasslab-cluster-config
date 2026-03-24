@@ -27,7 +27,7 @@
     "qwen3-4b-instruct-2507",
     "deterministic-template"
   ],
-  "runner_image": "ghcr.io/offensivegeneric/glasslab-literature-runner:0.1.1",
+  "runner_image": "ghcr.io/offensivegeneric/glasslab-literature-runner:0.1.2",
   "evaluator_type": "spec-comparison",
   "expected_artifacts": {
     "required": [
@@ -40,6 +40,7 @@
       "logs/"
     ],
     "optional": [
+      "analysis_notebook.ipynb",
       "method_spec.json",
       "design_notes.md"
     ]

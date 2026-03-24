@@ -24,6 +24,7 @@ MEDIA_TYPES = {
     '.csv': 'text/csv',
     '.log': 'text/plain',
     '.txt': 'text/plain',
+    '.ipynb': 'application/x-ipynb+json',
 }
 REQUIRED_ARTIFACTS = {
     'run_manifest.json',
@@ -342,8 +343,112 @@ def write_supporting_artifacts(settings: Settings, result_payload: dict, status:
     if error:
         report_lines.extend(['', '## Error', '', error])
     (artifact_dir / 'report.md').write_text('\n'.join(report_lines) + '\n')
+    write_notebook(artifact_dir / 'analysis_notebook.ipynb', build_analysis_notebook(settings, result_payload, status, error))
 
     write_json(artifact_dir / 'artifacts_index.json', build_artifacts_index(settings, status=status))
+
+
+def build_analysis_notebook(settings: Settings, result_payload: dict, status: str, error: str | None = None) -> dict:
+    pipeline = result_payload.get('pipeline', settings.parsed_spec.get('pipeline', 'unknown'))
+    dataset = result_payload.get('dataset', settings.parsed_spec.get('dataset', 'unknown'))
+
+    cells: list[dict] = [
+        markdown_cell(
+            [
+                f'# Glasslab Run {settings.experiment_id}',
+                '',
+                f'- status: `{status}`',
+                f'- trace_id: `{settings.trace_id}`',
+                f'- pipeline: `{pipeline}`',
+                f'- dataset: `{dataset}`',
+            ]
+        ),
+        code_cell(
+            [
+                'from pathlib import Path',
+                'import json',
+                '',
+                "artifact_dir = Path('.')",
+                "metrics = json.loads((artifact_dir / 'metrics.json').read_text())",
+                "status_payload = json.loads((artifact_dir / 'status.json').read_text())",
+                "print('status:', status_payload['status'])",
+                "print('metric_name:', metrics.get('metric_name'))",
+            ]
+        ),
+    ]
+
+    if pipeline == 'titanic_baseline':
+        cells.extend(
+            [
+                markdown_cell(
+                    [
+                        '## Model Comparison',
+                        '',
+                        'This notebook includes a simple bar chart of validation accuracy for the approved tabular models.',
+                    ]
+                ),
+                code_cell(
+                    [
+                        'import matplotlib.pyplot as plt',
+                        '',
+                        "comparison = json.loads((artifact_dir / 'model_comparison.json').read_text())",
+                        "models = comparison['models']",
+                        'labels = list(models.keys())',
+                        "scores = [models[name]['accuracy'] for name in labels]",
+                        'plt.figure(figsize=(8, 4))',
+                        "plt.bar(labels, scores, color=['#3b82f6', '#f59e0b', '#10b981'][:len(labels)])",
+                        "plt.ylabel('Validation Accuracy')",
+                        "plt.title('Model Comparison')",
+                        'plt.ylim(0, 1)',
+                        'plt.xticks(rotation=20)',
+                        'plt.tight_layout()',
+                        'plt.show()',
+                    ]
+                ),
+            ]
+        )
+    elif pipeline == 'literature_to_experiment':
+        cells.extend(
+            [
+                markdown_cell(
+                    [
+                        '## Method Draft',
+                        '',
+                        'This notebook exposes the deterministic literature-to-experiment draft artifacts.',
+                    ]
+                ),
+                code_cell(
+                    [
+                        "method_spec = json.loads((artifact_dir / 'method_spec.json').read_text())",
+                        "design_notes = (artifact_dir / 'design_notes.md').read_text()",
+                        'method_spec',
+                        '',
+                        "print('\\n--- design notes preview ---\\n')",
+                        'print(design_notes)',
+                    ]
+                ),
+            ]
+        )
+
+    if error:
+        cells.append(markdown_cell(['## Error', '', error]))
+
+    return {
+        'cells': cells,
+        'metadata': {
+            'kernelspec': {
+                'display_name': 'Python 3',
+                'language': 'python',
+                'name': 'python3',
+            },
+            'language_info': {
+                'name': 'python',
+                'version': '3.11',
+            },
+        },
+        'nbformat': 4,
+        'nbformat_minor': 5,
+    }
 
 
 def build_model_pipeline(model_name: str, feature_profile: str, random_state: int) -> tuple[Pipeline, dict]:
@@ -386,3 +491,25 @@ def build_model_pipeline(model_name: str, feature_profile: str, random_state: in
 
 def write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + '\n')
+
+
+def write_notebook(path: Path, payload: dict) -> None:
+    path.write_text(json.dumps(payload, indent=2) + '\n')
+
+
+def markdown_cell(lines: list[str]) -> dict:
+    return {
+        'cell_type': 'markdown',
+        'metadata': {},
+        'source': [line + '\n' for line in lines],
+    }
+
+
+def code_cell(lines: list[str]) -> dict:
+    return {
+        'cell_type': 'code',
+        'execution_count': None,
+        'metadata': {},
+        'outputs': [],
+        'source': [line + '\n' for line in lines],
+    }

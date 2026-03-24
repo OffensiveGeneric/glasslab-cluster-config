@@ -34,7 +34,7 @@
     "random_forest",
     "xgboost_optional"
   ],
-  "runner_image": "ghcr.io/offensivegeneric/glasslab-tabular-runner:0.1.1",
+  "runner_image": "ghcr.io/offensivegeneric/glasslab-tabular-runner:0.1.2",
   "evaluator_type": "tabular-metric-max",
   "expected_artifacts": {
     "required": [
@@ -47,6 +47,7 @@
       "logs/"
     ],
     "optional": [
+      "analysis_notebook.ipynb",
       "submission.csv",
       "feature_importance.csv"
     ]
