@@ -21,6 +21,7 @@ from .schemas import (
     IntakeRecord,
     InterpretationRecord,
     LogEntry,
+    ReplicabilityAssessmentRecord,
     RunArtifactsResponse,
     RunCreateRequest,
     RunLogsResponse,
@@ -150,6 +151,71 @@ def build_interpretation_record(intake: IntakeRecord) -> InterpretationRecord:
         extracted_claims=extracted_claims,
         unresolved_questions=unresolved_questions,
         submitted_by=intake.submitted_by,
+    )
+
+
+def build_replicability_assessment(
+    interpretation: InterpretationRecord,
+    registry: WorkflowRegistry,
+) -> ReplicabilityAssessmentRecord:
+    now = datetime.now(timezone.utc)
+    recommended_workflow = None
+    approval_tier = None
+    for workflow_id in interpretation.candidate_workflow_families:
+        workflow = registry.get_workflow(workflow_id)
+        if workflow is None:
+            continue
+        if recommended_workflow is None:
+            recommended_workflow = workflow
+        if workflow.workflow_id == 'generic-tabular-benchmark' and 'titanic' in interpretation.dataset_hints:
+            recommended_workflow = workflow
+            break
+
+    unresolved_fields = list(dict.fromkeys(interpretation.unresolved_questions))
+    blocking_reasons: list[str] = []
+    recommendation = 'needs_review'
+    status_value = 'needs_review'
+    assessment_notes: list[str] = []
+
+    if recommended_workflow is not None:
+        approval_tier = recommended_workflow.approval_tier
+        assessment_notes.append(
+            f"Best current approved workflow match is {recommended_workflow.workflow_id}."
+        )
+        if recommended_workflow.approval_tier != 'tier-2-approved-execution':
+            unresolved_fields.append(
+                f'Approval tier {recommended_workflow.approval_tier} requires human review before execution.'
+            )
+            blocking_reasons.append('Approval tier requires explicit review.')
+        if unresolved_fields:
+            recommendation = 'needs_review'
+            status_value = 'needs_review'
+            assessment_notes.append('Interpretation still contains unresolved execution-critical fields.')
+        else:
+            recommendation = 'proceed'
+            status_value = 'ready_for_design'
+            assessment_notes.append('Interpretation can proceed toward design drafting.')
+    else:
+        recommendation = 'reject'
+        status_value = 'rejected'
+        blocking_reasons.append('No approved workflow family could be mapped from the interpretation.')
+        assessment_notes.append('No approved workflow mapping was found in the current registry.')
+
+    return ReplicabilityAssessmentRecord(
+        assessment_id=uuid4().hex,
+        interpretation_id=interpretation.interpretation_id,
+        intake_id=interpretation.intake_id,
+        created_at=now,
+        updated_at=now,
+        status=status_value,
+        recommendation=recommendation,
+        recommended_workflow_id=recommended_workflow.workflow_id if recommended_workflow is not None else None,
+        candidate_workflow_families=interpretation.candidate_workflow_families,
+        unresolved_fields=unresolved_fields,
+        blocking_reasons=blocking_reasons,
+        approval_tier=approval_tier,
+        assessment_notes=assessment_notes,
+        submitted_by=interpretation.submitted_by,
     )
 
 
@@ -475,6 +541,33 @@ def create_app(
         record = store.get_interpretation(interpretation_id)
         if record is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='interpretation not found')
+        return record
+
+    @app.post(
+        '/replicability-assessments/from-latest-interpretation',
+        response_model=ReplicabilityAssessmentRecord,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def create_replicability_assessment_from_latest_interpretation() -> ReplicabilityAssessmentRecord:
+        interpretation = store.get_latest_interpretation()
+        if interpretation is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='interpretation not found')
+        record = build_replicability_assessment(interpretation, registry)
+        store.save_replicability_assessment(record)
+        return record
+
+    @app.get('/replicability-assessments/latest', response_model=ReplicabilityAssessmentRecord)
+    def get_latest_replicability_assessment() -> ReplicabilityAssessmentRecord:
+        record = store.get_latest_replicability_assessment()
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='replicability assessment not found')
+        return record
+
+    @app.get('/replicability-assessments/{assessment_id}', response_model=ReplicabilityAssessmentRecord)
+    def get_replicability_assessment(assessment_id: str) -> ReplicabilityAssessmentRecord:
+        record = store.get_replicability_assessment(assessment_id)
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='replicability assessment not found')
         return record
 
     @app.post('/design-drafts/from-latest-intake', response_model=DesignDraftRecord, status_code=status.HTTP_201_CREATED)

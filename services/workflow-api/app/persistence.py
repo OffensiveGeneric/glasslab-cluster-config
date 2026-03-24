@@ -5,7 +5,7 @@ from threading import Lock
 
 from services.common.schemas import ArtifactsIndex
 
-from .schemas import DesignDraftRecord, IntakeRecord, InterpretationRecord, LogEntry, RunRecord
+from .schemas import DesignDraftRecord, IntakeRecord, InterpretationRecord, LogEntry, ReplicabilityAssessmentRecord, RunRecord
 
 
 class RunStore(ABC):
@@ -46,6 +46,18 @@ class RunStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def save_replicability_assessment(self, record: ReplicabilityAssessmentRecord) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_replicability_assessment(self, assessment_id: str) -> ReplicabilityAssessmentRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_latest_replicability_assessment(self) -> ReplicabilityAssessmentRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
     def save_run(self, record: RunRecord) -> None:
         raise NotImplementedError
 
@@ -76,6 +88,8 @@ class InMemoryRunStore(RunStore):
         self._latest_intake_id: str | None = None
         self._interpretations: dict[str, InterpretationRecord] = {}
         self._latest_interpretation_id: str | None = None
+        self._replicability_assessments: dict[str, ReplicabilityAssessmentRecord] = {}
+        self._latest_replicability_assessment_id: str | None = None
         self._design_drafts: dict[str, DesignDraftRecord] = {}
         self._latest_design_draft_id: str | None = None
         self._runs: dict[str, RunRecord] = {}
@@ -112,6 +126,21 @@ class InMemoryRunStore(RunStore):
             if self._latest_interpretation_id is None:
                 return None
             return self._interpretations.get(self._latest_interpretation_id)
+
+    def save_replicability_assessment(self, record: ReplicabilityAssessmentRecord) -> None:
+        with self._lock:
+            self._replicability_assessments[record.assessment_id] = record
+            self._latest_replicability_assessment_id = record.assessment_id
+
+    def get_replicability_assessment(self, assessment_id: str) -> ReplicabilityAssessmentRecord | None:
+        with self._lock:
+            return self._replicability_assessments.get(assessment_id)
+
+    def get_latest_replicability_assessment(self) -> ReplicabilityAssessmentRecord | None:
+        with self._lock:
+            if self._latest_replicability_assessment_id is None:
+                return None
+            return self._replicability_assessments.get(self._latest_replicability_assessment_id)
 
     def save_design_draft(self, record: DesignDraftRecord) -> None:
         with self._lock:

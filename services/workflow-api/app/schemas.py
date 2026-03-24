@@ -83,6 +83,25 @@ class InterpretationRecord(BaseModel):
     submitted_by: str
 
 
+class ReplicabilityAssessmentRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    assessment_id: str
+    interpretation_id: str
+    intake_id: str
+    created_at: datetime
+    updated_at: datetime
+    status: str
+    recommendation: str
+    recommended_workflow_id: str | None = None
+    candidate_workflow_families: list[str] = Field(default_factory=list)
+    unresolved_fields: list[str] = Field(default_factory=list)
+    blocking_reasons: list[str] = Field(default_factory=list)
+    approval_tier: str | None = None
+    assessment_notes: list[str] = Field(default_factory=list)
+    submitted_by: str
+
+
 class DesignDraftRecord(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
