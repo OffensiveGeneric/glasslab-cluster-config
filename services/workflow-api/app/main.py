@@ -281,7 +281,12 @@ def derive_design_from_intake(intake: IntakeRecord, workflow: WorkflowRegistryEn
     return declared_inputs, unresolved_inputs, design_notes
 
 
-def build_design_draft(intake: IntakeRecord, workflow: WorkflowRegistryEntry, submitted_by: str) -> DesignDraftRecord:
+def build_design_draft(
+    intake: IntakeRecord,
+    workflow: WorkflowRegistryEntry,
+    submitted_by: str,
+    source_assessment_id: str | None = None,
+) -> DesignDraftRecord:
     now = datetime.now(timezone.utc)
     design_id = uuid4().hex
     declared_inputs, unresolved_inputs, design_notes = derive_design_from_intake(intake, workflow)
@@ -298,6 +303,7 @@ def build_design_draft(intake: IntakeRecord, workflow: WorkflowRegistryEntry, su
     return DesignDraftRecord(
         design_id=design_id,
         intake_id=intake.intake_id,
+        source_assessment_id=source_assessment_id,
         created_at=now,
         updated_at=now,
         status=status_value,
@@ -579,6 +585,30 @@ def create_app(
         if workflow is None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='no approved workflow mapping found')
         record = build_design_draft(intake, workflow, submitted_by=intake.submitted_by)
+        store.save_design_draft(record)
+        return record
+
+    @app.post('/design-drafts/from-latest-assessment', response_model=DesignDraftRecord, status_code=status.HTTP_201_CREATED)
+    def create_design_draft_from_latest_assessment() -> DesignDraftRecord:
+        assessment = store.get_latest_replicability_assessment()
+        if assessment is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='replicability assessment not found')
+        if assessment.status != 'ready_for_design' or assessment.recommendation != 'proceed':
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='replicability assessment is not ready_for_design')
+        if not assessment.recommended_workflow_id:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='replicability assessment has no recommended workflow')
+        intake = store.get_intake(assessment.intake_id)
+        if intake is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='intake not found')
+        workflow = registry.get_workflow(assessment.recommended_workflow_id)
+        if workflow is None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='workflow registry entry not found')
+        record = build_design_draft(
+            intake,
+            workflow,
+            submitted_by=assessment.submitted_by,
+            source_assessment_id=assessment.assessment_id,
+        )
         store.save_design_draft(record)
         return record
 

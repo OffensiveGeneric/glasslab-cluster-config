@@ -192,6 +192,47 @@ def test_create_and_fetch_design_draft_from_latest_titanic_intake() -> None:
     assert fetched.json()['candidate_models'] == ['logistic_regression', 'random_forest']
 
 
+def test_create_design_draft_from_latest_assessment() -> None:
+    client = build_client()
+
+    create_intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Read this paper intake and determine whether the approved Titanic benchmark path is a good fit.',
+            'source_refs': ['https://example.org/titanic-paper'],
+            'notes': [
+                'The paper compares a baseline on Titanic.',
+                'Focus on the reported metrics and dataset assumptions.',
+            ],
+        },
+    )
+    assert create_intake.status_code == 201
+    intake_id = create_intake.json()['intake_id']
+
+    create_interpretation = client.post('/interpretations/from-latest-intake')
+    assert create_interpretation.status_code == 201
+
+    create_assessment = client.post('/replicability-assessments/from-latest-interpretation')
+    assert create_assessment.status_code == 201
+    assessment_id = create_assessment.json()['assessment_id']
+
+    create_design = client.post('/design-drafts/from-latest-assessment')
+    assert create_design.status_code == 201
+    payload = create_design.json()
+    assert payload['intake_id'] == intake_id
+    assert payload['source_assessment_id'] == assessment_id
+    assert payload['workflow_id'] == 'generic-tabular-benchmark'
+    assert payload['status'] == 'ready_for_run'
+
+
+def test_create_design_draft_from_latest_assessment_requires_assessment() -> None:
+    client = build_client()
+
+    create_design = client.post('/design-drafts/from-latest-assessment')
+    assert create_design.status_code == 404
+    assert create_design.json()['detail'] == 'replicability assessment not found'
+
+
 def test_create_design_draft_prefers_benchmark_for_titanic_paper_intake() -> None:
     client = build_client()
 

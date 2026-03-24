@@ -107,6 +107,7 @@ class DesignDraftRecord(BaseModel):
 
     design_id: str
     intake_id: str
+    source_assessment_id: str | None = None
     created_at: datetime
     updated_at: datetime
     status: str
