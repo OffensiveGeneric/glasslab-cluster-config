@@ -15,8 +15,10 @@ Start here:
 - `next-no-arg-operator-actions.md`: the next operator actions worth adding while the safe path remains mostly no-arg
 - `bounded-agent-architecture.md`: how to move toward multi-agent workflows without depending on broad live tool orchestration
 - `stage-agent-pipeline.md`: specialized backend agent roles, handoffs, and why OpenClaw should stay at the edge
+- `doc-audit-2026-03-24.md`: which v2 docs are still canonical, which are historical scaffolding, and which map to tracker work
 - `intake-design-run-implementation-plan.md`: first concrete backend plan for intake -> design draft -> validation run
 - `model-improvement-options.md`: stronger model vs ranker vs control-surface vs backend decomposition
+- `qwen-fit-for-stage-agents.md`: where the current local Qwen path is useful for backend agents and where it is not
 - `cluster-primitives-gap-audit.md`: missing infrastructure primitives and next actions
 - `storage-and-state.md`: storage posture and persistence expectations
 - `storage-options.md`: where XFS, ZFS, and NFS fit in the stack
