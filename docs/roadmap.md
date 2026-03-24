@@ -169,6 +169,77 @@ Dependencies:
 - helper cleanup
 - careful live validation on `.44`
 
+## Current Next Five
+
+This is the current recommended execution order given the newer backend-agent direction.
+
+### 1. Add paper interpretation stage records
+
+Issue:
+
+- `#28`
+
+Why first:
+
+- it is the first missing bounded backend stage after intake
+- it creates the right place for model-assisted paper understanding
+- it advances the system without depending on richer OpenClaw tool behavior
+
+### 2. Add replicability assessment before design approval
+
+Issue:
+
+- `#29`
+
+Why second:
+
+- it separates “what does the paper say” from “can we actually execute this safely”
+- it gives a clean proceed / needs-review / reject boundary
+- it reduces pressure on design-draft logic to do too much at once
+
+### 3. Generalize intake templates beyond Titanic
+
+Issue:
+
+- `#17`
+
+Why third:
+
+- the current end-to-end path is real, but too benchmark-specific
+- one more intake family will prove the backend-agent shape is not just a Titanic demo
+
+### 4. Add design-draft review and update transitions
+
+Issue:
+
+- `#18`
+
+Why fourth:
+
+- once interpretation and replicability exist, the system needs a clean review loop
+- this is the natural place to hold unresolved fields and operator corrections
+
+### 5. Pin OpenClaw image to an explicit version or digest
+
+Issue:
+
+- `#19`
+
+Why fifth:
+
+- this is the smallest high-value hardening change around the operator edge
+- it reduces rollout ambiguity without distracting from the backend-stage work
+
+## Immediate Follow-On
+
+After the next five, the strongest next candidates are:
+
+- `#22` add a second end-to-end approved workflow family
+- `#30` add approval-tier-gated unattended operations
+- `#31` add notebook-style final artifact generation
+- `#15` document backup and restore for local-PV-backed services
+- `#21` reduce `.44` dependence for OpenClaw runtime export and deploy flow
+
 ## Work Buckets
 
 ### Needs Lab Access
