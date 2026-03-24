@@ -39,7 +39,7 @@ spec:
               mountPath: /runtime
       containers:
         - name: openclaw
-          image: ghcr.io/openclaw/openclaw:latest
+          image: ghcr.io/openclaw/openclaw@sha256:b86307b257ff42a81353b0d6b3963ccd09bbd9eb1916077d1833a967763c5bc7
           imagePullPolicy: IfNotPresent
           env:
             - name: OPENCLAW_CONFIG_PATH

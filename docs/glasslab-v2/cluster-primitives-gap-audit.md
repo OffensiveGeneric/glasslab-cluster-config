@@ -37,7 +37,7 @@ This document records the remaining infrastructure primitives Glasslab v2 still 
 
 - `workflow-api` now uses a private GHCR pull path with the in-cluster `glasslab-ghcr-pull` secret and no longer depends on node-local import or `node03` pinning.
 - `workflow-api` no longer depends on `node03`-local image import and can reschedule onto other workers that can reach GHCR.
-- OpenClaw currently uses `ghcr.io/openclaw/openclaw:latest`; that is acceptable for validation, but not as a long-term pinning strategy.
+- OpenClaw is pinned to `ghcr.io/openclaw/openclaw@sha256:b86307b257ff42a81353b0d6b3963ccd09bbd9eb1916077d1833a967763c5bc7`, which matches the digest validated live on 2026-03-24.
 
 ### Secrets durability and disaster recovery
 
