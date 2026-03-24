@@ -1,5 +1,11 @@
 # Next No-Arg Operator Actions
 
+Status note:
+
+- this file is partly historical now
+- most of the original no-arg ladder has been implemented
+- use it as rationale for the safe operator path, not as the current authoritative task list
+
 This note answers a practical question:
 
 If Glasslab keeps the production operator path mostly no-arg for now, what are the next few actions worth adding?

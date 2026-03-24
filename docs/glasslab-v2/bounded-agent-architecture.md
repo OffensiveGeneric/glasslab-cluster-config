@@ -1,5 +1,10 @@
 # Bounded Agent Architecture
 
+Status note:
+
+- this file is still useful, but `stage-agent-pipeline.md` is now the canonical planning note for the backend-agent direction
+- read this as supporting rationale and historical framing rather than the primary execution plan
+
 This note describes the likely path forward if Glasslab keeps OpenClaw as the front door but stops depending on general live tool orchestration as the main execution model.
 
 This is the likely path past the current `tool_choice` limitation.
