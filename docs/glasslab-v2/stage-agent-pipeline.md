@@ -9,6 +9,29 @@ This note sharpens the current Glasslab v2 direction:
 
 The system should move toward a pipeline of specialized backend agents rather than a single general chat agent trying to improvise the whole process.
 
+## Current Status
+
+As of 2026-03-25, this roadmap is no longer purely conceptual.
+
+Repo-backed progress now splits into two categories:
+
+- bounded service scaffolds now exist for:
+  - intake
+  - interpretation
+  - replicability assessment
+  - design drafting
+- deterministic boundary decisions are now explicit for:
+  - run preparation
+  - execution
+  - evaluation
+  - reporting
+
+That means the remaining work is primarily:
+
+- wiring the first bounded services into `workflow-api`
+- adding Kubernetes manifests and service wiring
+- validating live model-backed behavior only where it actually helps
+
 ## Goal
 
 Turn:
@@ -75,6 +98,11 @@ Deterministic checks:
 - duplicate detection
 - required fields present
 
+Current repo state:
+
+- bounded scaffold exists under `services/intake-agent`
+- `workflow-api` config surface is reserved
+
 ### 2. Paper Interpretation Agent
 
 Purpose:
@@ -101,6 +129,11 @@ Deterministic checks:
 
 - output schema validation
 - candidate family must be in approved registry set
+
+Current repo state:
+
+- bounded scaffold exists under `services/interpretation-agent`
+- `workflow-api` config surface is reserved
 
 ### 3. Replicability Assessment Agent
 
@@ -132,6 +165,11 @@ Deterministic checks:
 - approval-tier rules
 - required workflow inputs identified or explicitly unresolved
 
+Current repo state:
+
+- bounded scaffold exists under `services/assessment-agent`
+- `workflow-api` config surface is reserved
+
 ### 4. Design Draft Agent
 
 Purpose:
@@ -161,6 +199,11 @@ Deterministic checks:
 - unresolved fields must be explicit
 - only approved models/resource profiles may appear
 
+Current repo state:
+
+- bounded scaffold exists under `services/design-agent`
+- `workflow-api` config surface is reserved
+
 ### 5. Run Preparation Agent
 
 Purpose:
@@ -186,6 +229,11 @@ Deterministic checks:
 - strict schema validation
 - registry-backed allowed values only
 
+Current repo state:
+
+- should remain a deterministic `workflow-api` boundary
+- see `run-preparation-boundary.md`
+
 ### 6. Execution Agent
 
 Purpose:
@@ -210,6 +258,11 @@ Deterministic checks:
 
 - job spec construction
 - artifact contract enforcement
+
+Current repo state:
+
+- should remain a deterministic `workflow-api` plus `JobSubmitter` boundary
+- see `execution-boundary.md`
 
 ### 7. Evaluation Agent
 
@@ -237,6 +290,11 @@ Deterministic checks:
 - metric comparison logic
 - workflow-family compatibility
 
+Current repo state:
+
+- should remain the deterministic `evaluator` boundary first
+- see `evaluation-boundary.md`
+
 ### 8. Reporting Agent
 
 Purpose:
@@ -263,6 +321,11 @@ Deterministic checks:
 
 - required report sections
 - artifact references must exist
+
+Current repo state:
+
+- should remain the deterministic `reporter` boundary first
+- see `reporting-boundary.md`
 
 ## Notebook Output Idea
 
@@ -324,3 +387,12 @@ This path:
 - keeps the system auditable
 
 This is a better match for the current hardware and model limitations than trying to force one live chat agent to orchestrate the whole research pipeline.
+
+## Recommended Next Implementation Order
+
+1. wire the interpretation-agent into `workflow-api` behind a feature flag
+2. wire the intake-agent the same way
+3. wire the assessment-agent
+4. wire the design-agent
+5. add explicit evaluator and reporter trigger contracts
+6. only then revisit whether any later enrichment actually needs model help
