@@ -34,6 +34,7 @@ Reference:
 - the native config file lives at `/var/lib/openclaw/runtime/openclaw.json`
 - generated workspaces live at `/var/lib/openclaw/runtime/workspaces/<agent>/`
 - the raw repo-managed source tree is mirrored at `/var/lib/openclaw/runtime/glasslab-config/`
+- the unpacked runtime directory is writable inside the running container so channel setup can persist one-time config normalization without mutating the repo-managed source tree
 
 ## Agent separation
 

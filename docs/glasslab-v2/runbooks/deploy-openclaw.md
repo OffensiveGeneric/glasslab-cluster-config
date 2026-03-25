@@ -51,6 +51,7 @@ Channel note:
 - the first WhatsApp validation path requires `OPENCLAW_WHATSAPP_OWNER` in `kubeadm/glasslab-v2/secrets/30-openclaw.local.yaml`
 - linked WhatsApp credentials are created at runtime under `/var/lib/openclaw/state/credentials/whatsapp/default/`
 - `/var/lib/openclaw/state` now uses a retained local PV/PVC on `node01`, so a normal pod replacement no longer clears the linked WhatsApp session
+- `/var/lib/openclaw/runtime` is initialized from the exported bundle at pod start and remains writable inside the main container so channel setup and doctor flows can normalize config during live validation
 - this is still a node-local durability step, not shared storage or failover-grade state
 
 Example creation flow:

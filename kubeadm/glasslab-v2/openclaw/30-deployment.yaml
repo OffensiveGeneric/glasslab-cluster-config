@@ -100,7 +100,6 @@ spec:
           volumeMounts:
             - name: runtime-config
               mountPath: /var/lib/openclaw/runtime
-              readOnly: true
             - name: state
               mountPath: /var/lib/openclaw/state
             - name: tmp
