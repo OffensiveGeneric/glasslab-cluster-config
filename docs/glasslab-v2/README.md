@@ -26,6 +26,7 @@ Canonical planning and architecture:
 - `stage-agent-api-changes.md`: concrete `workflow-api`, service-contract, and config changes needed for the staged backend-agent path
 - `evaluation-boundary.md`: why evaluation should stay deterministic first and where later narrative enrichment could fit
 - `run-preparation-boundary.md`: why canonical run preparation should remain inside `workflow-api`
+- `execution-boundary.md`: why execution remains deterministic and backend-owned instead of becoming a free-form agent
 - `reporting-boundary.md`: why reporting should stay grounded in explicit artifacts and deterministic rendering first
 - `resume-next-session-2026-03-24.md`: concise checkpoint for resuming after the `qwen3:30b` pull and Mac-native tool evaluation
 - `qwen-fit-for-stage-agents.md`: where the current local Qwen path is useful for backend agents and where it is not
