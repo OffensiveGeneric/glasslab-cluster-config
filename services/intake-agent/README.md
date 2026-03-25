@@ -30,6 +30,20 @@ Current implementation is a scaffold:
 This is enough to make the service boundary real and testable before live model
 integration is added.
 
+## Seed Material
+
+Tracked seed inputs for future literature or paper-harvesting work live under:
+
+- `services/intake-agent/seeds/`
+
+Current tracked seed manifest:
+
+- `services/intake-agent/seeds/glasslab_paper_harvester_seed_manifest.yaml`
+
+That manifest is the current approved-source and seed-paper list for the future
+paper-puller / literature-harvester path. It should be treated as tracked input
+data for bounded intake-side agent work, not as a runtime secret.
+
 ## Intended Deployment Shape
 
 - namespace: `glasslab-v2`

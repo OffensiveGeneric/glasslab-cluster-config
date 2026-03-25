@@ -1,0 +1,449 @@
+manifest_version: 1
+name: glasslab_paper_harvester_seed_manifest
+created_on: '2026-03-25'
+owner_project: glasslab-cluster-config
+repo_context:
+  repo_url: https://github.com/OffensiveGeneric/glasslab-cluster-config
+  reference_doc: https://github.com/OffensiveGeneric/glasslab-cluster-config/blob/main/docs/titanic-agent-stack.md
+  architecture_bias:
+  - favor bounded, reproducible jobs that fit a Kubernetes job runner
+  - prefer papers with public code, public benchmarks, and clear artifact outputs
+  - prioritize tabular ML, benchmarking, literature triage, and agent-evaluation over
+    open-ended autonomy
+source_preference:
+- official journal or proceedings page
+- official venue homepage
+- official arXiv abstract page
+- official code repository linked by the paper
+hard_filters:
+  has_public_abstract: true
+  language: en
+  empirical_or_systems_content: true
+  avoid_paywalled_only_without_abstract: true
+  prefer_public_code_or_reproducible_protocol: true
+ranking_weights:
+  venue_signal: 0.18
+  reproducibility_signal: 0.2
+  bounded_job_fit: 0.2
+  benchmark_compatibility: 0.16
+  code_or_artifact_signal: 0.12
+  glasslab_relevance: 0.14
+ranking_notes:
+  bounded_job_fit_scale: 1-5
+  replication_complexity_scale: 1-5
+  priority_scale:
+    P0: seed immediately
+    P1: add in first expansion wave
+    P2: optional or later-stage
+venue_allowlist:
+- id: jmlr
+  name: Journal of Machine Learning Research
+  type: journal
+  homepage: https://www.jmlr.org/
+  access_pattern: volume pages and paper pages on jmlr.org
+  notes: high-quality ML journal; open access
+- id: tmlr
+  name: Transactions on Machine Learning Research
+  type: journal
+  homepage: https://www.jmlr.org/tmlr/
+  access_pattern: TMLR pages hosted by JMLR, reviews/publication workflow on OpenReview
+  notes: rolling journal venue; good for fresh, technically solid work
+- id: nature_machine_intelligence
+  name: Nature Machine Intelligence
+  type: journal
+  homepage: https://www.nature.com/natmachintell/
+  access_pattern: article pages on nature.com
+  notes: high-impact venue for ML/AI/robotics and scientific-discovery adjacent work
+- id: neurips
+  name: NeurIPS Proceedings
+  type: conference_proceedings
+  homepage: https://proceedings.neurips.cc/
+  access_pattern: proceedings.neurips.cc abstract or paper pages
+  notes: core ML venue; includes datasets and benchmarks track from 2022 onward in
+    main proceedings
+- id: neurips_datasets_benchmarks
+  name: NeurIPS Datasets and Benchmarks
+  type: conference_proceedings
+  homepage: https://datasets-benchmarks-proceedings.neurips.cc/
+  access_pattern: datasets-benchmarks-proceedings.neurips.cc paper pages
+  notes: especially good for benchmark and reproducibility papers
+- id: pmlr
+  name: Proceedings of Machine Learning Research
+  type: conference_proceedings
+  homepage: https://proceedings.mlr.press/
+  access_pattern: proceedings.mlr.press volume and paper pages
+  notes: host for ICML and many adjacent ML venues
+- id: iclr_openreview
+  name: ICLR via OpenReview
+  type: conference_platform
+  homepage: https://openreview.net/venue?id=ICLR.cc
+  access_pattern: openreview.net forum pages
+  notes: useful because accepted papers, reviews, and discussion are often public
+- id: kdd
+  name: ACM SIGKDD / KDD Proceedings
+  type: conference_proceedings
+  homepage: https://www.kdd.org/proceedings
+  access_pattern: kdd.org conference pages and proceedings entries
+  notes: strong source for practical data mining and tabular ML systems work
+- id: arxiv
+  name: arXiv
+  type: preprint_server
+  homepage: https://arxiv.org/
+  access_pattern: arxiv.org/abs/<id>
+  notes: use for fast-moving agent and automation work; downgrade slightly versus
+    peer-reviewed venue papers
+track_queries:
+- track: tabular_baselines
+  queries:
+  - tabular learning benchmark gradient boosting transformer openml
+  - site:proceedings.neurips.cc tabular data benchmark
+  - site:openreview.net tabular learning openml
+- track: interpretability
+  queries:
+  - site:proceedings.neurips.cc feature attribution SHAP
+  - model interpretability tabular benchmark official proceedings
+- track: benchmarks_reproducibility
+  queries:
+  - site:datasets-benchmarks-proceedings.neurips.cc benchmarking suites
+  - site:openml.org benchmark suites reproducible
+- track: literature_screening
+  queries:
+  - site:nature.com systematic review machine learning framework ASReview
+  - active learning systematic review paper official
+- track: agent_evaluation
+  queries:
+  - site:arxiv.org machine learning agents benchmark Kaggle
+  - site:arxiv.org AI research agents benchmark
+- track: autonomous_science
+  queries:
+  - site:arxiv.org automated scientific discovery language models
+  - site:nature.com scientific discovery machine intelligence agents
+tracks:
+- id: tabular_baselines
+  description: strong baselines and comparison targets that map cleanly to fixed-run
+    experiments
+  default_priority: P0
+- id: interpretability
+  description: explanation methods that can be attached to artifacts after training
+  default_priority: P1
+- id: benchmarks_reproducibility
+  description: benchmark suites and reproducibility infrastructure for fair comparisons
+  default_priority: P0
+- id: literature_screening
+  description: papers that directly inform the paper-harvesting and triage agent
+  default_priority: P1
+- id: agent_evaluation
+  description: benchmarks for measuring ML or research-agent capability rather than
+    just model quality
+  default_priority: P1
+- id: autonomous_science
+  description: open-ended autonomous research systems; useful for architecture ideas,
+    not first replication targets
+  default_priority: P2
+papers:
+- id: xgboost_kdd_2016
+  title: 'XGBoost: A Scalable Tree Boosting System'
+  year: 2016
+  venue: KDD
+  venue_id: kdd
+  official_page: https://www.kdd.org/kdd2016/subtopic/view/xgboost-a-scalable-tree-boosting-system/670/
+  pdf_url: https://www.kdd.org/kdd2016/papers/files/rfp0697-chenAemb.pdf
+  tracks:
+  - tabular_baselines
+  priority: P0
+  bounded_job_fit: 5
+  replication_complexity: 2
+  tags:
+  - gbdt
+  - tabular
+  - baseline
+  - scalable_systems
+  why_seed: canonical tree-boosting baseline with strong system focus and easy bounded-run
+    replication
+  first_jobs:
+  - train XGBoost on Titanic and 5-10 OpenML-CC18 tasks
+  - compare runtime, accuracy, and feature importance against logistic regression
+    and random forest
+  - persist metrics.json and model_comparison.json per dataset
+- id: lightgbm_neurips_2017
+  title: 'LightGBM: A Highly Efficient Gradient Boosting Decision Tree'
+  year: 2017
+  venue: NeurIPS 2017
+  venue_id: neurips
+  official_page: https://proceedings.neurips.cc/paper_files/paper/2017/hash/6449f44a102fde848669bdd9eb6b76fa-Abstract.html
+  tracks:
+  - tabular_baselines
+  priority: P0
+  bounded_job_fit: 5
+  replication_complexity: 2
+  tags:
+  - gbdt
+  - tabular
+  - efficiency
+  - goss
+  - efb
+  why_seed: fast bounded baseline that is cheap to run across many tasks and useful
+    for system-level comparisons
+  first_jobs:
+  - benchmark LightGBM against XGBoost on identical folds
+  - track train time, inference time, and AUC/accuracy
+  - evaluate performance as feature dimensionality grows
+- id: catboost_neurips_2018
+  title: 'CatBoost: unbiased boosting with categorical features'
+  year: 2018
+  venue: NeurIPS 2018
+  venue_id: neurips
+  official_page: https://papers.neurips.cc/paper/7898-catboost-
+  pdf_url: https://papers.neurips.cc/paper_files/paper/2018/file/14491b756b3a51daac41c24863285549-Paper.pdf
+  tracks:
+  - tabular_baselines
+  priority: P0
+  bounded_job_fit: 5
+  replication_complexity: 2
+  tags:
+  - gbdt
+  - categorical_features
+  - tabular
+  - ordered_boosting
+  why_seed: strong baseline whenever future datasets contain mixed or categorical
+    columns
+  first_jobs:
+  - run on datasets with categorical inputs or category-heavy feature engineering
+  - compare native categorical handling versus one-hot preprocessing pipelines
+- id: revisiting_tabular_dl_neurips_2021
+  title: Revisiting Deep Learning Models for Tabular Data
+  year: 2021
+  venue: NeurIPS 2021
+  venue_id: neurips
+  official_page: https://proceedings.neurips.cc/paper/2021/hash/9d86d83f925f2149e9edb0ac3b49229c-Abstract.html
+  tracks:
+  - tabular_baselines
+  - benchmarks_reproducibility
+  priority: P0
+  bounded_job_fit: 4
+  replication_complexity: 3
+  tags:
+  - tabular
+  - transformer
+  - resnet
+  - benchmark_hygiene
+  why_seed: excellent anti-self-deception paper; useful for designing fair tabular
+    comparisons
+  first_jobs:
+  - reproduce a reduced benchmark protocol on selected OpenML-CC18 tasks
+  - compare GBDTs to MLP/ResNet/FT-Transformer-style models under matched tuning budgets
+  - attach a fairness note documenting identical preprocessing and tuning budgets
+- id: tabnet_iclr_2020
+  title: 'TabNet: Attentive Interpretable Tabular Learning'
+  year: 2020
+  venue: ICLR 2020
+  venue_id: iclr_openreview
+  official_page: https://openreview.net/forum?id=BylRkAEKDH
+  tracks:
+  - tabular_baselines
+  - interpretability
+  priority: P1
+  bounded_job_fit: 4
+  replication_complexity: 3
+  tags:
+  - tabular
+  - attention
+  - interpretability
+  - deep_learning
+  why_seed: interpretable neural tabular model with public venue record and clear
+    experiment surfaces
+  first_jobs:
+  - compare TabNet against LightGBM on small and medium tabular tasks
+  - export feature masks or per-step importances as auxiliary artifacts
+- id: tabpfn_iclr_2023
+  title: 'TabPFN: A Transformer That Solves Small Tabular Classification Problems
+    in a Second'
+  year: 2023
+  venue: ICLR 2023
+  venue_id: iclr_openreview
+  official_page: https://openreview.net/forum?id=cp5PvcI6w8_
+  tracks:
+  - tabular_baselines
+  priority: P1
+  bounded_job_fit: 5
+  replication_complexity: 3
+  tags:
+  - tabular
+  - transformer
+  - small_data
+  - few_shot_like
+  why_seed: interesting small-data contender with low per-task runtime and strong
+    benchmark value
+  first_jobs:
+  - evaluate only on tasks matching paper constraints
+  - compare against GBDTs on low-N tasks where it is supposed to shine
+- id: shap_neurips_2017
+  title: A Unified Approach to Interpreting Model Predictions
+  year: 2017
+  venue: NeurIPS 2017
+  venue_id: neurips
+  official_page: https://papers.nips.cc/paper/7062-a
+  tracks:
+  - interpretability
+  priority: P1
+  bounded_job_fit: 5
+  replication_complexity: 1
+  tags:
+  - interpretability
+  - shap
+  - feature_attribution
+  - artifacts
+  why_seed: not a model benchmark itself, but an ideal artifact-layer add-on for trained
+    tabular models
+  first_jobs:
+  - compute SHAP values for top-performing tabular models
+  - write per-run feature_summary.json and example local explanations
+- id: openml_benchmarking_suites_neurips_2021
+  title: OpenML Benchmarking Suites
+  year: 2021
+  venue: NeurIPS Datasets and Benchmarks 2021
+  venue_id: neurips_datasets_benchmarks
+  official_page: https://datasets-benchmarks-proceedings.neurips.cc/paper_files/paper/2021/hash/c7e1249ffc03eb9ded908c236bd1996d-Abstract-round2.html
+  tracks:
+  - benchmarks_reproducibility
+  priority: P0
+  bounded_job_fit: 5
+  replication_complexity: 2
+  tags:
+  - benchmarking
+  - reproducibility
+  - openml
+  - openml_cc18
+  why_seed: gives the cluster a principled benchmark substrate instead of ad hoc dataset
+    picking
+  first_jobs:
+  - ingest OpenML-CC18 task metadata
+  - create a task manifest and run matrix for baseline models
+  - standardize split handling and result schemas
+- id: asreview_nat_mach_intell_2021
+  title: An open source machine learning framework for efficient and transparent systematic
+    reviews
+  year: 2021
+  venue: Nature Machine Intelligence
+  venue_id: nature_machine_intelligence
+  official_page: https://www.nature.com/articles/s42256-020-00287-7
+  tracks:
+  - literature_screening
+  priority: P1
+  bounded_job_fit: 4
+  replication_complexity: 3
+  tags:
+  - literature_screening
+  - active_learning
+  - systematic_review
+  - triage
+  why_seed: directly relevant to the paper-gathering agent; shows a transparent active-learning
+    review workflow
+  first_jobs:
+  - prototype a citation-triage loop with human-in-the-loop labeling
+  - rank candidate papers by uncertainty and relevance instead of raw keyword score
+    only
+- id: mle_bench_arxiv_2024
+  title: 'MLE-bench: Evaluating Machine Learning Agents on Machine Learning Engineering'
+  year: 2024
+  venue: arXiv
+  venue_id: arxiv
+  official_page: https://arxiv.org/abs/2410.07095
+  tracks:
+  - agent_evaluation
+  priority: P1
+  bounded_job_fit: 4
+  replication_complexity: 4
+  tags:
+  - agents
+  - kaggle
+  - evaluation
+  - ml_engineering
+  why_seed: benchmark for measuring whether agents can do bounded ML engineering work
+    on real tasks
+  first_jobs:
+  - adapt a reduced internal benchmark using 3-5 public competitions or equivalent
+    tasks
+  - compare agent outputs against static baseline scripts and human-written starter
+    pipelines
+- id: mlgym_arxiv_2025
+  title: 'MLGym: A New Framework and Benchmark for Advancing AI Research Agents'
+  year: 2025
+  venue: arXiv
+  venue_id: arxiv
+  official_page: https://arxiv.org/abs/2502.14499
+  tracks:
+  - agent_evaluation
+  - autonomous_science
+  priority: P1
+  bounded_job_fit: 3
+  replication_complexity: 4
+  tags:
+  - agents
+  - benchmark
+  - rl_env
+  - research_agents
+  why_seed: useful for thinking about a future benchmark harness for research-style
+    agents
+  first_jobs:
+  - lift benchmark concepts rather than full framework initially
+  - define one internal research-agent task with explicit inputs, budget, and artifact
+    schema
+- id: ai_scientist_arxiv_2024
+  title: 'The AI Scientist: Towards Fully Automated Open-Ended Scientific Discovery'
+  year: 2024
+  venue: arXiv
+  venue_id: arxiv
+  official_page: https://arxiv.org/abs/2408.06292
+  tracks:
+  - autonomous_science
+  priority: P2
+  bounded_job_fit: 2
+  replication_complexity: 5
+  tags:
+  - autonomous_science
+  - agents
+  - paper_writing
+  - experiment_loop
+  why_seed: strong architecture inspiration, but should be downstream of a solid bounded-job
+    benchmark stack
+  first_jobs:
+  - 'borrow sub-components only: idea logging, experiment registry, and result-to-paper
+    summarization'
+  - do not attempt full autonomous-paper generation before benchmark hygiene is in
+    place
+recommended_initial_backlog:
+  phase_1:
+  - openml_benchmarking_suites_neurips_2021
+  - xgboost_kdd_2016
+  - lightgbm_neurips_2017
+  - catboost_neurips_2018
+  - revisiting_tabular_dl_neurips_2021
+  phase_2:
+  - shap_neurips_2017
+  - tabnet_iclr_2020
+  - tabpfn_iclr_2023
+  - asreview_nat_mach_intell_2021
+  phase_3:
+  - mle_bench_arxiv_2024
+  - mlgym_arxiv_2025
+  - ai_scientist_arxiv_2024
+output_schema_hints:
+  required_fields_per_harvested_paper:
+  - title
+  - year
+  - venue
+  - official_page
+  - abstract
+  - tags
+  - code_url_if_any
+  - benchmark_or_dataset_names
+  - estimated_replication_complexity
+  - bounded_job_fit
+  - notes_for_experiment_design
+  recommended_artifacts_from_cluster_runs:
+  - metrics.json
+  - feature_summary.json
+  - model_comparison.json
+  - result_payload.json
+  - run_manifest.json
