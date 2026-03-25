@@ -18,6 +18,7 @@ Deploy the core Glasslab v2 services by default:
 - Postgres
 - NATS
 - MinIO
+- bounded stage-agent services
 - workflow-api
 
 OpenClaw is skipped unless --include-openclaw is supplied.
@@ -84,6 +85,10 @@ apply_yaml_dir "$MANIFEST_ROOT/config"
 apply_yaml_dir "$MANIFEST_ROOT/postgres"
 apply_yaml_dir "$MANIFEST_ROOT/nats"
 apply_yaml_dir "$MANIFEST_ROOT/minio"
+apply_yaml_dir "$MANIFEST_ROOT/intake-agent"
+apply_yaml_dir "$MANIFEST_ROOT/interpretation-agent"
+apply_yaml_dir "$MANIFEST_ROOT/assessment-agent"
+apply_yaml_dir "$MANIFEST_ROOT/design-agent"
 apply_yaml_dir "$MANIFEST_ROOT/workflow-api"
 
 if [[ "$INCLUDE_OPENCLAW" == true ]]; then

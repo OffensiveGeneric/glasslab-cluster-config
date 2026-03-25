@@ -11,6 +11,11 @@ Complete these items before the first live Glasslab v2 deployment.
 ## Required image preparation
 
 - `workflow-api` uses `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.8`
+- bounded agents use:
+  - `ghcr.io/offensivegeneric/glasslab-intake-agent:0.1.0`
+  - `ghcr.io/offensivegeneric/glasslab-interpretation-agent:0.1.0`
+  - `ghcr.io/offensivegeneric/glasslab-assessment-agent:0.1.0`
+  - `ghcr.io/offensivegeneric/glasslab-design-agent:0.1.0`
 - push the image to private GHCR before deployment
 - create or refresh the `glasslab-ghcr-pull` secret in the `glasslab-v2` namespace before deployment
 - the old `build-import-workflow-api-image.sh` helper is emergency fallback only
@@ -27,6 +32,7 @@ Complete these items before the first live Glasslab v2 deployment.
 ```bash
 ./scripts/seed-registry.sh
 GHCR_TOKEN="$(gh auth token)" ./scripts/push-workflow-api-image.sh
+GHCR_TOKEN="$(gh auth token)" ./scripts/push-bounded-agent-images.sh
 GHCR_TOKEN="$(gh auth token)" ./scripts/create-ghcr-pull-secret.sh
 ./scripts/deploy-glasslab-v2.sh
 ./scripts/smoke-test-v2.sh

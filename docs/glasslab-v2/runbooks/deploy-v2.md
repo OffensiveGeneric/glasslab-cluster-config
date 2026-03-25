@@ -29,16 +29,22 @@ Back them up separately. Git and `scripts/snapshot-provisioner-config.sh` do not
 ./scripts/seed-registry.sh
 ```
 
-5. Build and push the `workflow-api` image to private GHCR, then create or refresh the in-cluster pull secret.
+5. Build and push the `workflow-api` image and bounded-agent images to private GHCR, then create or refresh the in-cluster pull secret.
 
 ```bash
 GHCR_TOKEN="$(gh auth token)" ./scripts/push-workflow-api-image.sh
+GHCR_TOKEN="$(gh auth token)" ./scripts/push-bounded-agent-images.sh
 GHCR_TOKEN="$(gh auth token)" ./scripts/create-ghcr-pull-secret.sh
 ```
 
 Current assumptions:
 - the `glasslab-v2` namespace contains a `glasslab-ghcr-pull` Docker registry secret
 - the `workflow-api` Deployment pulls `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.8`
+- the bounded-agent Deployments pull:
+  - `ghcr.io/offensivegeneric/glasslab-intake-agent:0.1.0`
+  - `ghcr.io/offensivegeneric/glasslab-interpretation-agent:0.1.0`
+  - `ghcr.io/offensivegeneric/glasslab-assessment-agent:0.1.0`
+  - `ghcr.io/offensivegeneric/glasslab-design-agent:0.1.0`
 - the old import helper remains available as a fallback if GHCR is unavailable
 
 6. Apply the initial v2 core manifest tree.
@@ -56,6 +62,15 @@ Current storage caveat:
 
 ```bash
 ./scripts/smoke-test-v2.sh
+```
+
+Bounded-agent rollout check:
+
+```bash
+kubectl -n glasslab-v2 rollout status deployment/glasslab-intake-agent --timeout=120s
+kubectl -n glasslab-v2 rollout status deployment/glasslab-interpretation-agent --timeout=120s
+kubectl -n glasslab-v2 rollout status deployment/glasslab-assessment-agent --timeout=120s
+kubectl -n glasslab-v2 rollout status deployment/glasslab-design-agent --timeout=120s
 ```
 
 8. OpenClaw is intentionally excluded from the default deploy path. Do not deploy it until the runtime bundle, local secret manifest, and in-cluster service references are confirmed.
@@ -93,3 +108,9 @@ kubectl -n glasslab-v2 describe pod -l app.kubernetes.io/name=glasslab-workflow-
 ```
 
 11. Do not expose v2 publicly yet. Keep access internal until OpenClaw posture, auth, and policy manifests are in place.
+
+12. Keep all bounded-agent feature flags disabled in `workflow-api` until each service has been deployed and tested one stage at a time.
+
+Reference:
+
+- `runbooks/deploy-bounded-agents.md`
