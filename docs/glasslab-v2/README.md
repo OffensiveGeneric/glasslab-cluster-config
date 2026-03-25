@@ -73,4 +73,5 @@ Operational and infrastructure references:
 - `image-distribution.md`: current image import path and registry migration plan
 - `secrets-and-dr.md`: local secret handling and disaster recovery notes
 - `runbooks/backup-restore-local-pv-services.md`: validated first backup/restore path for the local-PV-backed v2 services
+- `openclaw-shared-state-decision.md`: decision rule for whether the OpenClaw shared-state experiment should change the default storage path
 - `runbooks/`: operational steps once manifests and services land
