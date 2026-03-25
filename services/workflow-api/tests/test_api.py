@@ -297,6 +297,82 @@ def test_create_and_fetch_replicability_assessment_from_latest_interpretation() 
     assert fetched.json()['approval_tier'] == 'tier-2-approved-execution'
 
 
+def test_create_replicability_assessment_uses_agent_when_enabled(monkeypatch) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        assessment_agent_enabled=True,
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    create_intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Read this paper intake and determine whether the approved Titanic benchmark path is a good fit.',
+            'source_refs': ['https://example.org/titanic-paper'],
+            'notes': ['The paper compares a baseline on Titanic.'],
+        },
+    )
+    assert create_intake.status_code == 201
+    create_interpretation = client.post('/interpretations/from-latest-intake')
+    assert create_interpretation.status_code == 201
+
+    def fake_call_assessment_agent(interpretation, settings, registry):
+        return main_module.build_replicability_assessment_from_agent_draft(
+            interpretation,
+            {
+                'status': 'ready_for_design',
+                'recommendation': 'proceed',
+                'recommended_workflow_id': 'generic-tabular-benchmark',
+                'candidate_workflow_families': ['generic-tabular-benchmark'],
+                'unresolved_fields': [],
+                'blocking_reasons': [],
+                'approval_tier': 'tier-2-approved-execution',
+                'assessment_notes': ['Agent assessment note'],
+            },
+        )
+
+    monkeypatch.setattr(main_module, 'call_assessment_agent', fake_call_assessment_agent)
+
+    create_assessment = client.post('/replicability-assessments/from-latest-interpretation')
+    assert create_assessment.status_code == 201
+    payload = create_assessment.json()
+    assert payload['status'] == 'ready_for_design'
+    assert payload['recommendation'] == 'proceed'
+    assert payload['assessment_notes'] == ['Agent assessment note']
+
+
+def test_create_replicability_assessment_falls_back_when_agent_returns_none(monkeypatch) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        assessment_agent_enabled=True,
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    create_intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Read this paper intake and determine whether the approved Titanic benchmark path is a good fit.',
+            'source_refs': ['https://example.org/titanic-paper'],
+            'notes': ['The paper compares a baseline on Titanic.'],
+        },
+    )
+    assert create_intake.status_code == 201
+    create_interpretation = client.post('/interpretations/from-latest-intake')
+    assert create_interpretation.status_code == 201
+
+    monkeypatch.setattr(main_module, 'call_assessment_agent', lambda interpretation, settings, registry: None)
+
+    create_assessment = client.post('/replicability-assessments/from-latest-interpretation')
+    assert create_assessment.status_code == 201
+    payload = create_assessment.json()
+    assert payload['recommended_workflow_id'] == 'generic-tabular-benchmark'
+    assert payload['status'] == 'ready_for_design'
+
+
 def test_create_replicability_assessment_requires_interpretation() -> None:
     client = build_client()
 

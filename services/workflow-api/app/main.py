@@ -416,6 +416,127 @@ def build_replicability_assessment(
     )
 
 
+def validate_assessment_agent_draft(
+    draft: dict[str, Any],
+    interpretation: InterpretationRecord,
+    registry: WorkflowRegistry,
+) -> dict[str, Any]:
+    status_value = draft.get('status')
+    recommendation = draft.get('recommendation')
+    if not isinstance(status_value, str) or not status_value.strip():
+        raise ValueError('assessment agent draft missing valid status')
+    if not isinstance(recommendation, str) or not recommendation.strip():
+        raise ValueError('assessment agent draft missing valid recommendation')
+
+    recommended_workflow_id = draft.get('recommended_workflow_id')
+    if recommended_workflow_id is not None:
+        if not isinstance(recommended_workflow_id, str) or not recommended_workflow_id.strip():
+            raise ValueError('assessment agent draft has invalid recommended_workflow_id')
+        if registry.get_workflow(recommended_workflow_id) is None:
+            raise ValueError(f'assessment agent returned unapproved workflow id: {recommended_workflow_id}')
+        recommended_workflow_id = recommended_workflow_id.strip()
+
+    normalized = {
+        'status': status_value.strip(),
+        'recommendation': recommendation.strip(),
+        'recommended_workflow_id': recommended_workflow_id,
+        'candidate_workflow_families': normalize_unique_strings(list(draft.get('candidate_workflow_families', []))),
+        'unresolved_fields': normalize_unique_strings(list(draft.get('unresolved_fields', []))),
+        'blocking_reasons': normalize_unique_strings(list(draft.get('blocking_reasons', []))),
+        'approval_tier': draft.get('approval_tier').strip() if isinstance(draft.get('approval_tier'), str) else None,
+        'assessment_notes': normalize_unique_strings(list(draft.get('assessment_notes', []))),
+    }
+
+    invalid_candidates = [
+        workflow_id for workflow_id in normalized['candidate_workflow_families']
+        if registry.get_workflow(workflow_id) is None
+    ]
+    if invalid_candidates:
+        raise ValueError(f'assessment agent returned unapproved candidate ids: {", ".join(invalid_candidates)}')
+
+    return normalized
+
+
+def build_replicability_assessment_from_agent_draft(
+    interpretation: InterpretationRecord,
+    validated_draft: dict[str, Any],
+) -> ReplicabilityAssessmentRecord:
+    now = datetime.now(timezone.utc)
+    return ReplicabilityAssessmentRecord(
+        assessment_id=uuid4().hex,
+        interpretation_id=interpretation.interpretation_id,
+        intake_id=interpretation.intake_id,
+        created_at=now,
+        updated_at=now,
+        status=validated_draft['status'],
+        recommendation=validated_draft['recommendation'],
+        recommended_workflow_id=validated_draft['recommended_workflow_id'],
+        candidate_workflow_families=validated_draft['candidate_workflow_families'],
+        unresolved_fields=validated_draft['unresolved_fields'],
+        blocking_reasons=validated_draft['blocking_reasons'],
+        approval_tier=validated_draft['approval_tier'],
+        assessment_notes=validated_draft['assessment_notes'],
+        submitted_by=interpretation.submitted_by,
+    )
+
+
+def call_assessment_agent(
+    interpretation: InterpretationRecord,
+    settings: Settings,
+    registry: WorkflowRegistry,
+) -> ReplicabilityAssessmentRecord | None:
+    if not settings.assessment_agent_enabled:
+        return None
+
+    available_workflows = []
+    for workflow_id in interpretation.candidate_workflow_families:
+        workflow = registry.get_workflow(workflow_id)
+        if workflow is None:
+            continue
+        available_workflows.append(
+            {
+                'workflow_id': workflow.workflow_id,
+                'approval_tier': workflow.approval_tier,
+            }
+        )
+
+    payload = {
+        'request_id': interpretation.interpretation_id,
+        'interpretation': {
+            'interpretation_id': interpretation.interpretation_id,
+            'intake_id': interpretation.intake_id,
+            'source_type': interpretation.source_type,
+            'normalized_summary': interpretation.normalized_summary,
+            'extracted_method_summary': interpretation.extracted_method_summary,
+            'candidate_workflow_families': interpretation.candidate_workflow_families,
+            'dataset_hints': interpretation.dataset_hints,
+            'evaluation_targets': interpretation.evaluation_targets,
+            'extracted_claims': interpretation.extracted_claims,
+            'unresolved_questions': interpretation.unresolved_questions,
+            'submitted_by': interpretation.submitted_by,
+        },
+        'available_workflows': available_workflows,
+    }
+    request_obj = urllib_request.Request(
+        settings.assessment_agent_url,
+        data=json.dumps(payload).encode('utf-8'),
+        headers={'Content-Type': 'application/json'},
+        method='POST',
+    )
+
+    try:
+        with urllib_request.urlopen(request_obj, timeout=settings.assessment_agent_timeout_seconds) as response:
+            body = json.loads(response.read().decode('utf-8'))
+        draft = body.get('draft')
+        if not isinstance(draft, dict):
+            raise ValueError('assessment agent response missing draft object')
+        validated_draft = validate_assessment_agent_draft(draft, interpretation, registry)
+        return build_replicability_assessment_from_agent_draft(interpretation, validated_draft)
+    except (urllib_error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        LOGGER.warning('assessment-agent fallback for interpretation %s: %s', interpretation.interpretation_id, exc)
+        return None
+
+
 def choose_workflow_for_intake(intake: IntakeRecord, registry: WorkflowRegistry) -> WorkflowRegistryEntry | None:
     lowered = ' '.join([intake.raw_request, intake.normalized_summary, *intake.notes, *intake.source_refs]).lower()
     candidate_ids = list(intake.workflow_family_candidates)
@@ -869,7 +990,7 @@ def create_app(
         interpretation = store.get_latest_interpretation()
         if interpretation is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='interpretation not found')
-        record = build_replicability_assessment(interpretation, registry)
+        record = call_assessment_agent(interpretation, settings, registry) or build_replicability_assessment(interpretation, registry)
         store.save_replicability_assessment(record)
         return record
 
