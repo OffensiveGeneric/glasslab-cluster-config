@@ -32,6 +32,7 @@ Canonical planning and architecture:
 - `run-preparation-boundary.md`: why canonical run preparation should remain inside `workflow-api`
 - `execution-boundary.md`: why execution remains deterministic and backend-owned instead of becoming a free-form agent
 - `reporting-boundary.md`: why reporting should stay grounded in explicit artifacts and deterministic rendering first
+- `reporting-implementation-checklist.md`: concrete wiring checklist for the deterministic reporter path
 - `resume-next-session-2026-03-24.md`: concise checkpoint for resuming after the `qwen3:30b` pull and Mac-native tool evaluation
 - `qwen-fit-for-stage-agents.md`: where the current local Qwen path is useful for backend agents and where it is not
 - `approval-tier-unattended-ops-plan.md`: concrete plan for unattended digests and approved reruns behind approval tiers
