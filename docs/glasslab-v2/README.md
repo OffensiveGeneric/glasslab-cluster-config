@@ -24,6 +24,7 @@ Canonical planning and architecture:
 - `node02-interpretation-agent-experiment.md`: why the first cluster-side stage-agent experiment should be a bounded interpretation worker on `node02`
 - `interpretation-agent-service.md`: concrete contract and ownership boundary for the first in-cluster stage-agent service
 - `stage-agent-api-changes.md`: concrete `workflow-api`, service-contract, and config changes needed for the staged backend-agent path
+- `evaluation-boundary.md`: why evaluation should stay deterministic first and where later narrative enrichment could fit
 - `resume-next-session-2026-03-24.md`: concise checkpoint for resuming after the `qwen3:30b` pull and Mac-native tool evaluation
 - `qwen-fit-for-stage-agents.md`: where the current local Qwen path is useful for backend agents and where it is not
 - `approval-tier-unattended-ops-plan.md`: concrete plan for unattended digests and approved reruns behind approval tiers
