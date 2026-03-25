@@ -46,6 +46,7 @@ Canonical planning and architecture:
 - `workflow-api-schedules.md`: current stored schedule endpoints for digests and approved reruns
 - `schedule-worker-plan.md`: bounded worker shape for executing due schedules after re-validation
 - `schedule-execution-boundaries.md`: fail-closed execution rules for stored schedules and future `run-now` support
+- `schedule-implementation-checklist.md`: concrete backend checklist for digest workers, approved reruns, audit records, and eventual `run-now`
 - `operator-access-options.md`: narrowed decision between Tailscale or reverse proxy for stable operator-facing access
 - `operator-access-recommendation.md`: concrete recommendation to expose only OpenClaw through a narrow authenticated operator path
 - `operator-access-close-criteria.md`: when the operator-access decision issue should be considered materially resolved
