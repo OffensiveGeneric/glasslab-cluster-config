@@ -43,6 +43,7 @@ Canonical planning and architecture:
 - `external-researcher-hardening-gaps.md`: what must be hardened before outside researchers should be treated as first-class cluster users
 - `external-researcher-offer-profiles.md`: concrete outside-researcher offer lanes and why "one worker node" is the wrong framing
 - `external-researcher-access-primitives.md`: concrete Kubernetes and access-control primitives needed before broader outside-researcher use
+- `external-researcher-first-lane.md`: concrete first outside-researcher lane shape instead of broad self-service cluster access
 - `tool-choice-exposure-options.md`: realistic paths for issue `#11` and why runtime YAML alone is not enough
 - `tool-choice-patch-experiment.md`: bounded experiment plan for carrying a tiny OpenClaw patch only if pinned-tool evaluation is still worth it
 - `provisioner-dependence-inventory.md`: splits the remaining `.44` dependence into image, runtime, secret, and admin-context buckets
