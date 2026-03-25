@@ -98,6 +98,7 @@ TMP_DIR="$(mktemp -d)"
 python3 - "$SOURCE_DIR" "$TMP_DIR/runtime" <<'PY'
 import json
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
