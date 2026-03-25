@@ -23,4 +23,6 @@ Channel notes:
 - the first validated chat channel is WhatsApp
 - enabling it requires `OPENCLAW_WHATSAPP_OWNER` in `kubeadm/glasslab-v2/secrets/30-openclaw.local.yaml`
 - linked WhatsApp credentials are written under `/var/lib/openclaw/state/credentials/whatsapp/default/`
-- the current Deployment keeps `/var/lib/openclaw/state` on `emptyDir`, so WhatsApp login state is not durable yet
+- the committed Deployment mounts `/var/lib/openclaw/state` from the `glasslab-openclaw-state` PVC
+- that PVC is currently backed by a retained static local PV on `node01`
+- normal pod replacement therefore preserves linked WhatsApp state, but node-loss tolerance still requires a later shared-storage or recovery improvement

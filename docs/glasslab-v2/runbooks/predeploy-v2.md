@@ -22,8 +22,9 @@ Complete these items before the first live Glasslab v2 deployment.
 
 ## Expected first-live compromises
 
-- Postgres uses `emptyDir`, so state is not durable yet
-- MinIO uses `emptyDir`, so object storage is not durable yet
+- Postgres uses a retained static local PV/PVC on `node01`, so it survives pod replacement but not loss of that node
+- MinIO uses a retained static local PV/PVC on `node01`, so object storage survives pod replacement but not loss of that node
+- OpenClaw writable state uses a retained static local PV/PVC on `node01`, but the runtime bundle still unpacks into pod-local `emptyDir`
 - OpenClaw is intentionally excluded from the default deploy path
 - no public ingress should be created
 
