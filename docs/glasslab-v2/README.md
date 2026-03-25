@@ -10,6 +10,13 @@ Current live validation reference:
 - `../machine-state-2026-03-24.md`
 - `../machine-state-2026-03-25.md`
 
+Most recent 2026-03-25 deltas:
+
+- OpenClaw is now live on `.12` native Ollama with `qwen3:14b`
+- the dedicated WhatsApp assistant number is linked and the self-chat bootstrap path is retired
+- `workflow-api` is live on `0.1.21-local` with the controlled literature pipeline and execution-preflight path
+- legacy `vllm` on `node02` was retired and that GPU lane is reclaimed
+
 Canonical planning and architecture:
 - `overview.md`: repo-level architecture and control flow
 - `workflow-registry.md`: approved workflow family format

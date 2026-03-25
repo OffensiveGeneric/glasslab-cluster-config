@@ -16,7 +16,7 @@ It is meant to complement `live-state-2026-03-25.md` by keeping the current mach
 - validated state:
   - reachable through the `glasslab.org -> .44` path
   - Docker build path works
-  - node image import wrappers are usable from this host
+  - `/tmp` briefly filled with stale image tarballs during the live rollout and had to be cleaned before OpenClaw could be re-exported
 
 ## Kubernetes Nodes
 
@@ -33,9 +33,10 @@ Validated from `.44`:
 - role:
   - Kubernetes worker
   - active NVIDIA GPU host
-  - legacy in-cluster `vllm` host
 - current note:
-  - still not reclaimed for bounded-agent work
+  - legacy in-cluster `vllm` was retired during this session
+  - `kubectl describe node node02` now shows `nvidia.com/gpu     0         0` under allocated resources
+  - this GPU lane is now free for future bounded backend work, including a later GPU-capable neural-net workflow
 
 ### `192.168.1.50` `node03`
 
@@ -69,28 +70,32 @@ These hosts are not Kubernetes workers.
 ### `192.168.1.23`
 
 - role:
-  - primary external inference host
-  - current native-Ollama OpenClaw backend
+  - heavier external inference host
+  - larger-model backend candidate for bounded research stages
 - validated state:
   - `qwen3:30b` installed
-  - native tool support available to OpenClaw on this path
+  - native tool support available
+  - no longer the active interactive OpenClaw chat backend
 
 ### `192.168.1.12`
 
 - role:
-  - secondary model host
+  - primary interactive OpenClaw chat backend
   - bounded ranker host
 - validated state:
+  - native Ollama serving `qwen3:14b`
   - ranker service healthy on `:8181`
   - current `workflow-api` ranker target
+  - current OpenClaw provider target
 
 ## Current Practical Role Split
 
 As of the 2026-03-25 remote session:
 
 - `.44`: canonical admin, deploy, image-build, and image-import host
-- `.23`: main OpenClaw inference backend
-- `.12`: bounded ranker backend
+- `.23`: heavier inference host for later bounded research stages
+- `.12`: OpenClaw chat backend and bounded ranker backend
 - `node04`: live `workflow-api` and interpretation-agent host
 - `node05`: live intake-agent and schedule-worker host
-- `node02`: still occupied by legacy `vllm`
+- `node01`: live OpenClaw host
+- `node02`: reclaimed GPU worker; no longer occupied by legacy `vllm`

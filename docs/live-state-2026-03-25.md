@@ -9,33 +9,48 @@ It should be treated as a newer documented live-state checkpoint than `live-stat
 Validated from `.44`:
 
 - `glasslab-openclaw` remains live and healthy
-- the active runtime is using native Ollama against `.23`
-- `.23` `qwen3:30b` is now installed and serving as the main OpenClaw model
-- native tool support is working again on this path
+- the active runtime is now using native Ollama against `.12`
+- the live agent model is `glasslab-ollama/qwen3:14b`
+- WhatsApp is linked on the dedicated assistant number and the live pod is listening for inbound messages
+- the new OpenClaw runtime includes the controlled-literature no-arg/latest-record operator tools
+- native tool support is working on this path
 
 Validated operator-tool state:
 
 - the safe no-arg workflow path is working again
 - the generated no-arg exact-family lookup tools work live
 - the tiny argumented `workflow_api_get_family_by_id` path is still not a trustworthy control surface
+- the brittle direct free-text research-problem tool was removed from the chat-facing surface in favor of staged/no-arg paths
 
 ## Glasslab v2 Core
 
 Validated from `.44`:
 
 - `glasslab-workflow-api` is `Running`
-- the live image is `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.13-local`
+- the live image is `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.21-local`
 - `glasslab-interpretation-agent` is `Running`
 - `glasslab-intake-agent` is now deployed and healthy
 - the live image is `ghcr.io/offensivegeneric/glasslab-intake-agent:0.1.2-local`
 - `glasslab-schedule-worker` is now deployed and healthy
 - the live image is `ghcr.io/offensivegeneric/glasslab-schedule-worker:0.1.0-local`
 
+Additional live backend state:
+
+- the controlled literature pipeline is now integrated in the live `workflow-api`
+- paper-intake queues and source-document records are first-class backend objects
+- interpretation outputs now carry:
+  - `literature_state_summary`
+  - `research_gaps`
+  - `bounded_experiment_ideas`
+- those interpretation outputs now inform later assessment and design stages
+- `workflow-api` now exposes execution preflight and applies registry-declared resource requests, limits, and node selectors at job-submission time
+
 Observed placement at validation time:
 
 - `glasslab-workflow-api` on `node04`
 - `glasslab-intake-agent` on `node05`
 - `glasslab-schedule-worker` on `node05`
+- `glasslab-openclaw` on `node01`
 
 ## Intake And Ranker Lane
 
@@ -79,5 +94,18 @@ Current limitation:
 
 ## Remaining Live Gaps
 
-- ranker-assisted intake is deployed, but the first live prompt checked here did not yet produce an obviously reordered family list through `workflow-api`
-- the old in-cluster `vllm` path on `node02` still exists and the GPU has not yet been reclaimed
+- ranker-assisted intake is deployed, but still needs a tighter live proof that the reordered candidate set is materially different for a real literature prompt
+- the current harness can validate declared execution shape before submission, but it does not yet introspect runner images for Python/package prerequisites
+- the current workflow families are still CPU-oriented in practice; a dedicated GPU neural-net workflow family and runner image have not been added yet
+
+## Retired Today
+
+Validated from `.44`:
+
+- the old in-cluster `vllm` path on `node02` was retired
+- `glasslab-openclaw` was fully cut over off `glasslab-vllm/Qwen/Qwen3-4B-Instruct-2507`
+- `deploy/vllm` in `glasslab-agents` is now scaled to `0`
+- the old `vllm` pod on `node02` terminated
+- `kubectl describe node node02` now shows:
+  - `nvidia.com/gpu     0         0`
+  under allocated resources, so the GPU lane is reclaimed for future bounded backend work
