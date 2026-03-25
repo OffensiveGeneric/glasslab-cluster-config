@@ -97,6 +97,20 @@ function resolveKnownWorkflowIds(api: any): string[] {
   return workflowIds;
 }
 
+function buildWorkflowIdProperty(knownWorkflowIds: string[]) {
+  return {
+    type: "string",
+    minLength: 1,
+    enum: knownWorkflowIds,
+    oneOf: knownWorkflowIds.map((workflowId) => ({
+      const: workflowId,
+      title: workflowId
+    })),
+    examples: knownWorkflowIds,
+    description: `Exact approved workflow_id. Must be one of: ${knownWorkflowIds.join(", ")}.`
+  };
+}
+
 function resolveStateDir(): string {
   return join(process.env.OPENCLAW_STATE_DIR || DEFAULT_STATE_DIR, "workflow-api-tool");
 }
@@ -183,6 +197,7 @@ const plugin = {
   name: "Workflow API Tool",
   description: "Narrow workflow-api helper for Glasslab v2 validation.",
   register(api: any) {
+    const knownWorkflowIds = resolveKnownWorkflowIds(api);
     api.registerTool(
       {
         name: "workflow_api_get_families",
@@ -764,11 +779,7 @@ const plugin = {
           type: "object",
           additionalProperties: false,
           properties: {
-            workflow_id: {
-              type: "string",
-              enum: knownWorkflowIds,
-              description: "Exact approved workflow_id."
-            }
+            workflow_id: buildWorkflowIdProperty(knownWorkflowIds)
           },
           required: ["workflow_id"]
         },

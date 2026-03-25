@@ -43,7 +43,7 @@
           "minLength": 1
         },
         "minItems": 1,
-        "description": "Approved workflow_ids exposed to the tiny experimental lookup tool."
+        "description": "Approved workflow_ids exposed to the tiny experimental lookup tool. These IDs are also expanded into explicit const/example metadata for the workflow_id tool parameter."
       },
       "timeoutSeconds": {
         "type": "number",
