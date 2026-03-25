@@ -33,6 +33,7 @@ Canonical planning and architecture:
 - `run-preparation-boundary.md`: why canonical run preparation should remain inside `workflow-api`
 - `run-preparation-implementation-checklist.md`: concrete checklist for preserving the deterministic manifest-derivation path
 - `execution-boundary.md`: why execution remains deterministic and backend-owned instead of becoming a free-form agent
+- `execution-implementation-checklist.md`: concrete checklist for preserving the deterministic execution path
 - `reporting-boundary.md`: why reporting should stay grounded in explicit artifacts and deterministic rendering first
 - `reporting-implementation-checklist.md`: concrete wiring checklist for the deterministic reporter path
 - `resume-next-session-2026-03-24.md`: concise checkpoint for resuming after the `qwen3:30b` pull and Mac-native tool evaluation
