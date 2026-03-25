@@ -34,12 +34,13 @@ class IntakeCreateRequest(BaseModel):
 
     raw_request: str = Field(min_length=10)
     source_refs: list[str] = Field(default_factory=list)
+    document_refs: list[str] = Field(default_factory=list)
     source_type: str | None = None
     notes: list[str] = Field(default_factory=list)
     submitted_by: str | None = None
     trace_id: str | None = None
 
-    @field_validator('source_refs', 'notes')
+    @field_validator('source_refs', 'document_refs', 'notes')
     @classmethod
     def validate_non_empty_unique_strings(cls, value: list[str]) -> list[str]:
         cleaned = [item.strip() for item in value if item.strip()]
@@ -92,6 +93,24 @@ class ResearchProblemPipelineRequest(BaseModel):
         return deduped
 
 
+class PaperIntakeQueueCreateRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    problem_statement: str = Field(min_length=12)
+    max_candidate_papers: int = Field(default=5, ge=1, le=25)
+    priorities: list[str] = Field(default_factory=list)
+    submitted_by: str | None = None
+
+    @field_validator('priorities')
+    @classmethod
+    def validate_unique_priorities(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value if item.strip()]
+        deduped = list(dict.fromkeys(cleaned))
+        if len(deduped) != len(cleaned):
+            raise ValueError('priorities entries must be unique')
+        return deduped
+
+
 class ResearchProblemRecord(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -114,6 +133,7 @@ class IntakeRecord(BaseModel):
     status: str
     source_type: str
     source_refs: list[str] = Field(default_factory=list)
+    document_refs: list[str] = Field(default_factory=list)
     raw_request: str
     normalized_summary: str
     workflow_family_candidates: list[str] = Field(default_factory=list)
@@ -132,10 +152,13 @@ class InterpretationRecord(BaseModel):
     source_type: str
     normalized_summary: str
     extracted_method_summary: str
+    literature_state_summary: str
     candidate_workflow_families: list[str] = Field(default_factory=list)
     dataset_hints: list[str] = Field(default_factory=list)
     evaluation_targets: list[str] = Field(default_factory=list)
     extracted_claims: list[str] = Field(default_factory=list)
+    research_gaps: list[str] = Field(default_factory=list)
+    bounded_experiment_ideas: list[str] = Field(default_factory=list)
     unresolved_questions: list[str] = Field(default_factory=list)
     submitted_by: str
 
@@ -281,6 +304,22 @@ class WorkflowFamilySummary(BaseModel):
     approval_tier: str
 
 
+class ExecutionPreflightResult(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    workflow_id: str
+    runner_image: str
+    resource_profile: str
+    resource_requests: dict[str, str] = Field(default_factory=dict)
+    resource_limits: dict[str, str] = Field(default_factory=dict)
+    node_selector: dict[str, str] = Field(default_factory=dict)
+    job_submission_mode: str
+    ready: bool
+    eligible_nodes: list[str] = Field(default_factory=list)
+    blocking_issues: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class RunRecord(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -327,6 +366,46 @@ class ResearchProblemPaperCandidate(BaseModel):
     why_seed: str
     first_jobs: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+
+
+class PaperIntakeCandidateRecord(ResearchProblemPaperCandidate):
+    model_config = ConfigDict(extra='forbid')
+
+    intake_status: Literal['pending', 'staged'] = 'pending'
+    staged_intake_id: str | None = None
+
+
+class PaperIntakeQueueRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    queue_id: str
+    created_at: datetime
+    updated_at: datetime
+    status: Literal['ready', 'exhausted'] = 'ready'
+    problem_statement: str
+    selected_tracks: list[str] = Field(default_factory=list)
+    selected_queries: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    candidates: list[PaperIntakeCandidateRecord] = Field(default_factory=list)
+    submitted_by: str
+
+
+class SourceDocumentRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    document_id: str
+    created_at: datetime
+    updated_at: datetime
+    status: Literal['fetched', 'fetch-failed']
+    source_url: str
+    submitted_by: str
+    storage_uri: str | None = None
+    content_type: str | None = None
+    size_bytes: int | None = None
+    sha256: str | None = None
+    title: str | None = None
+    text_excerpt: str | None = None
+    fetch_error: str | None = None
 
 
 class FreshPaperPipelineResponse(BaseModel):

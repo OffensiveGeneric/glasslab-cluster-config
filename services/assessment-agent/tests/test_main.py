@@ -41,10 +41,13 @@ def build_request() -> AssessmentRequest:
             'source_type': 'paper-link',
             'normalized_summary': 'Paper-derived reproduction request.',
             'extracted_method_summary': 'Interpreted intake as generic-tabular-benchmark.',
+            'literature_state_summary': 'Current bounded literature view: The paper compares a baseline on Titanic.',
             'candidate_workflow_families': ['generic-tabular-benchmark', 'literature-to-experiment'],
             'dataset_hints': ['titanic'],
             'evaluation_targets': ['baseline comparison'],
             'extracted_claims': ['The paper compares a baseline on Titanic.'],
+            'research_gaps': [],
+            'bounded_experiment_ideas': ['Run a bounded benchmark on titanic and compare baselines.'],
             'unresolved_questions': [],
             'submitted_by': 'glasslab-operator',
         },
@@ -67,6 +70,7 @@ def test_build_assessment_draft_prefers_ready_workflow() -> None:
     assert draft.recommendation == 'proceed'
     assert draft.recommended_workflow_id == 'generic-tabular-benchmark'
     assert draft.status == 'ready_for_design'
+    assert draft.assessment_notes
 
 
 def test_assess_interpretation_endpoint() -> None:
@@ -77,6 +81,7 @@ def test_assess_interpretation_endpoint() -> None:
     assert payload['request_id'] == 'assessment-1'
     assert payload['draft']['recommended_workflow_id'] == 'generic-tabular-benchmark'
     assert payload['draft']['recommendation'] == 'proceed'
+    assert payload['draft']['assessment_notes']
     assert payload['warnings'] == [
         'current implementation is deterministic scaffold logic; live model integration is not enabled yet',
     ]

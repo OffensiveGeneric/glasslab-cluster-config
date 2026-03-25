@@ -13,11 +13,12 @@ class IntakePayload(BaseModel):
     source_refs: list[str] = Field(default_factory=list)
     raw_request: str = Field(min_length=1)
     normalized_summary: str = Field(min_length=1)
+    document_refs: list[str] = Field(default_factory=list)
     workflow_family_candidates: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
     submitted_by: str = Field(min_length=1)
 
-    @field_validator('source_refs', 'workflow_family_candidates', 'notes')
+    @field_validator('source_refs', 'document_refs', 'workflow_family_candidates', 'notes')
     @classmethod
     def validate_unique_non_empty_lists(cls, value: list[str]) -> list[str]:
         cleaned = [item.strip() for item in value if item.strip()]

@@ -403,6 +403,117 @@ const plugin = {
 
     api.registerTool(
       {
+        name: "workflow_api_get_latest_interpretation",
+        description: "Fetch the most recent interpretation record, including literature state, gaps, and bounded experiment ideas.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const { endpoint, payload } = await requestJson(api, "/interpretations/latest");
+            await appendAuditEvent({
+              tool: "workflow_api_get_latest_interpretation",
+              status: "ok",
+              endpoint,
+              interpretation_id: payload?.interpretation_id ?? null,
+              intake_id: payload?.intake_id ?? null
+            });
+            return buildJsonResult({
+              endpoint,
+              interpretation: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_get_latest_interpretation",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
+        name: "workflow_api_create_assessment_from_latest_interpretation",
+        description: "Create a replicability assessment from the latest interpretation record.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const { endpoint, payload } = await requestJson(api, "/replicability-assessments/from-latest-interpretation", {
+              method: "POST"
+            });
+            await appendAuditEvent({
+              tool: "workflow_api_create_assessment_from_latest_interpretation",
+              status: "ok",
+              endpoint,
+              assessment_id: payload?.assessment_id ?? null,
+              recommendation: payload?.recommendation ?? null,
+              recommended_workflow_id: payload?.recommended_workflow_id ?? null
+            });
+            return buildJsonResult({
+              endpoint,
+              assessment: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_create_assessment_from_latest_interpretation",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
+        name: "workflow_api_get_latest_assessment",
+        description: "Fetch the most recent replicability assessment record.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const { endpoint, payload } = await requestJson(api, "/replicability-assessments/latest");
+            await appendAuditEvent({
+              tool: "workflow_api_get_latest_assessment",
+              status: "ok",
+              endpoint,
+              assessment_id: payload?.assessment_id ?? null,
+              recommendation: payload?.recommendation ?? null
+            });
+            return buildJsonResult({
+              endpoint,
+              assessment: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_get_latest_assessment",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
         name: "workflow_api_create_design_draft_from_last_intake",
         description: "Create a design draft from the latest intake record.",
         parameters: {
@@ -442,6 +553,45 @@ const plugin = {
 
     api.registerTool(
       {
+        name: "workflow_api_create_design_draft_from_last_assessment",
+        description: "Create a design draft from the latest assessment record.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const { endpoint, payload } = await requestJson(api, "/design-drafts/from-latest-assessment", {
+              method: "POST"
+            });
+            await appendAuditEvent({
+              tool: "workflow_api_create_design_draft_from_last_assessment",
+              status: "ok",
+              endpoint,
+              design_id: payload?.design_id ?? null,
+              design_status: payload?.status ?? null,
+              workflow_id: payload?.workflow_id ?? null
+            });
+            return buildJsonResult({
+              endpoint,
+              design_draft: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_create_design_draft_from_last_assessment",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
         name: "workflow_api_get_last_design_draft",
         description: "Fetch the most recent design draft.",
         parameters: {
@@ -467,6 +617,52 @@ const plugin = {
           } catch (error) {
             await appendAuditEvent({
               tool: "workflow_api_get_last_design_draft",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
+        name: "workflow_api_get_execution_preflight_from_last_design",
+        description: "Fetch execution preflight for the workflow referenced by the latest design draft.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const { payload: design } = await requestJson(api, "/design-drafts/latest");
+            const workflowId = typeof design?.workflow_id === "string" ? design.workflow_id.trim() : "";
+            if (!workflowId) {
+              throw new Error("latest design draft did not include workflow_id");
+            }
+            const { endpoint, payload } = await requestJson(
+              api,
+              `/workflow-families/${encodeURIComponent(workflowId)}/execution-preflight`
+            );
+            await appendAuditEvent({
+              tool: "workflow_api_get_execution_preflight_from_last_design",
+              status: "ok",
+              endpoint,
+              workflow_id: workflowId,
+              ready: payload?.ready ?? null,
+              eligible_node_count: Array.isArray(payload?.eligible_nodes) ? payload.eligible_nodes.length : null
+            });
+            return buildJsonResult({
+              endpoint,
+              workflow_id: workflowId,
+              execution_preflight: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_get_execution_preflight_from_last_design",
               status: "error",
               error: error instanceof Error ? error.message : String(error)
             });
@@ -553,6 +749,184 @@ const plugin = {
           } catch (error) {
             await appendAuditEvent({
               tool: "workflow_api_create_validation_run_from_last_design",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
+        name: "workflow_api_create_paper_intake_queue_from_latest_research_problem",
+        description: "Create a controlled-corpus paper intake queue from the latest staged research problem.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const { payload: problem } = await requestJson(api, "/research-problems/latest");
+            const requestBody = {
+              problem_statement: String(problem?.problem_statement || "").trim(),
+              max_candidate_papers:
+                typeof problem?.max_candidate_papers === "number"
+                  ? Math.max(1, Math.min(25, Math.floor(problem.max_candidate_papers)))
+                  : 5,
+              priorities: Array.isArray(problem?.priorities)
+                ? problem.priorities.filter((item: unknown) => typeof item === "string" && item.trim())
+                : [],
+              submitted_by: typeof problem?.submitted_by === "string" && problem.submitted_by.trim()
+                ? problem.submitted_by.trim()
+                : "openclaw-operator"
+            };
+            if (!requestBody.problem_statement) {
+              throw new Error("latest research problem is missing problem_statement");
+            }
+            const { endpoint, payload } = await requestJson(api, "/paper-intake-queues/from-research-problem", {
+              method: "POST",
+              body: JSON.stringify(requestBody)
+            });
+            await appendAuditEvent({
+              tool: "workflow_api_create_paper_intake_queue_from_latest_research_problem",
+              status: "ok",
+              endpoint,
+              queue_id: payload?.queue_id ?? null,
+              candidate_count: Array.isArray(payload?.candidates) ? payload.candidates.length : null
+            });
+            return buildJsonResult({
+              endpoint,
+              queue: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_create_paper_intake_queue_from_latest_research_problem",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
+        name: "workflow_api_get_latest_paper_intake_queue",
+        description: "Fetch the most recent controlled-corpus paper intake queue.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const { endpoint, payload } = await requestJson(api, "/paper-intake-queues/latest");
+            await appendAuditEvent({
+              tool: "workflow_api_get_latest_paper_intake_queue",
+              status: "ok",
+              endpoint,
+              queue_id: payload?.queue_id ?? null,
+              queue_status: payload?.status ?? null,
+              candidate_count: Array.isArray(payload?.candidates) ? payload.candidates.length : null
+            });
+            return buildJsonResult({
+              endpoint,
+              queue: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_get_latest_paper_intake_queue",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
+        name: "workflow_api_stage_next_intake_from_latest_queue",
+        description: "Stage the next pending paper from the latest paper intake queue into a real intake record.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const { payload: queue } = await requestJson(api, "/paper-intake-queues/latest");
+            const queueId = typeof queue?.queue_id === "string" ? queue.queue_id.trim() : "";
+            if (!queueId) {
+              throw new Error("latest paper intake queue did not include queue_id");
+            }
+            const { endpoint, payload } = await requestJson(
+              api,
+              `/paper-intake-queues/${encodeURIComponent(queueId)}/stage-next-intake`,
+              {
+                method: "POST"
+              }
+            );
+            await appendAuditEvent({
+              tool: "workflow_api_stage_next_intake_from_latest_queue",
+              status: "ok",
+              endpoint,
+              queue_id: queueId,
+              intake_id: payload?.intake_id ?? null
+            });
+            return buildJsonResult({
+              endpoint,
+              queue_id: queueId,
+              intake: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_stage_next_intake_from_latest_queue",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
+        name: "workflow_api_get_latest_source_document",
+        description: "Fetch the most recent stored source document record from the controlled corpus.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const { endpoint, payload } = await requestJson(api, "/source-documents/latest");
+            await appendAuditEvent({
+              tool: "workflow_api_get_latest_source_document",
+              status: "ok",
+              endpoint,
+              document_id: payload?.document_id ?? null,
+              source_url: payload?.source_url ?? null,
+              document_status: payload?.status ?? null
+            });
+            return buildJsonResult({
+              endpoint,
+              source_document: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_get_latest_source_document",
               status: "error",
               error: error instanceof Error ? error.message : String(error)
             });

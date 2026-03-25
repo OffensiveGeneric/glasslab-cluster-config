@@ -20,6 +20,8 @@ Current implementation is a scaffold:
 - `GET /healthz`
 - `POST /interpret-intake`
 - deterministic bounded draft generation
+- accepts `document_refs` from `workflow-api` so stored source-document context
+  can be threaded into later model-backed interpretation
 - response metadata that records the configured model backend
 
 This is enough to make the service boundary concrete and testable before live model

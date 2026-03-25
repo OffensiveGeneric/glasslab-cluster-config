@@ -119,6 +119,11 @@ Output:
 - references
 - open questions
 
+Near-term constraint:
+
+- keep this on a controlled corpus first
+- use approved-source planning, stored source documents, and bounded paper-intake queues before introducing open-ended web retrieval
+
 ### Stage 5: Execution Planning
 
 Input:
@@ -131,7 +136,14 @@ Output:
 - canonical run manifest
 - job specification
 - resource profile
+- execution preflight result
 - execution receipt
+
+Near-term rule:
+
+- declared resource requests, limits, and node selectors must be explicit in the registry-backed workflow contract
+- package prerequisites should be treated as part of the runner image contract until image introspection exists
+- `workflow-api` should refuse run acceptance when preflight says the current cluster cannot satisfy the declared execution shape
 
 ### Stage 6: Bounded Execution
 

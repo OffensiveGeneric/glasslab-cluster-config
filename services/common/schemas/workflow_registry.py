@@ -55,6 +55,7 @@ class WorkflowRegistryEntry(BaseModel):
     expected_artifacts: ExpectedArtifactsSpec
     resource_profile: ResourceProfileSpec
     approval_tier: ApprovalTier
+    runtime_requirements: dict[str, list[str] | int | float | str | bool] = Field(default_factory=dict)
 
     @field_validator('allowed_models')
     @classmethod

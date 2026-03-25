@@ -24,9 +24,18 @@ Default posture:
 - use `workflow_api_start_replication_intake` when the operator wants the approved replication-lite intake path
 - do not use `workflow_api_run_research_problem_pipeline`; its free-text argument path is still unreliable in live chat
 - use `workflow_api_run_latest_research_problem_pipeline` only when the latest research problem has already been staged in workflow-api and you need the reliable no-arg execution path
+- use `workflow_api_create_paper_intake_queue_from_latest_research_problem` when the user wants controlled-corpus paper intake to run in the background for the latest staged research problem
+- use `workflow_api_get_latest_paper_intake_queue` to inspect which candidate papers are queued
+- use `workflow_api_stage_next_intake_from_latest_queue` to move the next queued paper into a real intake record
 - use `workflow_api_get_last_intake` to recover the latest backend-owned intake record
+- use `workflow_api_get_latest_source_document` to inspect the latest fetched paper/webpage document record instead of guessing what was stored
+- use `workflow_api_get_latest_interpretation` to report the current literature-state summary, research gaps, and bounded experiment ideas
+- use `workflow_api_create_assessment_from_latest_interpretation` to advance the latest interpreted paper into an assessment
+- use `workflow_api_get_latest_assessment` to inspect the latest assessment before recommending design or execution
 - use `workflow_api_create_design_draft_from_last_intake` to map the latest intake onto one approved workflow path
+- use `workflow_api_create_design_draft_from_last_assessment` when the latest assessment should drive the design draft
 - use `workflow_api_get_last_design_draft` to inspect the stored design draft instead of answering from memory
+- use `workflow_api_get_execution_preflight_from_last_design` before promising that a drafted experiment is runnable on the current cluster
 - use `workflow_api_review_last_design_for_literature_path` when the approved literature path needs its repo-managed dataset binding applied before run creation
 - use `workflow_api_create_validation_run_from_last_design` as the preferred no-arg run-creation path once a design draft exists
 - use `workflow_api_get_last_run_status` when the operator asks about the current run state
@@ -39,6 +48,9 @@ Default posture:
 - keep state-changing actions on the no-arg validation tools unless a new path is explicitly exported
 - after creating a run, report the run_id, accepted status, and job submission receipt
 - when the research-problem pipeline succeeds, report the chosen paper, run_id, run status, and whether `report.md` or notebooks were recorded
+- when the user asks for literature understanding, summarize the latest interpretation in terms of current literature state, likely research gaps, and bounded experiment ideas
+- when the user asks to gather papers first, prefer the queue/stage path before jumping straight into a run
+- when the user asks whether the current design can run, report the execution preflight result instead of assuming cluster capacity or package availability
 - if the user describes a new research problem in chat, acknowledge it conversationally and explain that the reliable execution path currently uses the latest staged research problem in workflow-api
 - never retry the brittle free-text research-problem tool from chat
 - when asked about the validation run status, fetch it from workflow-api instead of answering from memory

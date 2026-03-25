@@ -24,6 +24,9 @@ class RunManifest(BaseModel):
     inputs: dict[str, Any] = Field(default_factory=dict)
     requested_models: list[str] = Field(min_length=1)
     resource_profile: str
+    resource_requests: dict[str, str] = Field(default_factory=dict)
+    resource_limits: dict[str, str] = Field(default_factory=dict)
+    node_selector: dict[str, str] = Field(default_factory=dict)
     runner_image: str
     evaluator_type: str
     approval_tier: str

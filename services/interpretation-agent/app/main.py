@@ -83,6 +83,49 @@ def infer_claims(notes: list[str], normalized_summary: str) -> list[str]:
     return claims[:3]
 
 
+def infer_literature_state_summary(raw_text: str, normalized_summary: str) -> str:
+    cleaned = ' '.join(raw_text.split())
+    if cleaned:
+        return f'Current bounded literature view: {cleaned[:420]}'
+    return f'Current bounded literature view is based on the intake summary: {normalized_summary[:420]}'
+
+
+def infer_research_gaps(
+    raw_text: str,
+    source_type: str,
+    source_refs: list[str],
+    document_refs: list[str],
+    dataset_hints: list[str],
+    evaluation_targets: list[str],
+) -> list[str]:
+    lowered = raw_text.lower()
+    gaps: list[str] = []
+    if not dataset_hints:
+        gaps.append('The literature snapshot does not settle on one concrete dataset for a bounded run.')
+    if not evaluation_targets:
+        gaps.append('The literature snapshot does not identify one canonical evaluation target or metric.')
+    if 'baseline' not in lowered and 'benchmark' not in lowered:
+        gaps.append('Baseline comparison expectations are still underspecified in the current literature context.')
+    if source_type == 'paper-link' and source_refs and not document_refs:
+        gaps.append('A stored source document is missing, so interpretation still depends on URL-level context only.')
+    return list(dict.fromkeys(gaps))[:4]
+
+
+def infer_bounded_experiment_ideas(
+    candidate_workflows: list[str],
+    dataset_hints: list[str],
+) -> list[str]:
+    ideas: list[str] = []
+    if 'generic-tabular-benchmark' in candidate_workflows:
+        dataset_label = dataset_hints[0] if dataset_hints else 'one approved tabular dataset'
+        ideas.append(f'Run a bounded benchmark on {dataset_label} and compare the reported baseline against approved local baselines.')
+    if 'literature-to-experiment' in candidate_workflows:
+        ideas.append('Convert the reported method into a minimal literature-derived experiment with one dataset and one evaluation target.')
+    if 'replication-lite' in candidate_workflows:
+        ideas.append('Attempt a lightweight replication of the core reported claim with a reduced approved configuration.')
+    return list(dict.fromkeys(ideas))[:3]
+
+
 def infer_unresolved_questions(
     source_type: str,
     candidate_workflows: list[str],
@@ -116,6 +159,16 @@ def build_interpretation_draft(request: InterpretationRequest) -> Interpretation
     dataset_hints = infer_dataset_hints(raw_text)
     evaluation_targets = infer_evaluation_targets(raw_text)
     extracted_claims = infer_claims(intake.notes, intake.normalized_summary)
+    literature_state_summary = infer_literature_state_summary(raw_text, intake.normalized_summary)
+    research_gaps = infer_research_gaps(
+        raw_text,
+        intake.source_type,
+        intake.source_refs,
+        intake.document_refs,
+        dataset_hints,
+        evaluation_targets,
+    )
+    bounded_experiment_ideas = infer_bounded_experiment_ideas(candidate_workflows, dataset_hints)
     unresolved_questions = infer_unresolved_questions(
         intake.source_type,
         candidate_workflows,
@@ -130,10 +183,13 @@ def build_interpretation_draft(request: InterpretationRequest) -> Interpretation
             f"Interpreted intake as {', '.join(candidate_workflows) or 'unmapped research work'} "
             f"with source type {intake.source_type}."
         ),
+        literature_state_summary=literature_state_summary,
         candidate_workflow_families=candidate_workflows,
         dataset_hints=dataset_hints,
         evaluation_targets=evaluation_targets,
         extracted_claims=extracted_claims,
+        research_gaps=research_gaps,
+        bounded_experiment_ideas=bounded_experiment_ideas,
         unresolved_questions=unresolved_questions,
     )
 

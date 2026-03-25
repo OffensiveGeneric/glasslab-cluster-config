@@ -47,6 +47,8 @@ def derive_design_from_intake(request: DesignRequest) -> tuple[dict[str, object]
             'dataset_uri': 'UNRESOLVED_DATASET_URI',
         }
         design_notes.append('Source paper metadata was normalized from the intake record.')
+        if intake.document_refs:
+            design_notes.append(f'Stored source documents are available: {", ".join(intake.document_refs[:2])}.')
         design_notes.append('Dataset selection remains unresolved for literature-derived experiments.')
     else:
         paper_id = intake.source_refs[0] if intake.source_refs else 'UNRESOLVED_PAPER_ID'
@@ -68,6 +70,12 @@ def build_design_draft(request: DesignRequest) -> DesignDraft:
     intake = request.intake
     workflow = request.workflow
     declared_inputs, unresolved_inputs, design_notes = derive_design_from_intake(request)
+    literature_state_notes = [note for note in intake.notes if note.startswith('Literature state: ')]
+    bounded_idea_notes = [note for note in intake.notes if note.startswith('Bounded experiment ideas: ')]
+    design_notes.extend(literature_state_notes[:1])
+    design_notes.extend(bounded_idea_notes[:1])
+    if bounded_idea_notes:
+        design_notes.append('Design draft is grounded in bounded experiment ideas derived upstream from interpretation.')
     if workflow.approval_tier != 'tier-2-approved-execution':
         design_notes.append(f'Approval tier {workflow.approval_tier} requires operator review before run creation.')
     return DesignDraft(

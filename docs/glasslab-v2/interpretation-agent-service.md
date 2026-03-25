@@ -58,6 +58,7 @@ Request shape:
     "intake_id": "intake-123",
     "source_type": "paper-link",
     "source_refs": ["https://example.org/paper"],
+    "document_refs": ["doc-abc123"],
     "raw_request": "Read this paper and propose a bounded reproduction path.",
     "normalized_summary": "Paper-derived reproduction request.",
     "workflow_family_candidates": [
@@ -140,14 +141,18 @@ The service should call external Mac-hosted inference, not host the model itself
 
 Preferred backend order:
 
-1. `.23` with `qwen3:30b` once that model finishes pulling and is validated
-2. `.12` with `qwen3:14b` as fallback
+1. `.23` with the larger reasoning model for interpretation-quality work
+2. `.12` with `qwen3:14b` as fallback for lower-latency bounded drafts
 
 This keeps:
 
 - stronger models on the Macs
 - bounded backend logic in-cluster
 - cluster GPU free for later experiments
+
+When `document_refs` are available, `workflow-api` should hydrate stored
+document excerpts and pass them into the interpretation input so the agent can
+reason about fetched paper content, not only URLs and operator notes.
 
 ## Suggested Environment Variables
 

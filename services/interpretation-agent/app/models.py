@@ -11,13 +11,14 @@ class IntakePayload(BaseModel):
     intake_id: str = Field(min_length=1)
     source_type: str = Field(min_length=1)
     source_refs: list[str] = Field(default_factory=list)
+    document_refs: list[str] = Field(default_factory=list)
     raw_request: str = Field(min_length=1)
     normalized_summary: str = Field(min_length=1)
     workflow_family_candidates: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
     submitted_by: str = Field(min_length=1)
 
-    @field_validator('source_refs', 'workflow_family_candidates', 'notes')
+    @field_validator('source_refs', 'document_refs', 'workflow_family_candidates', 'notes')
     @classmethod
     def validate_unique_non_empty_lists(cls, value: list[str]) -> list[str]:
         cleaned = [item.strip() for item in value if item.strip()]
@@ -33,10 +34,13 @@ class InterpretationDraft(BaseModel):
     source_type: str
     normalized_summary: str
     extracted_method_summary: str
+    literature_state_summary: str
     candidate_workflow_families: list[str] = Field(default_factory=list)
     dataset_hints: list[str] = Field(default_factory=list)
     evaluation_targets: list[str] = Field(default_factory=list)
     extracted_claims: list[str] = Field(default_factory=list)
+    research_gaps: list[str] = Field(default_factory=list)
+    bounded_experiment_ideas: list[str] = Field(default_factory=list)
     unresolved_questions: list[str] = Field(default_factory=list)
 
 

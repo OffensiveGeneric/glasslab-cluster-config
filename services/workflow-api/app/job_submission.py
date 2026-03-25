@@ -149,8 +149,16 @@ class KubernetesJobSubmitter(JobSubmitter):
             image=manifest.runner_image,
             image_pull_policy=self.settings.runner_image_pull_policy,
             env=env,
-            resources=self.client.V1ResourceRequirements(),
+            resources=self.client.V1ResourceRequirements(
+                requests=manifest.resource_requests or None,
+                limits=manifest.resource_limits or None,
+            ),
         )
+
+        runtime_class_name = None
+        requested_gpu = manifest.resource_requests.get('nvidia.com/gpu') or manifest.resource_limits.get('nvidia.com/gpu')
+        if requested_gpu:
+            runtime_class_name = self.settings.gpu_runtime_class_name
 
         pod_spec = self.client.V1PodSpec(
             restart_policy='Never',
@@ -158,6 +166,8 @@ class KubernetesJobSubmitter(JobSubmitter):
             image_pull_secrets=[self.client.V1LocalObjectReference(name=self.settings.image_pull_secret_name)],
             containers=[container],
             priority_class_name=priority_class_name or None,
+            runtime_class_name=runtime_class_name,
+            node_selector=manifest.node_selector or None,
             volumes=[
                 self.client.V1Volume(
                     name='dataset-volume',

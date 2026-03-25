@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from io import BytesIO
+import hashlib
+import html
 import json
 import logging
+import mimetypes
 from pathlib import Path
 import re
 import time
@@ -16,6 +20,7 @@ from fastapi import FastAPI, HTTPException, status
 from services.common.schemas import ArtifactIndexEntry, ArtifactsIndex, RunManifest, RunStatus, WorkflowRegistryEntry
 
 from .config import Settings, get_settings
+from .execution_preflight import build_execution_preflight_result
 from .job_submission import JobSubmitter, create_job_submitter
 from .persistence import InMemoryRunStore, RunStore
 from .registry import WorkflowRegistry
@@ -23,12 +28,16 @@ from .schemas import (
     DesignDraftRecord,
     DesignDraftReviewRequest,
     DigestScheduleCreateRequest,
+    ExecutionPreflightResult,
     FreshPaperPipelineRequest,
     FreshPaperPipelineResponse,
     IntakeCreateRequest,
     IntakeRecord,
     InterpretationRecord,
     LogEntry,
+    PaperIntakeCandidateRecord,
+    PaperIntakeQueueCreateRequest,
+    PaperIntakeQueueRecord,
     PaperPipelineReportState,
     ResearchProblemPaperCandidate,
     ResearchProblemRecord,
@@ -42,6 +51,7 @@ from .schemas import (
     RunRecord,
     ScheduledExecutionRecord,
     ScheduledOperationRecord,
+    SourceDocumentRecord,
     WorkflowFamilySummary,
 )
 from .validation import validate_run_request
@@ -55,6 +65,7 @@ MEDIA_TYPES = {
 }
 UNRESOLVED_PREFIX = 'UNRESOLVED_'
 LOG_LINE_RE = re.compile(r'^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) (?P<level>[A-Z]+) (?P<logger>[^ ]+) (?P<message>.*)$')
+HTML_TAG_RE = re.compile(r'<[^>]+>')
 LOGGER = logging.getLogger(__name__)
 
 
@@ -115,6 +126,7 @@ def validate_intake_agent_draft(
     normalized = {
         'source_type': draft['source_type'].strip(),
         'source_refs': normalize_unique_strings(list(draft.get('source_refs', []))),
+        'document_refs': normalize_unique_strings(list(draft.get('document_refs', []))),
         'raw_request': draft['raw_request'].strip(),
         'normalized_summary': ' '.join(draft['normalized_summary'].split())[:500],
         'workflow_family_candidates': normalize_unique_strings(list(draft.get('workflow_family_candidates', []))),
@@ -143,6 +155,7 @@ def build_intake_record_from_agent_draft(
         status='ready_for_design',
         source_type=validated_draft['source_type'],
         source_refs=validated_draft['source_refs'],
+        document_refs=validated_draft.get('document_refs', []),
         raw_request=validated_draft['raw_request'],
         normalized_summary=validated_draft['normalized_summary'],
         workflow_family_candidates=validated_draft['workflow_family_candidates'],
@@ -374,6 +387,71 @@ def infer_extracted_claims(intake: IntakeRecord) -> list[str]:
     return claims[:3]
 
 
+def infer_literature_state_summary(intake: IntakeRecord) -> str:
+    notes_blob = ' '.join(intake.notes)
+    if notes_blob:
+        return f'Current bounded literature view: {notes_blob[:420]}'
+    return f'Current bounded literature view is based on the intake summary: {intake.normalized_summary[:420]}'
+
+
+def infer_research_gaps(
+    intake: IntakeRecord,
+    dataset_hints: list[str],
+    evaluation_targets: list[str],
+) -> list[str]:
+    lowered = ' '.join([intake.raw_request, intake.normalized_summary, *intake.notes, *intake.source_refs]).lower()
+    gaps: list[str] = []
+    if not dataset_hints:
+        gaps.append('The literature snapshot does not settle on one concrete dataset for a bounded run.')
+    if not evaluation_targets:
+        gaps.append('The literature snapshot does not identify one canonical evaluation target or metric.')
+    if 'baseline' not in lowered and 'benchmark' not in lowered:
+        gaps.append('Baseline comparison expectations are still underspecified in the current literature context.')
+    if intake.source_type == 'paper-link' and not intake.document_refs:
+        gaps.append('A stored source document is missing, so interpretation still depends on URL-level context only.')
+    return list(dict.fromkeys(gaps))[:4]
+
+
+def infer_bounded_experiment_ideas(
+    intake: IntakeRecord,
+    candidate_workflows: list[str],
+    dataset_hints: list[str],
+) -> list[str]:
+    ideas: list[str] = []
+    if 'generic-tabular-benchmark' in candidate_workflows:
+        dataset_label = dataset_hints[0] if dataset_hints else 'one approved tabular dataset'
+        ideas.append(f'Run a bounded benchmark on {dataset_label} and compare the reported baseline against approved local baselines.')
+    if 'literature-to-experiment' in candidate_workflows:
+        ideas.append('Convert the reported method into a minimal literature-derived experiment with one dataset and one evaluation target.')
+    if 'replication-lite' in candidate_workflows:
+        ideas.append('Attempt a lightweight replication of the core reported claim with a reduced approved configuration.')
+    return list(dict.fromkeys(ideas))[:3]
+
+
+def build_document_context(intake: IntakeRecord, store: RunStore) -> str:
+    parts: list[str] = []
+    for document_id in intake.document_refs:
+        record = store.get_source_document(document_id)
+        if record is None:
+            continue
+        label = record.title or record.source_url
+        if record.text_excerpt:
+            parts.append(f'{label}: {record.text_excerpt}')
+        else:
+            parts.append(f'{label}: source document fetched without extracted text')
+    return ' '.join(parts)
+
+
+def build_interpretation_notes(intake: IntakeRecord, store: RunStore | None = None) -> list[str]:
+    notes = list(intake.notes)
+    if store is None:
+        return notes
+    document_context = build_document_context(intake, store)
+    if document_context:
+        return [document_context, *notes]
+    return notes
+
+
 def infer_unresolved_questions(intake: IntakeRecord, candidates: list[str], dataset_hints: list[str], evaluation_targets: list[str]) -> list[str]:
     unresolved: list[str] = []
     if not candidates:
@@ -387,12 +465,21 @@ def infer_unresolved_questions(intake: IntakeRecord, candidates: list[str], data
     return unresolved
 
 
-def build_interpretation_record(intake: IntakeRecord) -> InterpretationRecord:
+def build_interpretation_record(intake: IntakeRecord, store: RunStore | None = None) -> InterpretationRecord:
     now = datetime.now(timezone.utc)
     candidate_workflows = list(dict.fromkeys([workflow for workflow in intake.workflow_family_candidates if workflow]))
-    dataset_hints = infer_dataset_hints(intake)
-    evaluation_targets = infer_evaluation_targets(intake)
-    extracted_claims = infer_extracted_claims(intake)
+    document_context = build_document_context(intake, store) if store is not None else ''
+    enriched_intake = intake.model_copy(
+        update={
+            'notes': build_interpretation_notes(intake, store),
+        }
+    )
+    dataset_hints = infer_dataset_hints(enriched_intake)
+    evaluation_targets = infer_evaluation_targets(enriched_intake)
+    extracted_claims = infer_extracted_claims(enriched_intake)
+    literature_state_summary = infer_literature_state_summary(enriched_intake)
+    research_gaps = infer_research_gaps(enriched_intake, dataset_hints, evaluation_targets)
+    bounded_experiment_ideas = infer_bounded_experiment_ideas(enriched_intake, candidate_workflows, dataset_hints)
     unresolved_questions = infer_unresolved_questions(intake, candidate_workflows, dataset_hints, evaluation_targets)
     return InterpretationRecord(
         interpretation_id=uuid4().hex,
@@ -405,11 +492,15 @@ def build_interpretation_record(intake: IntakeRecord) -> InterpretationRecord:
         extracted_method_summary=(
             f"Interpreted intake as {', '.join(candidate_workflows) or 'unmapped research work'} "
             f"with source type {intake.source_type}."
+            + (' Used stored source-document context.' if document_context else '')
         ),
+        literature_state_summary=literature_state_summary,
         candidate_workflow_families=candidate_workflows,
         dataset_hints=dataset_hints,
         evaluation_targets=evaluation_targets,
         extracted_claims=extracted_claims,
+        research_gaps=research_gaps,
+        bounded_experiment_ideas=bounded_experiment_ideas,
         unresolved_questions=unresolved_questions,
         submitted_by=intake.submitted_by,
     )
@@ -425,7 +516,7 @@ def validate_interpretation_agent_draft(
     intake: IntakeRecord,
     registry: WorkflowRegistry,
 ) -> dict[str, Any]:
-    required_string_fields = ('source_type', 'normalized_summary', 'extracted_method_summary')
+    required_string_fields = ('source_type', 'normalized_summary', 'extracted_method_summary', 'literature_state_summary')
     for field_name in required_string_fields:
         value = draft.get(field_name)
         if not isinstance(value, str) or not value.strip():
@@ -435,10 +526,13 @@ def validate_interpretation_agent_draft(
         'source_type': draft['source_type'].strip(),
         'normalized_summary': ' '.join(draft['normalized_summary'].split())[:500],
         'extracted_method_summary': ' '.join(draft['extracted_method_summary'].split())[:500],
+        'literature_state_summary': ' '.join(draft['literature_state_summary'].split())[:500],
         'candidate_workflow_families': normalize_unique_strings(list(draft.get('candidate_workflow_families', []))),
         'dataset_hints': normalize_unique_strings(list(draft.get('dataset_hints', []))),
         'evaluation_targets': normalize_unique_strings(list(draft.get('evaluation_targets', []))),
         'extracted_claims': normalize_unique_strings(list(draft.get('extracted_claims', [])))[:3],
+        'research_gaps': normalize_unique_strings(list(draft.get('research_gaps', [])))[:4],
+        'bounded_experiment_ideas': normalize_unique_strings(list(draft.get('bounded_experiment_ideas', [])))[:3],
         'unresolved_questions': normalize_unique_strings(list(draft.get('unresolved_questions', []))),
     }
 
@@ -467,10 +561,13 @@ def build_interpretation_record_from_agent_draft(
         source_type=validated_draft['source_type'],
         normalized_summary=validated_draft['normalized_summary'],
         extracted_method_summary=validated_draft['extracted_method_summary'],
+        literature_state_summary=validated_draft['literature_state_summary'],
         candidate_workflow_families=validated_draft['candidate_workflow_families'],
         dataset_hints=validated_draft['dataset_hints'],
         evaluation_targets=validated_draft['evaluation_targets'],
         extracted_claims=validated_draft['extracted_claims'],
+        research_gaps=validated_draft['research_gaps'],
+        bounded_experiment_ideas=validated_draft['bounded_experiment_ideas'],
         unresolved_questions=unresolved_questions,
         submitted_by=intake.submitted_by,
     )
@@ -480,6 +577,7 @@ def call_interpretation_agent(
     intake: IntakeRecord,
     settings: Settings,
     registry: WorkflowRegistry,
+    store: RunStore,
 ) -> InterpretationRecord | None:
     if not settings.interpretation_agent_enabled:
         return None
@@ -490,10 +588,11 @@ def call_interpretation_agent(
             'intake_id': intake.intake_id,
             'source_type': intake.source_type,
             'source_refs': intake.source_refs,
+            'document_refs': intake.document_refs,
             'raw_request': intake.raw_request,
             'normalized_summary': intake.normalized_summary,
             'workflow_family_candidates': intake.workflow_family_candidates,
-            'notes': intake.notes,
+            'notes': build_interpretation_notes(intake, store),
             'submitted_by': intake.submitted_by,
         },
     }
@@ -540,11 +639,21 @@ def build_replicability_assessment(
     status_value = 'needs_review'
     assessment_notes: list[str] = []
 
+    if interpretation.research_gaps:
+        assessment_notes.append(
+            'Interpretation surfaced research gaps: ' + '; '.join(interpretation.research_gaps[:2])
+        )
+    if interpretation.bounded_experiment_ideas:
+        assessment_notes.append(
+            'Bounded experiment ideas: ' + '; '.join(interpretation.bounded_experiment_ideas[:2])
+        )
+
     if recommended_workflow is not None:
         approval_tier = recommended_workflow.approval_tier
         assessment_notes.append(
             f"Best current approved workflow match is {recommended_workflow.workflow_id}."
         )
+        assessment_notes.append(interpretation.literature_state_summary[:240])
         if recommended_workflow.approval_tier != 'tier-2-approved-execution':
             unresolved_fields.append(
                 f'Approval tier {recommended_workflow.approval_tier} requires human review before execution.'
@@ -607,7 +716,7 @@ def validate_assessment_agent_draft(
         'recommendation': recommendation.strip(),
         'recommended_workflow_id': recommended_workflow_id,
         'candidate_workflow_families': normalize_unique_strings(list(draft.get('candidate_workflow_families', []))),
-        'unresolved_fields': normalize_unique_strings(list(draft.get('unresolved_fields', []))),
+        'unresolved_fields': normalize_unique_strings(list(draft.get('unresolved_fields', [])))[:6],
         'blocking_reasons': normalize_unique_strings(list(draft.get('blocking_reasons', []))),
         'approval_tier': draft.get('approval_tier').strip() if isinstance(draft.get('approval_tier'), str) else None,
         'assessment_notes': normalize_unique_strings(list(draft.get('assessment_notes', []))),
@@ -674,10 +783,13 @@ def call_assessment_agent(
             'source_type': interpretation.source_type,
             'normalized_summary': interpretation.normalized_summary,
             'extracted_method_summary': interpretation.extracted_method_summary,
+            'literature_state_summary': interpretation.literature_state_summary,
             'candidate_workflow_families': interpretation.candidate_workflow_families,
             'dataset_hints': interpretation.dataset_hints,
             'evaluation_targets': interpretation.evaluation_targets,
             'extracted_claims': interpretation.extracted_claims,
+            'research_gaps': interpretation.research_gaps,
+            'bounded_experiment_ideas': interpretation.bounded_experiment_ideas,
             'unresolved_questions': interpretation.unresolved_questions,
             'submitted_by': interpretation.submitted_by,
         },
@@ -748,6 +860,8 @@ def derive_design_from_intake(intake: IntakeRecord, workflow: WorkflowRegistryEn
             'dataset_uri': 'UNRESOLVED_DATASET_URI',
         }
         design_notes.append('Source paper metadata was normalized from the intake record.')
+        if intake.document_refs:
+            design_notes.append(f'Stored source documents are available: {", ".join(intake.document_refs[:2])}.')
         design_notes.append('Dataset selection remains unresolved for literature-derived experiments.')
     else:
         paper_id = intake.source_refs[0] if intake.source_refs else 'UNRESOLVED_PAPER_ID'
@@ -969,6 +1083,27 @@ def build_fresh_paper_request_from_problem(
     )
 
 
+def enrich_intake_with_interpretation_context(
+    intake: IntakeRecord,
+    interpretation: InterpretationRecord | None,
+) -> IntakeRecord:
+    if interpretation is None:
+        return intake
+    extra_notes = list(intake.notes)
+    if interpretation.literature_state_summary:
+        extra_notes.append('Literature state: ' + interpretation.literature_state_summary)
+    if interpretation.bounded_experiment_ideas:
+        extra_notes.append('Bounded experiment ideas: ' + '; '.join(interpretation.bounded_experiment_ideas[:2]))
+    if interpretation.research_gaps:
+        extra_notes.append('Research gaps: ' + '; '.join(interpretation.research_gaps[:2]))
+    return intake.model_copy(
+        update={
+            'notes': normalize_unique_strings(extra_notes),
+            'updated_at': datetime.now(timezone.utc),
+        }
+    )
+
+
 def build_research_problem_record(
     request: ResearchProblemPipelineRequest,
     settings: Settings,
@@ -998,6 +1133,251 @@ def build_research_problem_request_from_record(
     )
 
 
+def build_paper_intake_queue_record(
+    request: PaperIntakeQueueCreateRequest,
+    selected_track_ids: list[str],
+    selected_queries: list[str],
+    selected_papers: list[ResearchProblemPaperCandidate],
+    warnings: list[str],
+    settings: Settings,
+) -> PaperIntakeQueueRecord:
+    now = datetime.now(timezone.utc)
+    candidates = [
+        PaperIntakeCandidateRecord(**candidate.model_dump())
+        for candidate in selected_papers
+    ]
+    status_value = 'ready' if candidates else 'exhausted'
+    return PaperIntakeQueueRecord(
+        queue_id=uuid4().hex,
+        created_at=now,
+        updated_at=now,
+        status=status_value,
+        problem_statement=request.problem_statement.strip(),
+        selected_tracks=selected_track_ids,
+        selected_queries=selected_queries,
+        warnings=warnings,
+        candidates=candidates,
+        submitted_by=request.submitted_by or settings.default_submitted_by,
+    )
+
+
+def build_intake_request_from_problem_candidate(
+    queue: PaperIntakeQueueRecord,
+    candidate: PaperIntakeCandidateRecord,
+    document_refs: list[str] | None = None,
+) -> IntakeCreateRequest:
+    paper_ref = candidate.official_page or candidate.pdf_url or candidate.paper_id
+    notes = [candidate.why_seed]
+    notes.extend(candidate.first_jobs[:2])
+    if queue.selected_tracks:
+        notes.append('Selected tracks: ' + ', '.join(queue.selected_tracks))
+    return IntakeCreateRequest(
+        raw_request=(
+            'Investigate this research problem with a bounded literature-derived experiment: '
+            + queue.problem_statement.strip()
+        ),
+        source_refs=[paper_ref],
+        document_refs=document_refs or [],
+        source_type='paper-link',
+        notes=notes,
+        submitted_by=queue.submitted_by,
+    )
+
+
+def stage_intake_from_request(
+    request: IntakeCreateRequest,
+    settings: Settings,
+    registry: WorkflowRegistry,
+    store: RunStore,
+) -> IntakeRecord:
+    record = call_intake_agent(request, settings, registry)
+    source = 'agent'
+    if record is None:
+        source = 'deterministic'
+        now = datetime.now(timezone.utc)
+        intake_id = uuid4().hex
+        candidates = [
+            workflow_id
+            for workflow_id in infer_workflow_candidates(request.raw_request)
+            if registry.get_workflow(workflow_id) is not None
+        ]
+        record = IntakeRecord(
+            intake_id=intake_id,
+            created_at=now,
+            updated_at=now,
+            status='ready_for_design',
+            source_type=infer_intake_source_type(request),
+            source_refs=request.source_refs,
+            document_refs=request.document_refs,
+            raw_request=request.raw_request.strip(),
+            normalized_summary=summarize_intake(request.raw_request, request.notes),
+            workflow_family_candidates=candidates,
+            notes=request.notes,
+            submitted_by=request.submitted_by or settings.default_submitted_by,
+        )
+    elif request.document_refs:
+        record = record.model_copy(
+            update={
+                'document_refs': normalize_unique_strings(list(record.document_refs) + list(request.document_refs)),
+                'updated_at': datetime.now(timezone.utc),
+            }
+        )
+    record = reorder_intake_candidates_with_ranker(record, settings, registry)
+    store.save_intake(record)
+    log_stage_record_source(
+        'intake',
+        source,
+        record.intake_id,
+        intake_id=record.intake_id,
+        submitted_by=record.submitted_by,
+    )
+    return record
+
+
+def guess_document_title(source_url: str) -> str:
+    parsed = source_url.rstrip('/').rsplit('/', 1)[-1]
+    return parsed or 'source-document'
+
+
+def extract_text_excerpt(content: bytes, content_type: str | None, source_url: str) -> str | None:
+    media_type = (content_type or '').split(';', 1)[0].strip().lower()
+    try:
+        if media_type in {'text/html', 'application/xhtml+xml'} or source_url.lower().endswith(('.html', '.htm')):
+            decoded = content.decode('utf-8', errors='ignore')
+            stripped = HTML_TAG_RE.sub(' ', decoded)
+            normalized = ' '.join(html.unescape(stripped).split())
+            return normalized[:4000] or None
+        if media_type == 'text/plain':
+            normalized = ' '.join(content.decode('utf-8', errors='ignore').split())
+            return normalized[:4000] or None
+        if media_type == 'application/pdf' or source_url.lower().endswith('.pdf'):
+            from pypdf import PdfReader
+
+            reader = PdfReader(BytesIO(content))
+            parts: list[str] = []
+            for page in reader.pages[:5]:
+                text = page.extract_text() or ''
+                text = ' '.join(text.split())
+                if text:
+                    parts.append(text)
+            joined = ' '.join(parts)
+            return joined[:4000] or None
+    except Exception:
+        return None
+    return None
+
+
+def fetch_source_document_bytes(source_url: str) -> tuple[bytes, str | None]:
+    request_obj = urllib_request.Request(
+        source_url,
+        headers={
+            'User-Agent': 'glasslab-workflow-api/0.1.0',
+            'Accept': 'text/html,application/pdf,application/xhtml+xml;q=0.9,*/*;q=0.8',
+        },
+        method='GET',
+    )
+    with urllib_request.urlopen(request_obj, timeout=30.0) as response:
+        content = response.read()
+        content_type = response.headers.get('Content-Type')
+    return content, content_type
+
+
+def persist_source_document_bytes(
+    *,
+    document_id: str,
+    source_url: str,
+    content: bytes,
+    content_type: str | None,
+    settings: Settings,
+) -> str:
+    guessed_ext = mimetypes.guess_extension((content_type or '').split(';', 1)[0].strip()) or ''
+    if not guessed_ext:
+        if source_url.lower().endswith('.pdf'):
+            guessed_ext = '.pdf'
+        elif source_url.lower().endswith(('.html', '.htm')):
+            guessed_ext = '.html'
+    key_name = f'{document_id}/source{guessed_ext}'
+
+    if settings.source_document_storage_mode == 'minio':
+        try:
+            from minio import Minio
+        except ImportError as exc:
+            raise RuntimeError('minio package is required for source_document_storage_mode=minio') from exc
+
+        if not settings.minio_access_key or not settings.minio_secret_key:
+            raise RuntimeError('minio credentials are required for source_document_storage_mode=minio')
+
+        client = Minio(
+            settings.minio_endpoint,
+            access_key=settings.minio_access_key,
+            secret_key=settings.minio_secret_key,
+            secure=settings.minio_secure,
+        )
+        bucket = settings.source_document_bucket
+        if not client.bucket_exists(bucket):
+            client.make_bucket(bucket)
+        client.put_object(
+            bucket,
+            key_name,
+            BytesIO(content),
+            length=len(content),
+            content_type=(content_type or 'application/octet-stream'),
+        )
+        return f's3://{bucket}/{key_name}'
+
+    base_dir = Path(settings.source_document_storage_dir)
+    target = base_dir / document_id / f'source{guessed_ext}'
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(content)
+    return target.as_uri()
+
+
+def ingest_source_document(
+    source_url: str,
+    submitted_by: str,
+    settings: Settings,
+    store: RunStore,
+) -> SourceDocumentRecord:
+    now = datetime.now(timezone.utc)
+    document_id = uuid4().hex
+    try:
+        content, content_type = fetch_source_document_bytes(source_url)
+        storage_uri = persist_source_document_bytes(
+            document_id=document_id,
+            source_url=source_url,
+            content=content,
+            content_type=content_type,
+            settings=settings,
+        )
+        record = SourceDocumentRecord(
+            document_id=document_id,
+            created_at=now,
+            updated_at=now,
+            status='fetched',
+            source_url=source_url,
+            submitted_by=submitted_by,
+            storage_uri=storage_uri,
+            content_type=content_type,
+            size_bytes=len(content),
+            sha256=hashlib.sha256(content).hexdigest(),
+            title=guess_document_title(source_url),
+            text_excerpt=extract_text_excerpt(content, content_type, source_url),
+        )
+    except Exception as exc:
+        record = SourceDocumentRecord(
+            document_id=document_id,
+            created_at=now,
+            updated_at=now,
+            status='fetch-failed',
+            source_url=source_url,
+            submitted_by=submitted_by,
+            fetch_error=str(exc),
+            title=guess_document_title(source_url),
+        )
+    store.save_source_document(record)
+    return record
+
+
 def build_design_draft(
     intake: IntakeRecord,
     workflow: WorkflowRegistryEntry,
@@ -1007,6 +1387,10 @@ def build_design_draft(
     now = datetime.now(timezone.utc)
     design_id = uuid4().hex
     declared_inputs, unresolved_inputs, design_notes = derive_design_from_intake(intake, workflow)
+    bounded_idea_notes = [note for note in intake.notes if note.startswith('Bounded experiment ideas: ')]
+    literature_state_notes = [note for note in intake.notes if note.startswith('Literature state: ')]
+    design_notes.extend(bounded_idea_notes[:1])
+    design_notes.extend(literature_state_notes[:1])
     candidate_models = workflow.allowed_models[:2]
     status_value = 'ready_for_run'
     if unresolved_inputs:
@@ -1129,6 +1513,7 @@ def call_design_agent(
             'intake_id': intake.intake_id,
             'source_type': intake.source_type,
             'source_refs': intake.source_refs,
+            'document_refs': intake.document_refs,
             'raw_request': intake.raw_request,
             'normalized_summary': intake.normalized_summary,
             'workflow_family_candidates': intake.workflow_family_candidates,
@@ -1537,6 +1922,19 @@ def create_run_record(
             detail=[issue.model_dump() for issue in issues],
         )
 
+    preflight = build_execution_preflight_result(workflow, settings)
+    if not preflight.ready:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                'message': 'execution preflight failed',
+                'workflow_id': workflow.workflow_id,
+                'blocking_issues': preflight.blocking_issues,
+                'warnings': preflight.warnings,
+                'eligible_nodes': preflight.eligible_nodes,
+            },
+        )
+
     now = datetime.now(timezone.utc)
     run_id = uuid4().hex
     manifest = RunManifest(
@@ -1551,6 +1949,9 @@ def create_run_record(
         inputs=request.inputs,
         requested_models=request.models,
         resource_profile=request.resource_profile or workflow.resource_profile.profile_name,
+        resource_requests=workflow.resource_profile.requests,
+        resource_limits=workflow.resource_profile.limits,
+        node_selector=workflow.resource_profile.node_selector,
         runner_image=workflow.runner_image,
         evaluator_type=workflow.evaluator_type,
         approval_tier=workflow.approval_tier,
@@ -1690,40 +2091,7 @@ def create_app(
 
     @app.post('/intakes', response_model=IntakeRecord, status_code=status.HTTP_201_CREATED)
     def create_intake(request: IntakeCreateRequest) -> IntakeRecord:
-        record = call_intake_agent(request, settings, registry)
-        source = 'agent'
-        if record is None:
-            source = 'deterministic'
-            now = datetime.now(timezone.utc)
-            intake_id = uuid4().hex
-            candidates = [
-                workflow_id
-                for workflow_id in infer_workflow_candidates(request.raw_request)
-                if registry.get_workflow(workflow_id) is not None
-            ]
-            record = IntakeRecord(
-                intake_id=intake_id,
-                created_at=now,
-                updated_at=now,
-                status='ready_for_design',
-                source_type=infer_intake_source_type(request),
-                source_refs=request.source_refs,
-                raw_request=request.raw_request.strip(),
-                normalized_summary=summarize_intake(request.raw_request, request.notes),
-                workflow_family_candidates=candidates,
-                notes=request.notes,
-                submitted_by=request.submitted_by or settings.default_submitted_by,
-            )
-        record = reorder_intake_candidates_with_ranker(record, settings, registry)
-        store.save_intake(record)
-        log_stage_record_source(
-            'intake',
-            source,
-            record.intake_id,
-            intake_id=record.intake_id,
-            submitted_by=record.submitted_by,
-        )
-        return record
+        return stage_intake_from_request(request, settings, registry, store)
 
     @app.get('/intakes/latest', response_model=IntakeRecord)
     def get_latest_intake() -> IntakeRecord:
@@ -1744,11 +2112,11 @@ def create_app(
         intake = store.get_latest_intake()
         if intake is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='intake not found')
-        record = call_interpretation_agent(intake, settings, registry)
+        record = call_interpretation_agent(intake, settings, registry, store)
         source = 'agent'
         if record is None:
             source = 'deterministic'
-            record = build_interpretation_record(intake)
+            record = build_interpretation_record(intake, store)
         store.save_interpretation(record)
         log_stage_record_source(
             'interpretation',
@@ -1817,11 +2185,16 @@ def create_app(
         intake = store.get_latest_intake()
         if intake is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='intake not found')
-        workflow = choose_workflow_for_intake(intake, registry)
+        latest_interpretation = store.get_latest_interpretation()
+        intake_for_design = enrich_intake_with_interpretation_context(
+            intake,
+            latest_interpretation if latest_interpretation and latest_interpretation.intake_id == intake.intake_id else None,
+        )
+        workflow = choose_workflow_for_intake(intake_for_design, registry)
         if workflow is None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='no approved workflow mapping found')
         record = call_design_agent(
-            intake,
+            intake_for_design,
             workflow,
             submitted_by=intake.submitted_by,
             settings=settings,
@@ -1829,7 +2202,7 @@ def create_app(
         source = 'agent'
         if record is None:
             source = 'deterministic'
-            record = build_design_draft(intake, workflow, submitted_by=intake.submitted_by)
+            record = build_design_draft(intake_for_design, workflow, submitted_by=intake.submitted_by)
         store.save_design_draft(record)
         log_stage_record_source(
             'design',
@@ -1853,11 +2226,13 @@ def create_app(
         intake = store.get_intake(assessment.intake_id)
         if intake is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='intake not found')
+        interpretation = store.get_interpretation(assessment.interpretation_id)
+        intake_for_design = enrich_intake_with_interpretation_context(intake, interpretation)
         workflow = registry.get_workflow(assessment.recommended_workflow_id)
         if workflow is None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='workflow registry entry not found')
         record = call_design_agent(
-            intake,
+            intake_for_design,
             workflow,
             submitted_by=assessment.submitted_by,
             settings=settings,
@@ -1867,7 +2242,7 @@ def create_app(
         if record is None:
             source = 'deterministic'
             record = build_design_draft(
-                intake,
+                intake_for_design,
                 workflow,
                 submitted_by=assessment.submitted_by,
                 source_assessment_id=assessment.assessment_id,
@@ -1954,11 +2329,11 @@ def create_app(
             submitted_by=intake.submitted_by,
         )
 
-        interpretation = call_interpretation_agent(intake, settings, registry)
+        interpretation = call_interpretation_agent(intake, settings, registry, store)
         interpretation_source = 'agent'
         if interpretation is None:
             interpretation_source = 'deterministic'
-            interpretation = build_interpretation_record(intake)
+            interpretation = build_interpretation_record(intake, store)
         store.save_interpretation(interpretation)
         log_stage_record_source(
             'interpretation',
@@ -2166,6 +2541,140 @@ def create_app(
         request = build_research_problem_request_from_record(record, settings)
         return create_pipeline_from_research_problem(request)
 
+    @app.post('/paper-intake-queues/from-research-problem', response_model=PaperIntakeQueueRecord, status_code=status.HTTP_201_CREATED)
+    def create_paper_intake_queue_from_research_problem(request: PaperIntakeQueueCreateRequest) -> PaperIntakeQueueRecord:
+        harvester_request = ResearchProblemPipelineRequest(
+            problem_statement=request.problem_statement,
+            max_candidate_papers=request.max_candidate_papers,
+            priorities=request.priorities,
+            submitted_by=request.submitted_by,
+            wait_for_terminal_state=False,
+        )
+        try:
+            plan_payload = call_problem_harvester_plan(harvester_request, settings)
+        except (urllib_error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f'problem harvester unavailable: {exc}')
+
+        selected_track_ids = [
+            str(item.get('track_id', '')).strip()
+            for item in plan_payload.get('selected_tracks', [])
+            if isinstance(item, dict) and str(item.get('track_id', '')).strip()
+        ]
+        selected_queries = [
+            query.strip()
+            for item in plan_payload.get('selected_queries', [])
+            if isinstance(item, dict)
+            for query in item.get('queries', [])
+            if isinstance(query, str) and query.strip()
+        ]
+        selected_papers = [
+            ResearchProblemPaperCandidate.model_validate(item)
+            for item in plan_payload.get('selected_papers', [])
+            if isinstance(item, dict)
+        ]
+        warnings = [
+            warning.strip()
+            for warning in plan_payload.get('warnings', [])
+            if isinstance(warning, str) and warning.strip()
+        ]
+        record = build_paper_intake_queue_record(
+            request,
+            selected_track_ids,
+            selected_queries,
+            selected_papers,
+            warnings,
+            settings,
+        )
+        store.save_paper_intake_queue(record)
+        return record
+
+    @app.get('/paper-intake-queues', response_model=list[PaperIntakeQueueRecord])
+    def list_paper_intake_queues() -> list[PaperIntakeQueueRecord]:
+        return store.list_paper_intake_queues()
+
+    @app.get('/paper-intake-queues/latest', response_model=PaperIntakeQueueRecord)
+    def get_latest_paper_intake_queue() -> PaperIntakeQueueRecord:
+        record = store.get_latest_paper_intake_queue()
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='paper intake queue not found')
+        return record
+
+    @app.get('/paper-intake-queues/{queue_id}', response_model=PaperIntakeQueueRecord)
+    def get_paper_intake_queue(queue_id: str) -> PaperIntakeQueueRecord:
+        record = store.get_paper_intake_queue(queue_id)
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='paper intake queue not found')
+        return record
+
+    @app.post('/paper-intake-queues/{queue_id}/stage-next-intake', response_model=IntakeRecord, status_code=status.HTTP_201_CREATED)
+    def stage_next_intake_from_queue(queue_id: str) -> IntakeRecord:
+        queue = store.get_paper_intake_queue(queue_id)
+        if queue is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='paper intake queue not found')
+
+        next_candidate = next((candidate for candidate in queue.candidates if candidate.intake_status == 'pending'), None)
+        if next_candidate is None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='paper intake queue is exhausted')
+
+        paper_ref = next_candidate.official_page or next_candidate.pdf_url
+        document_refs: list[str] = []
+        if paper_ref:
+            source_document = ingest_source_document(
+                paper_ref,
+                submitted_by=queue.submitted_by,
+                settings=settings,
+                store=store,
+            )
+            store.save_source_document(source_document)
+            if source_document.status == 'fetched':
+                document_refs.append(source_document.document_id)
+
+        intake_request = build_intake_request_from_problem_candidate(queue, next_candidate, document_refs=document_refs)
+        intake = stage_intake_from_request(intake_request, settings, registry, store)
+
+        updated_candidates: list[PaperIntakeCandidateRecord] = []
+        for candidate in queue.candidates:
+            if candidate.paper_id == next_candidate.paper_id:
+                updated_candidates.append(
+                    candidate.model_copy(
+                        update={
+                            'intake_status': 'staged',
+                            'staged_intake_id': intake.intake_id,
+                        }
+                    )
+                )
+            else:
+                updated_candidates.append(candidate)
+
+        queue_status = 'ready' if any(candidate.intake_status == 'pending' for candidate in updated_candidates) else 'exhausted'
+        updated_queue = queue.model_copy(
+            update={
+                'updated_at': datetime.now(timezone.utc),
+                'status': queue_status,
+                'candidates': updated_candidates,
+            }
+        )
+        store.save_paper_intake_queue(updated_queue)
+        return intake
+
+    @app.get('/source-documents', response_model=list[SourceDocumentRecord])
+    def list_source_documents() -> list[SourceDocumentRecord]:
+        return store.list_source_documents()
+
+    @app.get('/source-documents/latest', response_model=SourceDocumentRecord)
+    def get_latest_source_document() -> SourceDocumentRecord:
+        record = store.get_latest_source_document()
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='source document not found')
+        return record
+
+    @app.get('/source-documents/{document_id}', response_model=SourceDocumentRecord)
+    def get_source_document(document_id: str) -> SourceDocumentRecord:
+        record = store.get_source_document(document_id)
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='source document not found')
+        return record
+
     @app.get('/workflow-families', response_model=list[WorkflowFamilySummary])
     def list_workflow_families() -> list[WorkflowFamilySummary]:
         return [
@@ -2180,6 +2689,13 @@ def create_app(
             )
             for entry in registry.list_workflows()
         ]
+
+    @app.get('/workflow-families/{workflow_id}/execution-preflight', response_model=ExecutionPreflightResult)
+    def get_workflow_execution_preflight(workflow_id: str) -> ExecutionPreflightResult:
+        workflow = registry.get_workflow(workflow_id)
+        if workflow is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='workflow not found')
+        return build_execution_preflight_result(workflow, settings)
 
     @app.post('/digest-schedules', response_model=ScheduledOperationRecord, status_code=status.HTTP_201_CREATED)
     def create_digest_schedule(request: DigestScheduleCreateRequest) -> ScheduledOperationRecord:

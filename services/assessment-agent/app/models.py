@@ -13,10 +13,13 @@ class InterpretationPayload(BaseModel):
     source_type: str = Field(min_length=1)
     normalized_summary: str = Field(min_length=1)
     extracted_method_summary: str = Field(min_length=1)
+    literature_state_summary: str = Field(min_length=1)
     candidate_workflow_families: list[str] = Field(default_factory=list)
     dataset_hints: list[str] = Field(default_factory=list)
     evaluation_targets: list[str] = Field(default_factory=list)
     extracted_claims: list[str] = Field(default_factory=list)
+    research_gaps: list[str] = Field(default_factory=list)
+    bounded_experiment_ideas: list[str] = Field(default_factory=list)
     unresolved_questions: list[str] = Field(default_factory=list)
     submitted_by: str = Field(min_length=1)
 
@@ -25,6 +28,8 @@ class InterpretationPayload(BaseModel):
         'dataset_hints',
         'evaluation_targets',
         'extracted_claims',
+        'research_gaps',
+        'bounded_experiment_ideas',
         'unresolved_questions',
     )
     @classmethod

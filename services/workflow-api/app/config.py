@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     artifacts_pvc_name: str = 'glasslab-shared-artifacts'
     artifacts_mount_path: str = '/mnt/artifacts'
     image_pull_secret_name: str = 'glasslab-ghcr-pull'
+    gpu_runtime_class_name: str = 'nvidia'
     user_priority_class_name: str = 'glasslab-user-high'
     autonomous_priority_class_name: str = 'glasslab-autonomous-low'
     intake_agent_enabled: bool = False
@@ -53,6 +54,13 @@ class Settings(BaseSettings):
     ranker_timeout_seconds: float = 15.0
     ranker_min_top_score: float = 0.75
     ranker_min_score_gap: float = 0.10
+    source_document_storage_mode: Literal['filesystem', 'minio'] = 'filesystem'
+    source_document_storage_dir: str = '/mnt/artifacts/source-documents'
+    source_document_bucket: str = 'research-sources'
+    minio_endpoint: str = 'glasslab-minio.glasslab-v2.svc.cluster.local:9000'
+    minio_access_key: str | None = None
+    minio_secret_key: str | None = None
+    minio_secure: bool = False
 
 
 @lru_cache(maxsize=1)

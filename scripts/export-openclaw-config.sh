@@ -316,6 +316,14 @@ if whatsapp_channel.get("group_policy") != "disabled":
 openclaw_secret_values = openclaw_local_secret.get("stringData", {})
 whatsapp_owner = openclaw_secret_values.get(whatsapp_channel.get("owner_env", "OPENCLAW_WHATSAPP_OWNER"))
 enable_whatsapp_channel = isinstance(whatsapp_owner, str) and bool(whatsapp_owner.strip())
+whatsapp_allow_from_raw = openclaw_secret_values.get("OPENCLAW_WHATSAPP_ALLOW_FROM", "")
+whatsapp_allow_from = []
+if enable_whatsapp_channel:
+    whatsapp_allow_from.append("${OPENCLAW_WHATSAPP_OWNER}")
+for candidate in str(whatsapp_allow_from_raw).split(","):
+    candidate = candidate.strip()
+    if candidate and candidate not in whatsapp_allow_from:
+        whatsapp_allow_from.append(candidate)
 
 runtime_dir.mkdir(parents=True, exist_ok=True)
 workspaces_dir = runtime_dir / "workspaces"
@@ -348,9 +356,18 @@ allowed_runtime_tools = {
     "workflow_api_start_paper_intake",
     "workflow_api_start_literature_intake",
     "workflow_api_start_replication_intake",
+    "workflow_api_create_paper_intake_queue_from_latest_research_problem",
+    "workflow_api_get_latest_paper_intake_queue",
+    "workflow_api_stage_next_intake_from_latest_queue",
     "workflow_api_get_last_intake",
+    "workflow_api_get_latest_source_document",
+    "workflow_api_get_latest_interpretation",
+    "workflow_api_create_assessment_from_latest_interpretation",
+    "workflow_api_get_latest_assessment",
     "workflow_api_create_design_draft_from_last_intake",
+    "workflow_api_create_design_draft_from_last_assessment",
     "workflow_api_get_last_design_draft",
+    "workflow_api_get_execution_preflight_from_last_design",
     "workflow_api_review_last_design_for_literature_path",
     "workflow_api_create_validation_run_from_last_design",
     "workflow_api_get_last_run_status",
@@ -498,7 +515,7 @@ if enable_whatsapp_channel:
         "whatsapp": {
             "defaultAccount": whatsapp_channel.get("account_id", "default"),
             "dmPolicy": whatsapp_channel["dm_policy"],
-            "allowFrom": ["${OPENCLAW_WHATSAPP_OWNER}"],
+            "allowFrom": whatsapp_allow_from,
             "selfChatMode": bool(whatsapp_channel.get("self_chat_mode", False)),
             "groupPolicy": whatsapp_channel["group_policy"],
             "sendReadReceipts": bool(whatsapp_channel.get("send_read_receipts", False)),
@@ -507,7 +524,7 @@ if enable_whatsapp_channel:
                     "enabled": True,
                     "authDir": "/var/lib/openclaw/state/credentials/whatsapp/default",
                     "dmPolicy": whatsapp_channel["dm_policy"],
-                    "allowFrom": ["${OPENCLAW_WHATSAPP_OWNER}"],
+                    "allowFrom": whatsapp_allow_from,
                     "selfChatMode": bool(whatsapp_channel.get("self_chat_mode", False)),
                     "groupPolicy": whatsapp_channel["group_policy"],
                     "sendReadReceipts": bool(whatsapp_channel.get("send_read_receipts", False)),

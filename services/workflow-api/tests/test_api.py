@@ -296,6 +296,8 @@ def test_create_and_fetch_interpretation_from_latest_intake() -> None:
     assert payload['intake_id'] == intake_id
     assert 'generic-tabular-benchmark' in payload['candidate_workflow_families']
     assert 'titanic' in payload['dataset_hints']
+    assert payload['literature_state_summary'].startswith('Current bounded literature view:')
+    assert payload['bounded_experiment_ideas']
     assert payload['status'] in {'ready_for_assessment', 'needs_review'}
 
     latest = client.get('/interpretations/latest')
@@ -326,17 +328,20 @@ def test_create_interpretation_uses_agent_when_enabled(monkeypatch) -> None:
     )
     assert create_intake.status_code == 201
 
-    def fake_call_interpretation_agent(intake, settings, registry):
+    def fake_call_interpretation_agent(intake, settings, registry, store):
         return main_module.build_interpretation_record_from_agent_draft(
             intake,
             {
                 'source_type': intake.source_type,
                 'normalized_summary': 'agent-normalized summary',
                 'extracted_method_summary': 'agent-produced method summary',
+                'literature_state_summary': 'agent literature-state summary',
                 'candidate_workflow_families': ['generic-tabular-benchmark'],
                 'dataset_hints': ['titanic'],
                 'evaluation_targets': ['baseline comparison'],
                 'extracted_claims': ['Agent extracted claim'],
+                'research_gaps': ['Agent gap'],
+                'bounded_experiment_ideas': ['Agent idea'],
                 'unresolved_questions': [],
             },
         )
@@ -348,7 +353,10 @@ def test_create_interpretation_uses_agent_when_enabled(monkeypatch) -> None:
     payload = create_interpretation.json()
     assert payload['normalized_summary'] == 'agent-normalized summary'
     assert payload['extracted_method_summary'] == 'agent-produced method summary'
+    assert payload['literature_state_summary'] == 'agent literature-state summary'
     assert payload['candidate_workflow_families'] == ['generic-tabular-benchmark']
+    assert payload['research_gaps'] == ['Agent gap']
+    assert payload['bounded_experiment_ideas'] == ['Agent idea']
     assert payload['status'] == 'ready_for_assessment'
 
 
@@ -371,13 +379,104 @@ def test_create_interpretation_falls_back_when_agent_returns_none(monkeypatch) -
     )
     assert create_intake.status_code == 201
 
-    monkeypatch.setattr(main_module, 'call_interpretation_agent', lambda intake, settings, registry: None)
+    monkeypatch.setattr(main_module, 'call_interpretation_agent', lambda intake, settings, registry, store: None)
 
     create_interpretation = client.post('/interpretations/from-latest-intake')
     assert create_interpretation.status_code == 201
     payload = create_interpretation.json()
     assert 'generic-tabular-benchmark' in payload['candidate_workflow_families']
     assert payload['normalized_summary'].startswith('Read this paper intake')
+
+
+def test_create_interpretation_uses_stored_source_document_context(monkeypatch) -> None:
+    client = build_client()
+
+    class FakeResponse:
+        def __init__(self, payload: dict) -> None:
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            import json
+            return json.dumps(self.payload).encode('utf-8')
+
+    monkeypatch.setattr(
+        main_module.urllib_request,
+        'urlopen',
+        lambda request_obj, timeout: FakeResponse(
+            {
+                'request_id': 'paper-queue-docctx',
+                'selected_tracks': [{'track_id': 'agent_evaluation', 'track': 'agent_evaluation'}],
+                'selected_queries': [{'queries': ['site:arxiv.org machine learning agents benchmark Kaggle']}],
+                'selected_papers': [
+                    {
+                        'paper_id': 'mle_bench_arxiv_2024',
+                        'title': 'MLE-bench: Evaluating Machine Learning Agents on Machine Learning Engineering',
+                        'year': 2024,
+                        'venue': 'arXiv',
+                        'priority': 'P1',
+                        'tracks': ['agent_evaluation'],
+                        'bounded_job_fit': 4,
+                        'replication_complexity': 4,
+                        'official_page': 'https://arxiv.org/abs/2410.07095',
+                        'pdf_url': None,
+                        'why_seed': 'benchmark for measuring whether agents can do bounded ML engineering work on real tasks',
+                        'first_jobs': ['adapt a reduced internal benchmark using 3-5 public competitions or equivalent tasks'],
+                        'tags': ['agents'],
+                    }
+                ],
+                'warnings': [],
+            }
+        ),
+    )
+
+    monkeypatch.setattr(
+        main_module,
+        'ingest_source_document',
+        lambda source_url, submitted_by, settings, store: main_module.SourceDocumentRecord(
+            document_id='doc-ctx-1',
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            status='fetched',
+            source_url=source_url,
+            submitted_by=submitted_by,
+            storage_uri='file:///tmp/source-documents/doc-ctx-1/source.html',
+            content_type='text/html',
+            size_bytes=128,
+            sha256='def456',
+            title='paper.html',
+            text_excerpt='This paper evaluates research agents on machine learning engineering tasks using Kaggle-style benchmarks and reports accuracy improvements over a baseline.',
+        ),
+    )
+
+    queue = client.post(
+        '/paper-intake-queues/from-research-problem',
+        json={
+            'problem_statement': 'Find literature about research agents doing machine learning engineering work.',
+            'max_candidate_papers': 1,
+        },
+    )
+    assert queue.status_code == 201
+    queue_id = queue.json()['queue_id']
+
+    staged_intake = client.post(f'/paper-intake-queues/{queue_id}/stage-next-intake')
+    assert staged_intake.status_code == 201
+
+    interpretation = client.post('/interpretations/from-latest-intake')
+    assert interpretation.status_code == 201
+    payload = interpretation.json()
+    assert 'Used stored source-document context.' in payload['extracted_method_summary']
+    assert payload['literature_state_summary'].startswith('Current bounded literature view:')
+    joined_claims = ' '.join(payload['extracted_claims']).lower()
+    assert 'machine learning engineering' in joined_claims
+    joined_gaps = ' '.join(payload['research_gaps']).lower()
+    assert 'concrete dataset' in joined_gaps
+    assert payload['bounded_experiment_ideas']
 
 
 def test_create_interpretation_requires_intake() -> None:
@@ -416,6 +515,7 @@ def test_create_and_fetch_replicability_assessment_from_latest_interpretation() 
     assert payload['recommendation'] == 'proceed'
     assert payload['recommended_workflow_id'] == 'generic-tabular-benchmark'
     assert payload['status'] == 'ready_for_design'
+    assert payload['assessment_notes']
 
     latest = client.get('/replicability-assessments/latest')
     assert latest.status_code == 200
@@ -500,6 +600,7 @@ def test_create_replicability_assessment_falls_back_when_agent_returns_none(monk
     payload = create_assessment.json()
     assert payload['recommended_workflow_id'] == 'generic-tabular-benchmark'
     assert payload['status'] == 'ready_for_design'
+    assert payload['assessment_notes']
 
 
 def test_create_replicability_assessment_requires_interpretation() -> None:
@@ -522,6 +623,9 @@ def test_create_and_fetch_design_draft_from_latest_titanic_intake() -> None:
     )
     assert create_intake.status_code == 201
     intake_id = create_intake.json()['intake_id']
+    create_interpretation = client.post('/interpretations/from-latest-intake')
+    assert create_interpretation.status_code == 201
+    interpretation_payload = create_interpretation.json()
 
     create_design = client.post('/design-drafts/from-latest-intake')
     assert create_design.status_code == 201
@@ -532,6 +636,10 @@ def test_create_and_fetch_design_draft_from_latest_titanic_intake() -> None:
     assert payload['status'] == 'ready_for_run'
     assert payload['declared_inputs']['dataset_name'] == 'titanic'
     assert payload['unresolved_inputs'] == []
+    joined_notes = ' '.join(payload['design_notes'])
+    assert 'Literature state:' in joined_notes
+    assert interpretation_payload['literature_state_summary'] in joined_notes
+    assert 'Bounded experiment ideas:' in joined_notes
 
     latest = client.get('/design-drafts/latest')
     assert latest.status_code == 200
@@ -559,6 +667,7 @@ def test_create_design_draft_from_latest_intake_uses_agent_when_enabled(monkeypa
         },
     )
     assert create_intake.status_code == 201
+    assert client.post('/interpretations/from-latest-intake').status_code == 201
 
     def fake_call_design_agent(intake, workflow, submitted_by, settings, source_assessment_id=None):
         return main_module.build_design_draft_from_agent_draft(
@@ -612,6 +721,7 @@ def test_create_design_draft_from_latest_intake_falls_back_when_agent_returns_no
         },
     )
     assert create_intake.status_code == 201
+    assert client.post('/interpretations/from-latest-intake').status_code == 201
 
     monkeypatch.setattr(main_module, 'call_design_agent', lambda *args, **kwargs: None)
 
@@ -653,6 +763,7 @@ def test_create_design_draft_from_latest_assessment() -> None:
     assert payload['source_assessment_id'] == assessment_id
     assert payload['workflow_id'] == 'generic-tabular-benchmark'
     assert payload['status'] == 'ready_for_run'
+    assert 'Literature state:' in ' '.join(payload['design_notes'])
 
 
 def test_create_design_draft_from_latest_assessment_uses_agent_when_enabled(monkeypatch) -> None:
@@ -1457,6 +1568,189 @@ def test_create_pipeline_from_latest_research_problem(monkeypatch) -> None:
     assert payload['pipeline']['run']['run_purpose'] == 'paper-pipeline'
 
 
+def test_create_and_fetch_paper_intake_queue(monkeypatch) -> None:
+    client = build_client()
+
+    class FakeResponse:
+        def __init__(self, payload: dict) -> None:
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            import json
+            return json.dumps(self.payload).encode('utf-8')
+
+    monkeypatch.setattr(
+        main_module.urllib_request,
+        'urlopen',
+        lambda request_obj, timeout: FakeResponse(
+            {
+                'request_id': 'paper-queue-1',
+                'selected_tracks': [{'track_id': 'agent_evaluation', 'track': 'agent_evaluation'}],
+                'selected_queries': [{'queries': ['site:arxiv.org machine learning agents benchmark Kaggle']}],
+                'selected_papers': [
+                    {
+                        'paper_id': 'mle_bench_arxiv_2024',
+                        'title': 'MLE-bench: Evaluating Machine Learning Agents on Machine Learning Engineering',
+                        'year': 2024,
+                        'venue': 'arXiv',
+                        'priority': 'P1',
+                        'tracks': ['agent_evaluation'],
+                        'bounded_job_fit': 4,
+                        'replication_complexity': 4,
+                        'official_page': 'https://arxiv.org/abs/2410.07095',
+                        'pdf_url': None,
+                        'why_seed': 'benchmark for measuring whether agents can do bounded ML engineering work on real tasks',
+                        'first_jobs': ['adapt a reduced internal benchmark using 3-5 public competitions or equivalent tasks'],
+                        'tags': ['agents'],
+                    },
+                    {
+                        'paper_id': 'second_paper',
+                        'title': 'Another bounded paper',
+                        'year': 2023,
+                        'venue': 'arXiv',
+                        'priority': 'P2',
+                        'tracks': ['agent_evaluation'],
+                        'bounded_job_fit': 3,
+                        'replication_complexity': 2,
+                        'official_page': 'https://arxiv.org/abs/2301.00001',
+                        'pdf_url': None,
+                        'why_seed': 'secondary candidate',
+                        'first_jobs': ['check reported setup'],
+                        'tags': ['agents'],
+                    },
+                ],
+                'warnings': [],
+            }
+        ),
+    )
+
+    create = client.post(
+        '/paper-intake-queues/from-research-problem',
+        json={
+            'problem_statement': 'Find bounded literature we can stage into intake before doing deeper understanding.',
+            'max_candidate_papers': 2,
+            'submitted_by': 'operator',
+        },
+    )
+
+    assert create.status_code == 201
+    payload = create.json()
+    assert payload['status'] == 'ready'
+    assert len(payload['candidates']) == 2
+    assert payload['candidates'][0]['intake_status'] == 'pending'
+
+    latest = client.get('/paper-intake-queues/latest')
+    assert latest.status_code == 200
+    assert latest.json()['queue_id'] == payload['queue_id']
+
+    listed = client.get('/paper-intake-queues')
+    assert listed.status_code == 200
+    assert listed.json()[0]['queue_id'] == payload['queue_id']
+
+
+def test_stage_next_intake_from_paper_queue(monkeypatch) -> None:
+    client = build_client()
+
+    class FakeResponse:
+        def __init__(self, payload: dict) -> None:
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            import json
+            return json.dumps(self.payload).encode('utf-8')
+
+    monkeypatch.setattr(
+        main_module.urllib_request,
+        'urlopen',
+        lambda request_obj, timeout: FakeResponse(
+            {
+                'request_id': 'paper-queue-2',
+                'selected_tracks': [{'track_id': 'agent_evaluation', 'track': 'agent_evaluation'}],
+                'selected_queries': [{'queries': ['site:arxiv.org machine learning agents benchmark Kaggle']}],
+                'selected_papers': [
+                    {
+                        'paper_id': 'mle_bench_arxiv_2024',
+                        'title': 'MLE-bench: Evaluating Machine Learning Agents on Machine Learning Engineering',
+                        'year': 2024,
+                        'venue': 'arXiv',
+                        'priority': 'P1',
+                        'tracks': ['agent_evaluation'],
+                        'bounded_job_fit': 4,
+                        'replication_complexity': 4,
+                        'official_page': 'https://arxiv.org/abs/2410.07095',
+                        'pdf_url': None,
+                        'why_seed': 'benchmark for measuring whether agents can do bounded ML engineering work on real tasks',
+                        'first_jobs': ['adapt a reduced internal benchmark using 3-5 public competitions or equivalent tasks'],
+                        'tags': ['agents'],
+                    }
+                ],
+                'warnings': [],
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        main_module,
+        'ingest_source_document',
+        lambda source_url, submitted_by, settings, store: main_module.SourceDocumentRecord(
+            document_id='doc-1',
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            status='fetched',
+            source_url=source_url,
+            submitted_by=submitted_by,
+            storage_uri='file:///tmp/source-documents/doc-1/source.html',
+            content_type='text/html',
+            size_bytes=42,
+            sha256='abc123',
+            title='source.html',
+        ),
+    )
+
+    create = client.post(
+        '/paper-intake-queues/from-research-problem',
+        json={
+            'problem_statement': 'Find bounded literature we can stage into intake before doing deeper understanding.',
+            'max_candidate_papers': 1,
+        },
+    )
+    assert create.status_code == 201
+    queue_id = create.json()['queue_id']
+
+    stage = client.post(f'/paper-intake-queues/{queue_id}/stage-next-intake')
+    assert stage.status_code == 201
+    intake = stage.json()
+    assert intake['source_refs'][0] == 'https://arxiv.org/abs/2410.07095'
+    assert intake['document_refs'] == ['doc-1']
+    assert intake['status'] == 'ready_for_design'
+
+    updated_queue = client.get(f'/paper-intake-queues/{queue_id}')
+    assert updated_queue.status_code == 200
+    queue_payload = updated_queue.json()
+    assert queue_payload['status'] == 'exhausted'
+    assert queue_payload['candidates'][0]['intake_status'] == 'staged'
+    assert queue_payload['candidates'][0]['staged_intake_id'] == intake['intake_id']
+
+    exhausted = client.post(f'/paper-intake-queues/{queue_id}/stage-next-intake')
+    assert exhausted.status_code == 409
+    assert exhausted.json()['detail'] == 'paper intake queue is exhausted'
+
+    latest_document = client.get('/source-documents/latest')
+    assert latest_document.status_code == 200
+    assert latest_document.json()['document_id'] == 'doc-1'
+
+
 def test_resolve_intake_agent_base_url_handles_normalize_endpoint() -> None:
     settings = Settings(
         registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
@@ -1492,6 +1786,9 @@ def test_create_run_success() -> None:
     assert payload['workflow_id'] == 'generic-tabular-benchmark'
     assert payload['status']['status'] == 'accepted'
     assert payload['manifest']['expected_artifacts']['required'][0] == 'run_manifest.json'
+    assert payload['manifest']['resource_requests'] == {'cpu': '500m', 'memory': '1Gi'}
+    assert payload['manifest']['resource_limits'] == {'cpu': '1', 'memory': '2Gi'}
+    assert payload['manifest']['node_selector'] == {}
 
     run = client.get(f'/runs/{run_id}')
     assert run.status_code == 200
@@ -1503,6 +1800,23 @@ def test_create_run_success() -> None:
     logs = client.get(f'/runs/{run_id}/logs')
     assert logs.status_code == 200
     assert logs.json()['logs'][0]['message'] == 'run accepted'
+
+
+def test_workflow_execution_preflight_reports_current_contract() -> None:
+    client = build_client()
+
+    response = client.get('/workflow-families/literature-to-experiment/execution-preflight')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['workflow_id'] == 'literature-to-experiment'
+    assert payload['resource_profile'] == 'cpu-medium'
+    assert payload['runner_image'] == 'ghcr.io/offensivegeneric/glasslab-literature-runner:0.1.2'
+    assert payload['resource_requests'] == {'cpu': '1', 'memory': '2Gi'}
+    assert payload['resource_limits'] == {'cpu': '2', 'memory': '4Gi'}
+    assert payload['job_submission_mode'] == 'null'
+    assert payload['ready'] is True
+    assert any('preflight was skipped' in warning for warning in payload['warnings'])
 
 
 def test_get_run_reflects_disk_artifacts_and_status(tmp_path) -> None:

@@ -39,10 +39,15 @@ def build_request() -> DesignRequest:
             'intake_id': 'intake-1',
             'source_type': 'paper-link',
             'source_refs': ['https://example.org/paper'],
+            'document_refs': ['doc-1'],
             'raw_request': 'Read this paper and derive a bounded benchmark on the Titanic dataset.',
             'normalized_summary': 'Paper-derived benchmark request.',
             'workflow_family_candidates': ['literature-to-experiment', 'generic-tabular-benchmark'],
-            'notes': ['The paper compares a baseline on Titanic.'],
+            'notes': [
+                'The paper compares a baseline on Titanic.',
+                'Literature state: Current bounded literature view: the paper compares a baseline on Titanic.',
+                'Bounded experiment ideas: Run a bounded benchmark on titanic and compare baselines.',
+            ],
             'submitted_by': 'glasslab-operator',
         },
         workflow={
@@ -72,6 +77,9 @@ def test_build_design_draft() -> None:
     assert draft.declared_inputs['dataset_name'] == 'titanic'
     assert draft.unresolved_inputs == []
     assert draft.candidate_models == ['logistic_regression', 'random_forest']
+    assert draft.design_notes
+    assert any('Literature state:' in note for note in draft.design_notes)
+    assert any('Bounded experiment ideas:' in note for note in draft.design_notes)
 
 
 def test_draft_design_endpoint() -> None:
@@ -82,6 +90,7 @@ def test_draft_design_endpoint() -> None:
     assert payload['request_id'] == 'design-1'
     assert payload['draft']['workflow_id'] == 'generic-tabular-benchmark'
     assert payload['draft']['declared_inputs']['dataset_name'] == 'titanic'
+    assert any('Literature state:' in note for note in payload['draft']['design_notes'])
     assert payload['warnings'] == [
         'current implementation is deterministic scaffold logic; live model integration is not enabled yet',
     ]

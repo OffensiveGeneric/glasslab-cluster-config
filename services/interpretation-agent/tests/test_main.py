@@ -39,6 +39,7 @@ def build_request() -> InterpretationRequest:
             'intake_id': 'intake-1',
             'source_type': 'paper-link',
             'source_refs': ['https://example.org/paper'],
+            'document_refs': ['doc-1'],
             'raw_request': 'Read this paper and propose a bounded reproduction path for the Titanic benchmark.',
             'normalized_summary': 'Paper-derived reproduction request for a bounded benchmark.',
             'workflow_family_candidates': ['literature-to-experiment', 'replication-lite', 'generic-tabular-benchmark'],
@@ -66,7 +67,9 @@ def test_build_interpretation_draft_prefers_matching_candidates() -> None:
     assert draft.candidate_workflow_families[0] == 'generic-tabular-benchmark'
     assert 'titanic' in draft.dataset_hints
     assert 'reported metrics' in draft.evaluation_targets
+    assert draft.literature_state_summary.startswith('Current bounded literature view:')
     assert draft.extracted_claims[0].startswith('The paper compares')
+    assert draft.bounded_experiment_ideas
 
 
 def test_interpret_intake_endpoint_returns_bounded_draft_shape() -> None:
@@ -78,6 +81,9 @@ def test_interpret_intake_endpoint_returns_bounded_draft_shape() -> None:
     assert payload['request_id'] == 'intake-1'
     assert payload['draft']['source_type'] == 'paper-link'
     assert payload['draft']['candidate_workflow_families'][0] == 'generic-tabular-benchmark'
+    assert payload['draft']['literature_state_summary'].startswith('Current bounded literature view:')
+    assert 'research_gaps' in payload['draft']
+    assert payload['draft']['bounded_experiment_ideas']
     assert payload['model_backend']['provider'] == 'ollama'
     assert payload['warnings'] == [
         'current implementation is deterministic scaffold logic; live model integration is not enabled yet',

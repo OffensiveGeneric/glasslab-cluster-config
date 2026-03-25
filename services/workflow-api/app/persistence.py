@@ -10,11 +10,13 @@ from .schemas import (
     IntakeRecord,
     InterpretationRecord,
     LogEntry,
+    PaperIntakeQueueRecord,
     ResearchProblemRecord,
     ReplicabilityAssessmentRecord,
     RunRecord,
     ScheduledExecutionRecord,
     ScheduledOperationRecord,
+    SourceDocumentRecord,
 )
 
 
@@ -84,6 +86,38 @@ class RunStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def save_paper_intake_queue(self, record: PaperIntakeQueueRecord) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_paper_intake_queue(self, queue_id: str) -> PaperIntakeQueueRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_latest_paper_intake_queue(self) -> PaperIntakeQueueRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_paper_intake_queues(self) -> list[PaperIntakeQueueRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def save_source_document(self, record: SourceDocumentRecord) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_source_document(self, document_id: str) -> SourceDocumentRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_latest_source_document(self) -> SourceDocumentRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_source_documents(self) -> list[SourceDocumentRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
     def get_run(self, run_id: str) -> RunRecord | None:
         raise NotImplementedError
 
@@ -144,6 +178,10 @@ class InMemoryRunStore(RunStore):
         self._latest_design_draft_id: str | None = None
         self._research_problems: dict[str, ResearchProblemRecord] = {}
         self._latest_research_problem_id: str | None = None
+        self._paper_intake_queues: dict[str, PaperIntakeQueueRecord] = {}
+        self._latest_paper_intake_queue_id: str | None = None
+        self._source_documents: dict[str, SourceDocumentRecord] = {}
+        self._latest_source_document_id: str | None = None
         self._runs: dict[str, RunRecord] = {}
         self._latest_run_id: str | None = None
         self._schedules: dict[str, ScheduledOperationRecord] = {}
@@ -231,6 +269,46 @@ class InMemoryRunStore(RunStore):
             if self._latest_research_problem_id is None:
                 return None
             return self._research_problems.get(self._latest_research_problem_id)
+
+    def save_paper_intake_queue(self, record: PaperIntakeQueueRecord) -> None:
+        with self._lock:
+            self._paper_intake_queues[record.queue_id] = record
+            self._latest_paper_intake_queue_id = record.queue_id
+
+    def get_paper_intake_queue(self, queue_id: str) -> PaperIntakeQueueRecord | None:
+        with self._lock:
+            return self._paper_intake_queues.get(queue_id)
+
+    def get_latest_paper_intake_queue(self) -> PaperIntakeQueueRecord | None:
+        with self._lock:
+            if self._latest_paper_intake_queue_id is None:
+                return None
+            return self._paper_intake_queues.get(self._latest_paper_intake_queue_id)
+
+    def list_paper_intake_queues(self) -> list[PaperIntakeQueueRecord]:
+        with self._lock:
+            records = list(self._paper_intake_queues.values())
+        return sorted(records, key=lambda record: record.created_at)
+
+    def save_source_document(self, record: SourceDocumentRecord) -> None:
+        with self._lock:
+            self._source_documents[record.document_id] = record
+            self._latest_source_document_id = record.document_id
+
+    def get_source_document(self, document_id: str) -> SourceDocumentRecord | None:
+        with self._lock:
+            return self._source_documents.get(document_id)
+
+    def get_latest_source_document(self) -> SourceDocumentRecord | None:
+        with self._lock:
+            if self._latest_source_document_id is None:
+                return None
+            return self._source_documents.get(self._latest_source_document_id)
+
+    def list_source_documents(self) -> list[SourceDocumentRecord]:
+        with self._lock:
+            records = list(self._source_documents.values())
+        return sorted(records, key=lambda record: record.created_at)
 
     def get_run(self, run_id: str) -> RunRecord | None:
         with self._lock:

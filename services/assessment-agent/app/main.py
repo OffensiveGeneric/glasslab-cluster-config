@@ -38,6 +38,15 @@ def build_assessment_draft(request: AssessmentRequest) -> AssessmentDraft:
     assessment_notes: list[str] = []
     approval_tier = recommended_workflow.approval_tier if recommended_workflow is not None else None
 
+    if interpretation.research_gaps:
+        assessment_notes.append(
+            'Interpretation surfaced research gaps: ' + '; '.join(interpretation.research_gaps[:2])
+        )
+    if interpretation.bounded_experiment_ideas:
+        assessment_notes.append(
+            'Bounded experiment ideas: ' + '; '.join(interpretation.bounded_experiment_ideas[:2])
+        )
+
     if recommended_workflow is None:
         return AssessmentDraft(
             recommendation='reject',
@@ -51,6 +60,7 @@ def build_assessment_draft(request: AssessmentRequest) -> AssessmentDraft:
         )
 
     assessment_notes.append(f'Best current approved workflow match is {recommended_workflow.workflow_id}.')
+    assessment_notes.append(interpretation.literature_state_summary[:240])
     if recommended_workflow.approval_tier != 'tier-2-approved-execution':
         unresolved_fields.append(
             f'Approval tier {recommended_workflow.approval_tier} requires human review before execution.'
