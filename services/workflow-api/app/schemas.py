@@ -304,6 +304,7 @@ class ResearchProblemPaperCandidate(BaseModel):
     title: str
     year: int
     venue: str
+    venue_id: str | None = None
     priority: str
     tracks: list[str] = Field(default_factory=list)
     bounded_job_fit: int
