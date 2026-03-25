@@ -21,6 +21,7 @@ Canonical planning and architecture:
 - `model-improvement-options.md`: stronger model vs ranker vs control-surface vs backend decomposition
 - `ranker-service-shape.md`: first concrete API and ownership boundary for a bounded ranker service
 - `ranker-integration-plan.md`: how `workflow-api` should consume the ranker while keeping ranking advisory and fail-closed
+- `ranker-implementation-checklist.md`: concrete checklist for wiring the ranker into intake handling behind a feature flag
 - `mac-studio-inference.md`: decision and switch path for using a Mac Studio as the primary external inference host
 - `mac-service-host-boundary.md`: why the Macs should stay outside kubeadm and act as service hosts first
 - `mac-service-host-close-criteria.md`: when the Mac integration issue should be considered materially resolved as a service-host decision

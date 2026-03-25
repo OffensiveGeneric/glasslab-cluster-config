@@ -206,6 +206,20 @@ Needed config work:
 - add non-secret ConfigMap or env wiring for internal agent URLs and timeouts
 - add local-secret support if any agent service needs tokens later
 
+## Adjacent Ranker Config Changes
+
+The ranker is not a stage-agent service, but it needs the same kind of bounded backend wiring.
+
+Suggested settings:
+
+- `GLASSLAB_WORKFLOW_API_RANKER_ENABLED`
+- `GLASSLAB_WORKFLOW_API_RANKER_URL`
+- `GLASSLAB_WORKFLOW_API_RANKER_TIMEOUT_SECONDS`
+- `GLASSLAB_WORKFLOW_API_RANKER_MIN_TOP_SCORE`
+- `GLASSLAB_WORKFLOW_API_RANKER_MIN_SCORE_GAP`
+
+These should stay advisory and intake-scoped first.
+
 ## Priority Order
 
 The API changes should be implemented in this order:

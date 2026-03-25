@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     design_agent_enabled: bool = False
     design_agent_url: str = 'http://glasslab-design-agent.glasslab-v2.svc.cluster.local:8093'
     design_agent_timeout_seconds: float = 45.0
+    ranker_enabled: bool = False
+    ranker_url: str = 'http://192.168.1.12:8181/rank/workflow-family'
+    ranker_timeout_seconds: float = 15.0
+    ranker_min_top_score: float = 0.75
+    ranker_min_score_gap: float = 0.10
 
 
 @lru_cache(maxsize=1)
