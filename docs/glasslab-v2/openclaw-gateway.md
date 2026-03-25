@@ -97,6 +97,7 @@ Rationale:
 Validation gate:
 
 - the WhatsApp channel is exported into the live runtime only when `kubeadm/glasslab-v2/secrets/30-openclaw.local.yaml` defines `OPENCLAW_WHATSAPP_OWNER`
+- the exported runtime should include `channels.whatsapp.defaultAccount=default` and `channels.whatsapp.accounts.default.authDir=/var/lib/openclaw/state/credentials/whatsapp/default`
 - this keeps the default repo path safe and prevents accidental broad DM exposure when the owner number is not explicitly set
 
 Current live nuance:

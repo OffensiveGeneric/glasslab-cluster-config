@@ -482,11 +482,23 @@ runtime_config = {
 if enable_whatsapp_channel:
     runtime_config["channels"] = {
         "whatsapp": {
+            "defaultAccount": whatsapp_channel.get("account_id", "default"),
             "dmPolicy": whatsapp_channel["dm_policy"],
             "allowFrom": ["${OPENCLAW_WHATSAPP_OWNER}"],
             "selfChatMode": bool(whatsapp_channel.get("self_chat_mode", False)),
             "groupPolicy": whatsapp_channel["group_policy"],
             "sendReadReceipts": bool(whatsapp_channel.get("send_read_receipts", False)),
+            "accounts": {
+                whatsapp_channel.get("account_id", "default"): {
+                    "enabled": True,
+                    "authDir": "/var/lib/openclaw/state/credentials/whatsapp/default",
+                    "dmPolicy": whatsapp_channel["dm_policy"],
+                    "allowFrom": ["${OPENCLAW_WHATSAPP_OWNER}"],
+                    "selfChatMode": bool(whatsapp_channel.get("self_chat_mode", False)),
+                    "groupPolicy": whatsapp_channel["group_policy"],
+                    "sendReadReceipts": bool(whatsapp_channel.get("send_read_receipts", False)),
+                }
+            },
         }
     }
     runtime_config["bindings"] = [

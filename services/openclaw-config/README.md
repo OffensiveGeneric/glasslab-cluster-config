@@ -20,6 +20,7 @@ First channel notes:
 - the first validated chat front door is WhatsApp
 - the committed channel config keeps validation in direct-message self-chat mode only
 - the channel is exported only when `kubeadm/glasslab-v2/secrets/30-openclaw.local.yaml` defines `OPENCLAW_WHATSAPP_OWNER`
+- the exported runtime pins WhatsApp to `channels.whatsapp.accounts.default.authDir=/var/lib/openclaw/state/credentials/whatsapp/default`
 - no broad allowlist or group routing is enabled in repo config
 
 Use `./scripts/export-openclaw-config.sh --output-dir /tmp/openclaw-runtime --no-apply` to inspect the generated runtime tree before applying it to the cluster.

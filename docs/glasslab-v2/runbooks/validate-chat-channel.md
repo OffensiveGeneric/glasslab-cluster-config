@@ -68,6 +68,8 @@ kubectl -n glasslab-v2 exec deploy/glasslab-openclaw -- \
 Confirm:
 - `channels.whatsapp.dmPolicy` is `allowlist`
 - `channels.whatsapp.allowFrom[0]` is `${OPENCLAW_WHATSAPP_OWNER}`
+- `channels.whatsapp.defaultAccount` is `default`
+- `channels.whatsapp.accounts.default.authDir` is `/var/lib/openclaw/state/credentials/whatsapp/default`
 - `channels.whatsapp.selfChatMode` is `true`
 - `channels.whatsapp.groupPolicy` is `disabled`
 - `bindings[]` includes `channel: "whatsapp"` for agent `operator`
