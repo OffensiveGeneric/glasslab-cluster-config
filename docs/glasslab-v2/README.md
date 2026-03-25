@@ -55,6 +55,7 @@ Operational and infrastructure references:
 - `cluster-primitives-gap-audit.md`: missing infrastructure primitives and next actions
 - `storage-and-state.md`: storage posture and persistence expectations
 - `stateful-service-recovery-matrix.md`: one-page classification of backup/restore versus relocation priorities
+- `node-loss-tolerance-phased-plan.md`: phased execution order for moving from restart durability toward node-loss tolerance
 - `storage-options.md`: where XFS, ZFS, and NFS fit in the stack
 - `network-storage-integration.md`: how shared network storage could fit the current live services
 - `storage-capacity-inventory-2026-03-23.md`: observed NFS and local-node storage capacity snapshot
