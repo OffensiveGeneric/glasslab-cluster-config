@@ -31,6 +31,7 @@ Canonical planning and architecture:
 - `evaluation-boundary.md`: why evaluation should stay deterministic first and where later narrative enrichment could fit
 - `evaluation-implementation-checklist.md`: concrete wiring checklist for the deterministic evaluator path
 - `run-preparation-boundary.md`: why canonical run preparation should remain inside `workflow-api`
+- `run-preparation-implementation-checklist.md`: concrete checklist for preserving the deterministic manifest-derivation path
 - `execution-boundary.md`: why execution remains deterministic and backend-owned instead of becoming a free-form agent
 - `reporting-boundary.md`: why reporting should stay grounded in explicit artifacts and deterministic rendering first
 - `reporting-implementation-checklist.md`: concrete wiring checklist for the deterministic reporter path
