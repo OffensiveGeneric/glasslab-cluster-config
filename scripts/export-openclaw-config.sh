@@ -481,6 +481,9 @@ runtime_config = {
 
 if enable_whatsapp_channel:
     runtime_config["plugins"]["allow"].append("whatsapp")
+    runtime_config["plugins"]["entries"]["whatsapp"] = {
+        "enabled": True,
+    }
     runtime_config["channels"] = {
         "whatsapp": {
             "defaultAccount": whatsapp_channel.get("account_id", "default"),
