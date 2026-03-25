@@ -222,7 +222,7 @@ provider_id = provider_id_override or default_provider_id
 if not provider_id:
     raise SystemExit("provider id is required")
 
-default_provider_api_key_env = "OPENCLAW_VLLM_API_KEY" if provider_api == "openai-completions" else "OPENCLAW_OLLAMA_API_KEY"
+default_provider_api_key_env = "OPENCLAW_VLLM_API_KEY" if provider_api == "openai-completions" else ""
 provider_api_key_env = provider_api_key_env_override or default_provider_api_key_env
 
 parsed_provider_url = urlparse(provider_base_url)
@@ -391,6 +391,30 @@ for agent_name, agent_cfg in agents.items():
                 f"agent {agent_name!r} requested unsupported runtime deny tool {tool_id!r}"
             )
 
+provider_config = {
+    "baseUrl": provider_base_url,
+    "api": provider_api,
+    "models": [
+        {
+            "id": default_model,
+            "name": default_model,
+            "reasoning": False,
+            "input": ["text"],
+            "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+            },
+            "contextWindow": context_window,
+            "maxTokens": max_output_tokens,
+        }
+    ],
+}
+
+if provider_api_key_env:
+    provider_config["apiKey"] = "${" + provider_api_key_env + "}"
+
 runtime_config = {
     "gateway": {
         "bind": "lan",
@@ -410,27 +434,7 @@ runtime_config = {
     "models": {
         "mode": "merge",
         "providers": {
-            provider_id: {
-                "baseUrl": provider_base_url,
-                "apiKey": "${" + provider_api_key_env + "}",
-                "api": provider_api,
-                "models": [
-                    {
-                        "id": default_model,
-                        "name": default_model,
-                        "reasoning": False,
-                        "input": ["text"],
-                        "cost": {
-                            "input": 0,
-                            "output": 0,
-                            "cacheRead": 0,
-                            "cacheWrite": 0,
-                        },
-                        "contextWindow": context_window,
-                        "maxTokens": max_output_tokens,
-                    }
-                ],
-            }
+            provider_id: provider_config
         }
     },
     "agents": {
