@@ -54,6 +54,7 @@ Canonical planning and architecture:
 - `operator-access-options.md`: narrowed decision between Tailscale or reverse proxy for stable operator-facing access
 - `operator-access-recommendation.md`: concrete recommendation to expose only OpenClaw through a narrow authenticated operator path
 - `operator-access-close-criteria.md`: when the operator-access decision issue should be considered materially resolved
+- `whatsapp-dedicated-account-migration.md`: why the current self-chat bootstrap path should move to a dedicated lab-assistant account before broader researcher use
 - `openclaw-runtime-portability.md`: what has and has not been reduced in the `.44`-special OpenClaw runtime path
 - `remote-admin-path.md`: why off-site operation through `glasslab.org -> .44` reduces friction without changing `.44`'s canonical admin role
 - `external-researcher-what-we-can-offer-now.md`: practical current answer for what outside researchers can safely use today

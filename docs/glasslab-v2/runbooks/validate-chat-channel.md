@@ -20,6 +20,11 @@ Expected policy:
 - `self_chat_mode: true`
 - `group_policy: disabled`
 
+Current interpretation:
+- `self_chat_mode: true` is the bootstrap/debug posture only
+- do not treat that as the desired long-term researcher-facing setup
+- the intended steady state is documented in `../whatsapp-dedicated-account-migration.md`
+
 3. Confirm the existing OpenClaw secret exists.
 
 ```bash
@@ -85,6 +90,11 @@ Expected behavior:
 - OpenClaw prints a QR code or pairing prompt in the terminal
 - scan it from the operator phone's WhatsApp client
 - this first validation path assumes self-chat on the linked account only
+
+Important caution:
+- self-chat is acceptable for bootstrap validation
+- it can create echo loops where OpenClaw sees its own replies as new inbound messages
+- once the channel is proven live, move to the dedicated-account path before treating WhatsApp as a shared assistant surface
 
 8. Verify channel readiness.
 
