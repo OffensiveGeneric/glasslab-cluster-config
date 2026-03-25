@@ -29,6 +29,7 @@ Canonical planning and architecture:
 - `interpretation-agent-service.md`: concrete contract and ownership boundary for the first in-cluster stage-agent service
 - `stage-agent-api-changes.md`: concrete `workflow-api`, service-contract, and config changes needed for the staged backend-agent path
 - `evaluation-boundary.md`: why evaluation should stay deterministic first and where later narrative enrichment could fit
+- `evaluation-implementation-checklist.md`: concrete wiring checklist for the deterministic evaluator path
 - `run-preparation-boundary.md`: why canonical run preparation should remain inside `workflow-api`
 - `execution-boundary.md`: why execution remains deterministic and backend-owned instead of becoming a free-form agent
 - `reporting-boundary.md`: why reporting should stay grounded in explicit artifacts and deterministic rendering first
