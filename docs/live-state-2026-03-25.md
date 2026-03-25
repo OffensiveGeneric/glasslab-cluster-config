@@ -69,11 +69,15 @@ Observed live result during validation:
 
 Current limitation:
 
-- the approved-rerun lane is implemented and deployed
-- it was not fully revalidated live during this session because the freshly restarted `workflow-api` store did not yet contain a naturally succeeded source run to schedule against
+- the approved-rerun lane is now fully revalidated live
+- a naturally succeeded source run was used to create an approved rerun schedule
+- `POST /approved-rerun-schedules/run-due` submitted an autonomous rerun successfully
+- the produced rerun reached `status=succeeded`
+- the produced rerun kept:
+  - `run_purpose=approved-rerun`
+  - `run_priority=autonomous`
 
 ## Remaining Live Gaps
 
 - ranker-assisted intake is deployed, but the first live prompt checked here did not yet produce an obviously reordered family list through `workflow-api`
-- approved reruns still need one full live validation against a succeeded source run
 - the old in-cluster `vllm` path on `node02` still exists and the GPU has not yet been reclaimed
