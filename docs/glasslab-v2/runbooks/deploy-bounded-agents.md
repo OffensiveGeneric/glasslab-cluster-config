@@ -8,6 +8,7 @@ Current agent set:
 - interpretation-agent
 - assessment-agent
 - design-agent
+- schedule-worker
 
 ## Purpose
 
@@ -41,6 +42,7 @@ kubectl -n glasslab-v2 rollout status deployment/glasslab-intake-agent --timeout
 kubectl -n glasslab-v2 rollout status deployment/glasslab-interpretation-agent --timeout=120s
 kubectl -n glasslab-v2 rollout status deployment/glasslab-assessment-agent --timeout=120s
 kubectl -n glasslab-v2 rollout status deployment/glasslab-design-agent --timeout=120s
+kubectl -n glasslab-v2 rollout status deployment/glasslab-schedule-worker --timeout=120s
 kubectl -n glasslab-v2 get deploy,svc | egrep 'agent|workflow-api'
 ```
 
@@ -66,6 +68,7 @@ Suggested order:
 2. intake-agent
 3. assessment-agent
 4. design-agent
+5. schedule-worker after digest schedules are enabled intentionally
 
 ## 6. Verify Behavior Through Workflow-API
 

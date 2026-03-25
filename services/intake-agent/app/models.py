@@ -56,6 +56,70 @@ class ApprovedSourcesSummary(BaseModel):
     approved_hosts: list[str] = Field(default_factory=list)
 
 
+class TrackQueryEntry(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    track: str
+    queries: list[str] = Field(default_factory=list)
+
+
+class TrackDefinition(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    track_id: str
+    description: str
+    default_priority: str
+    queries: list[str] = Field(default_factory=list)
+
+
+class SeedPaperSummary(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    paper_id: str
+    title: str
+    year: int
+    venue: str
+    venue_id: str
+    priority: str
+    tracks: list[str] = Field(default_factory=list)
+    bounded_job_fit: int
+    replication_complexity: int
+    official_page: str | None = None
+    pdf_url: str | None = None
+    why_seed: str
+    first_jobs: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+
+
+class PaperHarvesterPlanRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    request_id: str = Field(min_length=1)
+    track_ids: list[str] = Field(default_factory=list)
+    priorities: list[str] = Field(default_factory=list)
+    max_papers: int = Field(default=5, ge=1, le=50)
+
+    @field_validator('track_ids', 'priorities')
+    @classmethod
+    def validate_unique_non_empty_values(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value if item.strip()]
+        deduped = list(dict.fromkeys(cleaned))
+        if len(cleaned) != len(deduped):
+            raise ValueError('list entries must be unique')
+        return deduped
+
+
+class PaperHarvesterPlanResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    request_id: str
+    selected_tracks: list[TrackDefinition] = Field(default_factory=list)
+    selected_queries: list[TrackQueryEntry] = Field(default_factory=list)
+    selected_papers: list[SeedPaperSummary] = Field(default_factory=list)
+    approved_sources: ApprovedSourcesSummary
+    warnings: list[str] = Field(default_factory=list)
+
+
 class NormalizeIntakeRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
 

@@ -10,6 +10,7 @@ INTAKE_IMAGE_REF="${GLASSLAB_INTAKE_AGENT_IMAGE_REF:-ghcr.io/offensivegeneric/gl
 INTERPRETATION_IMAGE_REF="${GLASSLAB_INTERPRETATION_AGENT_IMAGE_REF:-ghcr.io/offensivegeneric/glasslab-interpretation-agent:0.1.0}"
 ASSESSMENT_IMAGE_REF="${GLASSLAB_ASSESSMENT_AGENT_IMAGE_REF:-ghcr.io/offensivegeneric/glasslab-assessment-agent:0.1.0}"
 DESIGN_IMAGE_REF="${GLASSLAB_DESIGN_AGENT_IMAGE_REF:-ghcr.io/offensivegeneric/glasslab-design-agent:0.1.0}"
+SCHEDULE_WORKER_IMAGE_REF="${GLASSLAB_SCHEDULE_WORKER_IMAGE_REF:-ghcr.io/offensivegeneric/glasslab-schedule-worker:0.1.0}"
 
 usage() {
   cat <<'USAGE'
@@ -49,5 +50,6 @@ build_and_push "$INTAKE_IMAGE_REF" "$ROOT_DIR/services/intake-agent/Dockerfile"
 build_and_push "$INTERPRETATION_IMAGE_REF" "$ROOT_DIR/services/interpretation-agent/Dockerfile"
 build_and_push "$ASSESSMENT_IMAGE_REF" "$ROOT_DIR/services/assessment-agent/Dockerfile"
 build_and_push "$DESIGN_IMAGE_REF" "$ROOT_DIR/services/design-agent/Dockerfile"
+build_and_push "$SCHEDULE_WORKER_IMAGE_REF" "$ROOT_DIR/services/schedule-worker/Dockerfile"
 
 printf '[push-bounded-agent-images] done\n'

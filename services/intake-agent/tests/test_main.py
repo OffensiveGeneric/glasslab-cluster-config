@@ -30,6 +30,7 @@ main_module = load_package_module(f'{PACKAGE_NAME}.main', APP_ROOT / 'main.py')
 app = main_module.app
 build_normalized_draft = main_module.build_normalized_draft
 build_approval_warnings = main_module.build_approval_warnings
+build_harvester_plan = main_module.build_harvester_plan
 NormalizeIntakeRequest = models_module.NormalizeIntakeRequest
 
 
@@ -64,6 +65,49 @@ def test_approved_sources_endpoint() -> None:
     assert payload['manifest_version'] == 1
     assert 'jmlr.org' in payload['approved_hosts']
     assert 'arxiv.org' in payload['approved_hosts']
+
+
+def test_paper_harvester_tracks_endpoint() -> None:
+    client = TestClient(app)
+    response = client.get('/paper-harvester/tracks')
+    assert response.status_code == 200
+    payload = response.json()
+    assert any(track['track_id'] == 'tabular_baselines' for track in payload)
+    assert any(track['track_id'] == 'autonomous_science' for track in payload)
+
+
+def test_build_harvester_plan_prefers_bounded_seed_papers() -> None:
+    plan = build_harvester_plan(
+        models_module.PaperHarvesterPlanRequest(
+            request_id='harvest-1',
+            track_ids=['tabular_baselines'],
+            priorities=['P0'],
+            max_papers=2,
+        )
+    )
+    assert plan.selected_tracks[0].track_id == 'tabular_baselines'
+    assert plan.selected_papers
+    assert all('tabular_baselines' in paper.tracks for paper in plan.selected_papers)
+    assert len(plan.selected_papers) == 2
+
+
+def test_paper_harvester_plan_warns_on_unknown_track() -> None:
+    client = TestClient(app)
+    response = client.post(
+        '/paper-harvester/plan',
+        json={
+            'request_id': 'harvest-2',
+            'track_ids': ['does-not-exist'],
+            'max_papers': 3,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['selected_tracks'] == []
+    assert payload['warnings'] == [
+        'unknown track ids ignored: does-not-exist',
+        'no seed papers matched the requested track/priority filters',
+    ]
 
 
 def test_build_normalized_draft() -> None:

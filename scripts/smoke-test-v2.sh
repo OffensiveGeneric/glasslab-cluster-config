@@ -53,6 +53,7 @@ while [[ $# -gt 0 ]]; do
         glasslab-interpretation-agent
         glasslab-assessment-agent
         glasslab-design-agent
+        glasslab-schedule-worker
       )
       shift
       ;;
@@ -85,6 +86,7 @@ if [[ "$INCLUDE_BOUNDED_AGENTS" == true ]]; then
   "$KUBECTL" -n "$NAMESPACE" rollout status deployment/glasslab-interpretation-agent --timeout=120s
   "$KUBECTL" -n "$NAMESPACE" rollout status deployment/glasslab-assessment-agent --timeout=120s
   "$KUBECTL" -n "$NAMESPACE" rollout status deployment/glasslab-design-agent --timeout=120s
+  "$KUBECTL" -n "$NAMESPACE" rollout status deployment/glasslab-schedule-worker --timeout=120s
 fi
 
 printf '[smoke-test-v2] checking service inventory\n'

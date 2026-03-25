@@ -16,6 +16,11 @@ from .models import (
     NormalizeIntakeRequest,
     NormalizeIntakeResponse,
     NormalizedIntakeDraft,
+    PaperHarvesterPlanRequest,
+    PaperHarvesterPlanResponse,
+    SeedPaperSummary,
+    TrackDefinition,
+    TrackQueryEntry,
 )
 
 TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -59,6 +64,73 @@ def load_approved_sources_summary() -> ApprovedSourcesSummary:
         track_query_count=len(manifest.get('track_queries', [])),
         approved_hosts=approved_hosts,
     )
+
+
+@lru_cache(maxsize=1)
+def load_seed_manifest() -> dict:
+    return yaml.safe_load(DEFAULT_SEED_MANIFEST.read_text())
+
+
+def load_track_queries() -> list[TrackQueryEntry]:
+    manifest = load_seed_manifest()
+    entries: list[TrackQueryEntry] = []
+    for item in manifest.get('track_queries', []):
+        track = str(item.get('track', '')).strip()
+        queries = [str(query).strip() for query in item.get('queries', []) if str(query).strip()]
+        if not track:
+            continue
+        entries.append(TrackQueryEntry(track=track, queries=queries))
+    return entries
+
+
+def load_tracks() -> list[TrackDefinition]:
+    query_map = {entry.track: entry.queries for entry in load_track_queries()}
+    manifest = load_seed_manifest()
+    tracks: list[TrackDefinition] = []
+    for item in manifest.get('tracks', []):
+        track_id = str(item.get('id', '')).strip()
+        if not track_id:
+            continue
+        tracks.append(
+            TrackDefinition(
+                track_id=track_id,
+                description=str(item.get('description', '')).strip(),
+                default_priority=str(item.get('default_priority', 'P2')).strip() or 'P2',
+                queries=query_map.get(track_id, []),
+            )
+        )
+    return tracks
+
+
+def load_seed_papers() -> list[SeedPaperSummary]:
+    manifest = load_seed_manifest()
+    papers: list[SeedPaperSummary] = []
+    for item in manifest.get('papers', []):
+        paper_id = str(item.get('id', '')).strip()
+        title = str(item.get('title', '')).strip()
+        venue_id = str(item.get('venue_id', '')).strip()
+        venue = str(item.get('venue', '')).strip()
+        if not all((paper_id, title, venue_id, venue)):
+            continue
+        papers.append(
+            SeedPaperSummary(
+                paper_id=paper_id,
+                title=title,
+                year=int(item.get('year', 0)),
+                venue=venue,
+                venue_id=venue_id,
+                priority=str(item.get('priority', 'P2')).strip() or 'P2',
+                tracks=[str(track).strip() for track in item.get('tracks', []) if str(track).strip()],
+                bounded_job_fit=int(item.get('bounded_job_fit', 0)),
+                replication_complexity=int(item.get('replication_complexity', 0)),
+                official_page=str(item.get('official_page', '')).strip() or None,
+                pdf_url=str(item.get('pdf_url', '')).strip() or None,
+                why_seed=str(item.get('why_seed', '')).strip(),
+                first_jobs=[str(job).strip() for job in item.get('first_jobs', []) if str(job).strip()],
+                tags=[str(tag).strip() for tag in item.get('tags', []) if str(tag).strip()],
+            )
+        )
+    return papers
 
 
 def summarize_intake(raw_request: str, notes: list[str]) -> str:
@@ -134,6 +206,47 @@ def build_approval_warnings(request: NormalizeIntakeRequest) -> list[str]:
     return warnings
 
 
+def filter_seed_papers(track_ids: list[str], priorities: list[str], max_papers: int) -> list[SeedPaperSummary]:
+    papers = load_seed_papers()
+    if track_ids:
+        track_set = set(track_ids)
+        papers = [paper for paper in papers if track_set.intersection(paper.tracks)]
+    if priorities:
+        priority_set = set(priorities)
+        papers = [paper for paper in papers if paper.priority in priority_set]
+    papers.sort(key=lambda paper: (-paper.bounded_job_fit, paper.replication_complexity, paper.paper_id))
+    return papers[:max_papers]
+
+
+def build_harvester_plan(request: PaperHarvesterPlanRequest) -> PaperHarvesterPlanResponse:
+    tracks = load_tracks()
+    track_map = {track.track_id: track for track in tracks}
+    selected_track_ids = request.track_ids or [track.track_id for track in tracks]
+    selected_tracks = [track_map[track_id] for track_id in selected_track_ids if track_id in track_map]
+    selected_queries = [
+        TrackQueryEntry(track=track.track_id, queries=track.queries)
+        for track in selected_tracks
+        if track.queries
+    ]
+    selected_papers = filter_seed_papers(selected_track_ids, request.priorities, request.max_papers)
+
+    warnings: list[str] = []
+    unknown_tracks = [track_id for track_id in selected_track_ids if track_id not in track_map]
+    if unknown_tracks:
+        warnings.append('unknown track ids ignored: ' + ', '.join(unknown_tracks))
+    if not selected_papers:
+        warnings.append('no seed papers matched the requested track/priority filters')
+
+    return PaperHarvesterPlanResponse(
+        request_id=request.request_id,
+        selected_tracks=selected_tracks,
+        selected_queries=selected_queries,
+        selected_papers=selected_papers,
+        approved_sources=load_approved_sources_summary(),
+        warnings=warnings,
+    )
+
+
 app = FastAPI(title='glasslab-intake-agent', version='0.1.0')
 
 
@@ -149,6 +262,23 @@ def healthz() -> HealthResponse:
 @app.get('/approved-sources', response_model=ApprovedSourcesSummary)
 def approved_sources() -> ApprovedSourcesSummary:
     return load_approved_sources_summary()
+
+
+@app.get('/paper-harvester/tracks', response_model=list[TrackDefinition])
+def paper_harvester_tracks() -> list[TrackDefinition]:
+    return load_tracks()
+
+
+@app.get('/paper-harvester/papers', response_model=list[SeedPaperSummary])
+def paper_harvester_papers(track: str | None = None, priority: str | None = None) -> list[SeedPaperSummary]:
+    track_ids = [track.strip()] if isinstance(track, str) and track.strip() else []
+    priorities = [priority.strip()] if isinstance(priority, str) and priority.strip() else []
+    return filter_seed_papers(track_ids, priorities, max_papers=50)
+
+
+@app.post('/paper-harvester/plan', response_model=PaperHarvesterPlanResponse)
+def paper_harvester_plan(request: PaperHarvesterPlanRequest) -> PaperHarvesterPlanResponse:
+    return build_harvester_plan(request)
 
 
 @app.post('/normalize-intake', response_model=NormalizeIntakeResponse)

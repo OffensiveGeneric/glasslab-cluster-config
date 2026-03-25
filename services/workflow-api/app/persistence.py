@@ -12,6 +12,7 @@ from .schemas import (
     LogEntry,
     ReplicabilityAssessmentRecord,
     RunRecord,
+    ScheduledExecutionRecord,
     ScheduledOperationRecord,
 )
 
@@ -78,6 +79,10 @@ class RunStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def list_runs(self) -> list[RunRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
     def save_schedule(self, record: ScheduledOperationRecord) -> None:
         raise NotImplementedError
 
@@ -87,6 +92,14 @@ class RunStore(ABC):
 
     @abstractmethod
     def list_schedules(self, operation_type: str | None = None) -> list[ScheduledOperationRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def save_execution(self, record: ScheduledExecutionRecord) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_executions(self, schedule_id: str | None = None) -> list[ScheduledExecutionRecord]:
         raise NotImplementedError
 
     @abstractmethod
@@ -119,6 +132,7 @@ class InMemoryRunStore(RunStore):
         self._runs: dict[str, RunRecord] = {}
         self._latest_run_id: str | None = None
         self._schedules: dict[str, ScheduledOperationRecord] = {}
+        self._executions: dict[str, ScheduledExecutionRecord] = {}
         self._artifacts: dict[str, ArtifactsIndex] = {}
         self._logs: dict[str, list[LogEntry]] = {}
         self._lock = Lock()
@@ -198,6 +212,11 @@ class InMemoryRunStore(RunStore):
                 return None
             return self._runs.get(self._latest_run_id)
 
+    def list_runs(self) -> list[RunRecord]:
+        with self._lock:
+            records = list(self._runs.values())
+        return sorted(records, key=lambda record: record.created_at)
+
     def save_schedule(self, record: ScheduledOperationRecord) -> None:
         with self._lock:
             self._schedules[record.schedule_id] = record
@@ -212,6 +231,17 @@ class InMemoryRunStore(RunStore):
         if operation_type is not None:
             records = [record for record in records if record.operation_type == operation_type]
         return sorted(records, key=lambda record: record.created_at)
+
+    def save_execution(self, record: ScheduledExecutionRecord) -> None:
+        with self._lock:
+            self._executions[record.execution_id] = record
+
+    def list_executions(self, schedule_id: str | None = None) -> list[ScheduledExecutionRecord]:
+        with self._lock:
+            records = list(self._executions.values())
+        if schedule_id is not None:
+            records = [record for record in records if record.schedule_id == schedule_id]
+        return sorted(records, key=lambda record: record.started_at)
 
     def save_artifacts(self, run_id: str, artifacts: ArtifactsIndex) -> None:
         with self._lock:

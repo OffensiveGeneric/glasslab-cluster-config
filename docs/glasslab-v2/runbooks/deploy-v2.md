@@ -45,6 +45,7 @@ Current assumptions:
   - `ghcr.io/offensivegeneric/glasslab-interpretation-agent:0.1.0`
   - `ghcr.io/offensivegeneric/glasslab-assessment-agent:0.1.0`
   - `ghcr.io/offensivegeneric/glasslab-design-agent:0.1.0`
+  - `ghcr.io/offensivegeneric/glasslab-schedule-worker:0.1.0`
 - the old import helper remains available as a fallback if GHCR is unavailable
 
 6. Apply the initial v2 core manifest tree.
@@ -72,6 +73,7 @@ kubectl -n glasslab-v2 rollout status deployment/glasslab-intake-agent --timeout
 kubectl -n glasslab-v2 rollout status deployment/glasslab-interpretation-agent --timeout=120s
 kubectl -n glasslab-v2 rollout status deployment/glasslab-assessment-agent --timeout=120s
 kubectl -n glasslab-v2 rollout status deployment/glasslab-design-agent --timeout=120s
+kubectl -n glasslab-v2 rollout status deployment/glasslab-schedule-worker --timeout=120s
 ```
 
 8. OpenClaw is intentionally excluded from the default deploy path. Do not deploy it until the runtime bundle, local secret manifest, and in-cluster service references are confirmed.

@@ -8,15 +8,29 @@ The design questions are mostly settled already:
 - execution must happen through a bounded backend worker
 - every execution attempt must re-validate scope and fail closed on drift
 
-What remains is implementation.
+The first bounded digest-execution path now exists in repo code.
 
-## Digest path checklist
+## Current repo state
 
-- keep stored digest schedule records bounded to explicit filters and time windows
-- add one backend worker loop that claims due digest schedules without relying on OpenClaw
+- `workflow-api` now owns:
+  - due-digest execution helper logic
+  - `POST /digest-schedules/run-due`
+  - `GET /scheduled-executions`
+  - explicit `ScheduledExecutionRecord` objects in the in-memory store
+- `services/schedule-worker` now exists as a bounded worker wrapper that calls the due-digest path through `workflow-api`
+
+This is intentionally only the first unattended lane:
+
+- digest schedules
+- read-only summaries
+- no arbitrary job creation
+
+## Remaining digest path checklist
+
 - fetch only existing run records, artifacts, and evaluation outputs
-- render one bounded digest result record or artifact reference
-- store one execution record per attempt with status and failure reason
+- render one bounded digest result artifact or persistent digest record instead of only an in-memory payload
+- add worker ownership / claim rules if multiple replicas are ever allowed
+- persist execution records durably once the backend store is no longer in-memory
 
 ## Approved rerun path checklist
 
@@ -26,11 +40,10 @@ What remains is implementation.
 - create a new run only through the normal `workflow-api` validation path
 - submit Kubernetes work only after manifest validation succeeds
 
-## Worker checklist
+## Remaining worker checklist
 
-- run the worker as an internal backend service or CronJob in `glasslab-v2`
+- deploy the worker as an internal backend service or CronJob in `glasslab-v2`
 - claim due schedules with one clear ownership path to avoid duplicate execution
-- write explicit execution records with `started_at`, `finished_at`, `result_status`, and failure reason
 - surface digest artifact references or resulting run IDs back through `workflow-api`
 - disable or quarantine schedules that repeatedly fail closed on the same validation problem
 
@@ -43,8 +56,8 @@ What remains is implementation.
 
 ## Rollout checklist
 
-1. implement digest worker first
-2. add execution records and read APIs second
+1. deploy the digest worker first
+2. persist digest execution outputs beyond memory
 3. implement approved rerun worker third
 4. add narrow `run-now` only after both worker paths are stable
 

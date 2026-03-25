@@ -1,4 +1,5 @@
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -133,6 +134,134 @@ def test_create_intake_falls_back_when_agent_returns_none(monkeypatch) -> None:
     payload = create.json()
     assert payload['normalized_summary'].startswith('Take this paper note set')
     assert 'generic-tabular-benchmark' in payload['workflow_family_candidates']
+
+
+def test_create_intake_uses_ranker_when_scores_are_strong(monkeypatch) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        ranker_enabled=True,
+        ranker_min_top_score=0.75,
+        ranker_min_score_gap=0.10,
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    class FakeResponse:
+        def __init__(self, payload: dict) -> None:
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            import json
+            return json.dumps(self.payload).encode('utf-8')
+
+    def fake_urlopen(request_obj, timeout):
+        return FakeResponse(
+            {
+                'request_id': 'ignored',
+                'ranked_candidates': [
+                    {
+                        'workflow_id': 'generic-tabular-benchmark',
+                        'score': 0.92,
+                        'reason': 'strong tabular benchmark signal',
+                    },
+                    {
+                        'workflow_id': 'literature-to-experiment',
+                        'score': 0.61,
+                        'reason': 'paper-oriented fallback',
+                    },
+                ],
+                'ranking_basis': 'test fixture',
+            }
+        )
+
+    monkeypatch.setattr(main_module.urllib_request, 'urlopen', fake_urlopen)
+
+    create = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Take this paper note set and turn it into a bounded validation experiment on a tabular dataset.',
+            'source_refs': ['https://example.org/paper-notes'],
+            'notes': ['Focus on the reported baseline and evaluation method.'],
+        },
+    )
+
+    assert create.status_code == 201
+    payload = create.json()
+    assert payload['workflow_family_candidates'] == [
+        'generic-tabular-benchmark',
+        'literature-to-experiment',
+    ]
+
+
+def test_create_intake_ignores_ranker_when_scores_are_ambiguous(monkeypatch) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        ranker_enabled=True,
+        ranker_min_top_score=0.75,
+        ranker_min_score_gap=0.10,
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    class FakeResponse:
+        def __init__(self, payload: dict) -> None:
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            import json
+            return json.dumps(self.payload).encode('utf-8')
+
+    def fake_urlopen(request_obj, timeout):
+        return FakeResponse(
+            {
+                'request_id': 'ignored',
+                'ranked_candidates': [
+                    {
+                        'workflow_id': 'generic-tabular-benchmark',
+                        'score': 0.78,
+                        'reason': 'slightly preferred',
+                    },
+                    {
+                        'workflow_id': 'literature-to-experiment',
+                        'score': 0.74,
+                        'reason': 'close alternative',
+                    },
+                ],
+                'ranking_basis': 'test fixture',
+            }
+        )
+
+    monkeypatch.setattr(main_module.urllib_request, 'urlopen', fake_urlopen)
+
+    create = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Take this paper note set and turn it into a bounded validation experiment on a tabular dataset.',
+            'source_refs': ['https://example.org/paper-notes'],
+            'notes': ['Focus on the reported baseline and evaluation method.'],
+        },
+    )
+
+    assert create.status_code == 201
+    payload = create.json()
+    assert payload['workflow_family_candidates'] == [
+        'literature-to-experiment',
+        'generic-tabular-benchmark',
+    ]
 
 
 def test_get_latest_intake_missing() -> None:
@@ -722,6 +851,55 @@ def test_digest_schedule_lifecycle() -> None:
     disabled = client.post(f'/digest-schedules/{schedule_id}/disable')
     assert disabled.status_code == 200
     assert disabled.json()['status'] == 'disabled'
+
+
+def test_run_due_digest_schedules_creates_execution_record() -> None:
+    client = build_client()
+
+    create_run = client.post(
+        '/runs',
+        json={
+            'workflow_id': 'generic-tabular-benchmark',
+            'objective': 'Create a run for digest schedule execution.',
+            'inputs': {
+                'dataset_name': 'titanic',
+                'train_uri': 's3://datasets/titanic/train.csv',
+                'test_uri': 's3://datasets/titanic/test.csv',
+                'target_column': 'Survived',
+            },
+            'models': ['logistic_regression'],
+            'resource_profile': 'cpu-small',
+        },
+    )
+    assert create_run.status_code == 201
+
+    now = datetime.now(timezone.utc)
+    cron_expr = f'{now.minute} {now.hour} {now.day} {now.month} {(now.weekday() + 1) % 7}'
+    created = client.post(
+        '/digest-schedules',
+        json={
+            'cron_expr': cron_expr,
+            'digest_kind': 'daily-run-summary',
+            'scope_filter': {'workflow_id': 'generic-tabular-benchmark'},
+        },
+    )
+    assert created.status_code == 201
+    schedule_id = created.json()['schedule_id']
+
+    executed = client.post('/digest-schedules/run-due')
+    assert executed.status_code == 200
+    payload = executed.json()
+    assert len(payload) == 1
+    assert payload[0]['schedule_id'] == schedule_id
+    assert payload[0]['result_status'] == 'ok'
+    assert payload[0]['digest_payload']['matching_run_count'] == 1
+    assert payload[0]['digest_payload']['workflow_ids'] == ['generic-tabular-benchmark']
+
+    listed = client.get('/scheduled-executions')
+    assert listed.status_code == 200
+    executions = listed.json()
+    assert len(executions) == 1
+    assert executions[0]['schedule_id'] == schedule_id
 
 
 def test_create_approved_rerun_schedule_from_latest_run() -> None:

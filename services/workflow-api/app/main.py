@@ -32,6 +32,7 @@ from .schemas import (
     RunCreateRequest,
     RunLogsResponse,
     RunRecord,
+    ScheduledExecutionRecord,
     ScheduledOperationRecord,
     WorkflowFamilySummary,
 )
@@ -140,6 +141,146 @@ def build_intake_record_from_agent_draft(
         notes=validated_draft['notes'],
         submitted_by=validated_draft['submitted_by'],
     )
+
+
+def validate_ranker_response(
+    payload: dict[str, Any],
+    offered_workflow_ids: list[str],
+) -> list[dict[str, Any]]:
+    ranked_candidates = payload.get('ranked_candidates')
+    if not isinstance(ranked_candidates, list) or not ranked_candidates:
+        raise ValueError('ranker response missing ranked_candidates')
+
+    offered_set = set(offered_workflow_ids)
+    validated: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in ranked_candidates:
+        if not isinstance(item, dict):
+            raise ValueError('ranker candidate must be an object')
+        workflow_id = item.get('workflow_id')
+        score = item.get('score')
+        reason = item.get('reason')
+        if not isinstance(workflow_id, str) or workflow_id not in offered_set:
+            raise ValueError(f'ranker returned unexpected workflow id: {workflow_id!r}')
+        if workflow_id in seen:
+            raise ValueError(f'ranker returned duplicate workflow id: {workflow_id}')
+        if not isinstance(score, (int, float)):
+            raise ValueError(f'ranker returned non-numeric score for {workflow_id}')
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError(f'ranker returned empty reason for {workflow_id}')
+        seen.add(workflow_id)
+        validated.append(
+            {
+                'workflow_id': workflow_id,
+                'score': float(score),
+                'reason': reason.strip(),
+            }
+        )
+
+    if seen != offered_set:
+        raise ValueError('ranker response does not cover the offered workflow set exactly')
+    return validated
+
+
+def build_ranker_candidates(
+    workflow_ids: list[str],
+    registry: WorkflowRegistry,
+) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for workflow_id in workflow_ids:
+        workflow = registry.get_workflow(workflow_id)
+        if workflow is None:
+            continue
+        candidates.append(
+            {
+                'workflow_id': workflow.workflow_id,
+                'summary': ' '.join(
+                    [
+                        workflow.display_name,
+                        workflow.workflow_family,
+                        workflow.description,
+                        workflow.resource_profile.profile_name,
+                        workflow.approval_tier,
+                    ]
+                ),
+                'metadata': {
+                    'resource_profile': workflow.resource_profile.profile_name,
+                    'approval_tier': workflow.approval_tier,
+                },
+            }
+        )
+    return candidates
+
+
+def reorder_intake_candidates_with_ranker(
+    record: IntakeRecord,
+    settings: Settings,
+    registry: WorkflowRegistry,
+) -> IntakeRecord:
+    if not settings.ranker_enabled or len(record.workflow_family_candidates) < 2:
+        return record
+
+    candidates = build_ranker_candidates(record.workflow_family_candidates, registry)
+    if len(candidates) < 2:
+        return record
+
+    payload = {
+        'request_id': record.intake_id,
+        'query': record.raw_request,
+        'candidates': candidates,
+        'hints': {
+            'source_type': record.source_type,
+            'source_refs': record.source_refs,
+            'submitted_by': record.submitted_by,
+        },
+    }
+    request_obj = urllib_request.Request(
+        settings.ranker_url,
+        data=json.dumps(payload).encode('utf-8'),
+        headers={'Content-Type': 'application/json'},
+        method='POST',
+    )
+
+    try:
+        with urllib_request.urlopen(request_obj, timeout=settings.ranker_timeout_seconds) as response:
+            response_payload = json.loads(response.read().decode('utf-8'))
+        ranked_candidates = validate_ranker_response(response_payload, record.workflow_family_candidates)
+        top_score = ranked_candidates[0]['score']
+        second_score = ranked_candidates[1]['score'] if len(ranked_candidates) > 1 else 0.0
+        score_gap = top_score - second_score
+        if top_score < settings.ranker_min_top_score:
+            LOGGER.info(
+                'ranker-intake-order ignored intake_id=%s reason=top-score-below-threshold top_score=%.3f threshold=%.3f',
+                record.intake_id,
+                top_score,
+                settings.ranker_min_top_score,
+            )
+            return record
+        if score_gap < settings.ranker_min_score_gap:
+            LOGGER.info(
+                'ranker-intake-order ignored intake_id=%s reason=score-gap-below-threshold gap=%.3f threshold=%.3f',
+                record.intake_id,
+                score_gap,
+                settings.ranker_min_score_gap,
+            )
+            return record
+        reordered = [item['workflow_id'] for item in ranked_candidates]
+        LOGGER.info(
+            'ranker-intake-order accepted intake_id=%s reordered_candidates=%s top_score=%.3f score_gap=%.3f',
+            record.intake_id,
+            ','.join(reordered),
+            top_score,
+            score_gap,
+        )
+        return record.model_copy(
+            update={
+                'workflow_family_candidates': reordered,
+                'updated_at': datetime.now(timezone.utc),
+            }
+        )
+    except (urllib_error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        LOGGER.warning('ranker-intake-order fallback intake_id=%s reason=%s', record.intake_id, exc)
+        return record
 
 
 def call_intake_agent(
@@ -892,6 +1033,102 @@ def disable_schedule(record: ScheduledOperationRecord) -> ScheduledOperationReco
     )
 
 
+def cron_field_matches(field: str, value: int) -> bool:
+    field = field.strip()
+    if field == '*':
+        return True
+    allowed_values: set[int] = set()
+    for token in field.split(','):
+        token = token.strip()
+        if not token:
+            continue
+        if token == '*':
+            return True
+        if token.isdigit():
+            allowed_values.add(int(token))
+    return value in allowed_values
+
+
+def schedule_is_due(record: ScheduledOperationRecord, now: datetime) -> bool:
+    if record.status != 'active':
+        return False
+    fields = record.cron_expr.split()
+    if len(fields) != 5:
+        return False
+    minute, hour, day, month, weekday = fields
+    weekday_value = (now.weekday() + 1) % 7
+    return all(
+        (
+            cron_field_matches(minute, now.minute),
+            cron_field_matches(hour, now.hour),
+            cron_field_matches(day, now.day),
+            cron_field_matches(month, now.month),
+            cron_field_matches(weekday, weekday_value),
+        )
+    )
+
+
+def execute_due_digest_schedules(
+    store: RunStore,
+    now: datetime,
+) -> list[ScheduledExecutionRecord]:
+    executions: list[ScheduledExecutionRecord] = []
+    all_runs = store.list_runs()
+    for schedule in store.list_schedules(operation_type='digest'):
+        if not schedule_is_due(schedule, now):
+            continue
+        if schedule.last_execution_at is not None:
+            last = schedule.last_execution_at.astimezone(timezone.utc)
+            if last.year == now.year and last.month == now.month and last.day == now.day and last.hour == now.hour and last.minute == now.minute:
+                continue
+
+        matching_runs = all_runs
+        workflow_id = schedule.scope_filter.get('workflow_id')
+        run_status = schedule.scope_filter.get('run_status')
+        if isinstance(workflow_id, str) and workflow_id.strip():
+            matching_runs = [run for run in matching_runs if run.workflow_id == workflow_id.strip()]
+        if isinstance(run_status, str) and run_status.strip():
+            matching_runs = [run for run in matching_runs if run.status.status == run_status.strip()]
+
+        payload = {
+            'digest_kind': schedule.digest_kind,
+            'matching_run_count': len(matching_runs),
+            'workflow_ids': sorted({run.workflow_id for run in matching_runs}),
+            'run_status_counts': {},
+        }
+        status_counts: dict[str, int] = {}
+        for run in matching_runs:
+            status_counts[run.status.status] = status_counts.get(run.status.status, 0) + 1
+        payload['run_status_counts'] = status_counts
+
+        started_at = now
+        finished_at = now
+        detail = f"Digest {schedule.digest_kind} matched {len(matching_runs)} runs."
+        execution = ScheduledExecutionRecord(
+            execution_id=uuid4().hex,
+            schedule_id=schedule.schedule_id,
+            operation_type=schedule.operation_type,
+            started_at=started_at,
+            finished_at=finished_at,
+            result_status='ok',
+            result_detail=detail,
+            produced_run_ids=[],
+            digest_payload=payload,
+        )
+        store.save_execution(execution)
+        updated_schedule = schedule.model_copy(
+            update={
+                'updated_at': finished_at,
+                'last_execution_at': finished_at,
+                'last_result_status': 'ok',
+                'last_result_detail': detail,
+            }
+        )
+        store.save_schedule(updated_schedule)
+        executions.append(execution)
+    return executions
+
+
 def create_run_record(
     request: RunCreateRequest,
     workflow: WorkflowRegistryEntry,
@@ -1084,6 +1321,7 @@ def create_app(
                 notes=request.notes,
                 submitted_by=request.submitted_by or settings.default_submitted_by,
             )
+        record = reorder_intake_candidates_with_ranker(record, settings, registry)
         store.save_intake(record)
         log_stage_record_source(
             'intake',
@@ -1343,6 +1581,15 @@ def create_app(
         updated = disable_schedule(record)
         store.save_schedule(updated)
         return updated
+
+    @app.post('/digest-schedules/run-due', response_model=list[ScheduledExecutionRecord])
+    def run_due_digest_schedules() -> list[ScheduledExecutionRecord]:
+        now = datetime.now(timezone.utc)
+        return execute_due_digest_schedules(store, now)
+
+    @app.get('/scheduled-executions', response_model=list[ScheduledExecutionRecord])
+    def list_scheduled_executions(schedule_id: str | None = None) -> list[ScheduledExecutionRecord]:
+        return store.list_executions(schedule_id=schedule_id)
 
     @app.post('/runs', response_model=RunRecord, status_code=status.HTTP_201_CREATED)
     def create_run(request: RunCreateRequest) -> RunRecord:

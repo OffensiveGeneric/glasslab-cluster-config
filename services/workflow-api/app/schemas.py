@@ -181,6 +181,20 @@ class ScheduledOperationRecord(BaseModel):
     last_result_detail: str | None = None
 
 
+class ScheduledExecutionRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    execution_id: str
+    schedule_id: str
+    operation_type: str
+    started_at: datetime
+    finished_at: datetime
+    result_status: str
+    result_detail: str
+    produced_run_ids: list[str] = Field(default_factory=list)
+    digest_payload: dict[str, Any] = Field(default_factory=dict)
+
+
 class ValidationIssue(BaseModel):
     model_config = ConfigDict(extra='forbid')
 

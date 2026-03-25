@@ -24,8 +24,12 @@ Current implementation is a scaffold:
 
 - `GET /healthz`
 - `GET /approved-sources`
+- `GET /paper-harvester/tracks`
+- `GET /paper-harvester/papers`
+- `POST /paper-harvester/plan`
 - `POST /normalize-intake`
 - deterministic normalization logic
+- deterministic paper-harvester planning derived from the approved seed manifest
 - response metadata describing the configured model backend and approved-source manifest
 
 This is enough to make the service boundary real and testable before live model
@@ -45,8 +49,15 @@ That manifest is the current approved-source and seed-paper list for the future
 paper-puller / literature-harvester path. `intake-agent` now loads it at
 runtime, exposes a normalized summary via `GET /approved-sources`, and surfaces
 warning text when incoming `source_refs` point outside the currently approved
-host list. It should be treated as tracked input data for bounded intake-side
-agent work, not as a runtime secret.
+host list. It also exposes bounded harvester planning endpoints so a future
+source-scout agent can ask for:
+
+- approved track definitions and search queries
+- filtered seed-paper lists
+- a first bounded harvest plan by track/priority
+
+It should be treated as tracked input data for bounded intake-side agent work,
+not as a runtime secret.
 
 ## Intended Deployment Shape
 

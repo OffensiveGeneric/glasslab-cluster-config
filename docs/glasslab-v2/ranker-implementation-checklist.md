@@ -4,7 +4,7 @@ This note turns issue `#23` into concrete backend work.
 
 The ranker already exists as a bounded service.
 
-What remains is a safe `workflow-api` integration path that keeps the ranker advisory and easy to disable.
+The first safe `workflow-api` integration path now exists and keeps the ranker advisory and easy to disable.
 
 ## First integration checklist
 
@@ -37,13 +37,21 @@ What remains is a safe `workflow-api` integration path that keeps the ranker adv
 - log an explicit fallback reason when ranker output is ignored
 - do not let the ranker silently create a workflow ID that deterministic logic did not offer
 
-## Rollout checklist
+## Current repo state
 
-1. add config surface in `workflow-api`
-2. add one internal client helper for `POST /rank/workflow-family`
-3. wire the helper behind a feature flag in the intake path
-4. compare ranker-assisted and deterministic outcomes before widening usage
-5. only then consider later ranker use in interpretation or design review
+- `workflow-api` now builds bounded candidate sets for intake workflow-family ordering
+- `workflow-api` now calls the ranker behind `GLASSLAB_WORKFLOW_API_RANKER_ENABLED`
+- ranker responses are accepted only when:
+  - returned IDs exactly match the offered set
+  - top score meets `GLASSLAB_WORKFLOW_API_RANKER_MIN_TOP_SCORE`
+  - score gap meets `GLASSLAB_WORKFLOW_API_RANKER_MIN_SCORE_GAP`
+- ambiguous or malformed responses fall back to deterministic ordering
+
+## Remaining rollout checklist
+
+1. enable the ranker feature flag in the live cluster deliberately
+2. compare ranker-assisted and deterministic outcomes before widening usage
+3. only then consider later ranker use in interpretation or design review
 
 ## Close rule
 

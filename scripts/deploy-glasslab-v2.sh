@@ -89,6 +89,7 @@ apply_yaml_dir "$MANIFEST_ROOT/intake-agent"
 apply_yaml_dir "$MANIFEST_ROOT/interpretation-agent"
 apply_yaml_dir "$MANIFEST_ROOT/assessment-agent"
 apply_yaml_dir "$MANIFEST_ROOT/design-agent"
+apply_yaml_dir "$MANIFEST_ROOT/schedule-worker"
 apply_yaml_dir "$MANIFEST_ROOT/workflow-api"
 
 if [[ "$INCLUDE_OPENCLAW" == true ]]; then
