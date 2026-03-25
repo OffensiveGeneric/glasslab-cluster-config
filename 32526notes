@@ -1,0 +1,13 @@
+Looking for research gaps. Impact assessment. Can it get done (within 3-6 months)? Novelty. Non-triviality. 
+
+Checking out other domains for potential solutions. How would you evaluate that solution? 
+
+suppose you take paintings from the met. or wikiart. Build a metric space (maybe not linear) s.t. if two paintsings or works of art are close then they are by the same artists and from, say, the same period. Ex. What paintings are closest to cubist picassos? And it will return you other picasso paintings, and then perhaps we ask it for not-picassos, and it returns the closest not-picassos
+
+tripple loss, what kind? Do we even want a metric space? triangle inequality in the loss function? 
+
+start with small small images 64x64 and iterate from there. 
+
+wikiart. Hopefully it can prepare the data. learn metrics, which ways? It should be able to come up with that stuff on its own. 
+
+We want an algo that works on a db of 64x64 that takes as input two paintings s.t. if it's the same artist in the same period even if the subject is very different. 
