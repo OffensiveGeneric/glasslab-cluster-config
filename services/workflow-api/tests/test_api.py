@@ -413,6 +413,86 @@ def test_create_and_fetch_design_draft_from_latest_titanic_intake() -> None:
     assert fetched.json()['candidate_models'] == ['logistic_regression', 'random_forest']
 
 
+def test_create_design_draft_from_latest_intake_uses_agent_when_enabled(monkeypatch) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        design_agent_enabled=True,
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    create_intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Benchmark the approved models on the Titanic dataset and validate the baseline results.',
+            'notes': ['Use the standard Titanic train/test splits.'],
+        },
+    )
+    assert create_intake.status_code == 201
+
+    def fake_call_design_agent(intake, workflow, submitted_by, settings, source_assessment_id=None):
+        return main_module.build_design_draft_from_agent_draft(
+            intake,
+            workflow,
+            submitted_by=submitted_by,
+            source_assessment_id=source_assessment_id,
+            validated_draft={
+                'workflow_id': workflow.workflow_id,
+                'workflow_family': workflow.workflow_family,
+                'objective': 'agent-produced design objective',
+                'declared_inputs': {
+                    'dataset_name': 'titanic',
+                    'train_uri': 's3://datasets/titanic/train.csv',
+                    'test_uri': 's3://datasets/titanic/test.csv',
+                    'target_column': 'Survived',
+                },
+                'unresolved_inputs': [],
+                'candidate_models': ['random_forest'],
+                'resource_profile': workflow.resource_profile.profile_name,
+                'expected_artifacts': workflow.expected_artifacts.model_dump(mode='json'),
+                'approval_tier': workflow.approval_tier,
+                'design_notes': ['Agent design note'],
+            },
+        )
+
+    monkeypatch.setattr(main_module, 'call_design_agent', fake_call_design_agent)
+
+    create_design = client.post('/design-drafts/from-latest-intake')
+    assert create_design.status_code == 201
+    payload = create_design.json()
+    assert payload['objective'] == 'agent-produced design objective'
+    assert payload['candidate_models'] == ['random_forest']
+    assert payload['design_notes'] == ['Agent design note']
+
+
+def test_create_design_draft_from_latest_intake_falls_back_when_agent_returns_none(monkeypatch) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        design_agent_enabled=True,
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    create_intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Benchmark the approved models on the Titanic dataset and validate the baseline results.',
+            'notes': ['Use the standard Titanic train/test splits.'],
+        },
+    )
+    assert create_intake.status_code == 201
+
+    monkeypatch.setattr(main_module, 'call_design_agent', lambda *args, **kwargs: None)
+
+    create_design = client.post('/design-drafts/from-latest-intake')
+    assert create_design.status_code == 201
+    payload = create_design.json()
+    assert payload['declared_inputs']['dataset_name'] == 'titanic'
+    assert payload['candidate_models'] == ['logistic_regression', 'random_forest']
+
+
 def test_create_design_draft_from_latest_assessment() -> None:
     client = build_client()
 
@@ -444,6 +524,64 @@ def test_create_design_draft_from_latest_assessment() -> None:
     assert payload['source_assessment_id'] == assessment_id
     assert payload['workflow_id'] == 'generic-tabular-benchmark'
     assert payload['status'] == 'ready_for_run'
+
+
+def test_create_design_draft_from_latest_assessment_uses_agent_when_enabled(monkeypatch) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        design_agent_enabled=True,
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    create_intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Read this paper intake and determine whether the approved Titanic benchmark path is a good fit.',
+            'source_refs': ['https://example.org/titanic-paper'],
+            'notes': ['The paper compares a baseline on Titanic.'],
+        },
+    )
+    assert create_intake.status_code == 201
+    assert client.post('/interpretations/from-latest-intake').status_code == 201
+    create_assessment = client.post('/replicability-assessments/from-latest-interpretation')
+    assert create_assessment.status_code == 201
+    assessment_id = create_assessment.json()['assessment_id']
+
+    def fake_call_design_agent(intake, workflow, submitted_by, settings, source_assessment_id=None):
+        return main_module.build_design_draft_from_agent_draft(
+            intake,
+            workflow,
+            submitted_by=submitted_by,
+            source_assessment_id=source_assessment_id,
+            validated_draft={
+                'workflow_id': workflow.workflow_id,
+                'workflow_family': workflow.workflow_family,
+                'objective': 'agent-produced assessment design objective',
+                'declared_inputs': {
+                    'dataset_name': 'titanic',
+                    'train_uri': 's3://datasets/titanic/train.csv',
+                    'test_uri': 's3://datasets/titanic/test.csv',
+                    'target_column': 'Survived',
+                },
+                'unresolved_inputs': [],
+                'candidate_models': ['logistic_regression'],
+                'resource_profile': workflow.resource_profile.profile_name,
+                'expected_artifacts': workflow.expected_artifacts.model_dump(mode='json'),
+                'approval_tier': workflow.approval_tier,
+                'design_notes': ['Agent assessment-linked design note'],
+            },
+        )
+
+    monkeypatch.setattr(main_module, 'call_design_agent', fake_call_design_agent)
+
+    create_design = client.post('/design-drafts/from-latest-assessment')
+    assert create_design.status_code == 201
+    payload = create_design.json()
+    assert payload['source_assessment_id'] == assessment_id
+    assert payload['objective'] == 'agent-produced assessment design objective'
+    assert payload['candidate_models'] == ['logistic_regression']
 
 
 def test_create_design_draft_from_latest_assessment_requires_assessment() -> None:

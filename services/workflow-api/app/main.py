@@ -645,6 +645,138 @@ def build_design_draft(
     )
 
 
+def validate_design_agent_draft(
+    draft: dict[str, Any],
+    workflow: WorkflowRegistryEntry,
+) -> dict[str, Any]:
+    required_string_fields = ('workflow_id', 'workflow_family', 'objective', 'resource_profile', 'approval_tier')
+    for field_name in required_string_fields:
+        value = draft.get(field_name)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f'design agent draft missing valid {field_name}')
+
+    if draft['workflow_id'].strip() != workflow.workflow_id:
+        raise ValueError('design agent draft changed workflow_id')
+    if draft['workflow_family'].strip() != workflow.workflow_family:
+        raise ValueError('design agent draft changed workflow_family')
+    if draft['resource_profile'].strip() != workflow.resource_profile.profile_name:
+        raise ValueError('design agent draft changed resource_profile')
+    if draft['approval_tier'].strip() != workflow.approval_tier:
+        raise ValueError('design agent draft changed approval_tier')
+
+    candidate_models = normalize_unique_strings(list(draft.get('candidate_models', [])))
+    invalid_models = [model for model in candidate_models if model not in workflow.allowed_models]
+    if invalid_models:
+        raise ValueError(f'design agent returned disallowed models: {", ".join(invalid_models)}')
+
+    declared_inputs = draft.get('declared_inputs', {})
+    expected_artifacts = draft.get('expected_artifacts', {})
+    if not isinstance(declared_inputs, dict):
+        raise ValueError('design agent draft missing valid declared_inputs')
+    if not isinstance(expected_artifacts, dict):
+        raise ValueError('design agent draft missing valid expected_artifacts')
+
+    normalized = {
+        'workflow_id': draft['workflow_id'].strip(),
+        'workflow_family': draft['workflow_family'].strip(),
+        'objective': ' '.join(draft['objective'].split())[:500],
+        'declared_inputs': declared_inputs,
+        'unresolved_inputs': normalize_unique_strings(list(draft.get('unresolved_inputs', []))),
+        'candidate_models': candidate_models,
+        'resource_profile': draft['resource_profile'].strip(),
+        'expected_artifacts': expected_artifacts,
+        'approval_tier': draft['approval_tier'].strip(),
+        'design_notes': normalize_unique_strings(list(draft.get('design_notes', []))),
+    }
+    return normalized
+
+
+def build_design_draft_from_agent_draft(
+    intake: IntakeRecord,
+    workflow: WorkflowRegistryEntry,
+    submitted_by: str,
+    validated_draft: dict[str, Any],
+    source_assessment_id: str | None = None,
+) -> DesignDraftRecord:
+    now = datetime.now(timezone.utc)
+    return DesignDraftRecord(
+        design_id=uuid4().hex,
+        intake_id=intake.intake_id,
+        source_assessment_id=source_assessment_id,
+        created_at=now,
+        updated_at=now,
+        status='ready_for_run' if not validated_draft['unresolved_inputs'] and workflow.approval_tier == 'tier-2-approved-execution' else 'needs_review',
+        workflow_id=validated_draft['workflow_id'],
+        workflow_family=validated_draft['workflow_family'],
+        objective=validated_draft['objective'],
+        declared_inputs=validated_draft['declared_inputs'],
+        unresolved_inputs=validated_draft['unresolved_inputs'],
+        candidate_models=validated_draft['candidate_models'],
+        resource_profile=validated_draft['resource_profile'],
+        expected_artifacts=validated_draft['expected_artifacts'],
+        approval_tier=validated_draft['approval_tier'],
+        design_notes=validated_draft['design_notes'],
+        submitted_by=submitted_by,
+    )
+
+
+def call_design_agent(
+    intake: IntakeRecord,
+    workflow: WorkflowRegistryEntry,
+    submitted_by: str,
+    settings: Settings,
+    source_assessment_id: str | None = None,
+) -> DesignDraftRecord | None:
+    if not settings.design_agent_enabled:
+        return None
+
+    payload = {
+        'request_id': intake.intake_id,
+        'intake': {
+            'intake_id': intake.intake_id,
+            'source_type': intake.source_type,
+            'source_refs': intake.source_refs,
+            'raw_request': intake.raw_request,
+            'normalized_summary': intake.normalized_summary,
+            'workflow_family_candidates': intake.workflow_family_candidates,
+            'notes': intake.notes,
+            'submitted_by': intake.submitted_by,
+        },
+        'workflow': {
+            'workflow_id': workflow.workflow_id,
+            'workflow_family': workflow.workflow_family,
+            'allowed_models': workflow.allowed_models,
+            'expected_artifacts': workflow.expected_artifacts.model_dump(mode='json'),
+            'resource_profile_name': workflow.resource_profile.profile_name,
+            'approval_tier': workflow.approval_tier,
+        },
+    }
+    request_obj = urllib_request.Request(
+        settings.design_agent_url,
+        data=json.dumps(payload).encode('utf-8'),
+        headers={'Content-Type': 'application/json'},
+        method='POST',
+    )
+
+    try:
+        with urllib_request.urlopen(request_obj, timeout=settings.design_agent_timeout_seconds) as response:
+            body = json.loads(response.read().decode('utf-8'))
+        draft = body.get('draft')
+        if not isinstance(draft, dict):
+            raise ValueError('design agent response missing draft object')
+        validated_draft = validate_design_agent_draft(draft, workflow)
+        return build_design_draft_from_agent_draft(
+            intake,
+            workflow,
+            submitted_by=submitted_by,
+            validated_draft=validated_draft,
+            source_assessment_id=source_assessment_id,
+        )
+    except (urllib_error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        LOGGER.warning('design-agent fallback for intake %s workflow %s: %s', intake.intake_id, workflow.workflow_id, exc)
+        return None
+
+
 def review_design_draft(
     design: DesignDraftRecord,
     request: DesignDraftReviewRequest,
@@ -1016,7 +1148,12 @@ def create_app(
         workflow = choose_workflow_for_intake(intake, registry)
         if workflow is None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='no approved workflow mapping found')
-        record = build_design_draft(intake, workflow, submitted_by=intake.submitted_by)
+        record = call_design_agent(
+            intake,
+            workflow,
+            submitted_by=intake.submitted_by,
+            settings=settings,
+        ) or build_design_draft(intake, workflow, submitted_by=intake.submitted_by)
         store.save_design_draft(record)
         return record
 
@@ -1035,7 +1172,13 @@ def create_app(
         workflow = registry.get_workflow(assessment.recommended_workflow_id)
         if workflow is None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='workflow registry entry not found')
-        record = build_design_draft(
+        record = call_design_agent(
+            intake,
+            workflow,
+            submitted_by=assessment.submitted_by,
+            settings=settings,
+            source_assessment_id=assessment.assessment_id,
+        ) or build_design_draft(
             intake,
             workflow,
             submitted_by=assessment.submitted_by,
