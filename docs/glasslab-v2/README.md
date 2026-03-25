@@ -15,6 +15,7 @@ Canonical planning and architecture:
 - `research-pipeline-target.md`: the intended end-state product shape for Glasslab research workflows
 - `stage-agent-pipeline.md`: specialized backend agent roles, handoffs, and why OpenClaw should stay at the edge
 - `stage-agent-rollout-order.md`: recommended stage-by-stage enablement order for the bounded-agent pipeline
+- `bounded-agent-live-enable-criteria.md`: shared live rollout milestone for intake, interpretation, assessment, and design agents
 - `doc-audit-2026-03-24.md`: which v2 docs are still canonical, which are historical scaffolding, and which map to tracker work
 - `intake-design-run-implementation-plan.md`: first concrete backend plan for intake -> design draft -> validation run
 - `model-improvement-options.md`: stronger model vs ranker vs control-surface vs backend decomposition
