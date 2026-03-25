@@ -45,6 +45,17 @@ class ModelBackendMetadata(BaseModel):
     timeout_seconds: float
 
 
+class ApprovedSourcesSummary(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    manifest_name: str
+    manifest_version: int
+    venue_count: int
+    paper_count: int
+    track_query_count: int
+    approved_hosts: list[str] = Field(default_factory=list)
+
+
 class NormalizeIntakeRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -58,6 +69,7 @@ class NormalizeIntakeResponse(BaseModel):
     request_id: str
     draft: NormalizedIntakeDraft
     model_backend: ModelBackendMetadata
+    approved_sources: ApprovedSourcesSummary
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -66,3 +78,4 @@ class HealthResponse(BaseModel):
 
     status: str
     model_backend: dict[str, Any]
+    approved_sources: ApprovedSourcesSummary
