@@ -36,6 +36,7 @@ Canonical planning and architecture:
 - `operator-access-options.md`: narrowed decision between Tailscale or reverse proxy for stable operator-facing access
 - `operator-access-recommendation.md`: concrete recommendation to expose only OpenClaw through a narrow authenticated operator path
 - `openclaw-runtime-portability.md`: what has and has not been reduced in the `.44`-special OpenClaw runtime path
+- `remote-admin-path.md`: why off-site operation through `glasslab.org -> .44` reduces friction without changing `.44`'s canonical admin role
 - `external-researcher-what-we-can-offer-now.md`: practical current answer for what outside researchers can safely use today
 - `external-researcher-hardening-gaps.md`: what must be hardened before outside researchers should be treated as first-class cluster users
 - `external-researcher-offer-profiles.md`: concrete outside-researcher offer lanes and why "one worker node" is the wrong framing
