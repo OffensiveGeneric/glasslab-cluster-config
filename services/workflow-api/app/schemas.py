@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -16,6 +16,7 @@ class RunCreateRequest(BaseModel):
     inputs: dict[str, Any] = Field(default_factory=dict)
     models: list[str] = Field(min_length=1)
     resource_profile: str | None = None
+    run_priority: Literal['user', 'autonomous'] = 'user'
     submitted_by: str | None = None
     trace_id: str | None = None
 
@@ -237,6 +238,7 @@ class RunRecord(BaseModel):
     source_design_id: str | None = None
     source_intake_id: str | None = None
     run_purpose: str | None = None
+    run_priority: Literal['user', 'autonomous'] = 'user'
     validation_issues: list[ValidationIssue] = Field(default_factory=list)
 
 

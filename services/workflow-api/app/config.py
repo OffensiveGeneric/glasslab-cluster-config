@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     artifacts_pvc_name: str = 'glasslab-shared-artifacts'
     artifacts_mount_path: str = '/mnt/artifacts'
     image_pull_secret_name: str = 'glasslab-ghcr-pull'
+    user_priority_class_name: str = 'glasslab-user-high'
+    autonomous_priority_class_name: str = 'glasslab-autonomous-low'
     intake_agent_enabled: bool = False
     intake_agent_url: str = 'http://glasslab-intake-agent.glasslab-v2.svc.cluster.local:8090'
     intake_agent_timeout_seconds: float = 30.0

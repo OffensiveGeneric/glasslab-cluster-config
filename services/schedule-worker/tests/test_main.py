@@ -41,6 +41,9 @@ def test_healthz() -> None:
 
 def test_run_once_calls_workflow_api(monkeypatch) -> None:
     class FakeResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
         def __enter__(self):
             return self
 
@@ -48,7 +51,11 @@ def test_run_once_calls_workflow_api(monkeypatch) -> None:
             return False
 
         def read(self) -> bytes:
-            return json.dumps(
+            return json.dumps(self.payload).encode('utf-8')
+
+    def fake_urlopen(request_obj, timeout):
+        if request_obj.full_url.endswith('/digest-schedules/run-due'):
+            return FakeResponse(
                 [
                     {
                         'execution_id': 'exec-1',
@@ -59,13 +66,26 @@ def test_run_once_calls_workflow_api(monkeypatch) -> None:
                         'digest_payload': {'matching_run_count': 2},
                     }
                 ]
-            ).encode('utf-8')
+            )
+        return FakeResponse(
+            [
+                {
+                    'execution_id': 'exec-2',
+                    'schedule_id': 'sched-2',
+                    'operation_type': 'approved-rerun',
+                    'result_status': 'ok',
+                    'result_detail': 'Approved rerun submitted as run-2.',
+                    'digest_payload': {},
+                }
+            ]
+        )
 
-    monkeypatch.setattr(main_module.urllib_request, 'urlopen', lambda request_obj, timeout: FakeResponse())
+    monkeypatch.setattr(main_module.urllib_request, 'urlopen', fake_urlopen)
 
     client = TestClient(app)
     response = client.post('/run-once')
     assert response.status_code == 200
     payload = response.json()
-    assert payload['executed_count'] == 1
+    assert payload['executed_count'] == 2
     assert payload['executions'][0]['schedule_id'] == 'sched-1'
+    assert payload['executions'][1]['schedule_id'] == 'sched-2'

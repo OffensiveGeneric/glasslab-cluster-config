@@ -56,6 +56,11 @@ Current assumptions:
 
 The deploy script applies local files in `kubeadm/glasslab-v2/secrets/` and skips any `*.example.yaml` manifests.
 
+It also applies the first explicit scheduling lanes:
+
+- `glasslab-user-high`
+- `glasslab-autonomous-low`
+
 Current storage caveat:
 - Postgres and MinIO are still non-durable until the storage plan under `docs/glasslab-v2/storage-and-state.md` is implemented
 

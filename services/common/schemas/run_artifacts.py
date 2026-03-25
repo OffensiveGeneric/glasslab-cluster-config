@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 RunState = Literal['accepted', 'queued', 'running', 'succeeded', 'failed', 'rejected']
 MetricDirection = Literal['maximize', 'minimize']
+RunPriority = Literal['user', 'autonomous']
 
 
 class RunManifest(BaseModel):
@@ -19,6 +20,7 @@ class RunManifest(BaseModel):
     objective: str = Field(min_length=5)
     submitted_by: str
     submitted_at: datetime
+    run_priority: RunPriority = 'user'
     inputs: dict[str, Any] = Field(default_factory=dict)
     requested_models: list[str] = Field(min_length=1)
     resource_profile: str

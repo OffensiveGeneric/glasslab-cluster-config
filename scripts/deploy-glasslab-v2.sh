@@ -80,6 +80,7 @@ printf '[deploy-glasslab-v2] validating workflow registry definitions\n'
 "$ROOT_DIR/scripts/seed-registry.sh"
 
 apply_yaml_dir "$MANIFEST_ROOT/namespaces"
+apply_yaml_dir "$MANIFEST_ROOT/priorityclasses"
 apply_yaml_dir "$MANIFEST_ROOT/secrets"
 apply_yaml_dir "$MANIFEST_ROOT/config"
 apply_yaml_dir "$MANIFEST_ROOT/postgres"

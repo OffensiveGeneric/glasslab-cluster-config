@@ -28,6 +28,7 @@ Complete these items before the first live Glasslab v2 deployment.
 - OpenClaw writable state uses a retained static local PV/PVC on `node01`, but the runtime bundle still unpacks into pod-local `emptyDir`
 - OpenClaw is intentionally excluded from the default deploy path
 - no public ingress should be created
+- user/autonomous scheduling priority is currently expressed through `PriorityClass`, not preemption or quota policy
 
 ## Core-only first deployment command set
 

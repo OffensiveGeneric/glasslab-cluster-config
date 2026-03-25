@@ -1,0 +1,7 @@
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: glasslab-user-high
+value: 100000
+globalDefault: false
+description: Higher-priority lane for reviewed or user-submitted Glasslab workloads.

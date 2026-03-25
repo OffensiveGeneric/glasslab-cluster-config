@@ -1129,6 +1129,149 @@ def execute_due_digest_schedules(
     return executions
 
 
+def execute_due_approved_rerun_schedules(
+    store: RunStore,
+    now: datetime,
+    settings: Settings,
+    registry: WorkflowRegistry,
+    submitter: JobSubmitter,
+) -> list[ScheduledExecutionRecord]:
+    executions: list[ScheduledExecutionRecord] = []
+    for schedule in store.list_schedules(operation_type='approved-rerun'):
+        if not schedule_is_due(schedule, now):
+            continue
+        if schedule.last_execution_at is not None:
+            last = schedule.last_execution_at.astimezone(timezone.utc)
+            if last.year == now.year and last.month == now.month and last.day == now.day and last.hour == now.hour and last.minute == now.minute:
+                continue
+
+        started_at = now
+        source_run = store.get_run(schedule.source_run_id or '')
+        failure_reason = None
+        if source_run is None:
+            failure_reason = 'source run not found'
+        elif source_run.status.status != 'succeeded':
+            failure_reason = 'source run is no longer succeeded'
+        elif schedule.workflow_id != source_run.workflow_id:
+            failure_reason = 'scheduled workflow_id drifted from source run'
+        elif schedule.resource_profile != source_run.manifest.resource_profile:
+            failure_reason = 'scheduled resource profile drifted from source run'
+        elif schedule.allowed_runner_image != source_run.manifest.runner_image:
+            failure_reason = 'scheduled runner image drifted from source run'
+        elif schedule.allowed_model_ids != list(source_run.manifest.requested_models):
+            failure_reason = 'scheduled model ids drifted from source run'
+        else:
+            dataset_uri = None
+            for candidate in ('dataset_uri', 'train_uri'):
+                value = source_run.manifest.inputs.get(candidate)
+                if isinstance(value, str) and value.strip():
+                    dataset_uri = value.strip()
+                    break
+            if schedule.allowed_dataset_uri != dataset_uri:
+                failure_reason = 'scheduled dataset uri drifted from source run'
+
+        if failure_reason is not None:
+            execution = ScheduledExecutionRecord(
+                execution_id=uuid4().hex,
+                schedule_id=schedule.schedule_id,
+                operation_type=schedule.operation_type,
+                started_at=started_at,
+                finished_at=started_at,
+                result_status='failed-closed',
+                result_detail=failure_reason,
+                produced_run_ids=[],
+                digest_payload={},
+            )
+            store.save_execution(execution)
+            store.save_schedule(
+                schedule.model_copy(
+                    update={
+                        'updated_at': started_at,
+                        'last_execution_at': started_at,
+                        'last_result_status': 'failed-closed',
+                        'last_result_detail': failure_reason,
+                    }
+                )
+            )
+            executions.append(execution)
+            continue
+
+        assert source_run is not None
+        workflow = registry.get_workflow(source_run.workflow_id)
+        if workflow is None:
+            detail = 'workflow registry entry not found for scheduled rerun'
+            execution = ScheduledExecutionRecord(
+                execution_id=uuid4().hex,
+                schedule_id=schedule.schedule_id,
+                operation_type=schedule.operation_type,
+                started_at=started_at,
+                finished_at=started_at,
+                result_status='failed-closed',
+                result_detail=detail,
+                produced_run_ids=[],
+                digest_payload={},
+            )
+            store.save_execution(execution)
+            store.save_schedule(
+                schedule.model_copy(
+                    update={
+                        'updated_at': started_at,
+                        'last_execution_at': started_at,
+                        'last_result_status': 'failed-closed',
+                        'last_result_detail': detail,
+                    }
+                )
+            )
+            executions.append(execution)
+            continue
+
+        rerun_request = RunCreateRequest(
+            workflow_id=source_run.workflow_id,
+            objective=source_run.manifest.objective,
+            inputs=source_run.manifest.inputs,
+            models=list(source_run.manifest.requested_models),
+            resource_profile=source_run.manifest.resource_profile,
+            run_priority='autonomous',
+            submitted_by=schedule.owner,
+        )
+        rerun_record = create_run_record(
+            rerun_request,
+            workflow,
+            settings,
+            submitter,
+            store,
+            source_design_id=source_run.source_design_id,
+            source_intake_id=source_run.source_intake_id,
+            run_purpose='approved-rerun',
+        )
+        finished_at = datetime.now(timezone.utc)
+        detail = f'Approved rerun submitted as {rerun_record.run_id}.'
+        execution = ScheduledExecutionRecord(
+            execution_id=uuid4().hex,
+            schedule_id=schedule.schedule_id,
+            operation_type=schedule.operation_type,
+            started_at=started_at,
+            finished_at=finished_at,
+            result_status='ok',
+            result_detail=detail,
+            produced_run_ids=[rerun_record.run_id],
+            digest_payload={},
+        )
+        store.save_execution(execution)
+        store.save_schedule(
+            schedule.model_copy(
+                update={
+                    'updated_at': finished_at,
+                    'last_execution_at': finished_at,
+                    'last_result_status': 'ok',
+                    'last_result_detail': detail,
+                }
+            )
+        )
+        executions.append(execution)
+    return executions
+
+
 def create_run_record(
     request: RunCreateRequest,
     workflow: WorkflowRegistryEntry,
@@ -1156,6 +1299,7 @@ def create_run_record(
         objective=request.objective,
         submitted_by=request.submitted_by or settings.default_submitted_by,
         submitted_at=now,
+        run_priority=request.run_priority,
         inputs=request.inputs,
         requested_models=request.models,
         resource_profile=request.resource_profile or workflow.resource_profile.profile_name,
@@ -1177,6 +1321,7 @@ def create_run_record(
         source_design_id=source_design_id,
         source_intake_id=source_intake_id,
         run_purpose=run_purpose,
+        run_priority=request.run_priority,
     )
     artifacts = build_artifact_index(run_id, workflow.expected_artifacts.required, workflow.expected_artifacts.optional)
     store.save_run(record)
@@ -1586,6 +1731,11 @@ def create_app(
     def run_due_digest_schedules() -> list[ScheduledExecutionRecord]:
         now = datetime.now(timezone.utc)
         return execute_due_digest_schedules(store, now)
+
+    @app.post('/approved-rerun-schedules/run-due', response_model=list[ScheduledExecutionRecord])
+    def run_due_approved_rerun_schedules() -> list[ScheduledExecutionRecord]:
+        now = datetime.now(timezone.utc)
+        return execute_due_approved_rerun_schedules(store, now, settings, registry, submitter)
 
     @app.get('/scheduled-executions', response_model=list[ScheduledExecutionRecord])
     def list_scheduled_executions(schedule_id: str | None = None) -> list[ScheduledExecutionRecord]:

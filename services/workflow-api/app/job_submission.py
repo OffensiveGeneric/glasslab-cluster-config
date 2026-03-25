@@ -123,7 +123,14 @@ class KubernetesJobSubmitter(JobSubmitter):
             'app.kubernetes.io/name': 'glasslab-v2-runner',
             'glasslab.io/run-id': manifest.run_id,
             'glasslab.io/workflow-id': _sanitize_label(manifest.workflow_id),
+            'glasslab.io/run-priority': manifest.run_priority,
         }
+
+        priority_class_name = ''
+        if manifest.run_priority == 'autonomous':
+            priority_class_name = self.settings.autonomous_priority_class_name
+        else:
+            priority_class_name = self.settings.user_priority_class_name
 
         env = [
             self.client.V1EnvVar(name='GLASSLAB_RUNNER_EXPERIMENT_ID', value=manifest.run_id),
@@ -150,6 +157,7 @@ class KubernetesJobSubmitter(JobSubmitter):
             service_account_name=self.settings.runner_service_account_name,
             image_pull_secrets=[self.client.V1LocalObjectReference(name=self.settings.image_pull_secret_name)],
             containers=[container],
+            priority_class_name=priority_class_name or None,
             volumes=[
                 self.client.V1Volume(
                     name='dataset-volume',

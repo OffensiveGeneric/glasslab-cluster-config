@@ -40,6 +40,18 @@ def run_due_digest_cycle() -> RunOnceResponse:
     )
 
 
+def run_due_approved_rerun_cycle() -> list[ScheduledExecutionPayload]:
+    request_obj = urllib_request.Request(
+        f'{WORKFLOW_API_URL}/approved-rerun-schedules/run-due',
+        data=b'',
+        headers={'Content-Type': 'application/json'},
+        method='POST',
+    )
+    with urllib_request.urlopen(request_obj, timeout=TIMEOUT_SECONDS) as response:
+        payload = json.loads(response.read().decode('utf-8'))
+    return [ScheduledExecutionPayload.model_validate(item) for item in payload]
+
+
 app = FastAPI(title='glasslab-schedule-worker', version='0.1.0')
 
 
@@ -50,4 +62,12 @@ def healthz() -> HealthResponse:
 
 @app.post('/run-once', response_model=RunOnceResponse)
 def run_once() -> RunOnceResponse:
-    return run_due_digest_cycle()
+    digest_result = run_due_digest_cycle()
+    rerun_executions = run_due_approved_rerun_cycle()
+    all_executions = list(digest_result.executions) + rerun_executions
+    return RunOnceResponse(
+        worker_status='ok',
+        executed_count=len(all_executions),
+        executions=all_executions,
+        worker_config=worker_config(),
+    )

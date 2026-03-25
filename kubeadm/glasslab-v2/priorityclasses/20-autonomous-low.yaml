@@ -1,0 +1,7 @@
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: glasslab-autonomous-low
+value: 1000
+globalDefault: false
+description: Lower-priority backfill lane for autonomous Glasslab background workloads.
