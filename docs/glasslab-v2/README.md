@@ -36,6 +36,7 @@ Canonical planning and architecture:
 - `qwen-fit-for-stage-agents.md`: where the current local Qwen path is useful for backend agents and where it is not
 - `approval-tier-unattended-ops-plan.md`: concrete plan for unattended digests and approved reruns behind approval tiers
 - `workflow-api-schedules.md`: current stored schedule endpoints for digests and approved reruns
+- `schedule-worker-plan.md`: bounded worker shape for executing due schedules after re-validation
 - `schedule-execution-boundaries.md`: fail-closed execution rules for stored schedules and future `run-now` support
 - `operator-access-options.md`: narrowed decision between Tailscale or reverse proxy for stable operator-facing access
 - `operator-access-recommendation.md`: concrete recommendation to expose only OpenClaw through a narrow authenticated operator path
