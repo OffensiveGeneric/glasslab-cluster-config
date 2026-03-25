@@ -1000,6 +1000,63 @@ def test_run_due_approved_rerun_schedules_creates_autonomous_run() -> None:
     assert rerun_record.manifest.run_priority == 'autonomous'
 
 
+def test_run_due_approved_rerun_schedules_resolves_source_status_from_disk(tmp_path) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        artifacts_mount_path=str(tmp_path),
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    create_run = client.post(
+        '/runs',
+        json={
+            'workflow_id': 'generic-tabular-benchmark',
+            'objective': 'Create a reviewed benchmark run suitable for scheduled reruns.',
+            'inputs': {
+                'dataset_name': 'titanic',
+                'train_uri': 's3://datasets/titanic/train.csv',
+                'test_uri': 's3://datasets/titanic/test.csv',
+                'target_column': 'Survived',
+            },
+            'models': ['logistic_regression', 'random_forest'],
+            'resource_profile': 'cpu-small',
+        },
+    )
+    assert create_run.status_code == 201
+    source_run_id = create_run.json()['run_id']
+
+    run_dir = tmp_path / source_run_id
+    run_dir.mkdir(parents=True)
+    (run_dir / 'status.json').write_text(
+        '{"run_id":"%s","status":"succeeded","updated_at":"2026-03-25T16:37:32Z","detail":"done"}'
+        % source_run_id
+    )
+
+    now = datetime.now(timezone.utc)
+    cron_expr = f'{now.minute} {now.hour} {now.day} {now.month} {(now.weekday() + 1) % 7}'
+    created = client.post(
+        '/approved-rerun-schedules/from-latest-run',
+        json={'cron_expr': cron_expr},
+    )
+    assert created.status_code == 201
+    schedule_id = created.json()['schedule_id']
+
+    executed = client.post('/approved-rerun-schedules/run-due')
+    assert executed.status_code == 200
+    payload = executed.json()
+    assert len(payload) == 1
+    assert payload[0]['schedule_id'] == schedule_id
+    assert payload[0]['result_status'] == 'ok'
+    produced_run_id = payload[0]['produced_run_ids'][0]
+
+    rerun_record = store.get_run(produced_run_id)
+    assert rerun_record is not None
+    assert rerun_record.run_purpose == 'approved-rerun'
+    assert rerun_record.run_priority == 'autonomous'
+
+
 def test_approved_rerun_schedule_requires_succeeded_tier_two_run() -> None:
     client = build_client()
 

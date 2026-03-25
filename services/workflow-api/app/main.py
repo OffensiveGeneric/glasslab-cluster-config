@@ -1150,17 +1150,22 @@ def execute_due_approved_rerun_schedules(
         failure_reason = None
         if source_run is None:
             failure_reason = 'source run not found'
-        elif source_run.status.status != 'succeeded':
-            failure_reason = 'source run is no longer succeeded'
-        elif schedule.workflow_id != source_run.workflow_id:
-            failure_reason = 'scheduled workflow_id drifted from source run'
-        elif schedule.resource_profile != source_run.manifest.resource_profile:
-            failure_reason = 'scheduled resource profile drifted from source run'
-        elif schedule.allowed_runner_image != source_run.manifest.runner_image:
-            failure_reason = 'scheduled runner image drifted from source run'
-        elif schedule.allowed_model_ids != list(source_run.manifest.requested_models):
-            failure_reason = 'scheduled model ids drifted from source run'
         else:
+            resolved_status = resolve_run_status(source_run, settings, submitter)
+            if resolved_status != source_run.status:
+                source_run = source_run.model_copy(update={'status': resolved_status, 'updated_at': resolved_status.updated_at})
+                store.save_run(source_run)
+        if failure_reason is None and source_run.status.status != 'succeeded':
+            failure_reason = 'source run is no longer succeeded'
+        elif failure_reason is None and schedule.workflow_id != source_run.workflow_id:
+            failure_reason = 'scheduled workflow_id drifted from source run'
+        elif failure_reason is None and schedule.resource_profile != source_run.manifest.resource_profile:
+            failure_reason = 'scheduled resource profile drifted from source run'
+        elif failure_reason is None and schedule.allowed_runner_image != source_run.manifest.runner_image:
+            failure_reason = 'scheduled runner image drifted from source run'
+        elif failure_reason is None and schedule.allowed_model_ids != list(source_run.manifest.requested_models):
+            failure_reason = 'scheduled model ids drifted from source run'
+        elif failure_reason is None:
             dataset_uri = None
             for candidate in ('dataset_uri', 'train_uri'):
                 value = source_run.manifest.inputs.get(candidate)
