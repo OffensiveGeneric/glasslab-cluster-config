@@ -695,6 +695,81 @@ const plugin = {
 
     api.registerTool(
       {
+        name: "workflow_api_run_research_problem_pipeline",
+        description: "Turn a bounded natural-language research problem into candidate-paper selection and a backend paper-to-artifact run.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            problem_statement: {
+              type: "string",
+              minLength: 12,
+              description: "Natural-language research problem statement."
+            },
+            max_candidate_papers: {
+              type: "integer",
+              minimum: 1,
+              maximum: 5,
+              default: 3,
+              description: "Maximum approved candidate papers to consider before selecting the top candidate."
+            },
+            wait_for_terminal_state: {
+              type: "boolean",
+              default: true,
+              description: "When true, wait for the backend run to reach a terminal state before returning."
+            }
+          },
+          required: ["problem_statement"]
+        },
+        async execute(args: any) {
+          const requestBody = {
+            problem_statement: String(args?.problem_statement || "").trim(),
+            max_candidate_papers:
+              typeof args?.max_candidate_papers === "number"
+                ? Math.max(1, Math.min(5, Math.floor(args.max_candidate_papers)))
+                : 3,
+            wait_for_terminal_state:
+              typeof args?.wait_for_terminal_state === "boolean"
+                ? args.wait_for_terminal_state
+                : true
+          };
+          if (!requestBody.problem_statement) {
+            throw new Error("problem_statement is required");
+          }
+          try {
+            const { endpoint, payload } = await requestJson(api, "/paper-pipelines/from-research-problem", {
+              method: "POST",
+              body: JSON.stringify(requestBody)
+            });
+            await appendAuditEvent({
+              tool: "workflow_api_run_research_problem_pipeline",
+              status: "ok",
+              endpoint,
+              chosen_paper_id: payload?.chosen_paper_id ?? null,
+              next_action: payload?.next_action ?? null,
+              run_id: payload?.pipeline?.run?.run_id ?? null,
+              run_status: payload?.pipeline?.report_state?.run_status ?? null
+            });
+            return buildJsonResult({
+              endpoint,
+              request: requestBody,
+              result: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_run_research_problem_pipeline",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
         name: "workflow_api_get_last_run_artifacts",
         description: "Fetch the artifact index for the latest stored run.",
         parameters: {

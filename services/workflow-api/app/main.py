@@ -30,6 +30,9 @@ from .schemas import (
     InterpretationRecord,
     LogEntry,
     PaperPipelineReportState,
+    ResearchProblemPaperCandidate,
+    ResearchProblemPipelineRequest,
+    ResearchProblemPipelineResponse,
     ApprovedRerunScheduleCreateRequest,
     ReplicabilityAssessmentRecord,
     RunArtifactsResponse,
@@ -895,6 +898,65 @@ def build_paper_pipeline_report_state(
         report_path=report_path,
         artifact_count=len(artifact_names),
         artifact_names=artifact_names,
+    )
+
+
+def validate_problem_harvester_response(payload: dict[str, Any]) -> dict[str, Any]:
+    selected_tracks = payload.get('selected_tracks')
+    selected_queries = payload.get('selected_queries')
+    selected_papers = payload.get('selected_papers')
+    if not isinstance(selected_tracks, list):
+        raise ValueError('problem harvester response missing selected_tracks')
+    if not isinstance(selected_queries, list):
+        raise ValueError('problem harvester response missing selected_queries')
+    if not isinstance(selected_papers, list):
+        raise ValueError('problem harvester response missing selected_papers')
+    return payload
+
+
+def call_problem_harvester_plan(
+    request: ResearchProblemPipelineRequest,
+    settings: Settings,
+) -> dict[str, Any]:
+    payload = {
+        'request_id': uuid4().hex,
+        'problem_statement': request.problem_statement,
+        'priorities': request.priorities,
+        'max_papers': request.max_candidate_papers,
+    }
+    request_obj = urllib_request.Request(
+        settings.intake_agent_url.rstrip('/') + '/paper-harvester/plan-from-problem',
+        data=json.dumps(payload).encode('utf-8'),
+        headers={'Content-Type': 'application/json'},
+        method='POST',
+    )
+
+    with urllib_request.urlopen(request_obj, timeout=settings.intake_agent_timeout_seconds) as response:
+        body = json.loads(response.read().decode('utf-8'))
+    return validate_problem_harvester_response(body)
+
+
+def build_fresh_paper_request_from_problem(
+    request: ResearchProblemPipelineRequest,
+    chosen_paper: ResearchProblemPaperCandidate,
+    selected_track_ids: list[str],
+) -> FreshPaperPipelineRequest:
+    paper_ref = chosen_paper.official_page or chosen_paper.pdf_url or chosen_paper.paper_id
+    notes = [chosen_paper.why_seed]
+    notes.extend(chosen_paper.first_jobs[:2])
+    if selected_track_ids:
+        notes.append('Selected tracks: ' + ', '.join(selected_track_ids))
+    return FreshPaperPipelineRequest(
+        paper_ref=paper_ref,
+        raw_request=(
+            f'Investigate this research problem with a bounded literature-derived experiment: '
+            f'{request.problem_statement.strip()}'
+        ),
+        notes=notes,
+        submitted_by=request.submitted_by,
+        wait_for_terminal_state=request.wait_for_terminal_state,
+        wait_timeout_seconds=request.wait_timeout_seconds,
+        poll_interval_seconds=request.poll_interval_seconds,
     )
 
 
@@ -1988,6 +2050,61 @@ def create_app(
             report_state=report_state,
             warnings=warnings,
             next_action=next_action,
+        )
+
+    @app.post('/paper-pipelines/from-research-problem', response_model=ResearchProblemPipelineResponse, status_code=status.HTTP_201_CREATED)
+    def create_pipeline_from_research_problem(request: ResearchProblemPipelineRequest) -> ResearchProblemPipelineResponse:
+        try:
+            plan_payload = call_problem_harvester_plan(request, settings)
+        except (urllib_error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f'problem harvester unavailable: {exc}')
+
+        selected_track_ids = [
+            str(item.get('track_id', '')).strip()
+            for item in plan_payload.get('selected_tracks', [])
+            if isinstance(item, dict) and str(item.get('track_id', '')).strip()
+        ]
+        selected_queries = [
+            query.strip()
+            for item in plan_payload.get('selected_queries', [])
+            if isinstance(item, dict)
+            for query in item.get('queries', [])
+            if isinstance(query, str) and query.strip()
+        ]
+        selected_papers = [
+            ResearchProblemPaperCandidate.model_validate(item)
+            for item in plan_payload.get('selected_papers', [])
+            if isinstance(item, dict)
+        ]
+        warnings = [
+            warning.strip()
+            for warning in plan_payload.get('warnings', [])
+            if isinstance(warning, str) and warning.strip()
+        ]
+        if not selected_papers:
+            return ResearchProblemPipelineResponse(
+                problem_statement=request.problem_statement,
+                selected_tracks=selected_track_ids,
+                selected_queries=selected_queries,
+                selected_papers=[],
+                chosen_paper_id=None,
+                pipeline=None,
+                warnings=warnings,
+                next_action='no-paper-candidates',
+            )
+
+        chosen_paper = selected_papers[0]
+        fresh_request = build_fresh_paper_request_from_problem(request, chosen_paper, selected_track_ids)
+        pipeline = create_fresh_paper_pipeline(fresh_request)
+        return ResearchProblemPipelineResponse(
+            problem_statement=request.problem_statement,
+            selected_tracks=selected_track_ids,
+            selected_queries=selected_queries,
+            selected_papers=selected_papers,
+            chosen_paper_id=chosen_paper.paper_id,
+            pipeline=pipeline,
+            warnings=warnings,
+            next_action='report-ready' if pipeline.next_action == 'report-ready' else 'pipeline-started',
         )
 
     @app.get('/workflow-families', response_model=list[WorkflowFamilySummary])

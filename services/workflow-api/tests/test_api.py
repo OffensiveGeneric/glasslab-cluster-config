@@ -1223,6 +1223,143 @@ def test_create_fresh_paper_pipeline_stops_for_replication_review_boundary() -> 
     assert payload['report_state']['run_status'] == 'not-submitted'
 
 
+def test_create_pipeline_from_research_problem_runs_top_candidate(monkeypatch) -> None:
+    client = build_client()
+
+    class FakeResponse:
+        def __init__(self, payload: dict) -> None:
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            import json
+            return json.dumps(self.payload).encode('utf-8')
+
+    def fake_urlopen(request_obj, timeout):
+        import json
+        body = json.loads(request_obj.data.decode('utf-8'))
+        assert body['problem_statement'].startswith('Find a bounded benchmark')
+        return FakeResponse(
+            {
+                'request_id': 'problem-plan-1',
+                'selected_tracks': [
+                    {
+                        'track_id': 'agent_evaluation',
+                        'description': 'benchmarks for measuring ML or research-agent capability rather than just model quality',
+                        'default_priority': 'P1',
+                        'queries': ['site:arxiv.org machine learning agents benchmark Kaggle'],
+                    }
+                ],
+                'selected_queries': [
+                    {
+                        'track': 'agent_evaluation',
+                        'queries': ['site:arxiv.org machine learning agents benchmark Kaggle'],
+                    }
+                ],
+                'selected_papers': [
+                    {
+                        'paper_id': 'mle_bench_arxiv_2024',
+                        'title': 'MLE-bench: Evaluating Machine Learning Agents on Machine Learning Engineering',
+                        'year': 2024,
+                        'venue': 'arXiv',
+                        'priority': 'P1',
+                        'tracks': ['agent_evaluation'],
+                        'bounded_job_fit': 4,
+                        'replication_complexity': 4,
+                        'official_page': 'https://arxiv.org/abs/2410.07095',
+                        'pdf_url': None,
+                        'why_seed': 'benchmark for measuring whether agents can do bounded ML engineering work on real tasks',
+                        'first_jobs': ['adapt a reduced internal benchmark using 3-5 public competitions or equivalent tasks'],
+                        'tags': ['agents', 'kaggle', 'evaluation', 'ml_engineering'],
+                    }
+                ],
+                'approved_sources': {
+                    'manifest_name': 'glasslab_paper_harvester_seed_manifest',
+                    'manifest_version': 1,
+                    'venue_count': 9,
+                    'paper_count': 12,
+                    'track_query_count': 6,
+                    'approved_hosts': ['arxiv.org'],
+                },
+                'warnings': [],
+            }
+        )
+
+    monkeypatch.setattr(main_module.urllib_request, 'urlopen', fake_urlopen)
+
+    response = client.post(
+        '/paper-pipelines/from-research-problem',
+        json={
+            'problem_statement': 'Find a bounded benchmark for research agents doing machine learning engineering work.',
+            'max_candidate_papers': 1,
+            'wait_for_terminal_state': False,
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload['chosen_paper_id'] == 'mle_bench_arxiv_2024'
+    assert payload['selected_tracks'] == ['agent_evaluation']
+    assert payload['pipeline']['run']['run_purpose'] == 'paper-pipeline'
+    assert payload['pipeline']['intake']['source_refs'][0] == 'https://arxiv.org/abs/2410.07095'
+
+
+def test_create_pipeline_from_research_problem_returns_no_candidates(monkeypatch) -> None:
+    client = build_client()
+
+    class FakeResponse:
+        def __init__(self, payload: dict) -> None:
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            import json
+            return json.dumps(self.payload).encode('utf-8')
+
+    monkeypatch.setattr(
+        main_module.urllib_request,
+        'urlopen',
+        lambda request_obj, timeout: FakeResponse(
+            {
+                'request_id': 'problem-plan-2',
+                'selected_tracks': [],
+                'selected_queries': [],
+                'selected_papers': [],
+                'approved_sources': {
+                    'manifest_name': 'glasslab_paper_harvester_seed_manifest',
+                    'manifest_version': 1,
+                    'venue_count': 9,
+                    'paper_count': 12,
+                    'track_query_count': 6,
+                    'approved_hosts': ['arxiv.org'],
+                },
+                'warnings': ['no approved seed papers matched the research problem strongly enough'],
+            }
+        ),
+    )
+
+    response = client.post(
+        '/paper-pipelines/from-research-problem',
+        json={'problem_statement': 'Solve some vague thing somehow.'},
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload['pipeline'] is None
+    assert payload['next_action'] == 'no-paper-candidates'
+    assert payload['warnings'] == ['no approved seed papers matched the research problem strongly enough']
+
+
 def test_create_run_success() -> None:
     client = build_client()
 

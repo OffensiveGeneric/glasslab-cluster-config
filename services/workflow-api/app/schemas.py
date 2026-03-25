@@ -71,6 +71,27 @@ class FreshPaperPipelineRequest(BaseModel):
         return deduped
 
 
+class ResearchProblemPipelineRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    problem_statement: str = Field(min_length=12)
+    max_candidate_papers: int = Field(default=3, ge=1, le=10)
+    priorities: list[str] = Field(default_factory=list)
+    submitted_by: str | None = None
+    wait_for_terminal_state: bool = True
+    wait_timeout_seconds: float = Field(default=45.0, ge=1.0, le=300.0)
+    poll_interval_seconds: float = Field(default=2.0, ge=0.5, le=30.0)
+
+    @field_validator('priorities')
+    @classmethod
+    def validate_unique_priorities(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value if item.strip()]
+        deduped = list(dict.fromkeys(cleaned))
+        if len(deduped) != len(cleaned):
+            raise ValueError('priorities entries must be unique')
+        return deduped
+
+
 class IntakeRecord(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -276,6 +297,24 @@ class PaperPipelineReportState(BaseModel):
     artifact_names: list[str] = Field(default_factory=list)
 
 
+class ResearchProblemPaperCandidate(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    paper_id: str
+    title: str
+    year: int
+    venue: str
+    priority: str
+    tracks: list[str] = Field(default_factory=list)
+    bounded_job_fit: int
+    replication_complexity: int
+    official_page: str | None = None
+    pdf_url: str | None = None
+    why_seed: str
+    first_jobs: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+
+
 class FreshPaperPipelineResponse(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -285,6 +324,19 @@ class FreshPaperPipelineResponse(BaseModel):
     design: DesignDraftRecord
     run: RunRecord | None = None
     report_state: PaperPipelineReportState
+    warnings: list[str] = Field(default_factory=list)
+    next_action: str
+
+
+class ResearchProblemPipelineResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    problem_statement: str
+    selected_tracks: list[str] = Field(default_factory=list)
+    selected_queries: list[str] = Field(default_factory=list)
+    selected_papers: list[ResearchProblemPaperCandidate] = Field(default_factory=list)
+    chosen_paper_id: str | None = None
+    pipeline: FreshPaperPipelineResponse | None = None
     warnings: list[str] = Field(default_factory=list)
     next_action: str
 

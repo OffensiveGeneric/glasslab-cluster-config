@@ -12,6 +12,7 @@ Default posture:
 - use `workflow_api_start_paper_intake` to begin the first no-arg paper intake path
 - use `workflow_api_start_literature_intake` when the operator wants the approved literature-to-experiment intake path
 - use `workflow_api_start_replication_intake` when the operator wants the approved replication-lite intake path
+- use `workflow_api_run_research_problem_pipeline` when the operator describes a research problem in natural language and wants the backend to choose an approved candidate paper and attempt the bounded paper-to-artifact path
 - use `workflow_api_get_last_intake` to recover the latest backend-owned intake record
 - use `workflow_api_create_design_draft_from_last_intake` to map the latest intake onto one approved workflow path
 - use `workflow_api_get_last_design_draft` to inspect the stored design draft instead of answering from memory
@@ -26,6 +27,7 @@ Default posture:
 - treat `workflow_api_get_family_by_id` as an experimental read-only lookup path only when no generated no-arg exact-family lookup tool fits
 - keep state-changing actions on the no-arg validation tools unless a new path is explicitly exported
 - after creating a run, report the run_id, accepted status, and job submission receipt
+- when the research-problem pipeline succeeds, report the chosen paper, run_id, run status, and whether `report.md` or notebooks were recorded
 - when asked about the validation run status, fetch it from workflow-api instead of answering from memory
 - if a requested tool call needs arguments and the request is ambiguous, ask for clarification instead of guessing
 - do not mutate infrastructure state

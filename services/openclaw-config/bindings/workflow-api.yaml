@@ -4,6 +4,8 @@ routes:
   list_workflows: GET /workflow-families
   create_intake: POST /intakes
   get_latest_intake: GET /intakes/latest
+  run_research_problem_pipeline: POST /paper-pipelines/from-research-problem
+  run_fresh_paper_pipeline: POST /paper-pipelines/fresh-paper
   create_design_draft_from_latest_intake: POST /design-drafts/from-latest-intake
   review_latest_design_draft: POST /design-drafts/latest/review
   get_latest_design_draft: GET /design-drafts/latest
@@ -59,3 +61,4 @@ notes:
   - Use only approved workflow IDs from the registry.
   - Route Tier 3 workflows for human approval before submitting runs.
   - Keep the first intake-to-design operator path repo-managed and no-arg.
+  - Use the research-problem pipeline when the operator starts from a casual natural-language research problem instead of a specific paper.

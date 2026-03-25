@@ -18,6 +18,7 @@ from .models import (
     NormalizedIntakeDraft,
     PaperHarvesterPlanRequest,
     PaperHarvesterPlanResponse,
+    ProblemHarvesterPlanRequest,
     SeedPaperSummary,
     TrackDefinition,
     TrackQueryEntry,
@@ -43,6 +44,10 @@ def normalize_host(value: str) -> str | None:
     if host.startswith('www.'):
         host = host[4:]
     return host or None
+
+
+def tokenize(value: str) -> set[str]:
+    return set(TOKEN_RE.findall(value.lower()))
 
 
 @lru_cache(maxsize=1)
@@ -218,6 +223,64 @@ def filter_seed_papers(track_ids: list[str], priorities: list[str], max_papers: 
     return papers[:max_papers]
 
 
+def score_track_for_problem(track: TrackDefinition, problem_tokens: set[str]) -> int:
+    corpus = " ".join([track.track_id, track.description, *track.queries])
+    overlap = tokenize(corpus).intersection(problem_tokens)
+    return len(overlap)
+
+
+def score_paper_for_problem(paper: SeedPaperSummary, problem_tokens: set[str]) -> tuple[int, int, int]:
+    corpus = " ".join(
+        [
+            paper.title,
+            paper.why_seed,
+            *paper.tags,
+            *paper.tracks,
+            *paper.first_jobs,
+        ]
+    )
+    overlap = tokenize(corpus).intersection(problem_tokens)
+    return (len(overlap), paper.bounded_job_fit, -paper.replication_complexity)
+
+
+def build_problem_harvester_plan(request: ProblemHarvesterPlanRequest) -> PaperHarvesterPlanResponse:
+    problem_tokens = tokenize(request.problem_statement)
+    tracks = load_tracks()
+    scored_tracks = [
+        (score_track_for_problem(track, problem_tokens), track)
+        for track in tracks
+    ]
+    selected_tracks = [track for score, track in scored_tracks if score > 0]
+    if not selected_tracks:
+        selected_tracks = [track for track in tracks if track.track_id in {'literature_screening', 'benchmarks_reproducibility'}]
+    selected_track_ids = [track.track_id for track in selected_tracks]
+    selected_queries = [
+        TrackQueryEntry(track=track.track_id, queries=track.queries)
+        for track in selected_tracks
+        if track.queries
+    ]
+
+    candidate_papers = filter_seed_papers(selected_track_ids, request.priorities, max(10, request.max_papers))
+    candidate_papers.sort(
+        key=lambda paper: score_paper_for_problem(paper, problem_tokens),
+        reverse=True,
+    )
+    selected_papers = candidate_papers[:request.max_papers]
+
+    warnings: list[str] = []
+    if not selected_papers:
+        warnings.append('no approved seed papers matched the research problem strongly enough')
+
+    return PaperHarvesterPlanResponse(
+        request_id=request.request_id,
+        selected_tracks=selected_tracks,
+        selected_queries=selected_queries,
+        selected_papers=selected_papers,
+        approved_sources=load_approved_sources_summary(),
+        warnings=warnings,
+    )
+
+
 def build_harvester_plan(request: PaperHarvesterPlanRequest) -> PaperHarvesterPlanResponse:
     tracks = load_tracks()
     track_map = {track.track_id: track for track in tracks}
@@ -279,6 +342,11 @@ def paper_harvester_papers(track: str | None = None, priority: str | None = None
 @app.post('/paper-harvester/plan', response_model=PaperHarvesterPlanResponse)
 def paper_harvester_plan(request: PaperHarvesterPlanRequest) -> PaperHarvesterPlanResponse:
     return build_harvester_plan(request)
+
+
+@app.post('/paper-harvester/plan-from-problem', response_model=PaperHarvesterPlanResponse)
+def paper_harvester_plan_from_problem(request: ProblemHarvesterPlanRequest) -> PaperHarvesterPlanResponse:
+    return build_problem_harvester_plan(request)
 
 
 @app.post('/normalize-intake', response_model=NormalizeIntakeResponse)

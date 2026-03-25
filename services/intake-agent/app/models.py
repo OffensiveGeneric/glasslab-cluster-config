@@ -109,6 +109,24 @@ class PaperHarvesterPlanRequest(BaseModel):
         return deduped
 
 
+class ProblemHarvesterPlanRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    request_id: str = Field(min_length=1)
+    problem_statement: str = Field(min_length=12)
+    priorities: list[str] = Field(default_factory=list)
+    max_papers: int = Field(default=5, ge=1, le=20)
+
+    @field_validator('priorities')
+    @classmethod
+    def validate_unique_priorities(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value if item.strip()]
+        deduped = list(dict.fromkeys(cleaned))
+        if len(cleaned) != len(deduped):
+            raise ValueError('list entries must be unique')
+        return deduped
+
+
 class PaperHarvesterPlanResponse(BaseModel):
     model_config = ConfigDict(extra='forbid')
 

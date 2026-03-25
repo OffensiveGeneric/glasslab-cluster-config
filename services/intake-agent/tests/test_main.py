@@ -31,6 +31,7 @@ app = main_module.app
 build_normalized_draft = main_module.build_normalized_draft
 build_approval_warnings = main_module.build_approval_warnings
 build_harvester_plan = main_module.build_harvester_plan
+build_problem_harvester_plan = main_module.build_problem_harvester_plan
 NormalizeIntakeRequest = models_module.NormalizeIntakeRequest
 
 
@@ -108,6 +109,37 @@ def test_paper_harvester_plan_warns_on_unknown_track() -> None:
         'unknown track ids ignored: does-not-exist',
         'no seed papers matched the requested track/priority filters',
     ]
+
+
+def test_problem_harvester_plan_matches_agent_evaluation_problem() -> None:
+    plan = build_problem_harvester_plan(
+        models_module.ProblemHarvesterPlanRequest(
+            request_id='problem-1',
+            problem_statement='We need a bounded benchmark for research agents doing machine learning engineering work.',
+            max_papers=3,
+        )
+    )
+    assert plan.selected_tracks
+    assert any(track.track_id == 'agent_evaluation' for track in plan.selected_tracks)
+    assert plan.selected_papers
+    assert plan.selected_papers[0].paper_id in {'mle_bench_arxiv_2024', 'mlgym_arxiv_2025'}
+
+
+def test_problem_harvester_plan_endpoint() -> None:
+    client = TestClient(app)
+    response = client.post(
+        '/paper-harvester/plan-from-problem',
+        json={
+            'request_id': 'problem-2',
+            'problem_statement': 'Find bounded reproducibility papers and benchmark-suite work we can run on the cluster.',
+            'max_papers': 2,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['selected_tracks']
+    assert len(payload['selected_papers']) <= 2
+    assert payload['approved_sources']['paper_count'] == 12
 
 
 def test_build_normalized_draft() -> None:
