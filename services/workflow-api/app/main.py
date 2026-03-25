@@ -5,6 +5,7 @@ import json
 import logging
 from pathlib import Path
 import re
+import time
 from typing import Any, Iterable
 from urllib import error as urllib_error
 from urllib import request as urllib_request
@@ -22,10 +23,13 @@ from .schemas import (
     DesignDraftRecord,
     DesignDraftReviewRequest,
     DigestScheduleCreateRequest,
+    FreshPaperPipelineRequest,
+    FreshPaperPipelineResponse,
     IntakeCreateRequest,
     IntakeRecord,
     InterpretationRecord,
     LogEntry,
+    PaperPipelineReportState,
     ApprovedRerunScheduleCreateRequest,
     ReplicabilityAssessmentRecord,
     RunArtifactsResponse,
@@ -753,6 +757,144 @@ def compute_unresolved_inputs(declared_inputs: dict[str, Any]) -> list[str]:
     return [
         name for name, value in declared_inputs.items() if isinstance(value, str) and value.startswith(UNRESOLVED_PREFIX)
     ]
+
+
+def default_paper_pipeline_request_text(paper_ref: str) -> str:
+    return (
+        f'Ingest the approved paper {paper_ref} and derive a bounded, reproducible experiment '
+        'using an approved workflow.'
+    )
+
+
+def build_fresh_paper_intake_request(
+    request: FreshPaperPipelineRequest,
+    settings: Settings,
+) -> IntakeCreateRequest:
+    notes = list(request.notes)
+    if request.dataset_uri:
+        notes.append(f'Preferred dataset uri: {request.dataset_uri}')
+    return IntakeCreateRequest(
+        raw_request=(request.raw_request or default_paper_pipeline_request_text(request.paper_ref)).strip(),
+        source_refs=[request.paper_ref],
+        source_type='paper-link',
+        notes=notes,
+        submitted_by=request.submitted_by or settings.default_submitted_by,
+    )
+
+
+def resolve_replication_repository_url(intake: IntakeRecord) -> str | None:
+    for ref in intake.source_refs:
+        lowered = ref.strip().lower()
+        if lowered.startswith('https://github.com/') or lowered.startswith('http://github.com/'):
+            return ref.strip()
+    return None
+
+
+def auto_resolve_pipeline_design_inputs(
+    design: DesignDraftRecord,
+    intake: IntakeRecord,
+    interpretation: InterpretationRecord,
+    request: FreshPaperPipelineRequest,
+) -> tuple[dict[str, Any], list[str]]:
+    resolved_inputs: dict[str, Any] = {}
+    review_notes: list[str] = []
+    lowered = ' '.join(
+        [
+            intake.raw_request,
+            intake.normalized_summary,
+            *intake.notes,
+            *intake.source_refs,
+            *interpretation.dataset_hints,
+            *interpretation.evaluation_targets,
+        ]
+    ).lower()
+
+    if design.workflow_id == 'literature-to-experiment':
+        dataset_uri = request.dataset_uri
+        if not dataset_uri:
+            if 'titanic' in lowered:
+                dataset_uri = 's3://datasets/titanic/train.csv'
+                review_notes.append('Auto-resolved literature dataset_uri to approved Titanic dataset.')
+            else:
+                dataset_uri = 's3://datasets/paper-derived/train.csv'
+                review_notes.append('Auto-resolved literature dataset_uri to bounded paper-derived dataset placeholder.')
+        resolved_inputs['dataset_uri'] = dataset_uri
+    elif design.workflow_id == 'replication-lite':
+        repository_url = resolve_replication_repository_url(intake)
+        if repository_url:
+            resolved_inputs['repository_url'] = repository_url
+            review_notes.append('Auto-resolved repository_url from GitHub source reference.')
+        if request.dataset_uri:
+            resolved_inputs['dataset_uri'] = request.dataset_uri
+            review_notes.append('Applied caller-provided dataset_uri for replication pipeline.')
+        else:
+            resolved_inputs['dataset_uri'] = 's3://datasets/replication-lite/input.csv'
+            review_notes.append('Auto-resolved replication dataset_uri to bounded default input.')
+        if interpretation.evaluation_targets:
+            resolved_inputs['evaluation_target'] = interpretation.evaluation_targets[0]
+            review_notes.append('Auto-resolved evaluation_target from interpretation output.')
+        else:
+            resolved_inputs['evaluation_target'] = 'baseline comparison'
+            review_notes.append('Auto-resolved evaluation_target to bounded baseline comparison default.')
+
+    return resolved_inputs, review_notes
+
+
+def wait_for_terminal_run_state(
+    run: RunRecord,
+    settings: Settings,
+    submitter: JobSubmitter,
+    timeout_seconds: float,
+    poll_interval_seconds: float,
+) -> RunRecord:
+    deadline = time.monotonic() + timeout_seconds
+    current = run
+    while True:
+        resolved_status = resolve_run_status(current, settings, submitter)
+        current = current.model_copy(update={'status': resolved_status, 'updated_at': resolved_status.updated_at})
+        if resolved_status.status in {'succeeded', 'failed', 'rejected'}:
+            return current
+        if time.monotonic() >= deadline:
+            return current
+        time.sleep(poll_interval_seconds)
+
+
+def build_paper_pipeline_report_state(
+    run: RunRecord | None,
+    settings: Settings,
+    submitter: JobSubmitter,
+) -> PaperPipelineReportState:
+    if run is None:
+        return PaperPipelineReportState(
+            run_id=None,
+            run_status='not-submitted',
+            terminal=False,
+            report_available=False,
+            report_path=None,
+            artifact_count=0,
+            artifact_names=[],
+        )
+
+    resolved_status = resolve_run_status(run, settings, submitter)
+    artifacts = load_artifacts_from_disk(settings, run.run_id)
+    artifact_names: list[str] = []
+    report_path = None
+    if artifacts is not None:
+        artifact_names = [artifact.name for artifact in artifacts.artifacts]
+        for artifact in artifacts.artifacts:
+            if artifact.name == 'report.md':
+                report_path = artifact.path
+                break
+
+    return PaperPipelineReportState(
+        run_id=run.run_id,
+        run_status=resolved_status.status,
+        terminal=resolved_status.status in {'succeeded', 'failed', 'rejected'},
+        report_available=report_path is not None,
+        report_path=report_path,
+        artifact_count=len(artifact_names),
+        artifact_names=artifact_names,
+    )
 
 
 def build_design_draft(
@@ -1672,6 +1814,180 @@ def create_app(
         updated = review_design_draft(record, request)
         store.save_design_draft(updated)
         return updated
+
+    @app.post('/paper-pipelines/fresh-paper', response_model=FreshPaperPipelineResponse, status_code=status.HTTP_201_CREATED)
+    def create_fresh_paper_pipeline(request: FreshPaperPipelineRequest) -> FreshPaperPipelineResponse:
+        warnings: list[str] = []
+
+        intake_request = build_fresh_paper_intake_request(request, settings)
+        intake = call_intake_agent(intake_request, settings, registry)
+        intake_source = 'agent'
+        if intake is None:
+            intake_source = 'deterministic'
+            now = datetime.now(timezone.utc)
+            candidates = [
+                workflow_id
+                for workflow_id in infer_workflow_candidates(intake_request.raw_request)
+                if registry.get_workflow(workflow_id) is not None
+            ]
+            intake = IntakeRecord(
+                intake_id=uuid4().hex,
+                created_at=now,
+                updated_at=now,
+                status='ready_for_design',
+                source_type=infer_intake_source_type(intake_request),
+                source_refs=intake_request.source_refs,
+                raw_request=intake_request.raw_request.strip(),
+                normalized_summary=summarize_intake(intake_request.raw_request, intake_request.notes),
+                workflow_family_candidates=candidates,
+                notes=intake_request.notes,
+                submitted_by=intake_request.submitted_by or settings.default_submitted_by,
+            )
+        intake = reorder_intake_candidates_with_ranker(intake, settings, registry)
+        store.save_intake(intake)
+        log_stage_record_source(
+            'intake',
+            intake_source,
+            intake.intake_id,
+            intake_id=intake.intake_id,
+            submitted_by=intake.submitted_by,
+        )
+
+        interpretation = call_interpretation_agent(intake, settings, registry)
+        interpretation_source = 'agent'
+        if interpretation is None:
+            interpretation_source = 'deterministic'
+            interpretation = build_interpretation_record(intake)
+        store.save_interpretation(interpretation)
+        log_stage_record_source(
+            'interpretation',
+            interpretation_source,
+            interpretation.interpretation_id,
+            intake_id=interpretation.intake_id,
+            submitted_by=interpretation.submitted_by,
+        )
+
+        assessment = call_assessment_agent(interpretation, settings, registry)
+        assessment_source = 'agent'
+        if assessment is None:
+            assessment_source = 'deterministic'
+            assessment = build_replicability_assessment(interpretation, registry)
+        store.save_replicability_assessment(assessment)
+        log_stage_record_source(
+            'assessment',
+            assessment_source,
+            assessment.assessment_id,
+            intake_id=assessment.intake_id,
+            interpretation_id=assessment.interpretation_id,
+            submitted_by=assessment.submitted_by,
+        )
+
+        workflow = None
+        if assessment.recommended_workflow_id:
+            workflow = registry.get_workflow(assessment.recommended_workflow_id)
+        if workflow is None:
+            workflow = choose_workflow_for_intake(intake, registry)
+        if workflow is None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='no approved workflow mapping found')
+
+        design = call_design_agent(
+            intake,
+            workflow,
+            submitted_by=assessment.submitted_by,
+            settings=settings,
+            source_assessment_id=assessment.assessment_id,
+        )
+        design_source = 'agent'
+        if design is None:
+            design_source = 'deterministic'
+            design = build_design_draft(
+                intake,
+                workflow,
+                submitted_by=assessment.submitted_by,
+                source_assessment_id=assessment.assessment_id,
+            )
+
+        resolved_inputs, review_notes = auto_resolve_pipeline_design_inputs(design, intake, interpretation, request)
+        if resolved_inputs:
+            design = review_design_draft(
+                design,
+                DesignDraftReviewRequest(
+                    resolved_inputs=resolved_inputs,
+                    review_notes=review_notes,
+                ),
+            )
+            warnings.extend(review_notes)
+        store.save_design_draft(design)
+        log_stage_record_source(
+            'design',
+            design_source,
+            design.design_id,
+            intake_id=design.intake_id,
+            source_assessment_id=assessment.assessment_id,
+            workflow_id=design.workflow_id,
+            submitted_by=design.submitted_by,
+        )
+
+        if design.status != 'ready_for_run':
+            if design.unresolved_inputs:
+                warnings.append('design still has unresolved inputs after bounded auto-review')
+            report_state = build_paper_pipeline_report_state(None, settings, submitter)
+            return FreshPaperPipelineResponse(
+                intake=intake,
+                interpretation=interpretation,
+                assessment=assessment,
+                design=design,
+                run=None,
+                report_state=report_state,
+                warnings=warnings,
+                next_action='review-required',
+            )
+
+        run_request = RunCreateRequest(
+            workflow_id=design.workflow_id,
+            objective=design.objective,
+            inputs=design.declared_inputs,
+            models=design.candidate_models or workflow.allowed_models[:1],
+            resource_profile=design.resource_profile,
+            submitted_by=design.submitted_by,
+        )
+        run = create_run_record(
+            run_request,
+            workflow,
+            settings,
+            submitter,
+            store,
+            source_design_id=design.design_id,
+            source_intake_id=design.intake_id,
+            run_purpose='paper-pipeline',
+        )
+        if request.wait_for_terminal_state:
+            run = wait_for_terminal_run_state(
+                run,
+                settings,
+                submitter,
+                timeout_seconds=request.wait_timeout_seconds,
+                poll_interval_seconds=request.poll_interval_seconds,
+            )
+            store.save_run(run)
+
+        report_state = build_paper_pipeline_report_state(run, settings, submitter)
+        next_action = 'await-run-completion'
+        if report_state.terminal and report_state.report_available:
+            next_action = 'report-ready'
+        elif report_state.terminal:
+            next_action = 'inspect-run-state'
+
+        return FreshPaperPipelineResponse(
+            intake=intake,
+            interpretation=interpretation,
+            assessment=assessment,
+            design=design,
+            run=run,
+            report_state=report_state,
+            warnings=warnings,
+            next_action=next_action,
+        )
 
     @app.get('/workflow-families', response_model=list[WorkflowFamilySummary])
     def list_workflow_families() -> list[WorkflowFamilySummary]:

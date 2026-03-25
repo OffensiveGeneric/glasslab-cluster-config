@@ -49,6 +49,28 @@ class IntakeCreateRequest(BaseModel):
         return deduped
 
 
+class FreshPaperPipelineRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    paper_ref: str = Field(min_length=8)
+    raw_request: str | None = None
+    notes: list[str] = Field(default_factory=list)
+    dataset_uri: str | None = None
+    submitted_by: str | None = None
+    wait_for_terminal_state: bool = True
+    wait_timeout_seconds: float = Field(default=45.0, ge=1.0, le=300.0)
+    poll_interval_seconds: float = Field(default=2.0, ge=0.5, le=30.0)
+
+    @field_validator('notes')
+    @classmethod
+    def validate_unique_notes(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value if item.strip()]
+        deduped = list(dict.fromkeys(cleaned))
+        if len(deduped) != len(cleaned):
+            raise ValueError('notes entries must be unique')
+        return deduped
+
+
 class IntakeRecord(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -240,6 +262,31 @@ class RunRecord(BaseModel):
     run_purpose: str | None = None
     run_priority: Literal['user', 'autonomous'] = 'user'
     validation_issues: list[ValidationIssue] = Field(default_factory=list)
+
+
+class PaperPipelineReportState(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    run_id: str | None = None
+    run_status: str
+    terminal: bool
+    report_available: bool
+    report_path: str | None = None
+    artifact_count: int = 0
+    artifact_names: list[str] = Field(default_factory=list)
+
+
+class FreshPaperPipelineResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    intake: IntakeRecord
+    interpretation: InterpretationRecord
+    assessment: ReplicabilityAssessmentRecord
+    design: DesignDraftRecord
+    run: RunRecord | None = None
+    report_state: PaperPipelineReportState
+    warnings: list[str] = Field(default_factory=list)
+    next_action: str
 
 
 class LogEntry(BaseModel):

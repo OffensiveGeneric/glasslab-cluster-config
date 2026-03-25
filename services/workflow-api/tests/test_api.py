@@ -1173,6 +1173,54 @@ def test_create_run_from_reviewed_literature_design_draft() -> None:
     assert payload['manifest']['inputs']['dataset_uri'] == 's3://datasets/paper-derived/train.csv'
 
 
+def test_create_fresh_paper_pipeline_creates_literature_run_without_manual_review() -> None:
+    client = build_client()
+
+    response = client.post(
+        '/paper-pipelines/fresh-paper',
+        json={
+            'paper_ref': 'https://example.org/papers/bounded-method.pdf',
+            'raw_request': 'Ingest this paper and derive a bounded literature experiment from the linked method notes.',
+            'notes': ['The paper discusses a bounded validation path for a literature-derived experiment.'],
+            'dataset_uri': 's3://datasets/paper-derived/train.csv',
+            'wait_for_terminal_state': False,
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload['assessment']['recommended_workflow_id'] == 'literature-to-experiment'
+    assert payload['design']['status'] == 'ready_for_run'
+    assert payload['design']['declared_inputs']['dataset_uri'] == 's3://datasets/paper-derived/train.csv'
+    assert payload['run']['workflow_id'] == 'literature-to-experiment'
+    assert payload['run']['run_purpose'] == 'paper-pipeline'
+    assert payload['report_state']['run_status'] == 'accepted'
+    assert payload['next_action'] == 'await-run-completion'
+
+
+def test_create_fresh_paper_pipeline_stops_for_replication_review_boundary() -> None:
+    client = build_client()
+
+    response = client.post(
+        '/paper-pipelines/fresh-paper',
+        json={
+            'paper_ref': 'https://github.com/example/project-paper',
+            'raw_request': 'Replicate this paper from the linked repository and compare against the reported baseline.',
+            'notes': ['Focus on the replication path and reported evaluation target.'],
+            'wait_for_terminal_state': False,
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload['assessment']['recommended_workflow_id'] == 'replication-lite'
+    assert payload['design']['workflow_id'] == 'replication-lite'
+    assert payload['design']['status'] == 'needs_review'
+    assert payload['run'] is None
+    assert payload['next_action'] == 'review-required'
+    assert payload['report_state']['run_status'] == 'not-submitted'
+
+
 def test_create_run_success() -> None:
     client = build_client()
 
