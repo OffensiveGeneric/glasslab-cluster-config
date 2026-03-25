@@ -34,6 +34,7 @@ Canonical planning and architecture:
 - `workflow-api-schedules.md`: current stored schedule endpoints for digests and approved reruns
 - `schedule-execution-boundaries.md`: fail-closed execution rules for stored schedules and future `run-now` support
 - `operator-access-options.md`: narrowed decision between Tailscale or reverse proxy for stable operator-facing access
+- `operator-access-recommendation.md`: concrete recommendation to expose only OpenClaw through a narrow authenticated operator path
 - `openclaw-runtime-portability.md`: what has and has not been reduced in the `.44`-special OpenClaw runtime path
 - `external-researcher-what-we-can-offer-now.md`: practical current answer for what outside researchers can safely use today
 - `external-researcher-hardening-gaps.md`: what must be hardened before outside researchers should be treated as first-class cluster users
