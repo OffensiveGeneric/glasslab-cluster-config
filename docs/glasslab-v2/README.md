@@ -47,6 +47,7 @@ Canonical planning and architecture:
 - `tool-choice-exposure-options.md`: realistic paths for issue `#11` and why runtime YAML alone is not enough
 - `tool-choice-patch-experiment.md`: bounded experiment plan for carrying a tiny OpenClaw patch only if pinned-tool evaluation is still worth it
 - `provisioner-dependence-inventory.md`: splits the remaining `.44` dependence into image, runtime, secret, and admin-context buckets
+- `provisioner-dependence-close-criteria.md`: defines when the remaining `.44` dependence should still be considered a real epic versus an intentional admin boundary
 
 Still-current supporting design notes:
 - `no-arg-vs-argumented-tools.md`: why the current safe operator path is mostly no-arg tools, what argumented tools would need to prove, and the current safety rules for repo-managed intake templates
