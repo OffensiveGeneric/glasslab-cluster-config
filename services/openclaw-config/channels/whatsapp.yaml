@@ -3,12 +3,12 @@ channel: whatsapp
 account_id: default
 agent_id: operator
 dm_policy: allowlist
-self_chat_requires_owner: true
+self_chat_requires_owner: false
 owner_env: OPENCLAW_WHATSAPP_OWNER
-self_chat_mode: true
+self_chat_mode: false
 group_policy: disabled
 send_read_receipts: false
 notes:
-  - Keep the first validation path limited to self-chat on the linked account.
+  - Use a dedicated WhatsApp assistant account instead of personal-number self-chat.
   - Enable the channel only when the local OpenClaw secret provides OPENCLAW_WHATSAPP_OWNER.
   - Do not enable group routing or broad allowlists during initial validation.
