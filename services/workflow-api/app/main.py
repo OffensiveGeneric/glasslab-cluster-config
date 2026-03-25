@@ -49,6 +49,15 @@ LOG_LINE_RE = re.compile(r'^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) (?
 LOGGER = logging.getLogger(__name__)
 
 
+def log_stage_record_source(stage: str, source: str, record_id: str, **context: str) -> None:
+    fields = [f'stage={stage}', f'source={source}', f'record_id={record_id}']
+    for key in sorted(context):
+        value = context[key]
+        if value:
+            fields.append(f'{key}={value}')
+    LOGGER.info('stage-record-created %s', ' '.join(fields))
+
+
 def summarize_intake(raw_request: str, notes: list[str]) -> str:
     summary = ' '.join(raw_request.split())
     if notes:
@@ -1052,7 +1061,9 @@ def create_app(
     @app.post('/intakes', response_model=IntakeRecord, status_code=status.HTTP_201_CREATED)
     def create_intake(request: IntakeCreateRequest) -> IntakeRecord:
         record = call_intake_agent(request, settings, registry)
+        source = 'agent'
         if record is None:
+            source = 'deterministic'
             now = datetime.now(timezone.utc)
             intake_id = uuid4().hex
             candidates = [
@@ -1074,6 +1085,13 @@ def create_app(
                 submitted_by=request.submitted_by or settings.default_submitted_by,
             )
         store.save_intake(record)
+        log_stage_record_source(
+            'intake',
+            source,
+            record.intake_id,
+            intake_id=record.intake_id,
+            submitted_by=record.submitted_by,
+        )
         return record
 
     @app.get('/intakes/latest', response_model=IntakeRecord)
@@ -1095,8 +1113,19 @@ def create_app(
         intake = store.get_latest_intake()
         if intake is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='intake not found')
-        record = call_interpretation_agent(intake, settings, registry) or build_interpretation_record(intake)
+        record = call_interpretation_agent(intake, settings, registry)
+        source = 'agent'
+        if record is None:
+            source = 'deterministic'
+            record = build_interpretation_record(intake)
         store.save_interpretation(record)
+        log_stage_record_source(
+            'interpretation',
+            source,
+            record.interpretation_id,
+            intake_id=record.intake_id,
+            submitted_by=record.submitted_by,
+        )
         return record
 
     @app.get('/interpretations/latest', response_model=InterpretationRecord)
@@ -1122,8 +1151,20 @@ def create_app(
         interpretation = store.get_latest_interpretation()
         if interpretation is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='interpretation not found')
-        record = call_assessment_agent(interpretation, settings, registry) or build_replicability_assessment(interpretation, registry)
+        record = call_assessment_agent(interpretation, settings, registry)
+        source = 'agent'
+        if record is None:
+            source = 'deterministic'
+            record = build_replicability_assessment(interpretation, registry)
         store.save_replicability_assessment(record)
+        log_stage_record_source(
+            'assessment',
+            source,
+            record.assessment_id,
+            intake_id=record.intake_id,
+            interpretation_id=record.interpretation_id,
+            submitted_by=record.submitted_by,
+        )
         return record
 
     @app.get('/replicability-assessments/latest', response_model=ReplicabilityAssessmentRecord)
@@ -1153,8 +1194,20 @@ def create_app(
             workflow,
             submitted_by=intake.submitted_by,
             settings=settings,
-        ) or build_design_draft(intake, workflow, submitted_by=intake.submitted_by)
+        )
+        source = 'agent'
+        if record is None:
+            source = 'deterministic'
+            record = build_design_draft(intake, workflow, submitted_by=intake.submitted_by)
         store.save_design_draft(record)
+        log_stage_record_source(
+            'design',
+            source,
+            record.design_id,
+            intake_id=record.intake_id,
+            workflow_id=record.workflow_id,
+            submitted_by=record.submitted_by,
+        )
         return record
 
     @app.post('/design-drafts/from-latest-assessment', response_model=DesignDraftRecord, status_code=status.HTTP_201_CREATED)
@@ -1178,13 +1231,26 @@ def create_app(
             submitted_by=assessment.submitted_by,
             settings=settings,
             source_assessment_id=assessment.assessment_id,
-        ) or build_design_draft(
-            intake,
-            workflow,
-            submitted_by=assessment.submitted_by,
-            source_assessment_id=assessment.assessment_id,
         )
+        source = 'agent'
+        if record is None:
+            source = 'deterministic'
+            record = build_design_draft(
+                intake,
+                workflow,
+                submitted_by=assessment.submitted_by,
+                source_assessment_id=assessment.assessment_id,
+            )
         store.save_design_draft(record)
+        log_stage_record_source(
+            'design',
+            source,
+            record.design_id,
+            intake_id=record.intake_id,
+            source_assessment_id=assessment.assessment_id,
+            workflow_id=record.workflow_id,
+            submitted_by=record.submitted_by,
+        )
         return record
 
     @app.get('/design-drafts/latest', response_model=DesignDraftRecord)
