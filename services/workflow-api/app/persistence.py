@@ -10,6 +10,7 @@ from .schemas import (
     IntakeRecord,
     InterpretationRecord,
     LogEntry,
+    ResearchProblemRecord,
     ReplicabilityAssessmentRecord,
     RunRecord,
     ScheduledExecutionRecord,
@@ -71,6 +72,18 @@ class RunStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def save_research_problem(self, record: ResearchProblemRecord) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_research_problem(self, problem_id: str) -> ResearchProblemRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_latest_research_problem(self) -> ResearchProblemRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
     def get_run(self, run_id: str) -> RunRecord | None:
         raise NotImplementedError
 
@@ -129,6 +142,8 @@ class InMemoryRunStore(RunStore):
         self._latest_replicability_assessment_id: str | None = None
         self._design_drafts: dict[str, DesignDraftRecord] = {}
         self._latest_design_draft_id: str | None = None
+        self._research_problems: dict[str, ResearchProblemRecord] = {}
+        self._latest_research_problem_id: str | None = None
         self._runs: dict[str, RunRecord] = {}
         self._latest_run_id: str | None = None
         self._schedules: dict[str, ScheduledOperationRecord] = {}
@@ -201,6 +216,21 @@ class InMemoryRunStore(RunStore):
         with self._lock:
             self._runs[record.run_id] = record
             self._latest_run_id = record.run_id
+
+    def save_research_problem(self, record: ResearchProblemRecord) -> None:
+        with self._lock:
+            self._research_problems[record.problem_id] = record
+            self._latest_research_problem_id = record.problem_id
+
+    def get_research_problem(self, problem_id: str) -> ResearchProblemRecord | None:
+        with self._lock:
+            return self._research_problems.get(problem_id)
+
+    def get_latest_research_problem(self) -> ResearchProblemRecord | None:
+        with self._lock:
+            if self._latest_research_problem_id is None:
+                return None
+            return self._research_problems.get(self._latest_research_problem_id)
 
     def get_run(self, run_id: str) -> RunRecord | None:
         with self._lock:

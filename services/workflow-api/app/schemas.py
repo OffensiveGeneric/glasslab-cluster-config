@@ -92,6 +92,19 @@ class ResearchProblemPipelineRequest(BaseModel):
         return deduped
 
 
+class ResearchProblemRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    problem_id: str
+    created_at: datetime
+    updated_at: datetime
+    status: str
+    problem_statement: str
+    max_candidate_papers: int = Field(default=3, ge=1, le=10)
+    priorities: list[str] = Field(default_factory=list)
+    submitted_by: str
+
+
 class IntakeRecord(BaseModel):
     model_config = ConfigDict(extra='forbid')
 

@@ -1360,6 +1360,103 @@ def test_create_pipeline_from_research_problem_returns_no_candidates(monkeypatch
     assert payload['warnings'] == ['no approved seed papers matched the research problem strongly enough']
 
 
+def test_stage_and_get_latest_research_problem() -> None:
+    client = build_client()
+
+    create = client.post(
+        '/research-problems',
+        json={
+            'problem_statement': 'Find a bounded benchmark for research agents doing machine learning engineering work.',
+            'max_candidate_papers': 2,
+            'priorities': ['boundedness', 'artifact quality'],
+            'submitted_by': 'operator',
+        },
+    )
+
+    assert create.status_code == 201
+    payload = create.json()
+    assert payload['status'] == 'staged'
+    assert payload['problem_statement'].startswith('Find a bounded benchmark')
+    assert payload['priorities'] == ['boundedness', 'artifact quality']
+
+    latest = client.get('/research-problems/latest')
+    assert latest.status_code == 200
+    assert latest.json()['problem_id'] == payload['problem_id']
+
+
+def test_create_pipeline_from_latest_research_problem(monkeypatch) -> None:
+    client = build_client()
+
+    class FakeResponse:
+        def __init__(self, payload: dict) -> None:
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            import json
+            return json.dumps(self.payload).encode('utf-8')
+
+    def fake_urlopen(request_obj, timeout):
+        return FakeResponse(
+            {
+                'request_id': 'problem-plan-latest',
+                'selected_tracks': [{'track_id': 'agent_evaluation', 'track': 'agent_evaluation'}],
+                'selected_queries': [{'queries': ['site:arxiv.org machine learning agents benchmark Kaggle']}],
+                'selected_papers': [
+                    {
+                        'paper_id': 'mle_bench_arxiv_2024',
+                        'title': 'MLE-bench: Evaluating Machine Learning Agents on Machine Learning Engineering',
+                        'year': 2024,
+                        'venue': 'arXiv',
+                        'priority': 'P1',
+                        'tracks': ['agent_evaluation'],
+                        'bounded_job_fit': 4,
+                        'replication_complexity': 4,
+                        'official_page': 'https://arxiv.org/abs/2410.07095',
+                        'pdf_url': None,
+                        'why_seed': 'benchmark for measuring whether agents can do bounded ML engineering work on real tasks',
+                        'first_jobs': ['adapt a reduced internal benchmark using 3-5 public competitions or equivalent tasks'],
+                        'tags': ['agents', 'kaggle', 'evaluation', 'ml_engineering'],
+                    }
+                ],
+                'approved_sources': {
+                    'manifest_name': 'glasslab_paper_harvester_seed_manifest',
+                    'manifest_version': 1,
+                    'venue_count': 9,
+                    'paper_count': 12,
+                    'track_query_count': 6,
+                    'approved_hosts': ['arxiv.org'],
+                },
+                'warnings': [],
+            }
+        )
+
+    monkeypatch.setattr(main_module.urllib_request, 'urlopen', fake_urlopen)
+
+    staged = client.post(
+        '/research-problems',
+        json={
+            'problem_statement': 'Find a bounded benchmark for research agents doing machine learning engineering work.',
+            'max_candidate_papers': 1,
+            'submitted_by': 'operator',
+            'wait_for_terminal_state': False,
+        },
+    )
+    assert staged.status_code == 201
+
+    response = client.post('/paper-pipelines/from-latest-research-problem')
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload['problem_statement'].startswith('Find a bounded benchmark')
+    assert payload['chosen_paper_id'] == 'mle_bench_arxiv_2024'
+    assert payload['pipeline']['run']['run_purpose'] == 'paper-pipeline'
+
+
 def test_resolve_intake_agent_base_url_handles_normalize_endpoint() -> None:
     settings = Settings(
         registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),

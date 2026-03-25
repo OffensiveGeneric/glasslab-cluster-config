@@ -357,6 +357,7 @@ allowed_runtime_tools = {
     "workflow_api_get_last_run_artifacts",
     "workflow_api_get_last_run_logs",
     "workflow_api_run_research_problem_pipeline",
+    "workflow_api_run_latest_research_problem_pipeline",
     "workflow_api_get_families",
     "workflow_api_create_validation_run",
     "workflow_api_get_last_validation_run",

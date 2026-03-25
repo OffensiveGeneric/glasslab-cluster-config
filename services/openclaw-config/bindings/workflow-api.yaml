@@ -5,6 +5,9 @@ routes:
   create_intake: POST /intakes
   get_latest_intake: GET /intakes/latest
   run_research_problem_pipeline: POST /paper-pipelines/from-research-problem
+  stage_research_problem: POST /research-problems
+  get_latest_research_problem: GET /research-problems/latest
+  run_latest_research_problem_pipeline: POST /paper-pipelines/from-latest-research-problem
   run_fresh_paper_pipeline: POST /paper-pipelines/fresh-paper
   create_design_draft_from_latest_intake: POST /design-drafts/from-latest-intake
   review_latest_design_draft: POST /design-drafts/latest/review

@@ -31,6 +31,7 @@ from .schemas import (
     LogEntry,
     PaperPipelineReportState,
     ResearchProblemPaperCandidate,
+    ResearchProblemRecord,
     ResearchProblemPipelineRequest,
     ResearchProblemPipelineResponse,
     ApprovedRerunScheduleCreateRequest,
@@ -965,6 +966,35 @@ def build_fresh_paper_request_from_problem(
         wait_for_terminal_state=request.wait_for_terminal_state,
         wait_timeout_seconds=request.wait_timeout_seconds,
         poll_interval_seconds=request.poll_interval_seconds,
+    )
+
+
+def build_research_problem_record(
+    request: ResearchProblemPipelineRequest,
+    settings: Settings,
+) -> ResearchProblemRecord:
+    now = datetime.now(timezone.utc)
+    return ResearchProblemRecord(
+        problem_id=uuid4().hex,
+        created_at=now,
+        updated_at=now,
+        status='staged',
+        problem_statement=request.problem_statement.strip(),
+        max_candidate_papers=request.max_candidate_papers,
+        priorities=request.priorities,
+        submitted_by=request.submitted_by or settings.default_submitted_by,
+    )
+
+
+def build_research_problem_request_from_record(
+    record: ResearchProblemRecord,
+    settings: Settings,
+) -> ResearchProblemPipelineRequest:
+    return ResearchProblemPipelineRequest(
+        problem_statement=record.problem_statement,
+        max_candidate_papers=record.max_candidate_papers,
+        priorities=record.priorities,
+        submitted_by=record.submitted_by or settings.default_submitted_by,
     )
 
 
@@ -2114,6 +2144,27 @@ def create_app(
             warnings=warnings,
             next_action='report-ready' if pipeline.next_action == 'report-ready' else 'pipeline-started',
         )
+
+    @app.post('/research-problems', response_model=ResearchProblemRecord, status_code=status.HTTP_201_CREATED)
+    def stage_research_problem(request: ResearchProblemPipelineRequest) -> ResearchProblemRecord:
+        record = build_research_problem_record(request, settings)
+        store.save_research_problem(record)
+        return record
+
+    @app.get('/research-problems/latest', response_model=ResearchProblemRecord)
+    def get_latest_research_problem() -> ResearchProblemRecord:
+        record = store.get_latest_research_problem()
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research problem has been staged yet')
+        return record
+
+    @app.post('/paper-pipelines/from-latest-research-problem', response_model=ResearchProblemPipelineResponse, status_code=status.HTTP_201_CREATED)
+    def create_pipeline_from_latest_research_problem() -> ResearchProblemPipelineResponse:
+        record = store.get_latest_research_problem()
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research problem has been staged yet')
+        request = build_research_problem_request_from_record(record, settings)
+        return create_pipeline_from_research_problem(request)
 
     @app.get('/workflow-families', response_model=list[WorkflowFamilySummary])
     def list_workflow_families() -> list[WorkflowFamilySummary]:

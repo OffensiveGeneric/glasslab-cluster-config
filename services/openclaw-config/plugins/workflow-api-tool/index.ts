@@ -770,6 +770,52 @@ const plugin = {
 
     api.registerTool(
       {
+        name: "workflow_api_run_latest_research_problem_pipeline",
+        description:
+          "Run the bounded paper-to-artifact pipeline for the latest research problem already staged in workflow-api.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const { endpoint, payload } = await requestJson(
+              api,
+              "/paper-pipelines/from-latest-research-problem",
+              {
+                method: "POST",
+                body: JSON.stringify({})
+              }
+            );
+            await appendAuditEvent({
+              tool: "workflow_api_run_latest_research_problem_pipeline",
+              status: "ok",
+              endpoint,
+              chosen_paper_id: payload?.chosen_paper_id ?? null,
+              next_action: payload?.next_action ?? null,
+              run_id: payload?.pipeline?.run?.run_id ?? null,
+              run_status: payload?.pipeline?.report_state?.run_status ?? null
+            });
+            return buildJsonResult({
+              endpoint,
+              result: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_run_latest_research_problem_pipeline",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
         name: "workflow_api_get_last_run_artifacts",
         description: "Fetch the artifact index for the latest stored run.",
         parameters: {
