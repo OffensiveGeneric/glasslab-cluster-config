@@ -6,16 +6,18 @@ CURL="${CURL:-curl}"
 NAMESPACE="${GLASSLAB_V2_NAMESPACE:-glasslab-v2}"
 HEALTH_PORT="${GLASSLAB_V2_HEALTH_PORT:-18081}"
 INCLUDE_OPENCLAW=false
+INCLUDE_BOUNDED_AGENTS=false
 EXPECTED_SERVICES=(glasslab-workflow-api glasslab-postgres glasslab-nats glasslab-minio)
 PORT_FORWARD_PID=""
 PORT_FORWARD_LOG=""
 
 usage() {
   cat <<'USAGE'
-Usage: smoke-test-v2.sh [--include-openclaw]
+Usage: smoke-test-v2.sh [--include-openclaw] [--include-bounded-agents]
 
 Validate the core Glasslab v2 services by default.
 OpenClaw checks are optional until that deployment is intentionally enabled.
+Bounded-agent checks are optional until those Deployments are intentionally applied.
 USAGE
 }
 
@@ -44,6 +46,16 @@ while [[ $# -gt 0 ]]; do
       EXPECTED_SERVICES+=(glasslab-openclaw)
       shift
       ;;
+    --include-bounded-agents)
+      INCLUDE_BOUNDED_AGENTS=true
+      EXPECTED_SERVICES+=(
+        glasslab-intake-agent
+        glasslab-interpretation-agent
+        glasslab-assessment-agent
+        glasslab-design-agent
+      )
+      shift
+      ;;
     --help|-h)
       usage
       exit 0
@@ -67,6 +79,13 @@ printf '[smoke-test-v2] checking rollout status for core services\n'
 "$KUBECTL" -n "$NAMESPACE" rollout status deployment/glasslab-minio --timeout=120s
 "$KUBECTL" -n "$NAMESPACE" rollout status deployment/glasslab-workflow-api --timeout=120s
 "$KUBECTL" -n "$NAMESPACE" rollout status statefulset/glasslab-postgres --timeout=120s
+
+if [[ "$INCLUDE_BOUNDED_AGENTS" == true ]]; then
+  "$KUBECTL" -n "$NAMESPACE" rollout status deployment/glasslab-intake-agent --timeout=120s
+  "$KUBECTL" -n "$NAMESPACE" rollout status deployment/glasslab-interpretation-agent --timeout=120s
+  "$KUBECTL" -n "$NAMESPACE" rollout status deployment/glasslab-assessment-agent --timeout=120s
+  "$KUBECTL" -n "$NAMESPACE" rollout status deployment/glasslab-design-agent --timeout=120s
+fi
 
 printf '[smoke-test-v2] checking service inventory\n'
 "$KUBECTL" -n "$NAMESPACE" get deploy,statefulset,svc
@@ -100,4 +119,10 @@ if [[ "$INCLUDE_OPENCLAW" == true ]]; then
   printf '[smoke-test-v2] OpenClaw service presence checked because --include-openclaw was supplied.\n'
 else
   printf '[smoke-test-v2] OpenClaw checks skipped by default.\n'
+fi
+
+if [[ "$INCLUDE_BOUNDED_AGENTS" == true ]]; then
+  printf '[smoke-test-v2] bounded-agent rollout checks were included.\n'
+else
+  printf '[smoke-test-v2] bounded-agent checks skipped by default.\n'
 fi

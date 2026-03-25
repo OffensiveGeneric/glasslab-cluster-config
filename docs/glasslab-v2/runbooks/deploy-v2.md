@@ -62,6 +62,7 @@ Current storage caveat:
 
 ```bash
 ./scripts/smoke-test-v2.sh
+./scripts/smoke-test-v2.sh --include-bounded-agents
 ```
 
 Bounded-agent rollout check:

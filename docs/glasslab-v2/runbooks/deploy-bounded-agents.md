@@ -72,7 +72,7 @@ Suggested order:
 After enabling one stage:
 
 ```bash
-./scripts/smoke-test-v2.sh
+./scripts/smoke-test-v2.sh --include-bounded-agents
 kubectl -n glasslab-v2 logs deploy/glasslab-workflow-api --tail=200
 ```
 

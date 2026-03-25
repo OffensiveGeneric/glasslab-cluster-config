@@ -5,6 +5,7 @@ This directory holds operator-facing procedures for deployment, rollback, workfl
 Key runbooks:
 
 - `deploy-v2.md`
+- `deploy-bounded-agents.md`
 - `deploy-openclaw.md`
 - `switch-openclaw-inference-backend.md`
 - `choose-operator-access-path.md`
