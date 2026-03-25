@@ -22,6 +22,7 @@ Canonical planning and architecture:
 - `mac-service-host-boundary.md`: why the Macs should stay outside kubeadm and act as service hosts first
 - `ollama-native-openclaw.md`: why remote Ollama should use native OpenClaw provider mode instead of `/v1` when tool calling matters
 - `node02-interpretation-agent-experiment.md`: why the first cluster-side stage-agent experiment should be a bounded interpretation worker on `node02`
+- `node02-role-decision.md`: explicit decision rule for retiring legacy `node02` `vllm` and reclaiming the GPU lane
 - `interpretation-agent-service.md`: concrete contract and ownership boundary for the first in-cluster stage-agent service
 - `stage-agent-api-changes.md`: concrete `workflow-api`, service-contract, and config changes needed for the staged backend-agent path
 - `evaluation-boundary.md`: why evaluation should stay deterministic first and where later narrative enrichment could fit
