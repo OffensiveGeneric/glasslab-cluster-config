@@ -16,6 +16,11 @@ spec:
       automountServiceAccountToken: false
       enableServiceLinks: false
       serviceAccountName: glasslab-openclaw
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
       initContainers:
         - name: unpack-config
           image: busybox:1.36
@@ -32,11 +37,15 @@ spec:
               test -f /runtime/workspaces/literature/IDENTITY.md
               test -f /runtime/workspaces/designer/IDENTITY.md
               test -f /runtime/workspaces/reporter/IDENTITY.md
+              mkdir -p /state/credentials/whatsapp/default
+              chown -R 1000:1000 /state/credentials/whatsapp
           volumeMounts:
             - name: exported-config
               mountPath: /config-archive
             - name: runtime-config
               mountPath: /runtime
+            - name: state
+              mountPath: /state
       containers:
         - name: openclaw
           image: ghcr.io/openclaw/openclaw@sha256:b86307b257ff42a81353b0d6b3963ccd09bbd9eb1916077d1833a967763c5bc7
