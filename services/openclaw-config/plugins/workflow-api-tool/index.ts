@@ -684,7 +684,6 @@ const plugin = {
       { optional: true }
     );
 
-    const knownWorkflowIds = resolveKnownWorkflowIds(api);
     api.registerTool(
       {
         name: "workflow_api_get_last_run_artifacts",
