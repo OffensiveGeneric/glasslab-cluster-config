@@ -13,7 +13,6 @@ runtime_tools_allow:
   - workflow_api_start_paper_intake
   - workflow_api_start_literature_intake
   - workflow_api_start_replication_intake
-  - workflow_api_run_research_problem_pipeline
   - workflow_api_run_latest_research_problem_pipeline
   - workflow_api_get_last_intake
   - workflow_api_create_design_draft_from_last_intake
