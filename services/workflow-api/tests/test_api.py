@@ -1,6 +1,11 @@
+import sys
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+
+for module_name in list(sys.modules):
+    if module_name == 'app' or module_name.startswith('app.'):
+        del sys.modules[module_name]
 
 from app.config import Settings
 from app.main import create_app

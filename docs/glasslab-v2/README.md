@@ -31,6 +31,8 @@ Canonical planning and architecture:
 - `schedule-execution-boundaries.md`: fail-closed execution rules for stored schedules and future `run-now` support
 - `operator-access-options.md`: narrowed decision between Tailscale or reverse proxy for stable operator-facing access
 - `openclaw-runtime-portability.md`: what has and has not been reduced in the `.44`-special OpenClaw runtime path
+- `external-researcher-what-we-can-offer-now.md`: practical current answer for what outside researchers can safely use today
+- `external-researcher-hardening-gaps.md`: what must be hardened before outside researchers should be treated as first-class cluster users
 - `tool-choice-exposure-options.md`: realistic paths for issue `#11` and why runtime YAML alone is not enough
 - `provisioner-dependence-inventory.md`: splits the remaining `.44` dependence into image, runtime, secret, and admin-context buckets
 

@@ -113,6 +113,21 @@ These hosts are not Kubernetes workers.
     - about `159 MB / 18 GB`
     - `~19G` total `.ollama` size on disk
 
+### 2026-03-25 Remote Update
+
+- host is reachable again through the `glasslab.org -> .44 -> .23` path
+- `qwen3:30b` is still not installed yet
+- a direct `ollama pull qwen3:30b` was revalidated as healthy at about `10-12 MB/s`
+- the previous `launchd` watchdog was misleading because it repeatedly reported restart activity without providing a stable operator-facing status signal
+- a simpler persistent pull loop is now running instead:
+  - script path: `/tmp/qwen3-30b-pull-loop.sh`
+  - process shape: `/bin/zsh /tmp/qwen3-30b-pull-loop.sh`
+  - log path: `/tmp/qwen3-30b-pull-loop.log`
+- observed live pull state during the 2026-03-25 remote check:
+  - about `534 MB / 18 GB`
+  - about `3%`
+  - estimated remaining time in Ollama output: about `25 minutes`
+
 ### `192.168.1.12` `CS60123N7311`
 
 - hardware:

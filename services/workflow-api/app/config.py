@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     artifacts_pvc_name: str = 'glasslab-shared-artifacts'
     artifacts_mount_path: str = '/mnt/artifacts'
     image_pull_secret_name: str = 'glasslab-ghcr-pull'
+    interpretation_agent_enabled: bool = False
+    interpretation_agent_url: str = 'http://glasslab-interpretation-agent.glasslab-v2.svc.cluster.local:8091'
+    interpretation_agent_timeout_seconds: float = 45.0
 
 
 @lru_cache(maxsize=1)
