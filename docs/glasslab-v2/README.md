@@ -18,6 +18,7 @@ Canonical planning and architecture:
 - `intake-design-run-implementation-plan.md`: first concrete backend plan for intake -> design draft -> validation run
 - `model-improvement-options.md`: stronger model vs ranker vs control-surface vs backend decomposition
 - `ranker-service-shape.md`: first concrete API and ownership boundary for a bounded ranker service
+- `ranker-integration-plan.md`: how `workflow-api` should consume the ranker while keeping ranking advisory and fail-closed
 - `mac-studio-inference.md`: decision and switch path for using a Mac Studio as the primary external inference host
 - `mac-service-host-boundary.md`: why the Macs should stay outside kubeadm and act as service hosts first
 - `ollama-native-openclaw.md`: why remote Ollama should use native OpenClaw provider mode instead of `/v1` when tool calling matters
