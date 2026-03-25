@@ -8,6 +8,7 @@ for module_name in list(sys.modules):
         del sys.modules[module_name]
 
 from app.config import Settings
+import app.main as main_module
 from app.main import create_app
 from app.persistence import InMemoryRunStore
 from app.registry import WorkflowRegistry
@@ -109,6 +110,79 @@ def test_create_and_fetch_interpretation_from_latest_intake() -> None:
     fetched = client.get(f'/interpretations/{interpretation_id}')
     assert fetched.status_code == 200
     assert fetched.json()['extracted_claims'][0].startswith('The paper compares')
+
+
+def test_create_interpretation_uses_agent_when_enabled(monkeypatch) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        interpretation_agent_enabled=True,
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    create_intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Read this paper intake and determine whether the approved Titanic benchmark path is a good fit.',
+            'source_refs': ['https://example.org/titanic-paper'],
+            'notes': ['The paper compares a baseline on Titanic.'],
+        },
+    )
+    assert create_intake.status_code == 201
+
+    def fake_call_interpretation_agent(intake, settings, registry):
+        return main_module.build_interpretation_record_from_agent_draft(
+            intake,
+            {
+                'source_type': intake.source_type,
+                'normalized_summary': 'agent-normalized summary',
+                'extracted_method_summary': 'agent-produced method summary',
+                'candidate_workflow_families': ['generic-tabular-benchmark'],
+                'dataset_hints': ['titanic'],
+                'evaluation_targets': ['baseline comparison'],
+                'extracted_claims': ['Agent extracted claim'],
+                'unresolved_questions': [],
+            },
+        )
+
+    monkeypatch.setattr(main_module, 'call_interpretation_agent', fake_call_interpretation_agent)
+
+    create_interpretation = client.post('/interpretations/from-latest-intake')
+    assert create_interpretation.status_code == 201
+    payload = create_interpretation.json()
+    assert payload['normalized_summary'] == 'agent-normalized summary'
+    assert payload['extracted_method_summary'] == 'agent-produced method summary'
+    assert payload['candidate_workflow_families'] == ['generic-tabular-benchmark']
+    assert payload['status'] == 'ready_for_assessment'
+
+
+def test_create_interpretation_falls_back_when_agent_returns_none(monkeypatch) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        interpretation_agent_enabled=True,
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    create_intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Read this paper intake and determine whether the approved Titanic benchmark path is a good fit.',
+            'source_refs': ['https://example.org/titanic-paper'],
+            'notes': ['The paper compares a baseline on Titanic.'],
+        },
+    )
+    assert create_intake.status_code == 201
+
+    monkeypatch.setattr(main_module, 'call_interpretation_agent', lambda intake, settings, registry: None)
+
+    create_interpretation = client.post('/interpretations/from-latest-intake')
+    assert create_interpretation.status_code == 201
+    payload = create_interpretation.json()
+    assert 'generic-tabular-benchmark' in payload['candidate_workflow_families']
+    assert payload['normalized_summary'].startswith('Read this paper intake')
 
 
 def test_create_interpretation_requires_intake() -> None:
