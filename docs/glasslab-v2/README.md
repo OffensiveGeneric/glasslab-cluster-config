@@ -21,6 +21,7 @@ Canonical planning and architecture:
 - `ranker-integration-plan.md`: how `workflow-api` should consume the ranker while keeping ranking advisory and fail-closed
 - `mac-studio-inference.md`: decision and switch path for using a Mac Studio as the primary external inference host
 - `mac-service-host-boundary.md`: why the Macs should stay outside kubeadm and act as service hosts first
+- `mac-service-host-close-criteria.md`: when the Mac integration issue should be considered materially resolved as a service-host decision
 - `ollama-native-openclaw.md`: why remote Ollama should use native OpenClaw provider mode instead of `/v1` when tool calling matters
 - `node02-interpretation-agent-experiment.md`: why the first cluster-side stage-agent experiment should be a bounded interpretation worker on `node02`
 - `node02-role-decision.md`: explicit decision rule for retiring legacy `node02` `vllm` and reclaiming the GPU lane
