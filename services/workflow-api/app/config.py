@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     assessment_agent_enabled: bool = False
     assessment_agent_url: str = 'http://glasslab-assessment-agent.glasslab-v2.svc.cluster.local:8092'
     assessment_agent_timeout_seconds: float = 45.0
+    design_agent_enabled: bool = False
+    design_agent_url: str = 'http://glasslab-design-agent.glasslab-v2.svc.cluster.local:8093'
+    design_agent_timeout_seconds: float = 45.0
 
 
 @lru_cache(maxsize=1)
