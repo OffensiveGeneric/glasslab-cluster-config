@@ -69,6 +69,72 @@ def test_create_and_fetch_latest_intake() -> None:
     assert fetched.json()['normalized_summary'].startswith('Take this paper note set')
 
 
+def test_create_intake_uses_agent_when_enabled(monkeypatch) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        intake_agent_enabled=True,
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    def fake_call_intake_agent(request, settings, registry):
+        return main_module.build_intake_record_from_agent_draft(
+            {
+                'source_type': 'paper-link',
+                'source_refs': ['https://example.org/agent-paper'],
+                'raw_request': request.raw_request,
+                'normalized_summary': 'agent-normalized intake summary',
+                'workflow_family_candidates': ['literature-to-experiment'],
+                'notes': ['Agent normalized note'],
+                'submitted_by': 'agent-operator',
+            }
+        )
+
+    monkeypatch.setattr(main_module, 'call_intake_agent', fake_call_intake_agent)
+
+    create = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Take this paper note set and turn it into a bounded validation experiment on a tabular dataset.',
+            'source_refs': ['https://example.org/paper-notes'],
+            'notes': ['Focus on the reported baseline and evaluation method.'],
+        },
+    )
+
+    assert create.status_code == 201
+    payload = create.json()
+    assert payload['normalized_summary'] == 'agent-normalized intake summary'
+    assert payload['workflow_family_candidates'] == ['literature-to-experiment']
+    assert payload['submitted_by'] == 'agent-operator'
+
+
+def test_create_intake_falls_back_when_agent_returns_none(monkeypatch) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        intake_agent_enabled=True,
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    monkeypatch.setattr(main_module, 'call_intake_agent', lambda request, settings, registry: None)
+
+    create = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Take this paper note set and turn it into a bounded validation experiment on a tabular dataset.',
+            'source_refs': ['https://example.org/paper-notes'],
+            'notes': ['Focus on the reported baseline and evaluation method.'],
+        },
+    )
+
+    assert create.status_code == 201
+    payload = create.json()
+    assert payload['normalized_summary'].startswith('Take this paper note set')
+    assert 'generic-tabular-benchmark' in payload['workflow_family_candidates']
+
+
 def test_get_latest_intake_missing() -> None:
     client = build_client()
 

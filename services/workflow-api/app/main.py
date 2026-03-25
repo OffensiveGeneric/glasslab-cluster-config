@@ -84,6 +84,93 @@ def infer_workflow_candidates(raw_request: str) -> list[str]:
     return list(dict.fromkeys(matches))
 
 
+def validate_intake_agent_draft(
+    draft: dict[str, Any],
+    registry: WorkflowRegistry,
+) -> dict[str, Any]:
+    required_string_fields = ('source_type', 'raw_request', 'normalized_summary', 'submitted_by')
+    for field_name in required_string_fields:
+        value = draft.get(field_name)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f'intake agent draft missing valid {field_name}')
+
+    normalized = {
+        'source_type': draft['source_type'].strip(),
+        'source_refs': normalize_unique_strings(list(draft.get('source_refs', []))),
+        'raw_request': draft['raw_request'].strip(),
+        'normalized_summary': ' '.join(draft['normalized_summary'].split())[:500],
+        'workflow_family_candidates': normalize_unique_strings(list(draft.get('workflow_family_candidates', []))),
+        'notes': normalize_unique_strings(list(draft.get('notes', []))),
+        'submitted_by': draft['submitted_by'].strip(),
+    }
+
+    invalid_workflows = [
+        workflow_id for workflow_id in normalized['workflow_family_candidates']
+        if registry.get_workflow(workflow_id) is None
+    ]
+    if invalid_workflows:
+        raise ValueError(f'intake agent returned unapproved workflow ids: {", ".join(invalid_workflows)}')
+
+    return normalized
+
+
+def build_intake_record_from_agent_draft(
+    validated_draft: dict[str, Any],
+) -> IntakeRecord:
+    now = datetime.now(timezone.utc)
+    return IntakeRecord(
+        intake_id=uuid4().hex,
+        created_at=now,
+        updated_at=now,
+        status='ready_for_design',
+        source_type=validated_draft['source_type'],
+        source_refs=validated_draft['source_refs'],
+        raw_request=validated_draft['raw_request'],
+        normalized_summary=validated_draft['normalized_summary'],
+        workflow_family_candidates=validated_draft['workflow_family_candidates'],
+        notes=validated_draft['notes'],
+        submitted_by=validated_draft['submitted_by'],
+    )
+
+
+def call_intake_agent(
+    request: IntakeCreateRequest,
+    settings: Settings,
+    registry: WorkflowRegistry,
+) -> IntakeRecord | None:
+    if not settings.intake_agent_enabled:
+        return None
+
+    payload = {
+        'request_id': uuid4().hex,
+        'intake': {
+            'raw_request': request.raw_request,
+            'source_refs': request.source_refs,
+            'source_type': request.source_type,
+            'notes': request.notes,
+            'submitted_by': request.submitted_by or settings.default_submitted_by,
+        },
+    }
+    request_obj = urllib_request.Request(
+        settings.intake_agent_url,
+        data=json.dumps(payload).encode('utf-8'),
+        headers={'Content-Type': 'application/json'},
+        method='POST',
+    )
+
+    try:
+        with urllib_request.urlopen(request_obj, timeout=settings.intake_agent_timeout_seconds) as response:
+            body = json.loads(response.read().decode('utf-8'))
+        draft = body.get('draft')
+        if not isinstance(draft, dict):
+            raise ValueError('intake agent response missing draft object')
+        validated_draft = validate_intake_agent_draft(draft, registry)
+        return build_intake_record_from_agent_draft(validated_draft)
+    except (urllib_error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        LOGGER.warning('intake-agent fallback: %s', exc)
+        return None
+
+
 def infer_dataset_hints(intake: IntakeRecord) -> list[str]:
     lowered = ' '.join([intake.raw_request, intake.normalized_summary, *intake.notes, *intake.source_refs]).lower()
     hints: list[str] = []
@@ -711,26 +798,28 @@ def create_app(
 
     @app.post('/intakes', response_model=IntakeRecord, status_code=status.HTTP_201_CREATED)
     def create_intake(request: IntakeCreateRequest) -> IntakeRecord:
-        now = datetime.now(timezone.utc)
-        intake_id = uuid4().hex
-        candidates = [
-            workflow_id
-            for workflow_id in infer_workflow_candidates(request.raw_request)
-            if registry.get_workflow(workflow_id) is not None
-        ]
-        record = IntakeRecord(
-            intake_id=intake_id,
-            created_at=now,
-            updated_at=now,
-            status='ready_for_design',
-            source_type=infer_intake_source_type(request),
-            source_refs=request.source_refs,
-            raw_request=request.raw_request.strip(),
-            normalized_summary=summarize_intake(request.raw_request, request.notes),
-            workflow_family_candidates=candidates,
-            notes=request.notes,
-            submitted_by=request.submitted_by or settings.default_submitted_by,
-        )
+        record = call_intake_agent(request, settings, registry)
+        if record is None:
+            now = datetime.now(timezone.utc)
+            intake_id = uuid4().hex
+            candidates = [
+                workflow_id
+                for workflow_id in infer_workflow_candidates(request.raw_request)
+                if registry.get_workflow(workflow_id) is not None
+            ]
+            record = IntakeRecord(
+                intake_id=intake_id,
+                created_at=now,
+                updated_at=now,
+                status='ready_for_design',
+                source_type=infer_intake_source_type(request),
+                source_refs=request.source_refs,
+                raw_request=request.raw_request.strip(),
+                normalized_summary=summarize_intake(request.raw_request, request.notes),
+                workflow_family_candidates=candidates,
+                notes=request.notes,
+                submitted_by=request.submitted_by or settings.default_submitted_by,
+            )
         store.save_intake(record)
         return record
 
