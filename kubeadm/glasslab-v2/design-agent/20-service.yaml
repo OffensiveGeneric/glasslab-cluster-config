@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: glasslab-design-agent
+  namespace: glasslab-v2
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: glasslab-design-agent
+  ports:
+    - name: http
+      port: 8093
+      targetPort: http

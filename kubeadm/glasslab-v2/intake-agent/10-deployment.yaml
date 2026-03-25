@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: glasslab-intake-agent
+  namespace: glasslab-v2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: glasslab-intake-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: glasslab-intake-agent
+    spec:
+      imagePullSecrets:
+        - name: glasslab-ghcr-pull
+      containers:
+        - name: intake-agent
+          image: ghcr.io/offensivegeneric/glasslab-intake-agent:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8090
+              name: http
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
