@@ -863,6 +863,7 @@ def build_paper_pipeline_report_state(
     run: RunRecord | None,
     settings: Settings,
     submitter: JobSubmitter,
+    store: RunStore,
 ) -> PaperPipelineReportState:
     if run is None:
         return PaperPipelineReportState(
@@ -876,7 +877,7 @@ def build_paper_pipeline_report_state(
         )
 
     resolved_status = resolve_run_status(run, settings, submitter)
-    artifacts = load_artifacts_from_disk(settings, run.run_id)
+    artifacts = load_artifacts_from_disk(settings, run.run_id) or store.get_artifacts(run.run_id)
     artifact_names: list[str] = []
     report_path = None
     if artifacts is not None:
@@ -1931,7 +1932,7 @@ def create_app(
         if design.status != 'ready_for_run':
             if design.unresolved_inputs:
                 warnings.append('design still has unresolved inputs after bounded auto-review')
-            report_state = build_paper_pipeline_report_state(None, settings, submitter)
+            report_state = build_paper_pipeline_report_state(None, settings, submitter, store)
             return FreshPaperPipelineResponse(
                 intake=intake,
                 interpretation=interpretation,
@@ -1971,7 +1972,7 @@ def create_app(
             )
             store.save_run(run)
 
-        report_state = build_paper_pipeline_report_state(run, settings, submitter)
+        report_state = build_paper_pipeline_report_state(run, settings, submitter, store)
         next_action = 'await-run-completion'
         if report_state.terminal and report_state.report_available:
             next_action = 'report-ready'

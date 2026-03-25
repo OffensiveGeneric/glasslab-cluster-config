@@ -1195,6 +1195,8 @@ def test_create_fresh_paper_pipeline_creates_literature_run_without_manual_revie
     assert payload['run']['workflow_id'] == 'literature-to-experiment'
     assert payload['run']['run_purpose'] == 'paper-pipeline'
     assert payload['report_state']['run_status'] == 'accepted'
+    assert payload['report_state']['report_available'] is True
+    assert 'report.md' in payload['report_state']['artifact_names']
     assert payload['next_action'] == 'await-run-completion'
 
 
