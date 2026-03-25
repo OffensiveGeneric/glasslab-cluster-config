@@ -67,6 +67,14 @@ So the current conclusion is simple:
 This does not mean Glasslab is pointed in the wrong direction.
 It means the safe autonomy boundary is still mostly "choose among pre-shaped actions," not "generate structured control payloads freely."
 
+That is exactly why exact-family lookup is better exposed as generated no-arg tools:
+
+- `workflow_api_get_family_generic_tabular_benchmark`
+- `workflow_api_get_family_literature_to_experiment`
+- `workflow_api_get_family_replication_lite`
+
+Those tools keep the workflow choice explicit without asking the model to synthesize a structured argument at call time.
+
 ## What This Means For The Real Goal
 
 The real goal is not "argumented tools everywhere."

@@ -111,6 +111,15 @@ function buildWorkflowIdProperty(knownWorkflowIds: string[]) {
   };
 }
 
+function buildWorkflowLookupToolName(workflowId: string): string {
+  const slug = workflowId
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return `workflow_api_get_family_${slug || "unknown"}`;
+}
+
 function resolveStateDir(): string {
   return join(process.env.OPENCLAW_STATE_DIR || DEFAULT_STATE_DIR, "workflow-api-tool");
 }
@@ -844,6 +853,57 @@ const plugin = {
       },
       { optional: true }
     );
+
+    for (const workflowId of knownWorkflowIds) {
+      const toolName = buildWorkflowLookupToolName(workflowId);
+      api.registerTool(
+        {
+          name: toolName,
+          description: `Fetch the approved workflow family for exact workflow_id ${workflowId}. No arguments required.`,
+          parameters: {
+            type: "object",
+            additionalProperties: false,
+            properties: {}
+          },
+          async execute() {
+            try {
+              const { endpoint, payload } = await requestJson(api, "/workflow-families");
+              const families = Array.isArray(payload) ? payload : [];
+              const match = families.find(
+                (item) =>
+                  item &&
+                  typeof item === "object" &&
+                  item.workflow_id === workflowId
+              );
+              if (!match) {
+                throw new Error(`workflow_id not found in approved workflow families: ${workflowId}`);
+              }
+              await appendAuditEvent({
+                tool: toolName,
+                status: "ok",
+                endpoint,
+                requested_workflow_id: workflowId,
+                matched_workflow_id: workflowId
+              });
+              return buildJsonResult({
+                endpoint,
+                requested_workflow_id: workflowId,
+                workflow_family: match
+              });
+            } catch (error) {
+              await appendAuditEvent({
+                tool: toolName,
+                status: "error",
+                requested_workflow_id: workflowId,
+                error: error instanceof Error ? error.message : String(error)
+              });
+              throw error;
+            }
+          }
+        },
+        { optional: true }
+      );
+    }
   }
 };
 

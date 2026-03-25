@@ -19,6 +19,7 @@ Run a simple OpenClaw tool-calling reliability check against the live Glasslab v
 The check includes:
 - the known-good no-arg create-validation-run path
 - the known-good no-arg get-last-validation-run path
+- the generated no-arg exact-family lookup path
 - repeated attempts against the tiny experimental argumented workflow family lookup tool
 USAGE
 }
@@ -159,6 +160,7 @@ cat >"$RESULTS_JSON" <<'JSON'
 {
   "no_arg_create": null,
   "no_arg_get": null,
+  "exact_family_lookup": null,
   "argumented_attempts": []
 }
 JSON
@@ -227,6 +229,35 @@ payload["no_arg_get"] = {
 path.write_text(json.dumps(payload, indent=2))
 PY
 printf '[check-openclaw-tool-calling] no-arg get ok run_id=%s\n' "$run_id"
+
+printf '[check-openclaw-tool-calling] verifying generated no-arg exact-family path\n'
+exact_before="$(audit_count)"
+EXACT_OUTPUT="$TMP_DIR/exact-family.json"
+run_agent \
+  "Use the workflow_api_get_family_generic_tabular_benchmark tool and report only its approval tier and resource profile." \
+  "$EXACT_OUTPUT"
+exact_after="$(audit_count)"
+if (( exact_after <= exact_before )); then
+  printf '[check-openclaw-tool-calling] expected a new audit event for generated exact-family path\n' >&2
+  exit 1
+fi
+exact_audit="$(last_audit_json)"
+assert_audit "$exact_audit" "workflow_api_get_family_generic_tabular_benchmark" "ok" "requested_workflow_id=generic-tabular-benchmark" >/dev/null
+exact_text="$(extract_payload_text "$EXACT_OUTPUT")"
+RESULTS_JSON="$RESULTS_JSON" EXACT_AUDIT="$exact_audit" EXACT_TEXT="$exact_text" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+path = Path(os.environ["RESULTS_JSON"])
+payload = json.loads(path.read_text())
+payload["exact_family_lookup"] = {
+    "audit": json.loads(os.environ["EXACT_AUDIT"]),
+    "response_text": os.environ["EXACT_TEXT"],
+}
+path.write_text(json.dumps(payload, indent=2))
+PY
+printf '[check-openclaw-tool-calling] generated no-arg exact-family lookup ok\n'
 
 successes=0
 for attempt in $(seq 1 "$ATTEMPTS"); do

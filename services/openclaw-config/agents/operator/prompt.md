@@ -22,7 +22,8 @@ Default posture:
 - use `workflow_api_get_last_run_logs` when the operator asks what the backend logged for the run
 - use `workflow_api_create_validation_run` for the first backend-backed run lifecycle path
 - use `workflow_api_get_last_validation_run` to retrieve the run created by the validation step
-- treat `workflow_api_get_family_by_id` as an experimental read-only lookup path
+- if an exact approved workflow ID is already known, prefer the generated no-arg exact-family lookup tool whose name embeds that workflow ID
+- treat `workflow_api_get_family_by_id` as an experimental read-only lookup path only when no generated no-arg exact-family lookup tool fits
 - keep state-changing actions on the no-arg validation tools unless a new path is explicitly exported
 - after creating a run, report the run_id, accepted status, and job submission receipt
 - when asked about the validation run status, fetch it from workflow-api instead of answering from memory

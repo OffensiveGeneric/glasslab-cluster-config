@@ -176,6 +176,14 @@ for definition_path in sorted(registry_dir.glob("*.json")):
 if not known_workflow_ids:
     raise SystemExit(f"no workflow_ids found in registry directory: {registry_dir}")
 
+
+def workflow_lookup_tool_name(workflow_id: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", workflow_id.strip().lower()).strip("_")
+    return f"workflow_api_get_family_{slug or 'unknown'}"
+
+
+generated_workflow_lookup_tools = [workflow_lookup_tool_name(workflow_id) for workflow_id in known_workflow_ids]
+
 expected_workflow_api = "http://glasslab-workflow-api.glasslab-v2.svc.cluster.local:8080"
 expected_vllm = "http://vllm.glasslab-agents.svc.cluster.local:8000/v1"
 provider_base_url_override = os.environ.get("GLASSLAB_OPENCLAW_PROVIDER_BASE_URL", "").strip()
@@ -352,7 +360,17 @@ allowed_runtime_tools = {
     "workflow_api_get_last_validation_run",
     "workflow_api_get_family_by_id",
 }
+allowed_runtime_tools.update(generated_workflow_lookup_tools)
 allowed_runtime_profiles = {"minimal", "coding", "messaging", "full"}
+
+
+def expanded_runtime_allow(agent_cfg: dict) -> list[str]:
+    runtime_allow = list(agent_cfg.get("runtime_tools_allow", []))
+    if "workflow_api_get_family_by_id" in runtime_allow:
+        for tool_id in generated_workflow_lookup_tools:
+            if tool_id not in runtime_allow:
+                runtime_allow.append(tool_id)
+    return runtime_allow
 
 for agent_name, agent_cfg in agents.items():
     runtime_profile = agent_cfg.get("runtime_tools_profile")
@@ -360,7 +378,7 @@ for agent_name, agent_cfg in agents.items():
         raise SystemExit(
             f"agent {agent_name!r} requested unsupported runtime tool profile {runtime_profile!r}"
         )
-    for tool_id in agent_cfg.get("runtime_tools_allow", []):
+    for tool_id in expanded_runtime_allow(agent_cfg):
         if tool_id not in allowed_runtime_tools:
             raise SystemExit(
                 f"agent {agent_name!r} requested unsupported runtime tool {tool_id!r}"
@@ -492,7 +510,7 @@ runtime_contract_lines = [
     "- provider default model: "
     + default_model,
     "- workflow-api plugin path: `/var/lib/openclaw/runtime/glasslab-config/plugins/workflow-api-tool`",
-    "- operator runtime allowlist: `workflow_api_get_families`, `workflow_api_create_validation_run`, `workflow_api_get_last_validation_run`, `workflow_api_get_family_by_id`",
+    "- operator runtime allowlist includes repo-managed no-arg workflow family lookup tools derived from the approved registry IDs, alongside `workflow_api_get_families`, `workflow_api_create_validation_run`, `workflow_api_get_last_validation_run`, and the experimental `workflow_api_get_family_by_id` path",
     "- workflow-api tool audit log: `/var/lib/openclaw/state/workflow-api-tool/tool-call-audit.jsonl`",
 ]
 
@@ -560,7 +578,7 @@ def workspace_text(agent_name: str, agent_cfg: dict) -> dict[str, str]:
     lines_tools.extend(["", "Runtime deny list:"])
     for item in deny_tools:
         lines_tools.append(f"- `{item}`")
-    runtime_allow = agent_cfg.get("runtime_tools_allow", [])
+    runtime_allow = expanded_runtime_allow(agent_cfg)
     runtime_profile = agent_cfg.get("runtime_tools_profile")
     if runtime_allow:
         lines_tools.extend(["", "Explicit runtime allowlist:"])
@@ -627,7 +645,7 @@ for agent_name, agent_cfg in agents.items():
             "workspace": str(container_workspaces_root / agent_name),
             "tools": {
                 **({"profile": agent_cfg["runtime_tools_profile"]} if agent_cfg.get("runtime_tools_profile") else {}),
-                "allow": agent_cfg.get("runtime_tools_allow", []),
+                "allow": expanded_runtime_allow(agent_cfg),
                 "deny": deny_tools,
             },
         }
