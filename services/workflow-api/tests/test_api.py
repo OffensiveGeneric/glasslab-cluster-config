@@ -1360,6 +1360,17 @@ def test_create_pipeline_from_research_problem_returns_no_candidates(monkeypatch
     assert payload['warnings'] == ['no approved seed papers matched the research problem strongly enough']
 
 
+def test_resolve_intake_agent_base_url_handles_normalize_endpoint() -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        intake_agent_url='http://glasslab-intake-agent.glasslab-v2.svc.cluster.local:8090/normalize-intake',
+    )
+    assert (
+        main_module.resolve_intake_agent_base_url(settings)
+        == 'http://glasslab-intake-agent.glasslab-v2.svc.cluster.local:8090'
+    )
+
+
 def test_create_run_success() -> None:
     client = build_client()
 

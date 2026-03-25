@@ -308,8 +308,9 @@ def call_intake_agent(
             'submitted_by': request.submitted_by or settings.default_submitted_by,
         },
     }
+    intake_agent_endpoint = settings.intake_agent_url
     request_obj = urllib_request.Request(
-        settings.intake_agent_url,
+        intake_agent_endpoint,
         data=json.dumps(payload).encode('utf-8'),
         headers={'Content-Type': 'application/json'},
         method='POST',
@@ -326,6 +327,13 @@ def call_intake_agent(
     except (urllib_error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
         LOGGER.warning('intake-agent fallback: %s', exc)
         return None
+
+
+def resolve_intake_agent_base_url(settings: Settings) -> str:
+    endpoint = settings.intake_agent_url.rstrip('/')
+    if endpoint.endswith('/normalize-intake'):
+        return endpoint[: -len('/normalize-intake')]
+    return endpoint
 
 
 def infer_dataset_hints(intake: IntakeRecord) -> list[str]:
@@ -925,7 +933,7 @@ def call_problem_harvester_plan(
         'max_papers': request.max_candidate_papers,
     }
     request_obj = urllib_request.Request(
-        settings.intake_agent_url.rstrip('/') + '/paper-harvester/plan-from-problem',
+        resolve_intake_agent_base_url(settings) + '/paper-harvester/plan-from-problem',
         data=json.dumps(payload).encode('utf-8'),
         headers={'Content-Type': 'application/json'},
         method='POST',
