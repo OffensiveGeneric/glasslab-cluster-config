@@ -63,10 +63,13 @@ Current storage caveat:
 OpenClaw predeploy checklist:
 - create `kubeadm/glasslab-v2/secrets/30-openclaw.local.yaml`
 - confirm `kubectl -n glasslab-v2 get svc glasslab-workflow-api`
-- confirm `kubectl -n glasslab-agents get svc vllm`
 - inspect the generated runtime tree with `./scripts/export-openclaw-config.sh --output-dir /tmp/openclaw-runtime --no-apply`
-- verify `/tmp/openclaw-runtime/openclaw.json` contains the expected `workflow-api` and `vLLM` cluster URLs
+- verify `/tmp/openclaw-runtime/openclaw.json` contains the expected `workflow-api` URL and the intended reviewed inference backend URL
 - keep `replicas: 0` until the predeploy checklist is complete
+
+If the default in-cluster path is still being used, also confirm:
+
+- `kubectl -n glasslab-agents get svc vllm`
 
 ```bash
 ./scripts/deploy-glasslab-v2.sh --include-openclaw

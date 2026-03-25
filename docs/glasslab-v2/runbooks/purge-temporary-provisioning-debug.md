@@ -6,12 +6,13 @@ This runbook is intentionally separate from the live v2 bring-up because the rem
 
 - The tracked PXE snapshots were updated to remove the historical `clusteradmin` password injection from `node48`.
 - The tracked cloud-init profiles were updated to replace the old shared `identity.password` hash with rotated non-shared placeholders.
+- Multiple tracked cloud-init profiles still carry `identity.password` hashes even though SSH password login is disabled.
 - `docs/next-step-control-plane.md` still tracks this cleanup as unfinished work.
-- The helper scripts now prefer passwordless sudo first and can use the reviewed wrapper-based sudo path on the live workers.
+- older helper flows historically carried password-fed `sudo` fallback paths and should now use only passwordless sudo or the reviewed node wrappers
 
 ## Current live state
 
-Validated on 2026-03-19 from `.44`:
+Validated from `.44`:
 
 - the helper scripts were updated to prefer passwordless sudo first
 - the reviewed wrapper-based sudo path was deployed live to:
@@ -30,11 +31,25 @@ Validated on 2026-03-19 from `.44`:
   - `node04`
   - `node05`
 - the cleaned active `user-data` files validate with `cloud-init schema`
+- the canonical provisioner checkout on 2026-03-24 shows per-profile password hashes in:
+  - `default`
+  - `node02`
+  - `node03`
+  - `node04`
+  - `node05`
+  - `node48`
+  - `node49`
+- the 2026-03-24 provisioner diff confirms:
+  - `chpasswd` removal from `default`, `node02`, `node48`, and `node49`
+  - removal of the explicit `clusteradmin:Glasslab@7311` late-command from `node48`
 
 Implication:
 
 - the maintenance path that previously blocked cleanup has been replaced
-- tracked password-era PXE/autoinstall material is now safe to purge from the repo snapshots
+- the repo no longer appears to depend on the old shared autoinstall hash or the legacy explicit `node48` password injection
+- the remaining password debt is now narrower:
+  - remove or justify the residual per-profile autoinstall password hashes
+  - keep helper flows on passwordless sudo or the reviewed maintenance wrappers only
 - the remaining gap is no longer config correctness, but access to a truly non-production PXE target for a destructive reinstall test
 
 ## Validation boundary
@@ -63,6 +78,7 @@ Current status:
   - `ansible/playbooks/enable-narrow-node-maintenance-sudo.yml`
   - root-owned wrappers under `/usr/local/sbin/`
   - a scoped sudoers drop-in for those wrappers only
+- the helper flows should now fail clearly if neither passwordless sudo nor the reviewed wrappers are present
 
 2. Update the tracked PXE/autoinstall snapshots.
 
@@ -78,7 +94,11 @@ Target files:
 
 3. Remove any remaining explicit password-setting late-commands from legacy profiles before the next provisioner snapshot. The tracked `node48` snapshot is already cleaned.
 
-4. Replace the shared autoinstall password hash with a rotated non-shared placeholder or another reviewed noninteractive bootstrap approach.
+4. Decide whether the remaining per-profile autoinstall password hashes are still needed at all.
+
+If not, remove them.
+
+If yes, document the narrow bootstrap reason and rotate them through a reviewed process instead of leaving them as ambiguous historical debt.
 
 5. Snapshot the live provisioner config again.
 

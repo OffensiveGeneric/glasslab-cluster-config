@@ -97,6 +97,12 @@ Success indicators:
 - `channels status` reports gateway reachable
 - logs show the WhatsApp listener connected without repeated auth failures
 
+Current caution from the 2026-03-24 Mac cutover:
+
+- the runtime and persisted credentials may still be present even when the current backend has not been revalidated end-to-end
+- treat a configured WhatsApp channel as insufficient proof by itself
+- after any inference-backend change, require a fresh `channels status` success and a real round-trip message before calling the channel live again
+
 9. Send the first test message from the linked WhatsApp account to itself.
 
 Recommended first message:

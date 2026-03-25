@@ -6,7 +6,6 @@ IMAGE_REF="${GLASSLAB_WORKFLOW_API_IMAGE_REF:-ghcr.io/offensivegeneric/glasslab-
 NODE_HOST="${GLASSLAB_WORKFLOW_API_NODE_HOST:-192.168.1.50}"
 NODE_USER="${GLASSLAB_WORKFLOW_API_NODE_USER:-clusteradmin}"
 NODE_SSH_KEY="${GLASSLAB_WORKFLOW_API_NODE_SSH_KEY:-/home/glasslab/.ssh/id_ed25519}"
-NODE_SUDO_PASSWORD="${NODE_SUDO_PASSWORD:-}"
 USE_PASSWORDLESS_SUDO=false
 USE_WRAPPER_SUDO=false
 LOCAL_TAR=""
@@ -37,16 +36,10 @@ need_cmd() {
   }
 }
 
-prompt_node_password() {
-  if [[ -n "$NODE_SUDO_PASSWORD" ]]; then
-    return
-  fi
-  read -r -s -p "sudo password for ${NODE_USER}@${NODE_HOST}: " NODE_SUDO_PASSWORD
-  printf '\n' >&2
-  [[ -n "$NODE_SUDO_PASSWORD" ]] || {
-    printf '[build-import-workflow-api-image] node sudo password is required\n' >&2
-    exit 1
-  }
+fail_node_sudo_mode() {
+  printf '[build-import-workflow-api-image] %s\n' "$1" >&2
+  printf '[build-import-workflow-api-image] enable reviewed wrapper sudo with ansible/playbooks/enable-narrow-node-maintenance-sudo.yml or provide passwordless sudo on %s\n' "$NODE_HOST" >&2
+  exit 1
 }
 
 detect_node_sudo_mode() {
@@ -63,7 +56,7 @@ detect_node_sudo_mode() {
     return
   fi
 
-  prompt_node_password
+  fail_node_sudo_mode "node does not expose passwordless sudo or the reviewed image-import wrappers"
 }
 
 run_remote_root() {
@@ -75,10 +68,7 @@ run_remote_root() {
     return
   fi
 
-  local password_b64
-  password_b64="$(printf '%s' "$NODE_SUDO_PASSWORD" | base64 -w0)"
-  ssh -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "${NODE_USER}@${NODE_HOST}" \
-    "PASSWORD_B64='$password_b64' bash -lc 'printf %s \"\$PASSWORD_B64\" | base64 -d | sudo -S bash -lc $(printf '%q' "$remote_cmd")'"
+  fail_node_sudo_mode "run_remote_root called without passwordless sudo"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -107,7 +97,6 @@ need_cmd sudo
 need_cmd docker
 need_cmd ssh
 need_cmd scp
-need_cmd base64
 
 [[ -f "$NODE_SSH_KEY" ]] || {
   printf '[build-import-workflow-api-image] ssh key not found: %s\n' "$NODE_SSH_KEY" >&2

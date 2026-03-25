@@ -11,6 +11,18 @@ cd /home/glasslab/cluster-config
 
 ```bash
 kubectl -n glasslab-v2 get svc glasslab-workflow-api
+```
+
+Then decide which reviewed inference backend the runtime should target.
+
+Current supported patterns in the repo:
+
+- default in-cluster path: `http://vllm.glasslab-agents.svc.cluster.local:8000/v1`
+- reviewed external OpenAI-compatible path via export overrides
+
+If you are using the default in-cluster path, verify the live `vllm` service exists:
+
+```bash
 kubectl -n glasslab-agents get svc vllm
 ```
 
@@ -67,6 +79,15 @@ find /tmp/openclaw-runtime -maxdepth 3 -type f | sort
 python3 -m json.tool /tmp/openclaw-runtime/openclaw.json | sed -n '1,240p'
 ```
 
+If you are targeting a reviewed external inference backend such as the Mac Studio path, provide the export overrides explicitly:
+
+```bash
+GLASSLAB_OPENCLAW_PROVIDER_BASE_URL="http://192.168.1.23:11434/v1" \
+GLASSLAB_OPENCLAW_DEFAULT_MODEL="deepseek-r1:32b" \
+GLASSLAB_OPENCLAW_MODEL_ALIAS="glasslab-mac-studio-primary" \
+./scripts/export-openclaw-config.sh --output-dir /tmp/openclaw-runtime --no-apply
+```
+
 6. Verify the generated runtime contract before scaling anything.
 
 Confirm:
@@ -76,7 +97,7 @@ Confirm:
 - `workspaces/designer/IDENTITY.md` exists
 - `workspaces/reporter/IDENTITY.md` exists
 - `openclaw.json` points at `http://glasslab-workflow-api.glasslab-v2.svc.cluster.local:8080`
-- `openclaw.json` points at `http://vllm.glasslab-agents.svc.cluster.local:8000/v1`
+- `openclaw.json` points at the intended reviewed inference backend URL
 
 7. Apply the exported runtime bundle and the OpenClaw manifests. Keep the Deployment at `replicas: 0`.
 
@@ -85,6 +106,8 @@ Confirm:
 kubectl apply -f kubeadm/glasslab-v2/openclaw/
 kubectl -n glasslab-v2 get deploy glasslab-openclaw -o jsonpath='{.spec.replicas}{"\n"}'
 ```
+
+If you are using an external reviewed inference backend, re-run the same command with the same explicit overrides before the apply step.
 
 Operator note:
 - the repo manifest intentionally keeps `glasslab-openclaw` at `replicas: 0`

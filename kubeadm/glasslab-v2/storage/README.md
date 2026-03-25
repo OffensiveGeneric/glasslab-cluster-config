@@ -13,6 +13,7 @@ Current tracked manifests:
 - `10-static-local-pv.example.yaml`: example static local PV/PVC pattern
 - `10-static-local-pv.yaml`: current node01-backed static local PV/PVC wiring for Postgres and MinIO
 - `20-nfs-static-pv.yaml`: shared NFS-backed RWX PV/PVC wiring for datasets and artifacts
+- `30-openclaw-shared-state.example.yaml`: non-production NFS-backed test PV/PVC for evaluating OpenClaw state relocation
 - `90-nfs-smoke-test.yaml`: one-shot validation pod for the NFS-backed PVCs
 
 The current live durable-storage plan is:

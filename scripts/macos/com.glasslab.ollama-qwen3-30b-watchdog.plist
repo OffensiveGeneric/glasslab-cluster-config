@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.glasslab.ollama-qwen3-30b-watchdog</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>/bin/bash</string>
+      <string>/Users/glasslab/.local/bin/ollama-pull-watchdog.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>GLASSLAB_OLLAMA_PULL_MODEL</key>
+      <string>qwen3:30b</string>
+      <key>GLASSLAB_OLLAMA_PULL_LOG</key>
+      <string>/tmp/ollama-pull-qwen3-30b.log</string>
+      <key>GLASSLAB_OLLAMA_WATCHDOG_LOG</key>
+      <string>/tmp/ollama-pull-watchdog.log</string>
+      <key>GLASSLAB_OLLAMA_PULL_STALL_SECONDS</key>
+      <string>180</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StartInterval</key>
+    <integer>120</integer>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/ollama-pull-watchdog.launchd.out</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/ollama-pull-watchdog.launchd.err</string>
+  </dict>
+</plist>

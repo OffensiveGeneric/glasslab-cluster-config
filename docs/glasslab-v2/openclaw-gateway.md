@@ -4,16 +4,21 @@ OpenClaw is the operator shell for Glasslab v2, not the experiment brain.
 
 ## Current live status
 
-As of the 2026-03-19 live validation from `.44`:
+Validated from `.44` on 2026-03-24:
 
-- OpenClaw is live in the cluster at `1` replica
 - the committed Deployment manifest still keeps `replicas: 0`
-- this means the repo posture is still “default off unless deliberately enabled,” while the actual live environment is currently “enabled”
-- the first WhatsApp channel path is not just planned; it is active in the live logs
+- the live Deployment has been deliberately scaled back up to `1`
+- the live pod is running against the Mac-backed inference endpoint on `192.168.1.23`
+- the first Mac cutover used Ollama's OpenAI-compatible `/v1` path
+- that cutover is good enough for plain chat inference
+- that cutover is not yet a valid replacement for the old tool-calling path
+- the current live tool harness fails on the Mac-backed `deepseek-r1:32b` path with:
+  - `400 registry.ollama.ai/library/deepseek-r1:32b does not support tools`
 
 Reference:
 
-- `../live-state-2026-03-19.md`
+- `../live-state-2026-03-24.md`
+- `ollama-native-openclaw.md`
 
 ## Why it sits in front
 
@@ -57,6 +62,27 @@ OpenClaw should only submit approved internal API calls and only after the reque
 
 These URLs are generated into the native runtime config by `scripts/export-openclaw-config.sh` and should never be replaced with localhost or port-forward addresses in the committed manifests.
 
+If Glasslab moves primary inference to a separate host such as a Mac Studio, keep the committed provider YAML on the safe in-cluster default and export the runtime bundle with explicit overrides instead.
+
+For plain OpenAI-compatible chat inference, an override like this still works:
+
+```bash
+GLASSLAB_OPENCLAW_PROVIDER_BASE_URL="https://mac-studio.example.internal/v1" \
+GLASSLAB_OPENCLAW_DEFAULT_MODEL="your-primary-model-id" \
+./scripts/export-openclaw-config.sh
+```
+
+But for remote Ollama tool use, the current OpenClaw docs recommend native Ollama provider mode instead:
+
+```bash
+GLASSLAB_OPENCLAW_PROVIDER_BASE_URL="http://mac-studio.example.internal:11434" \
+GLASSLAB_OPENCLAW_PROVIDER_API="ollama" \
+GLASSLAB_OPENCLAW_DEFAULT_MODEL="your-tool-capable-ollama-model" \
+./scripts/export-openclaw-config.sh
+```
+
+That keeps the repo default conservative while letting the deployed OpenClaw runtime target the external inference tier in a way that is compatible with native Ollama tool behavior.
+
 ## First chat channel
 
 WhatsApp is the first validation target.
@@ -75,5 +101,8 @@ Validation gate:
 
 Current live nuance:
 
-- the cluster logs now show the WhatsApp provider starting and listening repeatedly
-- operationally, treat that as “live but still validation-grade” until durable OpenClaw state and a more boring channel lifecycle exist
+- the runtime still contains the WhatsApp channel block and the operator binding
+- the owner number is still present in the live OpenClaw secret
+- persisted WhatsApp credentials still exist on the OpenClaw state volume
+- but the WhatsApp path has not yet been revalidated after the Mac cutover
+- operationally, treat the channel path as configured but not freshly confirmed end-to-end on the current backend

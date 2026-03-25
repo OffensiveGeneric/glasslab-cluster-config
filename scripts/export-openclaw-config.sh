@@ -29,6 +29,14 @@ The generated runtime contract is:
 Options:
 - --output-dir DIR  write the generated runtime tree to DIR for inspection
 - --no-apply        do not apply the ConfigMap, only generate the runtime tree
+
+Environment overrides:
+- GLASSLAB_OPENCLAW_PROVIDER_BASE_URL  override the inference provider base URL
+- GLASSLAB_OPENCLAW_PROVIDER_API       override the provider API type: openai-completions or ollama
+- GLASSLAB_OPENCLAW_PROVIDER_ID        override the exported provider id prefix
+- GLASSLAB_OPENCLAW_PROVIDER_API_KEY_ENV  override the OpenClaw secret env var used for the provider key
+- GLASSLAB_OPENCLAW_DEFAULT_MODEL      override the primary inference model id
+- GLASSLAB_OPENCLAW_MODEL_ALIAS        override the exported OpenClaw model alias
 USAGE
 }
 
@@ -89,9 +97,11 @@ fi
 TMP_DIR="$(mktemp -d)"
 python3 - "$SOURCE_DIR" "$TMP_DIR/runtime" <<'PY'
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 import yaml
 
@@ -168,6 +178,12 @@ if not known_workflow_ids:
 
 expected_workflow_api = "http://glasslab-workflow-api.glasslab-v2.svc.cluster.local:8080"
 expected_vllm = "http://vllm.glasslab-agents.svc.cluster.local:8000/v1"
+provider_base_url_override = os.environ.get("GLASSLAB_OPENCLAW_PROVIDER_BASE_URL", "").strip()
+provider_api_override = os.environ.get("GLASSLAB_OPENCLAW_PROVIDER_API", "").strip()
+provider_id_override = os.environ.get("GLASSLAB_OPENCLAW_PROVIDER_ID", "").strip()
+provider_api_key_env_override = os.environ.get("GLASSLAB_OPENCLAW_PROVIDER_API_KEY_ENV", "").strip()
+default_model_override = os.environ.get("GLASSLAB_OPENCLAW_DEFAULT_MODEL", "").strip()
+model_alias_override = os.environ.get("GLASSLAB_OPENCLAW_MODEL_ALIAS", "").strip()
 
 if workflow_binding.get("base_url") != expected_workflow_api:
     raise SystemExit(
@@ -175,11 +191,41 @@ if workflow_binding.get("base_url") != expected_workflow_api:
         f"{expected_workflow_api}, found {workflow_binding.get('base_url')!r}"
     )
 
-if provider.get("base_url") != expected_vllm:
+if not provider_base_url_override and provider.get("base_url") != expected_vllm:
     raise SystemExit(
         "provider base_url must point at "
         f"{expected_vllm}, found {provider.get('base_url')!r}"
     )
+
+provider_base_url = provider_base_url_override or provider.get("base_url")
+if not provider_base_url:
+    raise SystemExit("provider base_url is required")
+
+provider_api = provider_api_override or provider.get("api") or "openai-completions"
+if provider_api not in {"openai-completions", "ollama"}:
+    raise SystemExit(
+        "provider api must be one of 'openai-completions' or 'ollama', "
+        f"found {provider_api!r}"
+    )
+
+default_provider_id = "glasslab-vllm" if provider_api == "openai-completions" else "glasslab-ollama"
+provider_id = provider_id_override or default_provider_id
+if not provider_id:
+    raise SystemExit("provider id is required")
+
+default_provider_api_key_env = "OPENCLAW_VLLM_API_KEY" if provider_api == "openai-completions" else "OPENCLAW_OLLAMA_API_KEY"
+provider_api_key_env = provider_api_key_env_override or default_provider_api_key_env
+
+parsed_provider_url = urlparse(provider_base_url)
+if parsed_provider_url.scheme not in {"http", "https"} or not parsed_provider_url.netloc:
+    raise SystemExit(
+        "provider base_url must be a full http(s) URL, "
+        f"found {provider_base_url!r}"
+    )
+if parsed_provider_url.hostname in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}:
+    raise SystemExit("provider base_url must be reachable from the OpenClaw pod, not localhost")
+if provider_api == "ollama" and parsed_provider_url.path.rstrip("/") == "/v1":
+    raise SystemExit("provider base_url must not end in /v1 when provider api is 'ollama'")
 
 paper_intake_request = workflow_binding.get("paper_intake_request")
 if not isinstance(paper_intake_request, dict):
@@ -231,9 +277,11 @@ for key in ("workflow_id", "objective", "inputs", "models"):
             f"workflow-api validation_run_request is missing required key {key!r}"
         )
 
-default_model = provider.get("default_model")
+default_model = default_model_override or provider.get("default_model")
 if not default_model:
     raise SystemExit("provider default_model is required")
+
+model_alias = model_alias_override or "glasslab-inference-primary"
 
 context_window = int(provider.get("context_window", 4096))
 max_output_tokens = int(provider.get("max_output_tokens", 4096))
@@ -284,7 +332,7 @@ dangerous_tools = [
     "sessions_send",
 ]
 
-model_ref = f"glasslab-vllm/{default_model}"
+model_ref = f"{provider_id}/{default_model}"
 
 allowed_runtime_tools = {
     "web_fetch",
@@ -342,10 +390,10 @@ runtime_config = {
     "models": {
         "mode": "merge",
         "providers": {
-            "glasslab-vllm": {
-                "baseUrl": provider["base_url"],
-                "apiKey": "${OPENCLAW_VLLM_API_KEY}",
-                "api": "openai-completions",
+            provider_id: {
+                "baseUrl": provider_base_url,
+                "apiKey": "${" + provider_api_key_env + "}",
+                "api": provider_api,
                 "models": [
                     {
                         "id": default_model,
@@ -373,7 +421,7 @@ runtime_config = {
             },
             "models": {
                 model_ref: {
-                    "alias": "glasslab-qwen-local",
+                    "alias": model_alias,
                     "params": {
                         "temperature": provider.get("temperature", 0.0),
                     },
@@ -436,7 +484,13 @@ runtime_contract_lines = [
     "- workflow-api binding: "
     + workflow_binding["base_url"],
     "- provider base URL: "
-    + provider["base_url"],
+    + provider_base_url,
+    "- provider API: "
+    + provider_api,
+    "- provider id: "
+    + provider_id,
+    "- provider default model: "
+    + default_model,
     "- workflow-api plugin path: `/var/lib/openclaw/runtime/glasslab-config/plugins/workflow-api-tool`",
     "- operator runtime allowlist: `workflow_api_get_families`, `workflow_api_create_validation_run`, `workflow_api_get_last_validation_run`, `workflow_api_get_family_by_id`",
     "- workflow-api tool audit log: `/var/lib/openclaw/state/workflow-api-tool/tool-call-audit.jsonl`",
@@ -525,7 +579,8 @@ def workspace_text(agent_name: str, agent_cfg: dict) -> dict[str, str]:
         "",
         "In-cluster service references:",
         f"- workflow-api: `{workflow_binding['base_url']}`",
-        f"- vLLM provider: `{provider['base_url']}`",
+        f"- inference provider: `{provider_base_url}`",
+        f"- default model: `{default_model}`",
         "",
         "Chat gateway references:",
         "- first chat channel: `whatsapp`",

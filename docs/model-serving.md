@@ -2,7 +2,9 @@
 
 ## vLLM / Qwen
 
-This stack assumes a single vLLM Deployment exposing an OpenAI-compatible `/v1` API inside the `glasslab-agents` namespace.
+This stack started with a single in-cluster vLLM Deployment exposing an OpenAI-compatible `/v1` API inside the `glasslab-agents` namespace.
+
+That is still the safe repo default, but Glasslab can also treat a separate inference host such as a Mac Studio as the primary model-serving tier if it exposes a stable OpenAI-compatible `/v1` endpoint reachable from the cluster.
 
 Configured environment keys:
 
@@ -31,6 +33,31 @@ The agent API talks to:
 
 - `http://vllm.glasslab-agents.svc.cluster.local:8000/v1/models`
 - `http://vllm.glasslab-agents.svc.cluster.local:8000/v1/chat/completions`
+
+## External Primary Inference
+
+If the Mac Studio becomes the main inference box, the cleanest path is:
+
+- keep the Mac outside the Kubernetes worker set
+- expose a stable internal or Tailscale-reachable OpenAI-compatible `/v1` endpoint
+- point OpenClaw at that endpoint during runtime export
+- update any legacy v1 `agent-api` config that still depends on the old in-cluster `vllm` service
+
+Example OpenClaw export override:
+
+```bash
+GLASSLAB_OPENCLAW_PROVIDER_BASE_URL="https://mac-studio.example.internal/v1" \
+GLASSLAB_OPENCLAW_DEFAULT_MODEL="your-primary-model-id" \
+./scripts/export-openclaw-config.sh
+```
+
+Example smoke test against a non-default endpoint and model:
+
+```bash
+VLLM_BASE_URL="https://mac-studio.example.internal/v1" \
+VLLM_MODEL_NAME="your-primary-model-id" \
+./scripts/test-vllm.sh
+```
 
 ## Planner Behavior
 

@@ -6,6 +6,9 @@ Key runbooks:
 
 - `deploy-v2.md`
 - `deploy-openclaw.md`
+- `switch-openclaw-inference-backend.md`
+- `choose-operator-access-path.md`
+- `test-openclaw-shared-state.md`
 - `backup-restore-local-pv-services.md`
 - `rollback-v2.md`
 - `restore-v2-secrets.md`

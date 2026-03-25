@@ -12,4 +12,9 @@ Example:
 
 - `10-internal-services.example.yaml` shows the intended future direction for operator-facing services only
 
+Current preference:
+
+- if a stable path is needed first, expose OpenClaw before exposing anything else
+- do not use this directory as justification for exposing backend internals
+
 Do not use this directory to publish public endpoints.
