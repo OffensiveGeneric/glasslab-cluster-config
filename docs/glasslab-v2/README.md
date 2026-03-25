@@ -37,6 +37,8 @@ Canonical planning and architecture:
 - `openclaw-runtime-portability.md`: what has and has not been reduced in the `.44`-special OpenClaw runtime path
 - `external-researcher-what-we-can-offer-now.md`: practical current answer for what outside researchers can safely use today
 - `external-researcher-hardening-gaps.md`: what must be hardened before outside researchers should be treated as first-class cluster users
+- `external-researcher-offer-profiles.md`: concrete outside-researcher offer lanes and why "one worker node" is the wrong framing
+- `external-researcher-access-primitives.md`: concrete Kubernetes and access-control primitives needed before broader outside-researcher use
 - `tool-choice-exposure-options.md`: realistic paths for issue `#11` and why runtime YAML alone is not enough
 - `provisioner-dependence-inventory.md`: splits the remaining `.44` dependence into image, runtime, secret, and admin-context buckets
 
