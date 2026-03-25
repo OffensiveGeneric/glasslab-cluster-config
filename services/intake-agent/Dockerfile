@@ -8,5 +8,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY services/intake-agent/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 COPY services/intake-agent/app /app/app
+COPY services/intake-agent/seeds /app/seeds
 EXPOSE 8090
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8090"]
