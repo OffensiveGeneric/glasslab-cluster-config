@@ -47,7 +47,7 @@ spec:
             - name: OPENCLAW_STATE_DIR
               value: /var/lib/openclaw/state
             - name: NODE_OPTIONS
-              value: --max-old-space-size=3072
+              value: --max-old-space-size=4608
             - name: OPENCLAW_GATEWAY_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -67,10 +67,10 @@ spec:
           resources:
             requests:
               cpu: "1"
-              memory: 2Gi
+              memory: 3Gi
             limits:
               cpu: "2"
-              memory: 4Gi
+              memory: 6Gi
           ports:
             - containerPort: 18789
               name: http

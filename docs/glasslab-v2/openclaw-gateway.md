@@ -35,6 +35,7 @@ Reference:
 - generated workspaces live at `/var/lib/openclaw/runtime/workspaces/<agent>/`
 - the raw repo-managed source tree is mirrored at `/var/lib/openclaw/runtime/glasslab-config/`
 - the unpacked runtime directory is writable inside the running container so channel setup can persist one-time config normalization without mutating the repo-managed source tree
+- the current WhatsApp-enabled runtime needs a larger memory envelope than the earlier tool-only path, so the Deployment reserves more memory than the first bare operator validation
 
 ## Agent separation
 
