@@ -2,6 +2,12 @@
 
 Glasslab v2 turns the current Titanic-specific path into an explicit, registry-driven workflow platform.
 
+## Core Vocabulary
+
+- sessions are the primary user-facing object
+- skills are bounded capabilities that mutate session state in controlled steps
+- workflow families are execution templates, not the top-level product taxonomy
+
 Current live validation reference:
 
 - `../live-state-2026-03-23.md`

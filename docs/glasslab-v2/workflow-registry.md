@@ -1,8 +1,8 @@
 # Workflow Registry
 
-The workflow registry is the approval boundary for Glasslab v2.
+The workflow registry is the approval boundary for execution templates in Glasslab v2.
 
-Every definition under `services/workflow-registry/definitions/` is a reviewed workflow family entry. `workflow-api` should reject any run request that does not map cleanly to one of these definitions.
+Every definition under `services/workflow-registry/definitions/` is a reviewed execution template entry. `workflow-api` should reject any run request that does not map cleanly to one of these definitions.
 
 ## Required fields
 

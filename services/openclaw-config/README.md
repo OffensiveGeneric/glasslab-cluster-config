@@ -34,3 +34,10 @@ First channel notes:
 - no broad allowlist or group routing is enabled in repo config
 
 Use `./scripts/export-openclaw-config.sh --output-dir /tmp/openclaw-runtime --no-apply` to inspect the generated runtime tree before applying it to the cluster.
+
+Maintainer note:
+
+- keep the OpenClaw surface session-first
+- use skills as bounded capability calls that mutate a session in controlled steps
+- treat workflow families as execution templates selected after the session state is ready
+- do not let prompt wording imply that workflow families are the main product object

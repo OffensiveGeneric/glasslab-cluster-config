@@ -2,10 +2,18 @@
 
 Glasslab v2 keeps the existing cluster and v1 stack intact while introducing a clearer backend for approved, repeatable experiment workflows.
 
+## Mental Model
+
+The product should read as session-first:
+
+- sessions hold the durable research state and are the main object operators work in
+- skills are bounded capabilities that update that session state in controlled steps
+- workflow families are execution templates selected only when the work is ready to run
+
 ## Roles
 
-- `services/workflow-api`: the orchestration backend. It accepts structured run requests, validates them against the approved registry, writes a canonical run manifest, and hands work to bounded executors.
-- `services/workflow-registry`: the explicit catalog of allowed workflow families. This is where supported inputs, models, runner images, resource profiles, artifact expectations, and approval tiers are declared.
+- `services/workflow-api`: the orchestration backend. It accepts structured session- and run-related requests, validates execution against the approved registry, writes a canonical run manifest, and hands work to bounded executors.
+- `services/workflow-registry`: the explicit catalog of allowed execution templates. This is where supported inputs, models, runner images, resource profiles, artifact expectations, and approval tiers are declared.
 - `services/evaluator`: deterministic comparison logic for multiple runs once artifact bundles exist.
 - `services/reporter`: deterministic report synthesis from manifests, metrics, and evaluator output.
 - `services/openclaw-config`: tracked OpenClaw agents, prompts, bindings, and policy. OpenClaw is the operator shell and gateway, not the workflow brain.

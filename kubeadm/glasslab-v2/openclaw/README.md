@@ -2,6 +2,12 @@
 
 This directory holds the internal-only OpenClaw deployment manifests for Glasslab v2.
 
+The deployment should be interpreted as the operator edge for session-first work:
+
+- sessions are the primary object
+- skills are bounded capabilities invoked through OpenClaw
+- workflow families are execution templates, not the user-facing taxonomy
+
 The repo-managed source config under `services/openclaw-config` is exported into a native OpenClaw runtime bundle by `scripts/export-openclaw-config.sh` before the deployment is applied.
 
 Runtime contract:
