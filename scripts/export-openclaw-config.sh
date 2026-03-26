@@ -471,12 +471,12 @@ runtime_config = {
                 "primary": model_ref,
             },
             "compaction": {
-                "keepRecentTokens": 6000,
-                "recentTurnsPreserve": 8,
-                "reserveTokens": 2048,
+                "keepRecentTokens": 3000,
+                "recentTurnsPreserve": 4,
+                "reserveTokens": 1024,
                 "reserveTokensFloor": 0,
                 "memoryFlush": {
-                    "enabled": False,
+                    "enabled": True,
                     "forceFlushTranscriptBytes": 0,
                 },
             },
