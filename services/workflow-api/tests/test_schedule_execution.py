@@ -2,11 +2,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.config import Settings
+from app.digest_scheduling import build_digest_schedule, execute_due_digest_schedules
 from app.job_submission import NullJobSubmitter
-from app.main import create_run_record, execute_due_approved_rerun_schedules, execute_due_digest_schedules
+from app.main import create_run_record, execute_due_approved_rerun_schedules
 from app.persistence import InMemoryRunStore
 from app.registry import WorkflowRegistry
-from app.schemas import RunCreateRequest, RunRecord, ScheduledOperationRecord
+from app.schemas import DigestScheduleCreateRequest, RunCreateRequest, RunRecord, ScheduledOperationRecord
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -21,21 +22,6 @@ def build_registry() -> WorkflowRegistry:
 
 def cron_expr_for(now: datetime) -> str:
     return f'{now.minute} {now.hour} {now.day} {now.month} {(now.weekday() + 1) % 7}'
-
-
-def build_digest_schedule(schedule_id: str, now: datetime) -> ScheduledOperationRecord:
-    return ScheduledOperationRecord(
-        schedule_id=schedule_id,
-        created_at=now,
-        updated_at=now,
-        status='active',
-        operation_type='digest',
-        approval_tier='tier-1-read-only',
-        owner='glasslab-operator',
-        cron_expr=cron_expr_for(now),
-        scope_filter={'workflow_id': 'generic-tabular-benchmark'},
-        digest_kind='daily-run-summary',
-    )
 
 
 def build_source_run(store: InMemoryRunStore, registry: WorkflowRegistry, settings: Settings) -> RunRecord:
@@ -114,7 +100,13 @@ def test_digest_schedule_run_due_is_idempotent_and_auditable() -> None:
     submitter = NullJobSubmitter(namespace=settings.runner_namespace)
     create_run_record(run_request, workflow, settings, submitter, store)
 
-    schedule = build_digest_schedule('digest-1', now)
+    schedule_request = DigestScheduleCreateRequest(
+        cron_expr=cron_expr_for(now),
+        digest_kind='daily-run-summary',
+        scope_filter={'workflow_id': 'generic-tabular-benchmark'},
+        owner='glasslab-operator',
+    )
+    schedule = build_digest_schedule(schedule_request, settings).model_copy(update={'schedule_id': 'digest-1'})
     store.save_schedule(schedule)
 
     first = execute_due_digest_schedules(store, now)
@@ -183,3 +175,21 @@ def test_approved_rerun_schedule_run_due_is_idempotent_and_auditable() -> None:
     assert len(executions) == 1
     assert executions[0].execution_id == first[0].execution_id
     assert executions[0].produced_run_ids == [produced_run_id]
+
+
+def test_digest_scheduling_helpers_cover_cron_matching_and_default_fields() -> None:
+    settings = build_settings()
+    now = datetime(2026, 3, 26, 14, 30, tzinfo=timezone.utc)
+    request = DigestScheduleCreateRequest(
+        cron_expr=f'  {cron_expr_for(now)}  ',
+        digest_kind=' daily-run-summary ',
+        scope_filter={'workflow_id': 'generic-tabular-benchmark'},
+    )
+
+    schedule = build_digest_schedule(request, settings)
+
+    assert schedule.operation_type == 'digest'
+    assert schedule.approval_tier == 'tier-1-read-only'
+    assert schedule.owner == settings.default_submitted_by
+    assert schedule.cron_expr == cron_expr_for(now)
+    assert schedule.digest_kind == 'daily-run-summary'
