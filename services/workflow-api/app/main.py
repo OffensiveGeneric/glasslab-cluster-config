@@ -67,6 +67,7 @@ from .schemas import (
     RunRecord,
     ScheduledExecutionRecord,
     ScheduledOperationRecord,
+    SourceDocumentRecord,
     WorkflowFamilySummary,
 )
 from .validation import validate_run_request
@@ -2318,7 +2319,7 @@ def create_app(
         build_research_problem_request_from_record=lambda *args, **kwargs: build_research_problem_request_from_record(*args, **kwargs),
         touch_research_session=lambda *args, **kwargs: touch_research_session(*args, **kwargs),
         build_paper_intake_queue_record=lambda *args, **kwargs: build_paper_intake_queue_record(*args, **kwargs),
-        ingest_source_document=ingest_source_document,
+        ingest_source_document=lambda *args, **kwargs: ingest_source_document(*args, **kwargs),
         build_intake_request_from_problem_candidate=lambda *args, **kwargs: build_intake_request_from_problem_candidate(*args, **kwargs),
         stage_intake_from_request=lambda *args, **kwargs: stage_intake_from_request(*args, **kwargs),
         record_operation=lambda *args, **kwargs: record_operation(*args, **kwargs),
