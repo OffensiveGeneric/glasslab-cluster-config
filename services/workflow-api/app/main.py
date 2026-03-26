@@ -1,13 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from io import BytesIO
-import hashlib
-import html
 import json
 import logging
-import mimetypes
-import re
 import time
 from typing import Any, Iterable
 from urllib import error as urllib_error
@@ -20,11 +15,13 @@ from services.common.schemas import ArtifactIndexEntry, ArtifactsIndex, RunManif
 
 from .config import Settings, get_settings
 from .digest_scheduling import build_digest_schedule, disable_schedule, execute_due_digest_schedules, schedule_is_due
+from .execution_routes import register_execution_routes
 from .execution_preflight import build_execution_preflight_result
 from .job_submission import JobSubmitter, create_job_submitter
 from .literature_routes import register_literature_routes
 from .persistence import RunStore, create_run_store
 from .registry import WorkflowRegistry
+from .source_documents import ingest_source_document, register_source_document_routes
 from .session_helpers import (
     build_research_problem_request_from_session,
     build_research_session_context,
@@ -70,12 +67,10 @@ from .schemas import (
     RunRecord,
     ScheduledExecutionRecord,
     ScheduledOperationRecord,
-    SourceDocumentRecord,
     WorkflowFamilySummary,
 )
 from .validation import validate_run_request
 UNRESOLVED_PREFIX = 'UNRESOLVED_'
-HTML_TAG_RE = re.compile(r'<[^>]+>')
 LOGGER = logging.getLogger(__name__)
 
 
@@ -1293,153 +1288,6 @@ def stage_intake_from_request(
     return record
 
 
-def guess_document_title(source_url: str) -> str:
-    parsed = source_url.rstrip('/').rsplit('/', 1)[-1]
-    return parsed or 'source-document'
-
-
-def extract_text_excerpt(content: bytes, content_type: str | None, source_url: str) -> str | None:
-    media_type = (content_type or '').split(';', 1)[0].strip().lower()
-    try:
-        if media_type in {'text/html', 'application/xhtml+xml'} or source_url.lower().endswith(('.html', '.htm')):
-            decoded = content.decode('utf-8', errors='ignore')
-            stripped = HTML_TAG_RE.sub(' ', decoded)
-            normalized = ' '.join(html.unescape(stripped).split())
-            return normalized[:4000] or None
-        if media_type == 'text/plain':
-            normalized = ' '.join(content.decode('utf-8', errors='ignore').split())
-            return normalized[:4000] or None
-        if media_type == 'application/pdf' or source_url.lower().endswith('.pdf'):
-            from pypdf import PdfReader
-
-            reader = PdfReader(BytesIO(content))
-            parts: list[str] = []
-            for page in reader.pages[:5]:
-                text = page.extract_text() or ''
-                text = ' '.join(text.split())
-                if text:
-                    parts.append(text)
-            joined = ' '.join(parts)
-            return joined[:4000] or None
-    except Exception:
-        return None
-    return None
-
-
-def fetch_source_document_bytes(source_url: str) -> tuple[bytes, str | None]:
-    request_obj = urllib_request.Request(
-        source_url,
-        headers={
-            'User-Agent': 'glasslab-workflow-api/0.1.0',
-            'Accept': 'text/html,application/pdf,application/xhtml+xml;q=0.9,*/*;q=0.8',
-        },
-        method='GET',
-    )
-    with urllib_request.urlopen(request_obj, timeout=30.0) as response:
-        content = response.read()
-        content_type = response.headers.get('Content-Type')
-    return content, content_type
-
-
-def persist_source_document_bytes(
-    *,
-    document_id: str,
-    source_url: str,
-    content: bytes,
-    content_type: str | None,
-    settings: Settings,
-) -> str:
-    guessed_ext = mimetypes.guess_extension((content_type or '').split(';', 1)[0].strip()) or ''
-    if not guessed_ext:
-        if source_url.lower().endswith('.pdf'):
-            guessed_ext = '.pdf'
-        elif source_url.lower().endswith(('.html', '.htm')):
-            guessed_ext = '.html'
-    key_name = f'{document_id}/source{guessed_ext}'
-
-    if settings.source_document_storage_mode == 'minio':
-        try:
-            from minio import Minio
-        except ImportError as exc:
-            raise RuntimeError('minio package is required for source_document_storage_mode=minio') from exc
-
-        if not settings.minio_access_key or not settings.minio_secret_key:
-            raise RuntimeError('minio credentials are required for source_document_storage_mode=minio')
-
-        client = Minio(
-            settings.minio_endpoint,
-            access_key=settings.minio_access_key,
-            secret_key=settings.minio_secret_key,
-            secure=settings.minio_secure,
-        )
-        bucket = settings.source_document_bucket
-        if not client.bucket_exists(bucket):
-            client.make_bucket(bucket)
-        client.put_object(
-            bucket,
-            key_name,
-            BytesIO(content),
-            length=len(content),
-            content_type=(content_type or 'application/octet-stream'),
-        )
-        return f's3://{bucket}/{key_name}'
-
-    base_dir = Path(settings.source_document_storage_dir)
-    target = base_dir / document_id / f'source{guessed_ext}'
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(content)
-    return target.as_uri()
-
-
-def ingest_source_document(
-    source_url: str,
-    submitted_by: str,
-    settings: Settings,
-    store: RunStore,
-    session_id: str | None = None,
-) -> SourceDocumentRecord:
-    now = datetime.now(timezone.utc)
-    document_id = uuid4().hex
-    try:
-        content, content_type = fetch_source_document_bytes(source_url)
-        storage_uri = persist_source_document_bytes(
-            document_id=document_id,
-            source_url=source_url,
-            content=content,
-            content_type=content_type,
-            settings=settings,
-        )
-        record = SourceDocumentRecord(
-            document_id=document_id,
-            created_at=now,
-            updated_at=now,
-            status='fetched',
-            source_url=source_url,
-            submitted_by=submitted_by,
-            storage_uri=storage_uri,
-            content_type=content_type,
-            size_bytes=len(content),
-            sha256=hashlib.sha256(content).hexdigest(),
-            title=guess_document_title(source_url),
-            text_excerpt=extract_text_excerpt(content, content_type, source_url),
-            session_id=session_id,
-        )
-    except Exception as exc:
-        record = SourceDocumentRecord(
-            document_id=document_id,
-            created_at=now,
-            updated_at=now,
-            status='fetch-failed',
-            source_url=source_url,
-            submitted_by=submitted_by,
-            fetch_error=str(exc),
-            title=guess_document_title(source_url),
-            session_id=session_id,
-        )
-    store.save_source_document(record)
-    return record
-
-
 def build_design_draft(
     intake: IntakeRecord,
     workflow: WorkflowRegistryEntry,
@@ -2470,29 +2318,13 @@ def create_app(
         build_research_problem_request_from_record=lambda *args, **kwargs: build_research_problem_request_from_record(*args, **kwargs),
         touch_research_session=lambda *args, **kwargs: touch_research_session(*args, **kwargs),
         build_paper_intake_queue_record=lambda *args, **kwargs: build_paper_intake_queue_record(*args, **kwargs),
-        ingest_source_document=lambda *args, **kwargs: ingest_source_document(*args, **kwargs),
+        ingest_source_document=ingest_source_document,
         build_intake_request_from_problem_candidate=lambda *args, **kwargs: build_intake_request_from_problem_candidate(*args, **kwargs),
         stage_intake_from_request=lambda *args, **kwargs: stage_intake_from_request(*args, **kwargs),
         record_operation=lambda *args, **kwargs: record_operation(*args, **kwargs),
     )
 
-    @app.get('/source-documents', response_model=list[SourceDocumentRecord])
-    def list_source_documents() -> list[SourceDocumentRecord]:
-        return store.list_source_documents()
-
-    @app.get('/source-documents/latest', response_model=SourceDocumentRecord)
-    def get_latest_source_document() -> SourceDocumentRecord:
-        record = store.get_latest_source_document()
-        if record is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='source document not found')
-        return record
-
-    @app.get('/source-documents/{document_id}', response_model=SourceDocumentRecord)
-    def get_source_document(document_id: str) -> SourceDocumentRecord:
-        record = store.get_source_document(document_id)
-        if record is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='source document not found')
-        return record
+    register_source_document_routes(app, store=store)
 
     @app.get('/operations', response_model=list[OperationRecord])
     def list_operations(operation_type: str | None = None) -> list[OperationRecord]:
@@ -2512,30 +2344,14 @@ def create_app(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='operation not found')
         return record
 
-    @app.get('/workflow-families', response_model=list[WorkflowFamilySummary])
-    def list_workflow_families() -> list[WorkflowFamilySummary]:
-        return [
-            WorkflowFamilySummary(
-                workflow_id=entry.workflow_id,
-                display_name=entry.display_name,
-                workflow_family=entry.workflow_family,
-                description=entry.description,
-                allowed_models=entry.allowed_models,
-                resource_profile=entry.resource_profile.profile_name,
-                approval_tier=entry.approval_tier,
-                execution_status=entry.execution_status,
-                submission_backend=entry.submission_backend,
-                execution_blockers=entry.execution_blockers,
-            )
-            for entry in registry.list_workflows()
-        ]
-
-    @app.get('/workflow-families/{workflow_id}/execution-preflight', response_model=ExecutionPreflightResult)
-    def get_workflow_execution_preflight(workflow_id: str) -> ExecutionPreflightResult:
-        workflow = registry.get_workflow(workflow_id)
-        if workflow is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='workflow not found')
-        return build_execution_preflight_result(workflow, settings)
+    register_execution_routes(
+        app,
+        settings=settings,
+        registry=registry,
+        store=store,
+        submitter=submitter,
+        create_run_record=lambda *args, **kwargs: create_run_record(*args, **kwargs),
+    )
 
     @app.post('/digest-schedules', response_model=ScheduledOperationRecord, status_code=status.HTTP_201_CREATED)
     def create_digest_schedule(request: DigestScheduleCreateRequest) -> ScheduledOperationRecord:
@@ -2594,73 +2410,6 @@ def create_app(
     @app.get('/scheduled-executions', response_model=list[ScheduledExecutionRecord])
     def list_scheduled_executions(schedule_id: str | None = None) -> list[ScheduledExecutionRecord]:
         return store.list_executions(schedule_id=schedule_id)
-
-    @app.post('/runs', response_model=RunRecord, status_code=status.HTTP_201_CREATED)
-    def create_run(request: RunCreateRequest) -> RunRecord:
-        workflow = registry.get_workflow(request.workflow_id)
-        if workflow is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=[{'field': 'workflow_id', 'message': f'unsupported workflow family: {request.workflow_id}'}],
-            )
-        return create_run_record(request, workflow, settings, submitter, store)
-
-    @app.post('/runs/from-latest-design-draft', response_model=RunRecord, status_code=status.HTTP_201_CREATED)
-    def create_run_from_latest_design_draft() -> RunRecord:
-        design = store.get_latest_design_draft()
-        if design is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='design draft not found')
-        if design.status != 'ready_for_run':
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='design draft is not ready_for_run')
-        workflow = registry.get_workflow(design.workflow_id)
-        if workflow is None:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='workflow registry entry not found')
-        request = RunCreateRequest(
-            workflow_id=design.workflow_id,
-            objective=design.objective,
-            inputs=design.declared_inputs,
-            models=design.candidate_models or workflow.allowed_models[:1],
-            resource_profile=design.resource_profile,
-            submitted_by=design.submitted_by,
-        )
-        return create_run_record(
-            request,
-            workflow,
-            settings,
-            submitter,
-            store,
-            source_design_id=design.design_id,
-            source_intake_id=design.intake_id,
-            run_purpose='validation',
-            session_id=design.session_id,
-        )
-
-    @app.get('/runs/{run_id}', response_model=RunRecord)
-    def get_run(run_id: str) -> RunRecord:
-        record = store.get_run(run_id)
-        if record is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='run not found')
-        return record.model_copy(update={'status': resolve_run_status(record, settings, submitter)})
-
-    @app.get('/runs/{run_id}/artifacts', response_model=RunArtifactsResponse)
-    def get_run_artifacts(run_id: str) -> RunArtifactsResponse:
-        record = store.get_run(run_id)
-        if record is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='run not found')
-        artifacts = load_artifacts_from_disk(settings, run_id) or store.get_artifacts(run_id)
-        if artifacts is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='artifacts not found')
-        return RunArtifactsResponse(run_id=run_id, artifacts=artifacts)
-
-    @app.get('/runs/{run_id}/logs', response_model=RunLogsResponse)
-    def get_run_logs(run_id: str) -> RunLogsResponse:
-        record = store.get_run(run_id)
-        if record is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='run not found')
-        logs = load_logs_from_disk(settings, run_id)
-        if not logs:
-            logs = submitter.get_live_logs(record) or store.get_logs(run_id)
-        return RunLogsResponse(run_id=run_id, logs=logs)
 
     return app
 
