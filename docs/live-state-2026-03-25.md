@@ -13,6 +13,7 @@ Validated from `.44`:
 - the live agent model is `glasslab-ollama/qwen3:14b`
 - WhatsApp is linked on the dedicated assistant number and the live pod is listening for inbound messages
 - the new OpenClaw runtime includes the controlled-literature no-arg/latest-record operator tools
+- the new OpenClaw runtime now points the literature path at the session-scoped skill/read surface in `workflow-api`
 - native tool support is working on this path
 
 Validated operator-tool state:
@@ -27,7 +28,7 @@ Validated operator-tool state:
 Validated from `.44`:
 
 - `glasslab-workflow-api` is `Running`
-- the live image is `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.21-local`
+- the live image is `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.22-local`
 - `glasslab-interpretation-agent` is `Running`
 - `glasslab-intake-agent` is now deployed and healthy
 - the live image is `ghcr.io/offensivegeneric/glasslab-intake-agent:0.1.2-local`
@@ -38,6 +39,21 @@ Additional live backend state:
 
 - the controlled literature pipeline is now integrated in the live `workflow-api`
 - paper-intake queues and source-document records are first-class backend objects
+- research sessions now expose session-scoped skill routes for:
+  - research problem
+  - literature harvest
+  - paper intake
+  - interpretation
+  - assessment
+  - design
+- research sessions now expose session-scoped read routes for:
+  - research problem
+  - queue
+  - source document
+  - intake
+  - interpretation
+  - assessment
+  - design
 - interpretation outputs now carry:
   - `literature_state_summary`
   - `research_gaps`
