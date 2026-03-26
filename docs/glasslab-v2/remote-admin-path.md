@@ -34,6 +34,19 @@ From `.44`, the operator can then reach:
 - internal worker nodes
 - Mac service hosts such as `.23` and `.12`
 
+Thin helper wrappers now exist in the repo so this hop does not need to be rebuilt by hand every time:
+
+```bash
+export GLASSLAB_BASTION_PASS='...'
+export GLASSLAB_PROVISIONER_PASS='...'
+
+./scripts/remote-44.sh hostname
+./scripts/k44.sh get pods -n glasslab-v2
+./scripts/check-openclaw-turn.sh
+```
+
+These helpers do not change the control model. They only standardize the bastion -> `.44` path for repeatable rollouts and log inspection.
+
 ## Why This Matters
 
 This changes the operational meaning of issue `#21`.
