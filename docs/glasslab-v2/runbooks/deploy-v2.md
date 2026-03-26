@@ -39,6 +39,7 @@ GHCR_TOKEN="$(gh auth token)" ./scripts/create-ghcr-pull-secret.sh
 
 Current assumptions:
 - the `glasslab-v2` namespace contains a `glasslab-ghcr-pull` Docker registry secret
+- the shared PVCs `glasslab-shared-datasets` and `glasslab-shared-artifacts` exist and are `Bound`
 - the `workflow-api` Deployment pulls `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.8`
 - the bounded-agent Deployments pull:
   - `ghcr.io/offensivegeneric/glasslab-intake-agent:0.1.0`
@@ -47,6 +48,12 @@ Current assumptions:
   - `ghcr.io/offensivegeneric/glasslab-design-agent:0.1.0`
   - `ghcr.io/offensivegeneric/glasslab-schedule-worker:0.1.0`
 - the old import helper remains available as a fallback if GHCR is unavailable
+
+Prereq check:
+
+```bash
+./scripts/check-v2-run-prereqs.sh
+```
 
 6. Apply the initial v2 core manifest tree.
 

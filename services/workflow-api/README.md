@@ -20,6 +20,20 @@ Current durability warning:
 - session and stage metadata are still not in Postgres yet, so this is a bounded durability step rather than the final persistence architecture
 - artifact files and source-document blobs may be durable, but the coordinating metadata currently is not
 
+Current execution prerequisites:
+
+- dataset PVC: `glasslab-shared-datasets`
+- artifacts PVC: `glasslab-shared-artifacts`
+- image pull secret: `glasslab-ghcr-pull`
+- service account RBAC able to read:
+  - PVCs and secrets in `glasslab-v2`
+  - cluster `nodes`
+  - cluster `pods`
+
+The repo now includes a direct prereq checker:
+
+- `/home/gr66ss/cluster-config/scripts/check-v2-run-prereqs.sh`
+
 The first live execution path now targets Kubernetes Jobs in `glasslab-v2` for accepted `generic-tabular-benchmark` runs.
 
 Planned bounded stage-agent integration starts with the interpretation stage. The
