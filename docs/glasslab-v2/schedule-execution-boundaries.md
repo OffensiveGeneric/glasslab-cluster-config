@@ -2,6 +2,8 @@
 
 This note narrows issue `#30`.
 
+Issue `#55` sharpens the current execution contract so the repo does not describe schedule handling as more durable than it is.
+
 The current repo already has:
 
 - approval-tier guidance
@@ -52,6 +54,18 @@ If any of those checks fail, the schedule should:
 - not submit a Kubernetes Job
 - record a fail-closed reason
 - remain disabled or require explicit review
+
+## Current Execution Contract
+
+The current `workflow-api` implementation already enforces a narrow audit shape that should stay visible in docs and tests:
+
+- each due execution attempt writes a separate `ScheduledExecutionRecord`
+- the schedule row is updated with `last_execution_at`, `last_result_status`, and `last_result_detail`
+- a second execution in the same UTC minute is skipped by the current helper logic
+- the execution history is the append-only audit trail, not the mutable schedule row
+- `GET /scheduled-executions` and `list_executions(schedule_id=...)` are the stable read paths for that audit trail
+
+That is the minimum contract to preserve while scheduling stays inside `workflow-api`. It is not a claim that the scheduler itself is durable yet.
 
 ## `run-now` boundary
 
