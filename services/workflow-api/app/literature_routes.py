@@ -17,6 +17,7 @@ from .schemas import (
     PaperIntakeCandidateRecord,
     PaperIntakeQueueCreateRequest,
     PaperIntakeQueueRecord,
+    ResearchSessionBootstrapStatusResponse,
     ResearchSessionContextResponse,
     ResearchSessionCreateRequest,
     ResearchSessionRecord,
@@ -120,6 +121,37 @@ def register_literature_routes(
         if record is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
         return record
+
+    @app.get('/research-sessions/bootstrap-status', response_model=ResearchSessionBootstrapStatusResponse)
+    def get_research_session_bootstrap_status() -> ResearchSessionBootstrapStatusResponse:
+        session = store.get_latest_research_session()
+        problem = store.get_latest_research_problem()
+        if session is not None:
+            return ResearchSessionBootstrapStatusResponse(
+                active_session=session,
+                staged_research_problem=problem,
+                recommended_next_action='apply-session-skills',
+                can_create_session_from_latest_problem=problem is not None and problem.session_id is None,
+                can_apply_session_skills=True,
+                detail='an active research session exists; continue with session skills',
+            )
+        if problem is not None:
+            return ResearchSessionBootstrapStatusResponse(
+                active_session=None,
+                staged_research_problem=problem,
+                recommended_next_action='create-session-from-latest-problem',
+                can_create_session_from_latest_problem=True,
+                can_apply_session_skills=False,
+                detail='a research problem is staged, but no active session exists yet',
+            )
+        return ResearchSessionBootstrapStatusResponse(
+            active_session=None,
+            staged_research_problem=None,
+            recommended_next_action='create-session-manually',
+            can_create_session_from_latest_problem=False,
+            can_apply_session_skills=False,
+            detail='no active research session or staged research problem exists yet',
+        )
 
     @app.get('/research-sessions/{session_id}', response_model=ResearchSessionRecord)
     def get_research_session(session_id: str) -> ResearchSessionRecord:

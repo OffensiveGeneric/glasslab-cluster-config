@@ -10,6 +10,7 @@ routes:
   create_research_session: POST /research-sessions
   list_research_sessions: GET /research-sessions
   get_latest_research_session: GET /research-sessions/latest
+  get_research_session_bootstrap_status: GET /research-sessions/bootstrap-status
   get_latest_research_session_context: GET /research-sessions/latest/context
   create_research_session_from_latest_problem: POST /research-sessions/from-latest-research-problem
   stage_research_problem_from_latest_session: POST /research-sessions/latest/skills/research-problem

@@ -761,6 +761,43 @@ const plugin = {
 
     api.registerTool(
       {
+        name: "workflow_api_get_research_session_bootstrap_status",
+        description: "Check whether the literature workspace already has an active session, a staged research problem, or needs manual session bootstrap.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const { endpoint, payload } = await requestJson(api, "/research-sessions/bootstrap-status");
+            await appendAuditEvent({
+              tool: "workflow_api_get_research_session_bootstrap_status",
+              status: "ok",
+              endpoint,
+              recommended_next_action: payload?.recommended_next_action ?? null,
+              has_active_session: payload?.active_session ? true : false,
+              has_staged_research_problem: payload?.staged_research_problem ? true : false
+            });
+            return buildJsonResult({
+              endpoint,
+              bootstrap_status: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_get_research_session_bootstrap_status",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
         name: "workflow_api_create_research_session_from_latest_research_problem",
         description: "Create a persistent research session from the latest staged research problem.",
         parameters: {

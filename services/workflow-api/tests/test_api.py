@@ -1551,6 +1551,39 @@ def test_stage_and_get_latest_research_problem() -> None:
     assert latest.json()['problem_id'] == payload['problem_id']
 
 
+def test_research_session_bootstrap_status_reports_missing_state_and_staged_problem() -> None:
+    client = build_client()
+
+    initial = client.get('/research-sessions/bootstrap-status')
+    assert initial.status_code == 200
+    assert initial.json() == {
+        'active_session': None,
+        'staged_research_problem': None,
+        'recommended_next_action': 'create-session-manually',
+        'can_create_session_from_latest_problem': False,
+        'can_apply_session_skills': False,
+        'detail': 'no active research session or staged research problem exists yet',
+    }
+
+    staged = client.post(
+        '/research-problems',
+        json={
+            'problem_statement': 'Find a bounded benchmark for research agents doing machine learning engineering work.',
+            'submitted_by': 'operator',
+        },
+    )
+    assert staged.status_code == 201
+
+    after_problem = client.get('/research-sessions/bootstrap-status')
+    assert after_problem.status_code == 200
+    payload = after_problem.json()
+    assert payload['active_session'] is None
+    assert payload['staged_research_problem']['problem_id'] == staged.json()['problem_id']
+    assert payload['recommended_next_action'] == 'create-session-from-latest-problem'
+    assert payload['can_create_session_from_latest_problem'] is True
+    assert payload['can_apply_session_skills'] is False
+
+
 def test_create_pipeline_from_latest_research_problem(monkeypatch) -> None:
     client = build_client()
 

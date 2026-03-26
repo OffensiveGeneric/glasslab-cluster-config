@@ -490,6 +490,21 @@ class ResearchSessionContextResponse(BaseModel):
     run: RunRecord | None = None
 
 
+class ResearchSessionBootstrapStatusResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    active_session: ResearchSessionRecord | None = None
+    staged_research_problem: ResearchProblemRecord | None = None
+    recommended_next_action: Literal[
+        'create-session-manually',
+        'create-session-from-latest-problem',
+        'apply-session-skills',
+    ]
+    can_create_session_from_latest_problem: bool = False
+    can_apply_session_skills: bool = False
+    detail: str
+
+
 class FreshPaperPipelineResponse(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
