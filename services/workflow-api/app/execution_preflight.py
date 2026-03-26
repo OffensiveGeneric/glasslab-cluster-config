@@ -6,6 +6,7 @@ from typing import Any
 from services.common.schemas import WorkflowRegistryEntry
 
 from .config import Settings
+from .job_submission import validate_workflow_submission_support
 from .job_submission import _load_kube_config, _load_kube_modules
 from .schemas import ExecutionPreflightResult
 
@@ -54,13 +55,18 @@ def _parse_quantity(resource_name: str, value: str | None) -> int:
 
 def build_execution_preflight_result(workflow: WorkflowRegistryEntry, settings: Settings) -> ExecutionPreflightResult:
     warnings: list[str] = []
-    blocking_issues: list[str] = []
+    blocking_issues: list[str] = list(workflow.execution_blockers)
     resource_requests = dict(workflow.resource_profile.requests)
     resource_limits = dict(workflow.resource_profile.limits)
     node_selector = dict(workflow.resource_profile.node_selector)
 
     if not workflow.runner_image.strip():
         blocking_issues.append("workflow registry entry is missing runner_image")
+
+    submission_blockers = validate_workflow_submission_support(workflow)
+    for blocker in submission_blockers:
+        if blocker not in blocking_issues:
+            blocking_issues.append(blocker)
 
     if settings.job_submission_mode != "kubernetes":
         warnings.append("job submission mode is not kubernetes; live cluster preflight was skipped")
@@ -72,6 +78,8 @@ def build_execution_preflight_result(workflow: WorkflowRegistryEntry, settings: 
             resource_limits=resource_limits,
             node_selector=node_selector,
             job_submission_mode=settings.job_submission_mode,
+            execution_status=workflow.execution_status,
+            submission_backend=workflow.submission_backend,
             ready=not blocking_issues,
             eligible_nodes=[],
             blocking_issues=blocking_issues,
@@ -92,6 +100,8 @@ def build_execution_preflight_result(workflow: WorkflowRegistryEntry, settings: 
             resource_limits=resource_limits,
             node_selector=node_selector,
             job_submission_mode=settings.job_submission_mode,
+            execution_status=workflow.execution_status,
+            submission_backend=workflow.submission_backend,
             ready=False,
             eligible_nodes=[],
             blocking_issues=blocking_issues,
@@ -145,6 +155,8 @@ def build_execution_preflight_result(workflow: WorkflowRegistryEntry, settings: 
             resource_limits=resource_limits,
             node_selector=node_selector,
             job_submission_mode=settings.job_submission_mode,
+            execution_status=workflow.execution_status,
+            submission_backend=workflow.submission_backend,
             ready=False,
             eligible_nodes=[],
             blocking_issues=blocking_issues,
@@ -206,6 +218,8 @@ def build_execution_preflight_result(workflow: WorkflowRegistryEntry, settings: 
         resource_limits=resource_limits,
         node_selector=node_selector,
         job_submission_mode=settings.job_submission_mode,
+        execution_status=workflow.execution_status,
+        submission_backend=workflow.submission_backend,
         ready=not blocking_issues,
         eligible_nodes=eligible_nodes,
         blocking_issues=blocking_issues,

@@ -6,6 +6,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 ApprovalTier = Literal['tier-1-read-only', 'tier-2-approved-execution', 'tier-3-human-approval']
 InputType = Literal['dataset', 'paper_bundle', 'artifact_bundle', 'notes', 'text', 'url', 'parameter_set']
+ExecutionStatus = Literal['ready', 'experimental', 'declared_only', 'disabled']
+SubmissionBackend = Literal['kubernetes', 'null', 'unimplemented']
 
 
 class WorkflowInputSpec(BaseModel):
@@ -55,6 +57,9 @@ class WorkflowRegistryEntry(BaseModel):
     expected_artifacts: ExpectedArtifactsSpec
     resource_profile: ResourceProfileSpec
     approval_tier: ApprovalTier
+    execution_status: ExecutionStatus = 'ready'
+    submission_backend: SubmissionBackend = 'unimplemented'
+    execution_blockers: list[str] = Field(default_factory=list)
     runtime_requirements: dict[str, list[str] | int | float | str | bool] = Field(default_factory=dict)
 
     @field_validator('allowed_models')
@@ -73,3 +78,12 @@ class WorkflowRegistryEntry(BaseModel):
         if len(deduped) != len(names):
             raise ValueError('required_inputs names must be unique')
         return value
+
+    @field_validator('execution_blockers')
+    @classmethod
+    def validate_unique_execution_blockers(cls, value: list[str]) -> list[str]:
+        cleaned = [' '.join(item.split()) for item in value if item and item.strip()]
+        deduped = list(dict.fromkeys(cleaned))
+        if len(deduped) != len(cleaned):
+            raise ValueError('execution_blockers must be unique')
+        return deduped

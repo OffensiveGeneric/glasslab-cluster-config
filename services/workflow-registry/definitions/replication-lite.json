@@ -62,5 +62,10 @@
     },
     "node_selector": {}
   },
-  "approval_tier": "tier-3-human-approval"
+  "approval_tier": "tier-3-human-approval",
+  "execution_status": "declared_only",
+  "submission_backend": "unimplemented",
+  "execution_blockers": [
+    "runner-spec generation is not implemented in workflow-api job submission"
+  ]
 }

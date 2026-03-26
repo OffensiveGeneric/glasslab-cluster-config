@@ -2919,6 +2919,9 @@ def create_app(
                 allowed_models=entry.allowed_models,
                 resource_profile=entry.resource_profile.profile_name,
                 approval_tier=entry.approval_tier,
+                execution_status=entry.execution_status,
+                submission_backend=entry.submission_backend,
+                execution_blockers=entry.execution_blockers,
             )
             for entry in registry.list_workflows()
         ]

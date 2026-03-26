@@ -39,6 +39,11 @@ def test_healthz_and_workflow_families() -> None:
         'literature-to-experiment',
         'replication-lite',
     }
+    by_id = {entry['workflow_id']: entry for entry in payload}
+    assert by_id['generic-tabular-benchmark']['execution_status'] == 'ready'
+    assert by_id['generic-tabular-benchmark']['submission_backend'] == 'kubernetes'
+    assert by_id['replication-lite']['execution_status'] == 'declared_only'
+    assert by_id['replication-lite']['submission_backend'] == 'unimplemented'
 
 
 def test_create_and_fetch_latest_intake() -> None:
@@ -1918,8 +1923,25 @@ def test_workflow_execution_preflight_reports_current_contract() -> None:
     assert payload['resource_requests'] == {'cpu': '1', 'memory': '2Gi'}
     assert payload['resource_limits'] == {'cpu': '2', 'memory': '4Gi'}
     assert payload['job_submission_mode'] == 'null'
+    assert payload['execution_status'] == 'ready'
+    assert payload['submission_backend'] == 'kubernetes'
     assert payload['ready'] is True
     assert any('preflight was skipped' in warning for warning in payload['warnings'])
+
+
+def test_declared_only_workflow_reports_not_executable() -> None:
+    client = build_client()
+
+    response = client.get('/workflow-families/replication-lite/execution-preflight')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['workflow_id'] == 'replication-lite'
+    assert payload['execution_status'] == 'declared_only'
+    assert payload['submission_backend'] == 'unimplemented'
+    assert payload['ready'] is False
+    assert any('execution_status is declared_only' in issue for issue in payload['blocking_issues'])
+    assert any('submission_backend is unimplemented' in issue for issue in payload['blocking_issues'])
 
 
 def test_get_run_reflects_disk_artifacts_and_status(tmp_path) -> None:

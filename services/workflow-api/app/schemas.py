@@ -346,6 +346,9 @@ class WorkflowFamilySummary(BaseModel):
     allowed_models: list[str]
     resource_profile: str
     approval_tier: str
+    execution_status: str
+    submission_backend: str
+    execution_blockers: list[str] = Field(default_factory=list)
 
 
 class ExecutionPreflightResult(BaseModel):
@@ -358,6 +361,8 @@ class ExecutionPreflightResult(BaseModel):
     resource_limits: dict[str, str] = Field(default_factory=dict)
     node_selector: dict[str, str] = Field(default_factory=dict)
     job_submission_mode: str
+    execution_status: str
+    submission_backend: str
     ready: bool
     eligible_nodes: list[str] = Field(default_factory=list)
     blocking_issues: list[str] = Field(default_factory=list)

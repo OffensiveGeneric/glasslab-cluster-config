@@ -2,6 +2,18 @@
 
 `workflow-api` is the v2 orchestration backend. It accepts structured requests, validates them against the approved workflow registry, creates canonical run manifests, stores run state, and hands execution to a bounded job submission interface.
 
+Current architectural reality:
+
+- sessions are becoming the primary product object
+- skills/stages mutate session-owned state
+- workflow families are increasingly execution templates, not the whole ontology
+- mutating `latest` routes are still present for operator convenience, but should not be treated as the durable primary contract for automation
+
+Current durability warning:
+
+- the default store in code is still `InMemoryRunStore`
+- session and stage metadata are therefore not durable by default until a persistent store backend is added
+- artifact files and source-document blobs may be durable, but the coordinating metadata currently is not
 
 The first live execution path now targets Kubernetes Jobs in `glasslab-v2` for accepted `generic-tabular-benchmark` runs.
 
@@ -71,3 +83,8 @@ Execution is also more explicit now:
 - run acceptance now checks that preflight before submission
 - Kubernetes job submission now applies the registry-declared resource requests,
   limits, and node selector to the actual runner pod spec
+- workflow registry entries now declare:
+  - `execution_status`
+  - `submission_backend`
+  - `execution_blockers`
+- this lets preflight report "declared but not executable" instead of over-promising from the registry alone

@@ -64,5 +64,8 @@
     },
     "node_selector": {}
   },
-  "approval_tier": "tier-2-approved-execution"
+  "approval_tier": "tier-2-approved-execution",
+  "execution_status": "ready",
+  "submission_backend": "kubernetes",
+  "execution_blockers": []
 }

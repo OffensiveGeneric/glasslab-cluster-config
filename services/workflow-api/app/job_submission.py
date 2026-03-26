@@ -13,6 +13,19 @@ from .config import Settings
 from .schemas import JobSubmissionReceipt, LogEntry, RunRecord
 
 
+def workflow_submission_ready(workflow: RunManifest | Any) -> tuple[bool, list[str]]:
+    blockers = list(getattr(workflow, 'execution_blockers', []) or [])
+    execution_status = str(getattr(workflow, 'execution_status', 'ready')).strip()
+    submission_backend = str(getattr(workflow, 'submission_backend', 'unimplemented')).strip()
+
+    if execution_status != 'ready':
+        blockers.append(f'workflow execution_status is {execution_status}')
+    if submission_backend != 'kubernetes':
+        blockers.append(f'workflow submission_backend is {submission_backend}')
+
+    return (not blockers, blockers)
+
+
 class JobSubmitter(ABC):
     @abstractmethod
     def submit_run(self, manifest: RunManifest) -> JobSubmissionReceipt:
@@ -106,6 +119,51 @@ def _build_runner_spec(manifest: RunManifest) -> dict:
         }
 
     raise ValueError(f'workflow job submission is not implemented yet for {manifest.workflow_id}')
+
+
+def validate_workflow_submission_support(workflow: Any) -> list[str]:
+    _, blockers = workflow_submission_ready(workflow)
+    if blockers:
+        return blockers
+
+    placeholder_inputs: dict[str, Any] = {}
+    for input_spec in getattr(workflow, 'required_inputs', []) or []:
+        input_type = getattr(input_spec, 'input_type', 'text')
+        name = getattr(input_spec, 'name', 'input')
+        if input_type in {'dataset', 'url'}:
+            placeholder_inputs[name] = f's3://placeholder/{name}'
+        elif input_type == 'notes':
+            placeholder_inputs[name] = f'placeholder {name} notes'
+        elif input_type == 'parameter_set':
+            placeholder_inputs[name] = f'placeholder_{name}'
+        else:
+            placeholder_inputs[name] = f'placeholder-{name}'
+
+    try:
+        manifest = RunManifest(
+            run_id='preflight-dry-run',
+            workflow_id=workflow.workflow_id,
+            workflow_family=workflow.workflow_family,
+            display_name=workflow.display_name,
+            objective='dry-run submission validation',
+            submitted_by='workflow-api-preflight',
+            submitted_at=datetime.now(timezone.utc),
+            run_priority='user',
+            inputs=placeholder_inputs,
+            requested_models=list(workflow.allowed_models[:1]),
+            resource_profile=workflow.resource_profile.profile_name,
+            resource_requests=workflow.resource_profile.requests,
+            resource_limits=workflow.resource_profile.limits,
+            node_selector=workflow.resource_profile.node_selector,
+            runner_image=workflow.runner_image,
+            evaluator_type=workflow.evaluator_type,
+            approval_tier=workflow.approval_tier,
+            expected_artifacts=workflow.expected_artifacts.model_dump(mode='json'),
+        )
+        _build_runner_spec(manifest)
+    except Exception as exc:
+        blockers.append(f'workflow submission contract is not implemented: {exc}')
+    return blockers
 
 
 class KubernetesJobSubmitter(JobSubmitter):
