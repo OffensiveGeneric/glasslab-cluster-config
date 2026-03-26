@@ -31,6 +31,76 @@ function buildJsonResult(payload: unknown) {
   };
 }
 
+function truncateText(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(0, maxLength - 3)).trim()}...`;
+}
+
+function summarizeSession(session: any) {
+  if (!session || typeof session !== "object") {
+    return null;
+  }
+  return {
+    session_id: typeof session.session_id === "string" ? session.session_id : null,
+    status: typeof session.status === "string" ? session.status : null,
+    title: typeof session.title === "string" ? truncateText(session.title, 120) : null,
+    goal_statement:
+      typeof session.goal_statement === "string"
+        ? truncateText(session.goal_statement, 200)
+        : null
+  };
+}
+
+function summarizeResearchProblem(problem: any) {
+  if (!problem || typeof problem !== "object") {
+    return null;
+  }
+  const priorities = Array.isArray(problem.priorities)
+    ? problem.priorities.filter((item) => typeof item === "string").slice(0, 3)
+    : [];
+  return {
+    problem_id: typeof problem.problem_id === "string" ? problem.problem_id : null,
+    status: typeof problem.status === "string" ? problem.status : null,
+    problem_statement:
+      typeof problem.problem_statement === "string"
+        ? truncateText(problem.problem_statement, 200)
+        : null,
+    priorities
+  };
+}
+
+function summarizePaperIntakeQueue(queue: any) {
+  if (!queue || typeof queue !== "object") {
+    return null;
+  }
+  const candidates = Array.isArray(queue.candidates) ? queue.candidates : [];
+  const topCandidates = candidates.slice(0, 3).map((candidate) => ({
+    paper_ref: typeof candidate?.paper_ref === "string" ? candidate.paper_ref : null,
+    title: typeof candidate?.title === "string" ? truncateText(candidate.title, 160) : null,
+    intake_status: typeof candidate?.intake_status === "string" ? candidate.intake_status : null,
+    pdf_url: typeof candidate?.pdf_url === "string" ? candidate.pdf_url : null,
+    official_page:
+      typeof candidate?.official_page === "string" ? candidate.official_page : null
+  }));
+  const warnings = Array.isArray(queue.warnings)
+    ? queue.warnings.filter((item) => typeof item === "string").slice(0, 5)
+    : [];
+  return {
+    queue_id: typeof queue.queue_id === "string" ? queue.queue_id : null,
+    status: typeof queue.status === "string" ? queue.status : null,
+    problem_statement:
+      typeof queue.problem_statement === "string"
+        ? truncateText(queue.problem_statement, 200)
+        : null,
+    candidate_count: candidates.length,
+    warnings,
+    top_candidates: topCandidates
+  };
+}
+
 function resolvePaperIntakeRequest(api: any): Record<string, unknown> {
   const value = api?.pluginConfig?.paperIntakeRequest;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -948,10 +1018,10 @@ const plugin = {
               goal_excerpt: goalStatement.slice(0, 160)
             });
             return buildJsonResult({
-              goal_statement: goalStatement,
-              session,
-              research_problem: researchProblem,
-              paper_intake_queue: queue
+              goal_statement: truncateText(goalStatement, 200),
+              session: summarizeSession(session),
+              research_problem: summarizeResearchProblem(researchProblem),
+              paper_intake_queue: summarizePaperIntakeQueue(queue)
             });
           } catch (error) {
             await appendAuditEvent({
