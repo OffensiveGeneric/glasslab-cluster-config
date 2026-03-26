@@ -319,6 +319,22 @@ class ScheduledExecutionRecord(BaseModel):
     digest_payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class OperationRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    operation_id: str
+    operation_type: str
+    status: Literal['completed', 'failed']
+    started_at: datetime
+    finished_at: datetime
+    session_id: str | None = None
+    queue_id: str | None = None
+    document_id: str | None = None
+    intake_id: str | None = None
+    result_detail: str
+    error_detail: str | None = None
+
+
 class ValidationIssue(BaseModel):
     model_config = ConfigDict(extra='forbid')
 

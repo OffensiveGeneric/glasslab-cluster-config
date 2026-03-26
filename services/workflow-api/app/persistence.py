@@ -13,6 +13,7 @@ from .schemas import (
     IntakeRecord,
     InterpretationRecord,
     LogEntry,
+    OperationRecord,
     PaperIntakeQueueRecord,
     ResearchSessionRecord,
     ResearchProblemRecord,
@@ -180,6 +181,22 @@ class RunStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def save_operation(self, record: OperationRecord) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_operation(self, operation_id: str) -> OperationRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_latest_operation(self) -> OperationRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_operations(self, operation_type: str | None = None) -> list[OperationRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
     def append_log(self, run_id: str, entry: LogEntry) -> None:
         raise NotImplementedError
 
@@ -227,6 +244,8 @@ class InMemoryRunStore(RunStore):
         self._executions: dict[str, ScheduledExecutionRecord] = {}
         self._artifacts: dict[str, ArtifactsIndex] = {}
         self._logs: dict[str, list[LogEntry]] = {}
+        self._operations: dict[str, OperationRecord] = {}
+        self._latest_operation_id: str | None = None
         self._lock = Lock()
 
     def save_research_session(self, record: ResearchSessionRecord) -> None:
@@ -418,6 +437,28 @@ class InMemoryRunStore(RunStore):
         with self._lock:
             return self._artifacts.get(run_id)
 
+    def save_operation(self, record: OperationRecord) -> None:
+        with self._lock:
+            self._operations[record.operation_id] = record
+            self._latest_operation_id = record.operation_id
+
+    def get_operation(self, operation_id: str) -> OperationRecord | None:
+        with self._lock:
+            return self._operations.get(operation_id)
+
+    def get_latest_operation(self) -> OperationRecord | None:
+        with self._lock:
+            if self._latest_operation_id is None:
+                return None
+            return self._operations.get(self._latest_operation_id)
+
+    def list_operations(self, operation_type: str | None = None) -> list[OperationRecord]:
+        with self._lock:
+            records = list(self._operations.values())
+        if operation_type is not None:
+            records = [record for record in records if record.operation_type == operation_type]
+        return sorted(records, key=lambda record: record.started_at)
+
     def append_log(self, run_id: str, entry: LogEntry) -> None:
         with self._lock:
             self._logs.setdefault(run_id, []).append(entry)
@@ -469,6 +510,8 @@ class JsonFileRunStore(InMemoryRunStore):
             self._executions = _parse_record_map(payload.get('executions', {}), ScheduledExecutionRecord)
             self._artifacts = _parse_artifacts_map(payload.get('artifacts', {}))
             self._logs = _parse_logs_map(payload.get('logs', {}))
+            self._operations = _parse_record_map(payload.get('operations', {}), OperationRecord)
+            self._latest_operation_id = payload.get('latest_operation_id')
 
     def _flush(self) -> None:
         with self._lock:
@@ -503,6 +546,8 @@ class JsonFileRunStore(InMemoryRunStore):
                 'executions': {key: record.model_dump(mode='json') for key, record in self._executions.items()},
                 'artifacts': {key: record.model_dump(mode='json') for key, record in self._artifacts.items()},
                 'logs': {key: [entry.model_dump(mode='json') for entry in entries] for key, entries in self._logs.items()},
+                'operations': {key: record.model_dump(mode='json') for key, record in self._operations.items()},
+                'latest_operation_id': self._latest_operation_id,
             }
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
         self._state_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding='utf-8')
@@ -557,6 +602,10 @@ class JsonFileRunStore(InMemoryRunStore):
 
     def append_log(self, run_id: str, entry: LogEntry) -> None:
         super().append_log(run_id, entry)
+        self._flush()
+
+    def save_operation(self, record: OperationRecord) -> None:
+        super().save_operation(record)
         self._flush()
 
 

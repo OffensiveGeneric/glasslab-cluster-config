@@ -83,6 +83,18 @@ These are thin bounded aliases over the existing session-state path. The intent 
 - skills mutate that state in bounded ways
 - workflow families stay a later execution concern
 
+Operation-record endpoints:
+
+- `GET /operations`
+- `GET /operations/latest`
+- `GET /operations/{operation_id}`
+
+The first covered operation types are:
+
+- `literature-harvest`
+- `source-document-fetch`
+- `paper-intake`
+
 These let `workflow-api` persist a bounded queue of harvested paper candidates
 before interpretation/assessment/design work begins. The queue is intended to
 run in the background while later paper-understanding work is still being

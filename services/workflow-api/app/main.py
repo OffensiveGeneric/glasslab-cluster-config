@@ -35,6 +35,7 @@ from .schemas import (
     IntakeRecord,
     InterpretationRecord,
     LogEntry,
+    OperationRecord,
     PaperIntakeCandidateRecord,
     PaperIntakeQueueCreateRequest,
     PaperIntakeQueueRecord,
@@ -79,6 +80,36 @@ def log_stage_record_source(stage: str, source: str, record_id: str, **context: 
         if value:
             fields.append(f'{key}={value}')
     LOGGER.info('stage-record-created %s', ' '.join(fields))
+
+
+def record_operation(
+    store: RunStore,
+    *,
+    operation_type: str,
+    started_at: datetime,
+    status: str,
+    result_detail: str,
+    session_id: str | None = None,
+    queue_id: str | None = None,
+    document_id: str | None = None,
+    intake_id: str | None = None,
+    error_detail: str | None = None,
+) -> OperationRecord:
+    record = OperationRecord(
+        operation_id=uuid4().hex,
+        operation_type=operation_type,
+        status=status,
+        started_at=started_at,
+        finished_at=datetime.now(timezone.utc),
+        session_id=session_id,
+        queue_id=queue_id,
+        document_id=document_id,
+        intake_id=intake_id,
+        result_detail=result_detail,
+        error_detail=error_detail,
+    )
+    store.save_operation(record)
+    return record
 
 
 def summarize_session_title(title: str | None, goal_statement: str) -> str:
@@ -2788,6 +2819,7 @@ def create_app(
 
     @app.post('/paper-intake-queues/from-research-problem', response_model=PaperIntakeQueueRecord, status_code=status.HTTP_201_CREATED)
     def create_paper_intake_queue_from_research_problem(request: PaperIntakeQueueCreateRequest) -> PaperIntakeQueueRecord:
+        started_at = datetime.now(timezone.utc)
         harvester_request = ResearchProblemPipelineRequest(
             problem_statement=request.problem_statement,
             max_candidate_papers=request.max_candidate_papers,
@@ -2798,6 +2830,15 @@ def create_app(
         try:
             plan_payload = call_problem_harvester_plan(harvester_request, settings)
         except (urllib_error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+            record_operation(
+                store,
+                operation_type='literature-harvest',
+                started_at=started_at,
+                status='failed',
+                session_id=None,
+                result_detail='problem harvester failed',
+                error_detail=str(exc),
+            )
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f'problem harvester unavailable: {exc}')
 
         selected_track_ids = [
@@ -2832,6 +2873,15 @@ def create_app(
         )
         store.save_paper_intake_queue(record)
         touch_research_session(store, record.session_id, latest_queue_id=record.queue_id)
+        record_operation(
+            store,
+            operation_type='literature-harvest',
+            started_at=started_at,
+            status='completed',
+            session_id=record.session_id,
+            queue_id=record.queue_id,
+            result_detail=f'created paper intake queue with {len(record.candidates)} candidates',
+        )
         return record
 
     @app.get('/paper-intake-queues', response_model=list[PaperIntakeQueueRecord])
@@ -2854,6 +2904,7 @@ def create_app(
 
     @app.post('/paper-intake-queues/{queue_id}/stage-next-intake', response_model=IntakeRecord, status_code=status.HTTP_201_CREATED)
     def stage_next_intake_from_queue(queue_id: str) -> IntakeRecord:
+        started_at = datetime.now(timezone.utc)
         queue = store.get_paper_intake_queue(queue_id)
         if queue is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='paper intake queue not found')
@@ -2873,6 +2924,17 @@ def create_app(
                 session_id=queue.session_id,
             )
             store.save_source_document(source_document)
+            record_operation(
+                store,
+                operation_type='source-document-fetch',
+                started_at=started_at,
+                status='completed' if source_document.status == 'fetched' else 'failed',
+                session_id=queue.session_id,
+                queue_id=queue.queue_id,
+                document_id=source_document.document_id,
+                result_detail='source document fetched' if source_document.status == 'fetched' else 'source document fetch failed',
+                error_detail=source_document.fetch_error,
+            )
             if source_document.status == 'fetched':
                 document_refs.append(source_document.document_id)
             touch_research_session(store, queue.session_id, latest_document_id=source_document.document_id)
@@ -2904,6 +2966,16 @@ def create_app(
         )
         store.save_paper_intake_queue(updated_queue)
         touch_research_session(store, queue.session_id, latest_queue_id=updated_queue.queue_id, latest_intake_id=intake.intake_id)
+        record_operation(
+            store,
+            operation_type='paper-intake',
+            started_at=started_at,
+            status='completed',
+            session_id=queue.session_id,
+            queue_id=updated_queue.queue_id,
+            intake_id=intake.intake_id,
+            result_detail='staged next intake from queue',
+        )
         return intake
 
     @app.post('/research-sessions/{session_id}/skills/paper-intake', response_model=IntakeRecord, status_code=status.HTTP_201_CREATED)
@@ -2946,6 +3018,24 @@ def create_app(
         record = store.get_source_document(document_id)
         if record is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='source document not found')
+        return record
+
+    @app.get('/operations', response_model=list[OperationRecord])
+    def list_operations(operation_type: str | None = None) -> list[OperationRecord]:
+        return store.list_operations(operation_type=operation_type)
+
+    @app.get('/operations/latest', response_model=OperationRecord)
+    def get_latest_operation() -> OperationRecord:
+        record = store.get_latest_operation()
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='operation not found')
+        return record
+
+    @app.get('/operations/{operation_id}', response_model=OperationRecord)
+    def get_operation(operation_id: str) -> OperationRecord:
+        record = store.get_operation(operation_id)
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='operation not found')
         return record
 
     @app.get('/workflow-families', response_model=list[WorkflowFamilySummary])
