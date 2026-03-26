@@ -21,6 +21,8 @@ Canonical planning and architecture:
 - `overview.md`: repo-level architecture and control flow
 - `workflow-registry.md`: approved workflow family format
 - `services.md`: canonical run and artifact contract
+- `adr/README.md`: architecture decision records for the session/skill/template model
+- `adr/0001-session-skill-execution-model.md`: why sessions are the primary object and workflow families are execution templates
 - `research-pipeline-target.md`: the intended end-state product shape for Glasslab research workflows
 - `repo-review-2026-03-26.md`: current architecture concerns, bounded refactors, and issue follow-through after the shift toward session-centric research work
 - `stage-agent-pipeline.md`: specialized backend agent roles, handoffs, and why OpenClaw should stay at the edge
@@ -97,3 +99,10 @@ Operational and infrastructure references:
 - `runbooks/backup-restore-local-pv-services.md`: validated first backup/restore path for the local-PV-backed v2 services
 - `openclaw-shared-state-decision.md`: decision rule for whether the OpenClaw shared-state experiment should change the default storage path
 - `runbooks/`: operational steps once manifests and services land
+
+Repo-state rule of thumb:
+
+- `docs/` describes the intended and reviewed architecture
+- `kubeadm/glasslab-v2/` describes committed cluster manifests and deployment shape
+- `services/*/README.md` describes the committed service contract and local runtime assumptions
+- `.44` may still carry ignored secrets, exported bundles, and live cluster state that are not committed here

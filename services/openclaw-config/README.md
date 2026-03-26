@@ -4,6 +4,8 @@ This tree holds the repo-managed source-of-truth for OpenClaw agents, prompts, p
 
 It also carries the narrow chat-channel definitions used for first operator-facing validation.
 
+This tree is the committed config source, not the live runtime bundle.
+
 The OpenClaw container does not consume this YAML tree directly. `./scripts/export-openclaw-config.sh` converts it into the native runtime bundle used at deployment time.
 
 Runtime contract:
@@ -14,6 +16,13 @@ Runtime contract:
 - in-container runtime root: `/var/lib/openclaw/runtime`
 - in-container config path: `/var/lib/openclaw/runtime/openclaw.json`
 - in-container workspaces: `/var/lib/openclaw/runtime/workspaces/<agent>/`
+
+Live vs committed:
+
+- committed YAML in this tree is the source of truth for reviewable config
+- local secret manifests on `.44` provide live credentials and allowlists
+- the exported runtime bundle is the artifact actually mounted into the pod
+- the bundle can differ from this tree when local secrets or operator-only settings are applied
 
 First channel notes:
 
