@@ -17,6 +17,14 @@ first config surfaces now reserved are:
 
 Recent paper-intake endpoints:
 
+- `POST /research-sessions`
+- `GET /research-sessions`
+- `GET /research-sessions/latest`
+- `GET /research-sessions/latest/context`
+- `POST /research-sessions/from-latest-research-problem`
+- `POST /research-sessions/latest/research-problems/from-session-goal`
+- `POST /research-sessions/latest/paper-intake-queues/from-latest-problem`
+- `POST /research-sessions/latest/paper-intake-queues/stage-next-intake`
 - `POST /paper-intake-queues/from-research-problem`
 - `GET /paper-intake-queues`
 - `GET /paper-intake-queues/latest`
@@ -33,6 +41,14 @@ These let `workflow-api` persist a bounded queue of harvested paper candidates
 before interpretation/assessment/design work begins. The queue is intended to
 run in the background while later paper-understanding work is still being
 refined.
+
+The newer session layer makes that state conversationally usable:
+
+- a `ResearchSessionRecord` is now the stateful literature workspace
+- sessions track the latest problem, queue, document, intake, interpretation,
+  assessment, design, and run
+- workflow families stay execution-oriented
+- sessions are the stateful "how we think" layer for back-and-forth literature work
 
 When a queued paper is staged, `workflow-api` now fetches the paper URL and
 creates a `SourceDocumentRecord`. Storage is explicit:

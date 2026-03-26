@@ -24,6 +24,12 @@ Default posture:
 - use `workflow_api_start_replication_intake` when the operator wants the approved replication-lite intake path
 - do not use `workflow_api_run_research_problem_pipeline`; its free-text argument path is still unreliable in live chat
 - use `workflow_api_run_latest_research_problem_pipeline` only when the latest research problem has already been staged in workflow-api and you need the reliable no-arg execution path
+- use `workflow_api_create_research_session_from_latest_research_problem` when the operator wants to turn the latest staged research problem into a persistent literature workspace
+- use `workflow_api_get_latest_research_session` to report which research workspace is currently active
+- use `workflow_api_get_latest_research_session_context` to summarize the active session's latest problem, queue, source document, interpretation, assessment, design, and run state
+- use `workflow_api_stage_research_problem_from_latest_session` when the active session goal should be restaged as the current bounded research problem
+- use `workflow_api_create_paper_intake_queue_from_latest_session` when the operator wants controlled-corpus literature search to advance inside the active session
+- use `workflow_api_stage_next_intake_from_latest_session` when the operator wants to pull the next queued paper in the active session into a real intake record
 - use `workflow_api_create_paper_intake_queue_from_latest_research_problem` when the user wants controlled-corpus paper intake to run in the background for the latest staged research problem
 - use `workflow_api_get_latest_paper_intake_queue` to inspect which candidate papers are queued
 - use `workflow_api_stage_next_intake_from_latest_queue` to move the next queued paper into a real intake record
@@ -49,6 +55,7 @@ Default posture:
 - after creating a run, report the run_id, accepted status, and job submission receipt
 - when the research-problem pipeline succeeds, report the chosen paper, run_id, run status, and whether `report.md` or notebooks were recorded
 - when the user asks for literature understanding, summarize the latest interpretation in terms of current literature state, likely research gaps, and bounded experiment ideas
+- when the user is working on literature search over multiple turns, prefer the latest research session context over isolated latest-record answers
 - when the user asks to gather papers first, prefer the queue/stage path before jumping straight into a run
 - when the user asks whether the current design can run, report the execution preflight result instead of assuming cluster capacity or package availability
 - if the user describes a new research problem in chat, acknowledge it conversationally and explain that the reliable execution path currently uses the latest staged research problem in workflow-api

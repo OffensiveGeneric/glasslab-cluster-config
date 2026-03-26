@@ -438,7 +438,7 @@ def test_create_interpretation_uses_stored_source_document_context(monkeypatch) 
     monkeypatch.setattr(
         main_module,
         'ingest_source_document',
-        lambda source_url, submitted_by, settings, store: main_module.SourceDocumentRecord(
+        lambda source_url, submitted_by, settings, store, session_id=None: main_module.SourceDocumentRecord(
             document_id='doc-ctx-1',
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -451,6 +451,7 @@ def test_create_interpretation_uses_stored_source_document_context(monkeypatch) 
             sha256='def456',
             title='paper.html',
             text_excerpt='This paper evaluates research agents on machine learning engineering tasks using Kaggle-style benchmarks and reports accuracy improvements over a baseline.',
+            session_id=session_id,
         ),
     )
 
@@ -1703,7 +1704,7 @@ def test_stage_next_intake_from_paper_queue(monkeypatch) -> None:
     monkeypatch.setattr(
         main_module,
         'ingest_source_document',
-        lambda source_url, submitted_by, settings, store: main_module.SourceDocumentRecord(
+        lambda source_url, submitted_by, settings, store, session_id=None: main_module.SourceDocumentRecord(
             document_id='doc-1',
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -1715,6 +1716,7 @@ def test_stage_next_intake_from_paper_queue(monkeypatch) -> None:
             size_bytes=42,
             sha256='abc123',
             title='source.html',
+            session_id=session_id,
         ),
     )
 
@@ -1749,6 +1751,107 @@ def test_stage_next_intake_from_paper_queue(monkeypatch) -> None:
     latest_document = client.get('/source-documents/latest')
     assert latest_document.status_code == 200
     assert latest_document.json()['document_id'] == 'doc-1'
+
+
+def test_research_session_tracks_controlled_literature_state(monkeypatch) -> None:
+    client = build_client()
+
+    class FakeResponse:
+        def __init__(self, payload: dict) -> None:
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            import json
+            return json.dumps(self.payload).encode('utf-8')
+
+    monkeypatch.setattr(
+        main_module.urllib_request,
+        'urlopen',
+        lambda request_obj, timeout: FakeResponse(
+            {
+                'request_id': 'session-queue-1',
+                'selected_tracks': [{'track_id': 'agent_evaluation', 'track': 'agent_evaluation'}],
+                'selected_queries': [{'queries': ['controlled corpus literature search']}],
+                'selected_papers': [
+                    {
+                        'paper_id': 'mle_bench_arxiv_2024',
+                        'title': 'MLE-bench: Evaluating Machine Learning Agents on Machine Learning Engineering',
+                        'year': 2024,
+                        'venue': 'arXiv',
+                        'priority': 'P1',
+                        'tracks': ['agent_evaluation'],
+                        'bounded_job_fit': 4,
+                        'replication_complexity': 4,
+                        'official_page': 'https://arxiv.org/abs/2410.07095',
+                        'pdf_url': None,
+                        'why_seed': 'benchmark for measuring whether agents can do bounded ML engineering work on real tasks',
+                        'first_jobs': ['adapt a reduced internal benchmark using 3-5 public competitions or equivalent tasks'],
+                        'tags': ['agents'],
+                    }
+                ],
+                'warnings': [],
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        main_module,
+        'ingest_source_document',
+        lambda source_url, submitted_by, settings, store, session_id=None: main_module.SourceDocumentRecord(
+            document_id='session-doc-1',
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            status='fetched',
+            source_url=source_url,
+            submitted_by=submitted_by,
+            storage_uri='file:///tmp/source-documents/session-doc-1/source.html',
+            content_type='text/html',
+            size_bytes=42,
+            sha256='def456',
+            title='source.html',
+            text_excerpt='Controlled literature excerpt for session testing.',
+            session_id=session_id,
+        ),
+    )
+
+    session = client.post(
+        '/research-sessions',
+        json={
+            'goal_statement': 'Work on a controlled-corpus literature search for bounded ML engineering benchmarks.',
+            'priorities': ['controlled corpus', 'bounded experiments'],
+        },
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    problem = client.post(f'/research-sessions/{session_id}/research-problems/from-session-goal')
+    assert problem.status_code == 201
+    assert problem.json()['session_id'] == session_id
+
+    queue = client.post(f'/research-sessions/{session_id}/paper-intake-queues/from-latest-problem')
+    assert queue.status_code == 201
+    assert queue.json()['session_id'] == session_id
+
+    intake = client.post(f'/paper-intake-queues/{queue.json()["queue_id"]}/stage-next-intake')
+    assert intake.status_code == 201
+    assert intake.json()['session_id'] == session_id
+    assert intake.json()['document_refs'] == ['session-doc-1']
+
+    context = client.get('/research-sessions/latest/context')
+    assert context.status_code == 200
+    payload = context.json()
+    assert payload['session']['session_id'] == session_id
+    assert payload['session']['latest_problem_id'] == problem.json()['problem_id']
+    assert payload['session']['latest_queue_id'] == queue.json()['queue_id']
+    assert payload['session']['latest_document_id'] == 'session-doc-1'
+    assert payload['session']['latest_intake_id'] == intake.json()['intake_id']
+    assert payload['paper_intake_queue']['queue_id'] == queue.json()['queue_id']
+    assert payload['source_document']['document_id'] == 'session-doc-1'
 
 
 def test_resolve_intake_agent_base_url_handles_normalize_endpoint() -> None:

@@ -111,6 +111,45 @@ class PaperIntakeQueueCreateRequest(BaseModel):
         return deduped
 
 
+class ResearchSessionCreateRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    title: str | None = None
+    goal_statement: str = Field(min_length=12)
+    priorities: list[str] = Field(default_factory=list)
+    submitted_by: str | None = None
+
+    @field_validator('priorities')
+    @classmethod
+    def validate_unique_session_priorities(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value if item.strip()]
+        deduped = list(dict.fromkeys(cleaned))
+        if len(deduped) != len(cleaned):
+            raise ValueError('priorities entries must be unique')
+        return deduped
+
+
+class ResearchSessionRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    session_id: str
+    created_at: datetime
+    updated_at: datetime
+    status: str
+    title: str
+    goal_statement: str
+    priorities: list[str] = Field(default_factory=list)
+    submitted_by: str
+    latest_problem_id: str | None = None
+    latest_queue_id: str | None = None
+    latest_document_id: str | None = None
+    latest_intake_id: str | None = None
+    latest_interpretation_id: str | None = None
+    latest_assessment_id: str | None = None
+    latest_design_id: str | None = None
+    latest_run_id: str | None = None
+
+
 class ResearchProblemRecord(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -122,6 +161,7 @@ class ResearchProblemRecord(BaseModel):
     max_candidate_papers: int = Field(default=3, ge=1, le=10)
     priorities: list[str] = Field(default_factory=list)
     submitted_by: str
+    session_id: str | None = None
 
 
 class IntakeRecord(BaseModel):
@@ -139,6 +179,7 @@ class IntakeRecord(BaseModel):
     workflow_family_candidates: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
     submitted_by: str
+    session_id: str | None = None
 
 
 class InterpretationRecord(BaseModel):
@@ -161,6 +202,7 @@ class InterpretationRecord(BaseModel):
     bounded_experiment_ideas: list[str] = Field(default_factory=list)
     unresolved_questions: list[str] = Field(default_factory=list)
     submitted_by: str
+    session_id: str | None = None
 
 
 class ReplicabilityAssessmentRecord(BaseModel):
@@ -180,6 +222,7 @@ class ReplicabilityAssessmentRecord(BaseModel):
     approval_tier: str | None = None
     assessment_notes: list[str] = Field(default_factory=list)
     submitted_by: str
+    session_id: str | None = None
 
 
 class DesignDraftRecord(BaseModel):
@@ -202,6 +245,7 @@ class DesignDraftRecord(BaseModel):
     approval_tier: str
     design_notes: list[str] = Field(default_factory=list)
     submitted_by: str
+    session_id: str | None = None
 
 
 class DesignDraftReviewRequest(BaseModel):
@@ -335,6 +379,7 @@ class RunRecord(BaseModel):
     run_purpose: str | None = None
     run_priority: Literal['user', 'autonomous'] = 'user'
     validation_issues: list[ValidationIssue] = Field(default_factory=list)
+    session_id: str | None = None
 
 
 class PaperPipelineReportState(BaseModel):
@@ -388,6 +433,7 @@ class PaperIntakeQueueRecord(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     candidates: list[PaperIntakeCandidateRecord] = Field(default_factory=list)
     submitted_by: str
+    session_id: str | None = None
 
 
 class SourceDocumentRecord(BaseModel):
@@ -406,6 +452,21 @@ class SourceDocumentRecord(BaseModel):
     title: str | None = None
     text_excerpt: str | None = None
     fetch_error: str | None = None
+    session_id: str | None = None
+
+
+class ResearchSessionContextResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    session: ResearchSessionRecord
+    research_problem: ResearchProblemRecord | None = None
+    paper_intake_queue: PaperIntakeQueueRecord | None = None
+    source_document: SourceDocumentRecord | None = None
+    intake: IntakeRecord | None = None
+    interpretation: InterpretationRecord | None = None
+    assessment: ReplicabilityAssessmentRecord | None = None
+    design: DesignDraftRecord | None = None
+    run: RunRecord | None = None
 
 
 class FreshPaperPipelineResponse(BaseModel):

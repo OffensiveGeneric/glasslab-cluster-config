@@ -30,6 +30,14 @@ The current priority is:
 
 ## Current lane shape
 
+The newer state boundary above this lane is the research session:
+
+- a research session is the persistent literature workspace
+- sessions hold the current goal and track the latest problem, queue,
+  source document, intake, interpretation, assessment, design, and run
+- this lets OpenClaw talk about literature work as an ongoing session instead
+  of pretending every step is a separate workflow family
+
 1. source scouting and paper pulling
    - `intake-agent` owns the approved-source manifest
    - the paper-harvester surface exposes:

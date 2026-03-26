@@ -11,6 +11,7 @@ from .schemas import (
     InterpretationRecord,
     LogEntry,
     PaperIntakeQueueRecord,
+    ResearchSessionRecord,
     ResearchProblemRecord,
     ReplicabilityAssessmentRecord,
     RunRecord,
@@ -21,6 +22,22 @@ from .schemas import (
 
 
 class RunStore(ABC):
+    @abstractmethod
+    def save_research_session(self, record: ResearchSessionRecord) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_research_session(self, session_id: str) -> ResearchSessionRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_latest_research_session(self) -> ResearchSessionRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_research_sessions(self) -> list[ResearchSessionRecord]:
+        raise NotImplementedError
+
     @abstractmethod
     def save_intake(self, record: IntakeRecord) -> None:
         raise NotImplementedError
@@ -168,6 +185,8 @@ class RunStore(ABC):
 
 class InMemoryRunStore(RunStore):
     def __init__(self) -> None:
+        self._research_sessions: dict[str, ResearchSessionRecord] = {}
+        self._latest_research_session_id: str | None = None
         self._intakes: dict[str, IntakeRecord] = {}
         self._latest_intake_id: str | None = None
         self._interpretations: dict[str, InterpretationRecord] = {}
@@ -189,6 +208,26 @@ class InMemoryRunStore(RunStore):
         self._artifacts: dict[str, ArtifactsIndex] = {}
         self._logs: dict[str, list[LogEntry]] = {}
         self._lock = Lock()
+
+    def save_research_session(self, record: ResearchSessionRecord) -> None:
+        with self._lock:
+            self._research_sessions[record.session_id] = record
+            self._latest_research_session_id = record.session_id
+
+    def get_research_session(self, session_id: str) -> ResearchSessionRecord | None:
+        with self._lock:
+            return self._research_sessions.get(session_id)
+
+    def get_latest_research_session(self) -> ResearchSessionRecord | None:
+        with self._lock:
+            if self._latest_research_session_id is None:
+                return None
+            return self._research_sessions.get(self._latest_research_session_id)
+
+    def list_research_sessions(self) -> list[ResearchSessionRecord]:
+        with self._lock:
+            records = list(self._research_sessions.values())
+        return sorted(records, key=lambda record: record.created_at)
 
     def save_intake(self, record: IntakeRecord) -> None:
         with self._lock:

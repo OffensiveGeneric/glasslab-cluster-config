@@ -33,6 +33,15 @@ Short version:
 
 `message -> approved workflow -> staged execution -> artifacts -> evaluation -> report`
 
+One important refinement:
+
+- workflow families are how we run
+- research sessions are how we think across multiple conversational turns
+
+That means literature search, paper queues, stored source documents,
+interpretations, assessments, and design drafts should accumulate under a
+stateful research session before one execution family is finally chosen.
+
 ## What Glasslab Should Be
 
 Glasslab should become:

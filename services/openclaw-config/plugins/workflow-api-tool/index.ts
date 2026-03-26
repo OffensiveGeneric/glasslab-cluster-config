@@ -761,6 +761,259 @@ const plugin = {
 
     api.registerTool(
       {
+        name: "workflow_api_create_research_session_from_latest_research_problem",
+        description: "Create a persistent research session from the latest staged research problem.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const { endpoint, payload } = await requestJson(api, "/research-sessions/from-latest-research-problem", {
+              method: "POST"
+            });
+            await appendAuditEvent({
+              tool: "workflow_api_create_research_session_from_latest_research_problem",
+              status: "ok",
+              endpoint,
+              session_id: payload?.session_id ?? null,
+              title: payload?.title ?? null
+            });
+            return buildJsonResult({
+              endpoint,
+              session: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_create_research_session_from_latest_research_problem",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
+        name: "workflow_api_get_latest_research_session",
+        description: "Fetch the active research session record for the current literature workspace.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const { endpoint, payload } = await requestJson(api, "/research-sessions/latest");
+            await appendAuditEvent({
+              tool: "workflow_api_get_latest_research_session",
+              status: "ok",
+              endpoint,
+              session_id: payload?.session_id ?? null,
+              title: payload?.title ?? null
+            });
+            return buildJsonResult({
+              endpoint,
+              session: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_get_latest_research_session",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
+        name: "workflow_api_get_latest_research_session_context",
+        description: "Fetch the latest research session context, including the current problem, queue, documents, and downstream stage records.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const { endpoint, payload } = await requestJson(api, "/research-sessions/latest/context");
+            await appendAuditEvent({
+              tool: "workflow_api_get_latest_research_session_context",
+              status: "ok",
+              endpoint,
+              session_id: payload?.session?.session_id ?? null,
+              latest_problem_id: payload?.session?.latest_problem_id ?? null,
+              latest_queue_id: payload?.session?.latest_queue_id ?? null
+            });
+            return buildJsonResult({
+              endpoint,
+              session_context: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_get_latest_research_session_context",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
+        name: "workflow_api_stage_research_problem_from_latest_session",
+        description: "Restage the active research session goal as the latest bounded research problem.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const { payload: session } = await requestJson(api, "/research-sessions/latest");
+            const sessionId = typeof session?.session_id === "string" ? session.session_id.trim() : "";
+            if (!sessionId) {
+              throw new Error("latest research session did not include session_id");
+            }
+            const { endpoint, payload } = await requestJson(
+              api,
+              `/research-sessions/${encodeURIComponent(sessionId)}/research-problems/from-session-goal`,
+              {
+                method: "POST"
+              }
+            );
+            await appendAuditEvent({
+              tool: "workflow_api_stage_research_problem_from_latest_session",
+              status: "ok",
+              endpoint,
+              problem_id: payload?.problem_id ?? null,
+              session_id: payload?.session_id ?? null
+            });
+            return buildJsonResult({
+              endpoint,
+              research_problem: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_stage_research_problem_from_latest_session",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
+        name: "workflow_api_create_paper_intake_queue_from_latest_session",
+        description: "Create a controlled-corpus paper intake queue for the active research session.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const { payload: session } = await requestJson(api, "/research-sessions/latest");
+            const sessionId = typeof session?.session_id === "string" ? session.session_id.trim() : "";
+            if (!sessionId) {
+              throw new Error("latest research session did not include session_id");
+            }
+            const { endpoint, payload } = await requestJson(
+              api,
+              `/research-sessions/${encodeURIComponent(sessionId)}/paper-intake-queues/from-latest-problem`,
+              {
+                method: "POST"
+              }
+            );
+            await appendAuditEvent({
+              tool: "workflow_api_create_paper_intake_queue_from_latest_session",
+              status: "ok",
+              endpoint,
+              queue_id: payload?.queue_id ?? null,
+              session_id: payload?.session_id ?? null,
+              candidate_count: Array.isArray(payload?.candidates) ? payload.candidates.length : null
+            });
+            return buildJsonResult({
+              endpoint,
+              queue: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_create_paper_intake_queue_from_latest_session",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
+        name: "workflow_api_stage_next_intake_from_latest_session",
+        description: "Stage the next queued paper from the active research session into a real intake record.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const { payload: session } = await requestJson(api, "/research-sessions/latest");
+            const queueId = typeof session?.latest_queue_id === "string" ? session.latest_queue_id.trim() : "";
+            if (!queueId) {
+              throw new Error("latest research session did not include latest_queue_id");
+            }
+            const { endpoint, payload } = await requestJson(
+              api,
+              `/paper-intake-queues/${encodeURIComponent(queueId)}/stage-next-intake`,
+              {
+                method: "POST"
+              }
+            );
+            await appendAuditEvent({
+              tool: "workflow_api_stage_next_intake_from_latest_session",
+              status: "ok",
+              endpoint,
+              intake_id: payload?.intake_id ?? null,
+              session_id: payload?.session_id ?? null
+            });
+            return buildJsonResult({
+              endpoint,
+              intake: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_stage_next_intake_from_latest_session",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
         name: "workflow_api_create_paper_intake_queue_from_latest_research_problem",
         description: "Create a controlled-corpus paper intake queue from the latest staged research problem.",
         parameters: {

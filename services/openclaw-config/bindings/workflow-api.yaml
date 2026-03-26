@@ -7,6 +7,14 @@ routes:
   run_research_problem_pipeline: POST /paper-pipelines/from-research-problem
   stage_research_problem: POST /research-problems
   get_latest_research_problem: GET /research-problems/latest
+  create_research_session: POST /research-sessions
+  list_research_sessions: GET /research-sessions
+  get_latest_research_session: GET /research-sessions/latest
+  get_latest_research_session_context: GET /research-sessions/latest/context
+  create_research_session_from_latest_problem: POST /research-sessions/from-latest-research-problem
+  stage_research_problem_from_latest_session: POST /research-sessions/latest/research-problems/from-session-goal
+  create_paper_intake_queue_from_latest_session_problem: POST /research-sessions/latest/paper-intake-queues/from-latest-problem
+  stage_next_intake_from_latest_session_queue: POST /research-sessions/latest/paper-intake-queues/stage-next-intake
   run_latest_research_problem_pipeline: POST /paper-pipelines/from-latest-research-problem
   create_paper_intake_queue_from_research_problem: POST /paper-intake-queues/from-research-problem
   get_latest_paper_intake_queue: GET /paper-intake-queues/latest
