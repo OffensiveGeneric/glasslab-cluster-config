@@ -9,6 +9,16 @@ The product should read as session-first:
 - sessions hold the durable research state and are the main object operators work in
 - skills are bounded capabilities that update that session state in controlled steps
 - workflow families are execution templates selected only when the work is ready to run
+- the first operator step should recover the latest session or create one from the latest staged research problem before jumping to execution templates
+
+## Operator Bootstrap
+
+If the operator is missing required state, keep the response narrow:
+
+- name the missing prerequisite
+- give one concrete next step
+- do not chain unrelated recovery actions in the same turn
+- prefer session-scoped reads and writes over global `latest` answers once a session exists
 
 ## Roles
 

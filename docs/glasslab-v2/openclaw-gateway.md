@@ -44,6 +44,23 @@ Reference:
 - `designer`: maps structured requests to approved workflow families
 - `reporter`: summarizes artifacts and evaluator output for humans
 
+## First Operator Step
+
+OpenClaw should treat the first meaningful operator turn as a session bootstrap step, not a workflow-family lookup.
+
+Preferred flow:
+
+- recover the latest research session if one already exists
+- create a new session from the latest staged research problem when that is the approved entry point
+- only fall back to intake, queue, design, or run actions after the required session state is present
+
+Missing-state rule:
+
+- if a required session, research problem, queue, or design record does not exist, say which prerequisite is missing
+- give one concrete next step
+- do not retry the same missing-state path with a different tool in the same turn
+- if a backend route returns `404` for missing session state, stop there and surface the prerequisite gap plainly
+
 ## Default disabled tools
 
 The default policy should deny:

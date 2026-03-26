@@ -38,6 +38,8 @@ Use `./scripts/export-openclaw-config.sh --output-dir /tmp/openclaw-runtime --no
 Maintainer note:
 
 - keep the OpenClaw surface session-first
+- treat the first operator invocation as a session bootstrap or session recovery step before workflow-family selection
+- if the required session state is missing, the operator should name the missing prerequisite and give one concrete next step instead of chaining recovery attempts
 - use skills as bounded capability calls that mutate a session in controlled steps
 - treat workflow families as execution templates selected after the session state is ready
 - do not let prompt wording imply that workflow families are the main product object
