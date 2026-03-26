@@ -26,6 +26,7 @@ from .literature_routes import register_literature_routes
 from .persistence import RunStore, create_run_store
 from .registry import WorkflowRegistry
 from .session_helpers import (
+    build_research_problem_request_from_session,
     build_research_session_context,
     build_research_session_record,
     get_required_research_session,
@@ -57,7 +58,6 @@ from .schemas import (
     PaperIntakeQueueCreateRequest,
     PaperIntakeQueueRecord,
     PaperPipelineReportState,
-    ResearchSessionRecord,
     ResearchProblemPaperCandidate,
     ResearchProblemRecord,
     ResearchProblemPipelineRequest,
@@ -1176,19 +1176,6 @@ def build_research_problem_request_from_record(
         max_candidate_papers=record.max_candidate_papers,
         priorities=record.priorities,
         submitted_by=record.submitted_by or settings.default_submitted_by,
-    )
-
-
-def build_research_problem_request_from_session(
-    session: ResearchSessionRecord,
-    settings: Settings,
-) -> ResearchProblemPipelineRequest:
-    return ResearchProblemPipelineRequest(
-        problem_statement=session.goal_statement,
-        max_candidate_papers=5,
-        priorities=session.priorities,
-        submitted_by=session.submitted_by or settings.default_submitted_by,
-        wait_for_terminal_state=False,
     )
 
 

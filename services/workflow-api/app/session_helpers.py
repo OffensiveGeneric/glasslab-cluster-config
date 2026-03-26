@@ -10,6 +10,7 @@ from .persistence import RunStore
 from .schemas import (
     IntakeRecord,
     InterpretationRecord,
+    ResearchProblemPipelineRequest,
     ResearchSessionContextResponse,
     ResearchSessionCreateRequest,
     ResearchSessionRecord,
@@ -41,6 +42,19 @@ def build_research_session_record(
         goal_statement=request.goal_statement.strip(),
         priorities=request.priorities,
         submitted_by=request.submitted_by or settings.default_submitted_by,
+    )
+
+
+def build_research_problem_request_from_session(
+    session: ResearchSessionRecord,
+    settings: Settings,
+) -> ResearchProblemPipelineRequest:
+    return ResearchProblemPipelineRequest(
+        problem_statement=session.goal_statement,
+        max_candidate_papers=5,
+        priorities=session.priorities,
+        submitted_by=session.submitted_by or settings.default_submitted_by,
+        wait_for_terminal_state=False,
     )
 
 
