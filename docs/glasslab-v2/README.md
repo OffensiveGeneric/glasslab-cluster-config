@@ -22,6 +22,7 @@ Canonical planning and architecture:
 - `workflow-registry.md`: approved workflow family format
 - `services.md`: canonical run and artifact contract
 - `research-pipeline-target.md`: the intended end-state product shape for Glasslab research workflows
+- `repo-review-2026-03-26.md`: current architecture concerns, bounded refactors, and issue follow-through after the shift toward session-centric research work
 - `stage-agent-pipeline.md`: specialized backend agent roles, handoffs, and why OpenClaw should stay at the edge
 - `stage-agent-rollout-order.md`: recommended stage-by-stage enablement order for the bounded-agent pipeline
 - `bounded-agent-live-enable-criteria.md`: shared live rollout milestone for intake, interpretation, assessment, and design agents
