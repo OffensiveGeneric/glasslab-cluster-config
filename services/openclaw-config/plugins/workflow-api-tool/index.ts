@@ -873,7 +873,7 @@ const plugin = {
     api.registerTool(
       {
         name: "workflow_api_stage_research_problem_from_latest_session",
-        description: "Restage the active research session goal as the latest bounded research problem.",
+        description: "Apply the research-problem skill to the active research session.",
         parameters: {
           type: "object",
           additionalProperties: false,
@@ -888,7 +888,7 @@ const plugin = {
             }
             const { endpoint, payload } = await requestJson(
               api,
-              `/research-sessions/${encodeURIComponent(sessionId)}/research-problems/from-session-goal`,
+              `/research-sessions/${encodeURIComponent(sessionId)}/skills/research-problem`,
               {
                 method: "POST"
               }
@@ -920,7 +920,7 @@ const plugin = {
     api.registerTool(
       {
         name: "workflow_api_create_paper_intake_queue_from_latest_session",
-        description: "Create a controlled-corpus paper intake queue for the active research session.",
+        description: "Apply the literature-harvest skill to the active research session.",
         parameters: {
           type: "object",
           additionalProperties: false,
@@ -935,7 +935,7 @@ const plugin = {
             }
             const { endpoint, payload } = await requestJson(
               api,
-              `/research-sessions/${encodeURIComponent(sessionId)}/paper-intake-queues/from-latest-problem`,
+              `/research-sessions/${encodeURIComponent(sessionId)}/skills/literature-harvest`,
               {
                 method: "POST"
               }
@@ -968,7 +968,7 @@ const plugin = {
     api.registerTool(
       {
         name: "workflow_api_stage_next_intake_from_latest_session",
-        description: "Stage the next queued paper from the active research session into a real intake record.",
+        description: "Apply the paper-intake skill to the active research session.",
         parameters: {
           type: "object",
           additionalProperties: false,
@@ -977,13 +977,13 @@ const plugin = {
         async execute() {
           try {
             const { payload: session } = await requestJson(api, "/research-sessions/latest");
-            const queueId = typeof session?.latest_queue_id === "string" ? session.latest_queue_id.trim() : "";
-            if (!queueId) {
-              throw new Error("latest research session did not include latest_queue_id");
+            const sessionId = typeof session?.session_id === "string" ? session.session_id.trim() : "";
+            if (!sessionId) {
+              throw new Error("latest research session did not include session_id");
             }
             const { endpoint, payload } = await requestJson(
               api,
-              `/paper-intake-queues/${encodeURIComponent(queueId)}/stage-next-intake`,
+              `/research-sessions/${encodeURIComponent(sessionId)}/skills/paper-intake`,
               {
                 method: "POST"
               }
@@ -1002,6 +1002,42 @@ const plugin = {
           } catch (error) {
             await appendAuditEvent({
               tool: "workflow_api_stage_next_intake_from_latest_session",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
+        name: "workflow_api_get_latest_operation",
+        description: "Fetch the latest recorded workflow-api operation for the literature/session path.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const { endpoint, payload } = await requestJson(api, "/operations/latest");
+            await appendAuditEvent({
+              tool: "workflow_api_get_latest_operation",
+              status: "ok",
+              endpoint,
+              operation_id: payload?.operation_id ?? null,
+              operation_type: payload?.operation_type ?? null
+            });
+            return buildJsonResult({
+              endpoint,
+              operation: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_get_latest_operation",
               status: "error",
               error: error instanceof Error ? error.message : String(error)
             });

@@ -27,14 +27,15 @@ Default posture:
 - use `workflow_api_create_research_session_from_latest_research_problem` when the operator wants to turn the latest staged research problem into a persistent literature workspace
 - use `workflow_api_get_latest_research_session` to report which research workspace is currently active
 - use `workflow_api_get_latest_research_session_context` to summarize the active session's latest problem, queue, source document, interpretation, assessment, design, and run state
-- use `workflow_api_stage_research_problem_from_latest_session` when the active session goal should be restaged as the current bounded research problem
-- use `workflow_api_create_paper_intake_queue_from_latest_session` when the operator wants controlled-corpus literature search to advance inside the active session
-- use `workflow_api_stage_next_intake_from_latest_session` when the operator wants to pull the next queued paper in the active session into a real intake record
+- use `workflow_api_stage_research_problem_from_latest_session` when the active session should apply the bounded research-problem skill
+- use `workflow_api_create_paper_intake_queue_from_latest_session` when the active session should apply the controlled-corpus literature-harvest skill
+- use `workflow_api_stage_next_intake_from_latest_session` when the active session should apply the paper-intake skill and pull the next queued paper into a real intake record
 - use `workflow_api_create_paper_intake_queue_from_latest_research_problem` when the user wants controlled-corpus paper intake to run in the background for the latest staged research problem
 - use `workflow_api_get_latest_paper_intake_queue` to inspect which candidate papers are queued
 - use `workflow_api_stage_next_intake_from_latest_queue` to move the next queued paper into a real intake record
 - use `workflow_api_get_last_intake` to recover the latest backend-owned intake record
 - use `workflow_api_get_latest_source_document` to inspect the latest fetched paper/webpage document record instead of guessing what was stored
+- use `workflow_api_get_latest_operation` to inspect what the backend most recently did during literature harvest, source-document fetch, or paper intake
 - use `workflow_api_get_latest_interpretation` to report the current literature-state summary, research gaps, and bounded experiment ideas
 - use `workflow_api_create_assessment_from_latest_interpretation` to advance the latest interpreted paper into an assessment
 - use `workflow_api_get_latest_assessment` to inspect the latest assessment before recommending design or execution

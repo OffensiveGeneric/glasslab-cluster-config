@@ -123,6 +123,65 @@ def test_problem_harvester_plan_matches_agent_evaluation_problem() -> None:
     assert any(track.track_id == 'agent_evaluation' for track in plan.selected_tracks)
     assert plan.selected_papers
     assert plan.selected_papers[0].paper_id in {'mle_bench_arxiv_2024', 'mlgym_arxiv_2025'}
+    assert plan.coverage_summary.coverage_mode == 'strong'
+    assert 'agent_evaluation' in plan.coverage_summary.matched_track_ids
+    assert plan.coverage_summary.problem_token_count > 0
+
+
+def test_problem_harvester_plan_surfaces_weak_coverage_diagnostics(monkeypatch) -> None:
+    monkeypatch.setattr(
+        main_module,
+        'load_tracks',
+        lambda: [
+            models_module.TrackDefinition(
+                track_id='unrelated_track',
+                description='zzz qqq rrr',
+                default_priority='P1',
+                queries=['xxx yyy zzz'],
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        main_module,
+        'load_seed_papers',
+        lambda: [
+            models_module.SeedPaperSummary(
+                paper_id='tabular_seed_1',
+                title='Tabular Baseline Seed Paper',
+                year=2024,
+                venue='arXiv',
+                venue_id='arxiv',
+                priority='P1',
+                tracks=['unrelated_track'],
+                bounded_job_fit=3,
+                replication_complexity=2,
+                official_page='https://example.org/tabular-seed',
+                pdf_url=None,
+                why_seed='Seed corpus placeholder',
+                first_jobs=['run the baseline as-is'],
+                tags=['tabular'],
+            )
+        ],
+    )
+
+    plan = build_problem_harvester_plan(
+        models_module.ProblemHarvesterPlanRequest(
+            request_id='problem-weak-1',
+            problem_statement='We need papers on underwater robotics for coral mapping and lunar agriculture.',
+            max_papers=2,
+        )
+    )
+    assert plan.selected_tracks == []
+    assert plan.selected_papers
+    assert plan.coverage_summary.coverage_mode == 'fallback'
+    assert plan.coverage_summary.matched_track_ids == []
+    assert plan.coverage_summary.selected_track_scores == {}
+    assert plan.coverage_summary.selected_paper_scores['tabular_seed_1'] == 0
+    assert any(
+        'weakly overlaps the approved seed manifest' in warning
+        or 'no track-level seed match' in warning
+        for warning in plan.warnings
+    )
 
 
 def test_problem_harvester_plan_endpoint() -> None:
@@ -140,6 +199,8 @@ def test_problem_harvester_plan_endpoint() -> None:
     assert payload['selected_tracks']
     assert len(payload['selected_papers']) <= 2
     assert payload['approved_sources']['paper_count'] == 12
+    assert payload['coverage_summary']['coverage_mode'] in {'strong', 'thin', 'fallback'}
+    assert 'problem_token_count' in payload['coverage_summary']
 
 
 def test_build_normalized_draft() -> None:

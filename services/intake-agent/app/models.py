@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -127,6 +127,18 @@ class ProblemHarvesterPlanRequest(BaseModel):
         return deduped
 
 
+class HarvesterCoverageSummary(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    coverage_mode: Literal['strong', 'thin', 'fallback', 'filtered']
+    problem_token_count: int = 0
+    matched_track_ids: list[str] = Field(default_factory=list)
+    fallback_track_ids: list[str] = Field(default_factory=list)
+    selected_track_scores: dict[str, int] = Field(default_factory=dict)
+    selected_paper_scores: dict[str, int] = Field(default_factory=dict)
+    notes: list[str] = Field(default_factory=list)
+
+
 class PaperHarvesterPlanResponse(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -135,6 +147,7 @@ class PaperHarvesterPlanResponse(BaseModel):
     selected_queries: list[TrackQueryEntry] = Field(default_factory=list)
     selected_papers: list[SeedPaperSummary] = Field(default_factory=list)
     approved_sources: ApprovedSourcesSummary
+    coverage_summary: HarvesterCoverageSummary
     warnings: list[str] = Field(default_factory=list)
 
 

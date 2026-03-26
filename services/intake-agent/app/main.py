@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from .models import (
     ApprovedSourcesSummary,
     HealthResponse,
+    HarvesterCoverageSummary,
     ModelBackendMetadata,
     NormalizeIntakeRequest,
     NormalizeIntakeResponse,
@@ -243,6 +244,55 @@ def score_paper_for_problem(paper: SeedPaperSummary, problem_tokens: set[str]) -
     return (len(overlap), paper.bounded_job_fit, -paper.replication_complexity)
 
 
+def build_coverage_summary(
+    problem_statement: str,
+    scored_tracks: list[tuple[int, TrackDefinition]],
+    selected_tracks: list[TrackDefinition],
+    selected_papers: list[SeedPaperSummary],
+    *,
+    fallback_track_ids: list[str] | None = None,
+) -> HarvesterCoverageSummary:
+    problem_tokens = tokenize(problem_statement)
+    score_map = {track.track_id: score for score, track in scored_tracks}
+    selected_track_scores = {
+        track.track_id: score_map.get(track.track_id, 0)
+        for track in selected_tracks
+    }
+    selected_paper_scores = {
+        paper.paper_id: score_paper_for_problem(paper, problem_tokens)[0]
+        for paper in selected_papers
+    }
+    matched_track_ids = [track.track_id for score, track in scored_tracks if score > 0]
+    fallback_track_ids = fallback_track_ids or []
+    notes: list[str] = []
+    coverage_mode = 'strong'
+
+    best_track_score = max(score_map.values(), default=0)
+    best_paper_score = max(selected_paper_scores.values(), default=0)
+
+    if not matched_track_ids:
+        coverage_mode = 'fallback'
+        notes.append('no track-level match; plan was built from the approved seed corpus fallback')
+    elif best_track_score <= 1 or best_paper_score <= 1:
+        coverage_mode = 'thin'
+        notes.append('problem only weakly overlaps the approved seed manifest')
+
+    if selected_papers and best_paper_score == 0:
+        notes.append('selected papers have no lexical overlap with the problem statement; treat this as a coarse seed shortlist')
+    if not selected_papers:
+        notes.append('no approved seed papers matched strongly enough')
+
+    return HarvesterCoverageSummary(
+        coverage_mode=coverage_mode,
+        problem_token_count=len(problem_tokens),
+        matched_track_ids=matched_track_ids,
+        fallback_track_ids=fallback_track_ids,
+        selected_track_scores=selected_track_scores,
+        selected_paper_scores=selected_paper_scores,
+        notes=notes,
+    )
+
+
 def build_problem_harvester_plan(request: ProblemHarvesterPlanRequest) -> PaperHarvesterPlanResponse:
     problem_tokens = tokenize(request.problem_statement)
     tracks = load_tracks()
@@ -251,8 +301,10 @@ def build_problem_harvester_plan(request: ProblemHarvesterPlanRequest) -> PaperH
         for track in tracks
     ]
     selected_tracks = [track for score, track in scored_tracks if score > 0]
+    fallback_track_ids: list[str] = []
     if not selected_tracks:
         selected_tracks = [track for track in tracks if track.track_id in {'literature_screening', 'benchmarks_reproducibility'}]
+        fallback_track_ids = [track.track_id for track in selected_tracks]
     selected_track_ids = [track.track_id for track in selected_tracks]
     selected_queries = [
         TrackQueryEntry(track=track.track_id, queries=track.queries)
@@ -268,6 +320,17 @@ def build_problem_harvester_plan(request: ProblemHarvesterPlanRequest) -> PaperH
     selected_papers = candidate_papers[:request.max_papers]
 
     warnings: list[str] = []
+    coverage_summary = build_coverage_summary(
+        request.problem_statement,
+        scored_tracks,
+        selected_tracks,
+        selected_papers,
+        fallback_track_ids=fallback_track_ids,
+    )
+    if coverage_summary.coverage_mode == 'fallback':
+        warnings.append('no track-level seed match; literature harvest is using the approved corpus fallback')
+    elif coverage_summary.coverage_mode == 'thin':
+        warnings.append('problem only weakly overlaps the approved seed manifest; selected papers may be coarse matches')
     if not selected_papers:
         warnings.append('no approved seed papers matched the research problem strongly enough')
 
@@ -277,6 +340,7 @@ def build_problem_harvester_plan(request: ProblemHarvesterPlanRequest) -> PaperH
         selected_queries=selected_queries,
         selected_papers=selected_papers,
         approved_sources=load_approved_sources_summary(),
+        coverage_summary=coverage_summary,
         warnings=warnings,
     )
 
@@ -300,12 +364,23 @@ def build_harvester_plan(request: PaperHarvesterPlanRequest) -> PaperHarvesterPl
     if not selected_papers:
         warnings.append('no seed papers matched the requested track/priority filters')
 
+    coverage_summary = HarvesterCoverageSummary(
+        coverage_mode='filtered',
+        problem_token_count=0,
+        matched_track_ids=selected_track_ids,
+        fallback_track_ids=[],
+        selected_track_scores={track.track_id: 0 for track in selected_tracks},
+        selected_paper_scores={paper.paper_id: paper.bounded_job_fit for paper in selected_papers},
+        notes=['track/priority filter applied against the approved seed corpus'],
+    )
+
     return PaperHarvesterPlanResponse(
         request_id=request.request_id,
         selected_tracks=selected_tracks,
         selected_queries=selected_queries,
         selected_papers=selected_papers,
         approved_sources=load_approved_sources_summary(),
+        coverage_summary=coverage_summary,
         warnings=warnings,
     )
 

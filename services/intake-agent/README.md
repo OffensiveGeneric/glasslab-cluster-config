@@ -56,6 +56,12 @@ source-scout agent can ask for:
 - filtered seed-paper lists
 - a first bounded harvest plan by track/priority
 
+The harvester plan responses now also include a structured `coverage_summary`
+so weak seed-manifest matches are explicit instead of implicit. When the
+problem statement only loosely overlaps the corpus, the plan will now say so
+with fallback/thin coverage diagnostics rather than returning a silent seed
+shortlist.
+
 It should be treated as tracked input data for bounded intake-side agent work,
 not as a runtime secret.
 

@@ -19,6 +19,7 @@ runtime_tools_allow:
   - workflow_api_stage_research_problem_from_latest_session
   - workflow_api_create_paper_intake_queue_from_latest_session
   - workflow_api_stage_next_intake_from_latest_session
+  - workflow_api_get_latest_operation
   - workflow_api_run_latest_research_problem_pipeline
   - workflow_api_create_paper_intake_queue_from_latest_research_problem
   - workflow_api_get_latest_paper_intake_queue
