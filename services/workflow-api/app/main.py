@@ -2695,12 +2695,20 @@ def create_app(
         touch_research_session(store, session.session_id, latest_problem_id=record.problem_id)
         return record
 
+    @app.post('/research-sessions/{session_id}/skills/research-problem', response_model=ResearchProblemRecord, status_code=status.HTTP_201_CREATED)
+    def apply_session_research_problem_skill(session_id: str) -> ResearchProblemRecord:
+        return stage_research_problem_from_session_goal(session_id)
+
     @app.post('/research-sessions/latest/research-problems/from-session-goal', response_model=ResearchProblemRecord, status_code=status.HTTP_201_CREATED)
     def stage_research_problem_from_latest_session_goal() -> ResearchProblemRecord:
         session = store.get_latest_research_session()
         if session is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
         return stage_research_problem_from_session_goal(session.session_id)
+
+    @app.post('/research-sessions/latest/skills/research-problem', response_model=ResearchProblemRecord, status_code=status.HTTP_201_CREATED)
+    def apply_latest_session_research_problem_skill() -> ResearchProblemRecord:
+        return stage_research_problem_from_latest_session_goal()
 
     @app.post('/research-sessions/from-latest-research-problem', response_model=ResearchSessionRecord, status_code=status.HTTP_201_CREATED)
     def create_research_session_from_latest_problem() -> ResearchSessionRecord:
@@ -2763,12 +2771,20 @@ def create_app(
         touch_research_session(store, session.session_id, latest_queue_id=record.queue_id)
         return record
 
+    @app.post('/research-sessions/{session_id}/skills/literature-harvest', response_model=PaperIntakeQueueRecord, status_code=status.HTTP_201_CREATED)
+    def apply_session_literature_harvest_skill(session_id: str) -> PaperIntakeQueueRecord:
+        return create_paper_intake_queue_from_session_latest_problem(session_id)
+
     @app.post('/research-sessions/latest/paper-intake-queues/from-latest-problem', response_model=PaperIntakeQueueRecord, status_code=status.HTTP_201_CREATED)
     def create_paper_intake_queue_from_latest_session_problem() -> PaperIntakeQueueRecord:
         session = store.get_latest_research_session()
         if session is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
         return create_paper_intake_queue_from_session_latest_problem(session.session_id)
+
+    @app.post('/research-sessions/latest/skills/literature-harvest', response_model=PaperIntakeQueueRecord, status_code=status.HTTP_201_CREATED)
+    def apply_latest_session_literature_harvest_skill() -> PaperIntakeQueueRecord:
+        return create_paper_intake_queue_from_latest_session_problem()
 
     @app.post('/paper-intake-queues/from-research-problem', response_model=PaperIntakeQueueRecord, status_code=status.HTTP_201_CREATED)
     def create_paper_intake_queue_from_research_problem(request: PaperIntakeQueueCreateRequest) -> PaperIntakeQueueRecord:
@@ -2890,6 +2906,16 @@ def create_app(
         touch_research_session(store, queue.session_id, latest_queue_id=updated_queue.queue_id, latest_intake_id=intake.intake_id)
         return intake
 
+    @app.post('/research-sessions/{session_id}/skills/paper-intake', response_model=IntakeRecord, status_code=status.HTTP_201_CREATED)
+    def apply_session_paper_intake_skill(session_id: str) -> IntakeRecord:
+        session = store.get_research_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session not found')
+        queue_id = session.latest_queue_id or ''
+        if not queue_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session has no paper intake queue yet')
+        return stage_next_intake_from_queue(queue_id)
+
     @app.post('/research-sessions/latest/paper-intake-queues/stage-next-intake', response_model=IntakeRecord, status_code=status.HTTP_201_CREATED)
     def stage_next_intake_from_latest_session_queue() -> IntakeRecord:
         session = store.get_latest_research_session()
@@ -2899,6 +2925,10 @@ def create_app(
         if not queue_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='latest research session has no paper intake queue yet')
         return stage_next_intake_from_queue(queue_id)
+
+    @app.post('/research-sessions/latest/skills/paper-intake', response_model=IntakeRecord, status_code=status.HTTP_201_CREATED)
+    def apply_latest_session_paper_intake_skill() -> IntakeRecord:
+        return stage_next_intake_from_latest_session_queue()
 
     @app.get('/source-documents', response_model=list[SourceDocumentRecord])
     def list_source_documents() -> list[SourceDocumentRecord]:

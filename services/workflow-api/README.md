@@ -68,6 +68,21 @@ Recent paper-intake endpoints:
 - `GET /replicability-assessments/latest`
 - `GET /workflow-families/{workflow_id}/execution-preflight`
 
+Session-first skill endpoints:
+
+- `POST /research-sessions/{session_id}/skills/research-problem`
+- `POST /research-sessions/{session_id}/skills/literature-harvest`
+- `POST /research-sessions/{session_id}/skills/paper-intake`
+- `POST /research-sessions/latest/skills/research-problem`
+- `POST /research-sessions/latest/skills/literature-harvest`
+- `POST /research-sessions/latest/skills/paper-intake`
+
+These are thin bounded aliases over the existing session-state path. The intent is:
+
+- sessions hold the research state
+- skills mutate that state in bounded ways
+- workflow families stay a later execution concern
+
 These let `workflow-api` persist a bounded queue of harvested paper candidates
 before interpretation/assessment/design work begins. The queue is intended to
 run in the background while later paper-understanding work is still being
