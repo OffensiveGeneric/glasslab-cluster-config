@@ -444,6 +444,7 @@ if provider_api_key_env:
 
 runtime_config = {
     "gateway": {
+        "mode": "local",
         "bind": "lan",
         "port": 18789,
         "auth": {
