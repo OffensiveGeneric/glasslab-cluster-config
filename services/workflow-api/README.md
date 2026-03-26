@@ -15,8 +15,9 @@ Current durability warning:
   - `GLASSLAB_WORKFLOW_API_STORE_BACKEND=memory`
   - `GLASSLAB_WORKFLOW_API_STORE_BACKEND=json`
 - in-memory mode is still valid for tests and short-lived local iteration
-- `GLASSLAB_WORKFLOW_API_ALLOW_INMEMORY_STORE=false` can now fail closed instead of silently booting on ephemeral state
-- the first durable backend is JSON-file based via `GLASSLAB_WORKFLOW_API_STORE_JSON_PATH`
+- `GLASSLAB_WORKFLOW_API_ALLOW_INMEMORY_STORE=false` now fails closed at settings load instead of silently booting on ephemeral state
+- the bounded durable backend is JSON-file based via `GLASSLAB_WORKFLOW_API_STORE_JSON_PATH`
+- live-oriented configs should select `json` explicitly and mount the JSON path on durable storage
 - session and stage metadata are still not in Postgres yet, so this is a bounded durability step rather than the final persistence architecture
 - artifact files and source-document blobs may be durable, but the coordinating metadata currently is not
 

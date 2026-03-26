@@ -3,6 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .paths import discover_repo_root
@@ -64,6 +65,17 @@ class Settings(BaseSettings):
     minio_access_key: str | None = None
     minio_secret_key: str | None = None
     minio_secure: bool = False
+
+    @model_validator(mode='after')
+    def validate_store_backend(self) -> 'Settings':
+        if self.store_backend == 'memory' and not self.allow_inmemory_store:
+            raise ValueError(
+                'workflow-api store backend is set to memory but allow_inmemory_store=false; '
+                'choose a durable backend or explicitly allow in-memory mode'
+            )
+        if self.store_backend == 'json' and not self.store_json_path.strip():
+            raise ValueError('json store backend requires a non-empty store_json_path')
+        return self
 
 
 @lru_cache(maxsize=1)
