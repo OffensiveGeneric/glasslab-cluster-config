@@ -24,7 +24,7 @@ check_exists() {
 check_can_i() {
   local verb="$1"
   local resource="$2"
-  if "$KUBECTL" auth can-i --as="system:serviceaccount:${NAMESPACE}:${SERVICE_ACCOUNT}" "$verb" "$resource" >/dev/null 2>&1; then
+  if "$KUBECTL" auth can-i --as="system:serviceaccount:${NAMESPACE}:${SERVICE_ACCOUNT}" -n "$NAMESPACE" "$verb" "$resource" >/dev/null 2>&1; then
     printf '[ok] serviceaccount/%s can %s %s\n' "$SERVICE_ACCOUNT" "$verb" "$resource"
   else
     printf '[missing-rbac] serviceaccount/%s cannot %s %s\n' "$SERVICE_ACCOUNT" "$verb" "$resource" >&2
