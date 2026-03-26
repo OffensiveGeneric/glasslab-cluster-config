@@ -505,6 +505,19 @@ class ResearchSessionBootstrapStatusResponse(BaseModel):
     detail: str
 
 
+class ResearchSessionBootstrapResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    bootstrap_action: Literal[
+        'reuse-active-session',
+        'created-session-from-latest-problem',
+        'create-session-manually',
+    ]
+    session: ResearchSessionRecord | None = None
+    staged_research_problem: ResearchProblemRecord | None = None
+    detail: str
+
+
 class FreshPaperPipelineResponse(BaseModel):
     model_config = ConfigDict(extra='forbid')
 

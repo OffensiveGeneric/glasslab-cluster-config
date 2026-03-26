@@ -59,6 +59,7 @@ Recent paper-intake endpoints:
 - `POST /research-sessions`
 - `GET /research-sessions`
 - `GET /research-sessions/latest`
+- `POST /research-sessions/bootstrap`
 - `GET /research-sessions/latest/context`
 - `POST /research-sessions/from-latest-research-problem`
 - `POST /research-sessions/latest/research-problems/from-session-goal`

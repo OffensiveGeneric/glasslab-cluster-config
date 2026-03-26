@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from uuid import uuid4
+from typing import Callable
 
 from fastapi import HTTPException, status
 
@@ -16,6 +17,7 @@ from .schemas import (
     ResearchSessionRecord,
     ReplicabilityAssessmentRecord,
     DesignDraftRecord,
+    ResearchProblemRecord,
 )
 
 
@@ -43,6 +45,20 @@ def build_research_session_record(
         priorities=request.priorities,
         submitted_by=request.submitted_by or settings.default_submitted_by,
     )
+
+
+def create_research_session_from_problem(
+    problem: ResearchProblemRecord,
+    settings: Settings,
+    build_research_session_record: Callable[[ResearchSessionCreateRequest, Settings], ResearchSessionRecord],
+) -> ResearchSessionRecord:
+    request = ResearchSessionCreateRequest(
+        title=None,
+        goal_statement=problem.problem_statement,
+        priorities=problem.priorities,
+        submitted_by=problem.submitted_by,
+    )
+    return build_research_session_record(request, settings)
 
 
 def build_research_problem_request_from_session(

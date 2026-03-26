@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, status
 from .config import Settings
 from .persistence import RunStore
 from .registry import WorkflowRegistry
+from .session_helpers import create_research_session_from_problem
 from .schemas import (
     FreshPaperPipelineResponse,
     IntakeRecord,
@@ -18,6 +19,7 @@ from .schemas import (
     PaperIntakeQueueCreateRequest,
     PaperIntakeQueueRecord,
     ResearchSessionBootstrapStatusResponse,
+    ResearchSessionBootstrapResponse,
     ResearchSessionContextResponse,
     ResearchSessionCreateRequest,
     ResearchSessionRecord,
@@ -153,6 +155,36 @@ def register_literature_routes(
             detail='no active research session or staged research problem exists yet',
         )
 
+    @app.post('/research-sessions/bootstrap', response_model=ResearchSessionBootstrapResponse)
+    def bootstrap_research_session() -> ResearchSessionBootstrapResponse:
+        session = store.get_latest_research_session()
+        problem = store.get_latest_research_problem()
+        if session is not None:
+            return ResearchSessionBootstrapResponse(
+                bootstrap_action='reuse-active-session',
+                session=session,
+                staged_research_problem=problem,
+                detail='an active research session already exists; reuse it and continue with session skills',
+            )
+        if problem is not None:
+            session = create_research_session_from_problem(problem, settings, build_research_session_record)
+            store.save_research_session(session)
+            problem = problem.model_copy(update={'session_id': session.session_id, 'updated_at': datetime.now(timezone.utc)})
+            store.save_research_problem(problem)
+            touch_research_session(store, session.session_id, latest_problem_id=problem.problem_id)
+            return ResearchSessionBootstrapResponse(
+                bootstrap_action='created-session-from-latest-problem',
+                session=store.get_research_session(session.session_id) or session,
+                staged_research_problem=problem,
+                detail='created a research session from the latest staged research problem',
+            )
+        return ResearchSessionBootstrapResponse(
+            bootstrap_action='create-session-manually',
+            session=None,
+            staged_research_problem=None,
+            detail='no active research session or staged research problem exists yet',
+        )
+
     @app.get('/research-sessions/{session_id}', response_model=ResearchSessionRecord)
     def get_research_session(session_id: str) -> ResearchSessionRecord:
         record = store.get_research_session(session_id)
@@ -256,13 +288,7 @@ def register_literature_routes(
         problem = store.get_latest_research_problem()
         if problem is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research problem has been staged yet')
-        request = ResearchSessionCreateRequest(
-            title=None,
-            goal_statement=problem.problem_statement,
-            priorities=problem.priorities,
-            submitted_by=problem.submitted_by,
-        )
-        session = build_research_session_record(request, settings)
+        session = create_research_session_from_problem(problem, settings, build_research_session_record)
         store.save_research_session(session)
         problem = problem.model_copy(update={'session_id': session.session_id, 'updated_at': datetime.now(timezone.utc)})
         store.save_research_problem(problem)

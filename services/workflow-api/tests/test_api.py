@@ -1584,6 +1584,50 @@ def test_research_session_bootstrap_status_reports_missing_state_and_staged_prob
     assert payload['can_apply_session_skills'] is False
 
 
+def test_research_session_bootstrap_reports_manual_action_when_empty() -> None:
+    client = build_client()
+
+    response = client.post('/research-sessions/bootstrap')
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload == {
+        'bootstrap_action': 'create-session-manually',
+        'session': None,
+        'staged_research_problem': None,
+        'detail': 'no active research session or staged research problem exists yet',
+    }
+
+
+def test_research_session_bootstrap_creates_session_from_latest_problem() -> None:
+    client = build_client()
+
+    staged = client.post(
+        '/research-problems',
+        json={
+            'problem_statement': 'Find a bounded benchmark for research agents doing machine learning engineering work.',
+            'submitted_by': 'operator',
+        },
+    )
+    assert staged.status_code == 201
+
+    response = client.post('/research-sessions/bootstrap')
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['bootstrap_action'] == 'created-session-from-latest-problem'
+    assert payload['session']['goal_statement'].startswith('Find a bounded benchmark')
+    assert payload['staged_research_problem']['problem_id'] == staged.json()['problem_id']
+
+    latest_problem = client.get('/research-problems/latest')
+    assert latest_problem.status_code == 200
+    assert latest_problem.json()['session_id'] == payload['session']['session_id']
+
+    reused = client.post('/research-sessions/bootstrap')
+    assert reused.status_code == 200
+    reused_payload = reused.json()
+    assert reused_payload['bootstrap_action'] == 'reuse-active-session'
+    assert reused_payload['session']['session_id'] == payload['session']['session_id']
+
+
 def test_create_pipeline_from_latest_research_problem(monkeypatch) -> None:
     client = build_client()
 
