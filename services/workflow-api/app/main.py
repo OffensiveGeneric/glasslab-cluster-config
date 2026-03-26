@@ -210,6 +210,14 @@ def get_required_session_latest_assessment(store: RunStore, session_id: str) -> 
     return assessment
 
 
+def get_required_session_latest_design(store: RunStore, session_id: str) -> DesignDraftRecord:
+    session = get_required_research_session(store, session_id)
+    design = store.get_design_draft(session.latest_design_id or '')
+    if design is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session has no design draft yet')
+    return design
+
+
 def summarize_intake(raw_request: str, notes: list[str]) -> str:
     summary = ' '.join(raw_request.split())
     if notes:
@@ -2290,6 +2298,17 @@ def create_app(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='intake not found')
         return record
 
+    @app.get('/research-sessions/latest/intake', response_model=IntakeRecord)
+    def get_latest_session_intake() -> IntakeRecord:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return get_session_intake(session.session_id)
+
+    @app.get('/research-sessions/{session_id}/intake', response_model=IntakeRecord)
+    def get_session_intake(session_id: str) -> IntakeRecord:
+        return get_required_session_latest_intake(store, session_id)
+
     @app.post('/interpretations/from-latest-intake', response_model=InterpretationRecord, status_code=status.HTTP_201_CREATED)
     def create_interpretation_from_latest_intake() -> InterpretationRecord:
         intake = store.get_latest_intake()
@@ -2339,6 +2358,17 @@ def create_app(
         if record is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='interpretation not found')
         return record
+
+    @app.get('/research-sessions/latest/interpretation', response_model=InterpretationRecord)
+    def get_latest_session_interpretation() -> InterpretationRecord:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return get_session_interpretation(session.session_id)
+
+    @app.get('/research-sessions/{session_id}/interpretation', response_model=InterpretationRecord)
+    def get_session_interpretation(session_id: str) -> InterpretationRecord:
+        return get_required_session_latest_interpretation(store, session_id)
 
     @app.post(
         '/replicability-assessments/from-latest-interpretation',
@@ -2404,6 +2434,17 @@ def create_app(
         if record is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='replicability assessment not found')
         return record
+
+    @app.get('/research-sessions/latest/assessment', response_model=ReplicabilityAssessmentRecord)
+    def get_latest_session_assessment() -> ReplicabilityAssessmentRecord:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return get_session_assessment(session.session_id)
+
+    @app.get('/research-sessions/{session_id}/assessment', response_model=ReplicabilityAssessmentRecord)
+    def get_session_assessment(session_id: str) -> ReplicabilityAssessmentRecord:
+        return get_required_session_latest_assessment(store, session_id)
 
     @app.post('/design-drafts/from-latest-intake', response_model=DesignDraftRecord, status_code=status.HTTP_201_CREATED)
     def create_design_draft_from_latest_intake() -> DesignDraftRecord:
@@ -2522,6 +2563,17 @@ def create_app(
         if record is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='design draft not found')
         return record
+
+    @app.get('/research-sessions/latest/design', response_model=DesignDraftRecord)
+    def get_latest_session_design() -> DesignDraftRecord:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return get_session_design(session.session_id)
+
+    @app.get('/research-sessions/{session_id}/design', response_model=DesignDraftRecord)
+    def get_session_design(session_id: str) -> DesignDraftRecord:
+        return get_required_session_latest_design(store, session_id)
 
     @app.post('/design-drafts/latest/review', response_model=DesignDraftRecord)
     def review_latest_design_draft(request: DesignDraftReviewRequest) -> DesignDraftRecord:

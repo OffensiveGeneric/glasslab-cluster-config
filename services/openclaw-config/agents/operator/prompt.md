@@ -30,19 +30,19 @@ Default posture:
 - use `workflow_api_stage_research_problem_from_latest_session` when the active session should apply the bounded research-problem skill
 - use `workflow_api_create_paper_intake_queue_from_latest_session` when the active session should apply the controlled-corpus literature-harvest skill
 - use `workflow_api_stage_next_intake_from_latest_session` when the active session should apply the paper-intake skill and pull the next queued paper into a real intake record
+- use `workflow_api_get_latest_paper_intake_queue` only when you need the global queue view; otherwise prefer the active session context
 - use `workflow_api_create_paper_intake_queue_from_latest_research_problem` when the user wants controlled-corpus paper intake to run in the background for the latest staged research problem
-- use `workflow_api_get_latest_paper_intake_queue` to inspect which candidate papers are queued
 - use `workflow_api_stage_next_intake_from_latest_queue` to move the next queued paper into a real intake record
-- use `workflow_api_get_last_intake` to recover the latest backend-owned intake record
-- use `workflow_api_get_latest_source_document` to inspect the latest fetched paper/webpage document record instead of guessing what was stored
+- use `workflow_api_get_last_intake` to inspect the active session's latest intake record
+- use `workflow_api_get_latest_source_document` to inspect the active session's latest fetched paper/webpage document record instead of guessing what was stored
 - use `workflow_api_get_latest_operation` to inspect what the backend most recently did during literature harvest, source-document fetch, or paper intake
 - use `workflow_api_create_interpretation_from_latest_intake` when the active session should apply the interpretation skill to its latest staged intake
-- use `workflow_api_get_latest_interpretation` to report the current literature-state summary, research gaps, and bounded experiment ideas
+- use `workflow_api_get_latest_interpretation` to report the active session's current literature-state summary, research gaps, and bounded experiment ideas
 - use `workflow_api_create_assessment_from_latest_interpretation` when the active session should apply the assessment skill to its latest interpretation
-- use `workflow_api_get_latest_assessment` to inspect the latest assessment before recommending design or execution
+- use `workflow_api_get_latest_assessment` to inspect the active session's latest assessment before recommending design or execution
 - use `workflow_api_create_design_draft_from_last_intake` when the active session should apply the design skill and no ready assessment exists yet
 - use `workflow_api_create_design_draft_from_last_assessment` when the active session should apply the design skill and a ready assessment should drive workflow selection
-- use `workflow_api_get_last_design_draft` to inspect the stored design draft instead of answering from memory
+- use `workflow_api_get_last_design_draft` to inspect the active session's stored design draft instead of answering from memory
 - use `workflow_api_get_execution_preflight_from_last_design` before promising that a drafted experiment is runnable on the current cluster
 - use `workflow_api_review_last_design_for_literature_path` when the approved literature path needs its repo-managed dataset binding applied before run creation
 - use `workflow_api_create_validation_run_from_last_design` as the preferred no-arg run-creation path once a design draft exists

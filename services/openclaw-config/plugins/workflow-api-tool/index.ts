@@ -376,7 +376,7 @@ const plugin = {
         },
         async execute() {
           try {
-            const { endpoint, payload } = await requestJson(api, "/intakes/latest");
+            const { endpoint, payload } = await requestJson(api, "/research-sessions/latest/intake");
             await appendAuditEvent({
               tool: "workflow_api_get_last_intake",
               status: "ok",
@@ -412,7 +412,7 @@ const plugin = {
         },
         async execute() {
           try {
-            const { endpoint, payload } = await requestJson(api, "/interpretations/latest");
+            const { endpoint, payload } = await requestJson(api, "/research-sessions/latest/interpretation");
             await appendAuditEvent({
               tool: "workflow_api_get_latest_interpretation",
               status: "ok",
@@ -487,7 +487,7 @@ const plugin = {
         },
         async execute() {
           try {
-            const { endpoint, payload } = await requestJson(api, "/replicability-assessments/latest");
+            const { endpoint, payload } = await requestJson(api, "/research-sessions/latest/assessment");
             await appendAuditEvent({
               tool: "workflow_api_get_latest_assessment",
               status: "ok",
@@ -601,7 +601,7 @@ const plugin = {
         },
         async execute() {
           try {
-            const { endpoint, payload } = await requestJson(api, "/design-drafts/latest");
+            const { endpoint, payload } = await requestJson(api, "/research-sessions/latest/design");
             await appendAuditEvent({
               tool: "workflow_api_get_last_design_draft",
               status: "ok",
@@ -638,7 +638,7 @@ const plugin = {
         },
         async execute() {
           try {
-            const { payload: design } = await requestJson(api, "/design-drafts/latest");
+            const { payload: design } = await requestJson(api, "/research-sessions/latest/design");
             const workflowId = typeof design?.workflow_id === "string" ? design.workflow_id.trim() : "";
             if (!workflowId) {
               throw new Error("latest design draft did not include workflow_id");

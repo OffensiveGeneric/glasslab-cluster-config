@@ -98,6 +98,22 @@ These are thin bounded aliases over the existing session-state path. The intent 
 - design prefers the session's latest ready assessment when available, then falls
   back to the latest intake path
 
+Session-scoped read endpoints:
+
+- `GET /research-sessions/{session_id}/context`
+- `GET /research-sessions/{session_id}/research-problem`
+- `GET /research-sessions/{session_id}/paper-intake-queue`
+- `GET /research-sessions/{session_id}/source-document`
+- `GET /research-sessions/{session_id}/intake`
+- `GET /research-sessions/{session_id}/interpretation`
+- `GET /research-sessions/{session_id}/assessment`
+- `GET /research-sessions/{session_id}/design`
+- matching `latest` aliases under `/research-sessions/latest/...`
+
+Use these as the primary read contract when OpenClaw or an operator is working
+inside a session. The older global `latest` stage endpoints remain available for
+compatibility, but they are no longer the preferred session-oriented surface.
+
 Operation-record endpoints:
 
 - `GET /operations`

@@ -2106,6 +2106,97 @@ def test_research_session_skill_routes_advance_interpretation_assessment_and_des
     assert payload['session']['latest_design_id'] == design.json()['design_id']
 
 
+def test_research_session_read_routes_return_session_scoped_records(monkeypatch) -> None:
+    client = build_client()
+
+    class FakeResponse:
+        def __init__(self, payload: dict) -> None:
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            import json
+            return json.dumps(self.payload).encode('utf-8')
+
+    monkeypatch.setattr(
+        main_module.urllib_request,
+        'urlopen',
+        lambda request_obj, timeout: FakeResponse(
+            {
+                'request_id': 'session-read-queue-1',
+                'selected_tracks': [{'track_id': 'agent_evaluation', 'track': 'agent_evaluation'}],
+                'selected_queries': [{'queries': ['bounded literature harvest']}],
+                'selected_papers': [
+                    {
+                        'paper_id': 'mle_bench_arxiv_2024',
+                        'title': 'MLE-bench: Evaluating Machine Learning Agents on Machine Learning Engineering',
+                        'year': 2024,
+                        'venue': 'arXiv',
+                        'priority': 'P1',
+                        'tracks': ['agent_evaluation'],
+                        'bounded_job_fit': 4,
+                        'replication_complexity': 4,
+                        'official_page': 'https://arxiv.org/abs/2410.07095',
+                        'pdf_url': None,
+                        'why_seed': 'benchmark for bounded ML engineering work',
+                        'first_jobs': ['reduce the benchmark into a smaller internal harness'],
+                        'tags': ['agents'],
+                    }
+                ],
+                'warnings': [],
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        main_module,
+        'ingest_source_document',
+        lambda source_url, submitted_by, settings, store, session_id=None: main_module.SourceDocumentRecord(
+            document_id='session-read-doc-1',
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            status='fetched',
+            source_url=source_url,
+            submitted_by=submitted_by,
+            storage_uri='file:///tmp/source-documents/session-read-doc-1/source.html',
+            content_type='text/html',
+            size_bytes=42,
+            sha256='mno345',
+            title='source.html',
+            text_excerpt='Session read route document excerpt.',
+            session_id=session_id,
+        ),
+    )
+
+    session = client.post('/research-sessions', json={'goal_statement': 'Explore bounded ML engineering benchmark literature.'})
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    assert client.post(f'/research-sessions/{session_id}/skills/research-problem').status_code == 201
+    queue = client.post(f'/research-sessions/{session_id}/skills/literature-harvest')
+    intake = client.post(f'/research-sessions/{session_id}/skills/paper-intake')
+    interpretation = client.post(f'/research-sessions/{session_id}/skills/interpretation')
+    assessment = client.post(f'/research-sessions/{session_id}/skills/assessment')
+    design = client.post(f'/research-sessions/{session_id}/skills/design')
+
+    assert queue.status_code == 201
+    assert intake.status_code == 201
+    assert interpretation.status_code == 201
+    assert assessment.status_code == 201
+    assert design.status_code == 201
+
+    assert client.get(f'/research-sessions/{session_id}/paper-intake-queue').json()['queue_id'] == queue.json()['queue_id']
+    assert client.get(f'/research-sessions/{session_id}/source-document').json()['document_id'] == 'session-read-doc-1'
+    assert client.get(f'/research-sessions/{session_id}/intake').json()['intake_id'] == intake.json()['intake_id']
+    assert client.get(f'/research-sessions/{session_id}/interpretation').json()['interpretation_id'] == interpretation.json()['interpretation_id']
+    assert client.get(f'/research-sessions/{session_id}/assessment').json()['assessment_id'] == assessment.json()['assessment_id']
+    assert client.get(f'/research-sessions/{session_id}/design').json()['design_id'] == design.json()['design_id']
+
+
 def test_operation_records_capture_literature_harvest_and_paper_intake(monkeypatch) -> None:
     client = build_client()
 

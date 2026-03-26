@@ -15,6 +15,9 @@ routes:
   stage_research_problem_from_latest_session: POST /research-sessions/latest/skills/research-problem
   create_paper_intake_queue_from_latest_session_problem: POST /research-sessions/latest/skills/literature-harvest
   stage_next_intake_from_latest_session_queue: POST /research-sessions/latest/skills/paper-intake
+  get_latest_session_paper_intake_queue: GET /research-sessions/latest/paper-intake-queue
+  get_latest_session_source_document: GET /research-sessions/latest/source-document
+  get_latest_session_intake: GET /research-sessions/latest/intake
   run_latest_research_problem_pipeline: POST /paper-pipelines/from-latest-research-problem
   create_paper_intake_queue_from_research_problem: POST /paper-intake-queues/from-research-problem
   get_latest_paper_intake_queue: GET /paper-intake-queues/latest
@@ -22,13 +25,13 @@ routes:
   get_latest_source_document: GET /source-documents/latest
   get_latest_operation: GET /operations/latest
   create_interpretation_from_latest_session: POST /research-sessions/latest/skills/interpretation
-  get_latest_interpretation: GET /interpretations/latest
+  get_latest_session_interpretation: GET /research-sessions/latest/interpretation
   create_assessment_from_latest_session: POST /research-sessions/latest/skills/assessment
-  get_latest_assessment: GET /replicability-assessments/latest
+  get_latest_session_assessment: GET /research-sessions/latest/assessment
   run_fresh_paper_pipeline: POST /paper-pipelines/fresh-paper
   create_design_draft_from_latest_session: POST /research-sessions/latest/skills/design
   review_latest_design_draft: POST /design-drafts/latest/review
-  get_latest_design_draft: GET /design-drafts/latest
+  get_latest_session_design: GET /research-sessions/latest/design
   get_workflow_execution_preflight: GET /workflow-families/{workflow_id}/execution-preflight
   create_run_from_latest_design_draft: POST /runs/from-latest-design-draft
   create_run: POST /runs

@@ -142,6 +142,57 @@ def register_literature_routes(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session not found')
         return build_research_session_context(session, store)
 
+    @app.get('/research-sessions/latest/research-problem', response_model=ResearchProblemRecord)
+    def get_latest_session_research_problem() -> ResearchProblemRecord:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return get_session_research_problem(session.session_id)
+
+    @app.get('/research-sessions/{session_id}/research-problem', response_model=ResearchProblemRecord)
+    def get_session_research_problem(session_id: str) -> ResearchProblemRecord:
+        session = store.get_research_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session not found')
+        record = store.get_research_problem(session.latest_problem_id or '')
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session has no staged research problem yet')
+        return record
+
+    @app.get('/research-sessions/latest/paper-intake-queue', response_model=PaperIntakeQueueRecord)
+    def get_latest_session_paper_intake_queue() -> PaperIntakeQueueRecord:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return get_session_paper_intake_queue(session.session_id)
+
+    @app.get('/research-sessions/{session_id}/paper-intake-queue', response_model=PaperIntakeQueueRecord)
+    def get_session_paper_intake_queue(session_id: str) -> PaperIntakeQueueRecord:
+        session = store.get_research_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session not found')
+        record = store.get_paper_intake_queue(session.latest_queue_id or '')
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session has no paper-intake queue yet')
+        return record
+
+    @app.get('/research-sessions/latest/source-document', response_model=SourceDocumentRecord)
+    def get_latest_session_source_document() -> SourceDocumentRecord:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return get_session_source_document(session.session_id)
+
+    @app.get('/research-sessions/{session_id}/source-document', response_model=SourceDocumentRecord)
+    def get_session_source_document(session_id: str) -> SourceDocumentRecord:
+        session = store.get_research_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session not found')
+        record = store.get_source_document(session.latest_document_id or '')
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session has no source document yet')
+        return record
+
     @app.post('/research-sessions/{session_id}/research-problems/from-session-goal', response_model=ResearchProblemRecord, status_code=status.HTTP_201_CREATED)
     def stage_research_problem_from_session_goal(session_id: str) -> ResearchProblemRecord:
         session = store.get_research_session(session_id)
