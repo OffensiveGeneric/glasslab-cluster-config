@@ -368,7 +368,7 @@ const plugin = {
     api.registerTool(
       {
         name: "workflow_api_get_last_intake",
-        description: "Fetch the most recent intake record.",
+        description: "Fetch the active research session's latest intake record.",
         parameters: {
           type: "object",
           additionalProperties: false,
@@ -404,7 +404,7 @@ const plugin = {
     api.registerTool(
       {
         name: "workflow_api_get_latest_interpretation",
-        description: "Fetch the most recent interpretation record, including literature state, gaps, and bounded experiment ideas.",
+        description: "Fetch the active research session's latest interpretation, including literature state, gaps, and bounded experiment ideas.",
         parameters: {
           type: "object",
           additionalProperties: false,
@@ -479,7 +479,7 @@ const plugin = {
     api.registerTool(
       {
         name: "workflow_api_get_latest_assessment",
-        description: "Fetch the most recent replicability assessment record.",
+        description: "Fetch the active research session's latest replicability assessment record.",
         parameters: {
           type: "object",
           additionalProperties: false,
@@ -593,7 +593,7 @@ const plugin = {
     api.registerTool(
       {
         name: "workflow_api_get_last_design_draft",
-        description: "Fetch the most recent design draft.",
+        description: "Fetch the active research session's latest design draft.",
         parameters: {
           type: "object",
           additionalProperties: false,
