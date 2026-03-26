@@ -357,6 +357,7 @@ allowed_runtime_tools = {
     "workflow_api_start_literature_intake",
     "workflow_api_start_replication_intake",
     "workflow_api_get_research_session_bootstrap_status",
+    "workflow_api_bootstrap_research_session_from_latest_user_message",
     "workflow_api_create_research_session_from_latest_research_problem",
     "workflow_api_get_latest_research_session",
     "workflow_api_get_latest_research_session_context",

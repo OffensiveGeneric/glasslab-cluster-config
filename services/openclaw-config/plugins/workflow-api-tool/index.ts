@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 const DEFAULT_TIMEOUT_SECONDS = 10;
@@ -129,6 +129,95 @@ function resolveStatePath(name: string): string {
     resolveStateDir(),
     name
   );
+}
+
+function resolveOperatorSessionsDir(): string {
+  return join(process.env.OPENCLAW_STATE_DIR || DEFAULT_STATE_DIR, "agents", "operator", "sessions");
+}
+
+function extractTextContent(content: unknown): string {
+  if (!Array.isArray(content)) {
+    return "";
+  }
+  return content
+    .flatMap((item) => {
+      if (!item || typeof item !== "object") {
+        return [];
+      }
+      const record = item as Record<string, unknown>;
+      const type = typeof record.type === "string" ? record.type : "";
+      if (type !== "text") {
+        return [];
+      }
+      const text = typeof record.text === "string" ? record.text.trim() : "";
+      return text ? [text] : [];
+    })
+    .join("\n\n")
+    .trim();
+}
+
+function cleanLatestUserIdea(raw: string): string {
+  let text = raw.replace(/\r/g, "").trim();
+  text = text.replace(/Conversation info \(untrusted metadata\):\s*```[\s\S]*?```/g, "").trim();
+  text = text.replace(/Sender \(untrusted metadata\):\s*```[\s\S]*?```/g, "").trim();
+  if (/^System:/m.test(text) && /WhatsApp gateway connected\./.test(text)) {
+    text = text.replace(/^System:[\s\S]*$/m, "").trim();
+  }
+  const paragraphs = text
+    .split(/\n\s*\n/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .filter((item) => item !== "```");
+  const candidate = (paragraphs.length > 0 ? paragraphs[paragraphs.length - 1] : text).trim();
+  return candidate.replace(/\s+/g, " ").trim();
+}
+
+async function loadLatestUserIdeaText(): Promise<string> {
+  const sessionsDir = resolveOperatorSessionsDir();
+  const entries = await readdir(sessionsDir, { withFileTypes: true });
+  const sessionFiles = await Promise.all(
+    entries
+      .filter((entry) => entry.isFile())
+      .map(async (entry) => {
+        const name = entry.name;
+        if (!name.endsWith(".jsonl") || name.includes(".reset.") || name.endsWith(".lock")) {
+          return null;
+        }
+        const path = join(sessionsDir, name);
+        const meta = await stat(path);
+        return { path, mtimeMs: meta.mtimeMs };
+      })
+  );
+  const ordered = sessionFiles
+    .filter((item): item is { path: string; mtimeMs: number } => item !== null)
+    .sort((left, right) => right.mtimeMs - left.mtimeMs);
+  for (const sessionFile of ordered) {
+    const raw = await readFile(sessionFile.path, "utf8");
+    const lines = raw
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      try {
+        const payload = JSON.parse(lines[index]);
+        if (payload?.type !== "message") {
+          continue;
+        }
+        const role = payload?.message?.role;
+        if (role !== "user") {
+          continue;
+        }
+        const text = extractTextContent(payload?.message?.content);
+        const cleaned = cleanLatestUserIdea(text);
+        if (cleaned) {
+          return cleaned;
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+  throw new Error("no recent user idea was found in the operator session history");
 }
 
 async function requestJson(
@@ -749,6 +838,124 @@ const plugin = {
           } catch (error) {
             await appendAuditEvent({
               tool: "workflow_api_create_validation_run_from_last_design",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
+        name: "workflow_api_bootstrap_research_session_from_latest_user_message",
+        description: "Create a research session from the latest user chat idea, stage its research problem, and start literature harvest without relying on free-text tool arguments.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const { endpoint: bootstrapEndpoint, payload: bootstrap } = await requestJson(
+              api,
+              "/research-sessions/bootstrap",
+              { method: "POST" }
+            );
+
+            let goalStatement = "";
+            let sessionEndpoint = bootstrapEndpoint;
+            let session = bootstrap?.session ?? null;
+            let sessionId = typeof session?.session_id === "string" ? session.session_id.trim() : "";
+            let researchProblem = bootstrap?.staged_research_problem ?? null;
+            let problemEndpoint = bootstrapEndpoint;
+            let queue = null;
+            let queueEndpoint = bootstrapEndpoint;
+
+            if (!sessionId) {
+              goalStatement = await loadLatestUserIdeaText();
+              if (goalStatement.length < 24) {
+                throw new Error("latest user message is too short to bootstrap a research session safely");
+              }
+              const genericCommand =
+                /^(start|create|begin|open|make|do|try)\b/i.test(goalStatement) &&
+                /\b(session|paper intake|literature harvest|research problem)\b/i.test(goalStatement) &&
+                !/\b(on|about|for)\b/i.test(goalStatement);
+              if (genericCommand) {
+                throw new Error("latest user message looks like an instruction, not a concrete research idea");
+              }
+
+              const sessionRequest = {
+                title: null,
+                goal_statement: goalStatement,
+                priorities: [],
+                submitted_by: "openclaw-operator"
+              };
+              const createdSession = await requestJson(api, "/research-sessions", {
+                method: "POST",
+                body: JSON.stringify(sessionRequest)
+              });
+              sessionEndpoint = createdSession.endpoint;
+              session = createdSession.payload;
+              sessionId = typeof session?.session_id === "string" ? session.session_id.trim() : "";
+              if (!sessionId) {
+                throw new Error("created research session did not include session_id");
+              }
+            } else {
+              goalStatement = typeof session?.goal_statement === "string" ? session.goal_statement.trim() : "";
+            }
+
+            if (!researchProblem) {
+              const createdProblem = await requestJson(
+                api,
+                `/research-sessions/${encodeURIComponent(sessionId)}/skills/research-problem`,
+                { method: "POST" }
+              );
+              problemEndpoint = createdProblem.endpoint;
+              researchProblem = createdProblem.payload;
+            }
+
+            if (session?.latest_queue_id) {
+              const existingQueue = await requestJson(
+                api,
+                `/research-sessions/${encodeURIComponent(sessionId)}/paper-intake-queue`
+              );
+              queueEndpoint = existingQueue.endpoint;
+              queue = existingQueue.payload;
+            } else {
+              const createdQueue = await requestJson(
+                api,
+                `/research-sessions/${encodeURIComponent(sessionId)}/skills/literature-harvest`,
+                { method: "POST" }
+              );
+              queueEndpoint = createdQueue.endpoint;
+              queue = createdQueue.payload;
+            }
+
+            await appendAuditEvent({
+              tool: "workflow_api_bootstrap_research_session_from_latest_user_message",
+              status: "ok",
+              session_id: sessionId,
+              bootstrap_endpoint: bootstrapEndpoint,
+              bootstrap_action: bootstrap?.bootstrap_action ?? null,
+              session_endpoint: sessionEndpoint,
+              problem_endpoint: problemEndpoint,
+              queue_endpoint: queueEndpoint,
+              queue_id: queue?.queue_id ?? null,
+              problem_id: researchProblem?.problem_id ?? null,
+              goal_excerpt: goalStatement.slice(0, 160)
+            });
+            return buildJsonResult({
+              goal_statement: goalStatement,
+              session,
+              research_problem: researchProblem,
+              paper_intake_queue: queue
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_bootstrap_research_session_from_latest_user_message",
               status: "error",
               error: error instanceof Error ? error.message : String(error)
             });
