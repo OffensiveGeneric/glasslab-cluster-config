@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import json
+from pathlib import Path
 from threading import Lock
+from typing import Any, TypeVar
 
 from services.common.schemas import ArtifactsIndex
 
@@ -19,6 +22,8 @@ from .schemas import (
     ScheduledOperationRecord,
     SourceDocumentRecord,
 )
+
+ModelT = TypeVar('ModelT')
 
 
 class RunStore(ABC):
@@ -181,6 +186,21 @@ class RunStore(ABC):
     @abstractmethod
     def get_logs(self, run_id: str) -> list[LogEntry]:
         raise NotImplementedError
+
+
+def _parse_record_map(items: dict[str, Any], model_type: type[ModelT]) -> dict[str, ModelT]:
+    return {record_id: model_type.model_validate(payload) for record_id, payload in items.items()}
+
+
+def _parse_artifacts_map(items: dict[str, Any]) -> dict[str, ArtifactsIndex]:
+    return {run_id: ArtifactsIndex.model_validate(payload) for run_id, payload in items.items()}
+
+
+def _parse_logs_map(items: dict[str, Any]) -> dict[str, list[LogEntry]]:
+    return {
+        run_id: [LogEntry.model_validate(entry) for entry in entries]
+        for run_id, entries in items.items()
+    }
 
 
 class InMemoryRunStore(RunStore):
@@ -405,3 +425,146 @@ class InMemoryRunStore(RunStore):
     def get_logs(self, run_id: str) -> list[LogEntry]:
         with self._lock:
             return list(self._logs.get(run_id, []))
+
+
+class JsonFileRunStore(InMemoryRunStore):
+    def __init__(self, state_path: str | Path) -> None:
+        self._state_path = Path(state_path)
+        super().__init__()
+        self._load()
+
+    def _load(self) -> None:
+        if not self._state_path.exists():
+            return
+        payload = json.loads(self._state_path.read_text(encoding='utf-8'))
+        with self._lock:
+            self._research_sessions = _parse_record_map(
+                payload.get('research_sessions', {}),
+                ResearchSessionRecord,
+            )
+            self._latest_research_session_id = payload.get('latest_research_session_id')
+            self._intakes = _parse_record_map(payload.get('intakes', {}), IntakeRecord)
+            self._latest_intake_id = payload.get('latest_intake_id')
+            self._interpretations = _parse_record_map(payload.get('interpretations', {}), InterpretationRecord)
+            self._latest_interpretation_id = payload.get('latest_interpretation_id')
+            self._replicability_assessments = _parse_record_map(
+                payload.get('replicability_assessments', {}),
+                ReplicabilityAssessmentRecord,
+            )
+            self._latest_replicability_assessment_id = payload.get('latest_replicability_assessment_id')
+            self._design_drafts = _parse_record_map(payload.get('design_drafts', {}), DesignDraftRecord)
+            self._latest_design_draft_id = payload.get('latest_design_draft_id')
+            self._research_problems = _parse_record_map(payload.get('research_problems', {}), ResearchProblemRecord)
+            self._latest_research_problem_id = payload.get('latest_research_problem_id')
+            self._paper_intake_queues = _parse_record_map(
+                payload.get('paper_intake_queues', {}),
+                PaperIntakeQueueRecord,
+            )
+            self._latest_paper_intake_queue_id = payload.get('latest_paper_intake_queue_id')
+            self._source_documents = _parse_record_map(payload.get('source_documents', {}), SourceDocumentRecord)
+            self._latest_source_document_id = payload.get('latest_source_document_id')
+            self._runs = _parse_record_map(payload.get('runs', {}), RunRecord)
+            self._latest_run_id = payload.get('latest_run_id')
+            self._schedules = _parse_record_map(payload.get('schedules', {}), ScheduledOperationRecord)
+            self._executions = _parse_record_map(payload.get('executions', {}), ScheduledExecutionRecord)
+            self._artifacts = _parse_artifacts_map(payload.get('artifacts', {}))
+            self._logs = _parse_logs_map(payload.get('logs', {}))
+
+    def _flush(self) -> None:
+        with self._lock:
+            payload = {
+                'research_sessions': {key: record.model_dump(mode='json') for key, record in self._research_sessions.items()},
+                'latest_research_session_id': self._latest_research_session_id,
+                'intakes': {key: record.model_dump(mode='json') for key, record in self._intakes.items()},
+                'latest_intake_id': self._latest_intake_id,
+                'interpretations': {key: record.model_dump(mode='json') for key, record in self._interpretations.items()},
+                'latest_interpretation_id': self._latest_interpretation_id,
+                'replicability_assessments': {
+                    key: record.model_dump(mode='json') for key, record in self._replicability_assessments.items()
+                },
+                'latest_replicability_assessment_id': self._latest_replicability_assessment_id,
+                'design_drafts': {key: record.model_dump(mode='json') for key, record in self._design_drafts.items()},
+                'latest_design_draft_id': self._latest_design_draft_id,
+                'research_problems': {
+                    key: record.model_dump(mode='json') for key, record in self._research_problems.items()
+                },
+                'latest_research_problem_id': self._latest_research_problem_id,
+                'paper_intake_queues': {
+                    key: record.model_dump(mode='json') for key, record in self._paper_intake_queues.items()
+                },
+                'latest_paper_intake_queue_id': self._latest_paper_intake_queue_id,
+                'source_documents': {
+                    key: record.model_dump(mode='json') for key, record in self._source_documents.items()
+                },
+                'latest_source_document_id': self._latest_source_document_id,
+                'runs': {key: record.model_dump(mode='json') for key, record in self._runs.items()},
+                'latest_run_id': self._latest_run_id,
+                'schedules': {key: record.model_dump(mode='json') for key, record in self._schedules.items()},
+                'executions': {key: record.model_dump(mode='json') for key, record in self._executions.items()},
+                'artifacts': {key: record.model_dump(mode='json') for key, record in self._artifacts.items()},
+                'logs': {key: [entry.model_dump(mode='json') for entry in entries] for key, entries in self._logs.items()},
+            }
+        self._state_path.parent.mkdir(parents=True, exist_ok=True)
+        self._state_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding='utf-8')
+
+    def save_research_session(self, record: ResearchSessionRecord) -> None:
+        super().save_research_session(record)
+        self._flush()
+
+    def save_intake(self, record: IntakeRecord) -> None:
+        super().save_intake(record)
+        self._flush()
+
+    def save_design_draft(self, record: DesignDraftRecord) -> None:
+        super().save_design_draft(record)
+        self._flush()
+
+    def save_interpretation(self, record: InterpretationRecord) -> None:
+        super().save_interpretation(record)
+        self._flush()
+
+    def save_replicability_assessment(self, record: ReplicabilityAssessmentRecord) -> None:
+        super().save_replicability_assessment(record)
+        self._flush()
+
+    def save_run(self, record: RunRecord) -> None:
+        super().save_run(record)
+        self._flush()
+
+    def save_research_problem(self, record: ResearchProblemRecord) -> None:
+        super().save_research_problem(record)
+        self._flush()
+
+    def save_paper_intake_queue(self, record: PaperIntakeQueueRecord) -> None:
+        super().save_paper_intake_queue(record)
+        self._flush()
+
+    def save_source_document(self, record: SourceDocumentRecord) -> None:
+        super().save_source_document(record)
+        self._flush()
+
+    def save_schedule(self, record: ScheduledOperationRecord) -> None:
+        super().save_schedule(record)
+        self._flush()
+
+    def save_execution(self, record: ScheduledExecutionRecord) -> None:
+        super().save_execution(record)
+        self._flush()
+
+    def save_artifacts(self, run_id: str, artifacts: ArtifactsIndex) -> None:
+        super().save_artifacts(run_id, artifacts)
+        self._flush()
+
+    def append_log(self, run_id: str, entry: LogEntry) -> None:
+        super().append_log(run_id, entry)
+        self._flush()
+
+
+def create_run_store(store_backend: str, *, state_path: str | Path | None = None) -> RunStore:
+    if store_backend == 'memory':
+        return InMemoryRunStore()
+    if store_backend == 'json':
+        if state_path is None:
+            raise ValueError('json store backend requires state_path')
+        return JsonFileRunStore(state_path)
+    raise ValueError(f'unsupported store backend: {store_backend}')

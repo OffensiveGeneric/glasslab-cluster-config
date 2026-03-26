@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     app_version: str = '0.1.0'
     log_level: str = 'INFO'
     registry_dir: str = str(DEFAULT_REGISTRY_DIR)
+    store_backend: Literal['memory', 'json'] = 'memory'
+    allow_inmemory_store: bool = True
+    store_json_path: str = '/mnt/artifacts/workflow-api/state/run-store.json'
     runner_namespace: str = 'glasslab-v2'
     default_submitted_by: str = 'glasslab-operator'
     job_submission_mode: Literal['null', 'kubernetes'] = 'null'

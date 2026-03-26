@@ -22,7 +22,7 @@ from services.common.schemas import ArtifactIndexEntry, ArtifactsIndex, RunManif
 from .config import Settings, get_settings
 from .execution_preflight import build_execution_preflight_result
 from .job_submission import JobSubmitter, create_job_submitter
-from .persistence import InMemoryRunStore, RunStore
+from .persistence import RunStore, create_run_store
 from .registry import WorkflowRegistry
 from .schemas import (
     DesignDraftRecord,
@@ -2181,7 +2181,16 @@ def create_app(
 ) -> FastAPI:
     settings = settings or get_settings()
     registry = registry or WorkflowRegistry(settings.registry_dir)
-    store = store or InMemoryRunStore()
+    if store is None:
+        if settings.store_backend == 'memory' and not settings.allow_inmemory_store:
+            raise RuntimeError(
+                'workflow-api store backend is set to memory but allow_inmemory_store=false; '
+                'choose a durable backend or explicitly allow in-memory mode'
+            )
+        store = create_run_store(
+            settings.store_backend,
+            state_path=settings.store_json_path,
+        )
     submitter = submitter or create_job_submitter(settings)
 
     app = FastAPI(title=settings.app_name, version=settings.app_version)
@@ -2197,6 +2206,7 @@ def create_app(
             'app': settings.app_name,
             'version': settings.app_version,
             'workflow_count': len(registry.list_workflows()),
+            'store_backend': settings.store_backend,
         }
 
     @app.post('/intakes', response_model=IntakeRecord, status_code=status.HTTP_201_CREATED)

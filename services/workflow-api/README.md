@@ -11,8 +11,13 @@ Current architectural reality:
 
 Current durability warning:
 
-- the default store in code is still `InMemoryRunStore`
-- session and stage metadata are therefore not durable by default until a persistent store backend is added
+- the store backend is now explicit:
+  - `GLASSLAB_WORKFLOW_API_STORE_BACKEND=memory`
+  - `GLASSLAB_WORKFLOW_API_STORE_BACKEND=json`
+- in-memory mode is still valid for tests and short-lived local iteration
+- `GLASSLAB_WORKFLOW_API_ALLOW_INMEMORY_STORE=false` can now fail closed instead of silently booting on ephemeral state
+- the first durable backend is JSON-file based via `GLASSLAB_WORKFLOW_API_STORE_JSON_PATH`
+- session and stage metadata are still not in Postgres yet, so this is a bounded durability step rather than the final persistence architecture
 - artifact files and source-document blobs may be durable, but the coordinating metadata currently is not
 
 The first live execution path now targets Kubernetes Jobs in `glasslab-v2` for accepted `generic-tabular-benchmark` runs.

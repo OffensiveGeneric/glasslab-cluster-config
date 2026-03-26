@@ -30,6 +30,7 @@ def test_healthz_and_workflow_families() -> None:
     health = client.get('/healthz')
     assert health.status_code == 200
     assert health.json()['workflow_count'] == 3
+    assert health.json()['store_backend'] == 'memory'
 
     families = client.get('/workflow-families')
     assert families.status_code == 200
@@ -73,6 +74,51 @@ def test_create_and_fetch_latest_intake() -> None:
     fetched = client.get(f'/intakes/{intake_id}')
     assert fetched.status_code == 200
     assert fetched.json()['normalized_summary'].startswith('Take this paper note set')
+
+
+def test_json_store_persists_intake_across_restart(tmp_path) -> None:
+    state_path = tmp_path / 'run-store.json'
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        store_backend='json',
+        store_json_path=str(state_path),
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+
+    first_client = TestClient(create_app(settings=settings, registry=registry))
+    create = first_client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Turn this literature note into a bounded experiment.',
+            'source_refs': ['https://example.org/paper-notes'],
+            'notes': ['Persist this intake.'],
+        },
+    )
+
+    assert create.status_code == 201
+    intake_id = create.json()['intake_id']
+    assert state_path.exists()
+
+    second_client = TestClient(create_app(settings=settings, registry=registry))
+    latest = second_client.get('/intakes/latest')
+    assert latest.status_code == 200
+    assert latest.json()['intake_id'] == intake_id
+
+
+def test_create_app_rejects_implicit_memory_store_when_disallowed() -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        store_backend='memory',
+        allow_inmemory_store=False,
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+
+    try:
+        create_app(settings=settings, registry=registry)
+    except RuntimeError as exc:
+        assert 'allow_inmemory_store=false' in str(exc)
+    else:
+        raise AssertionError('expected create_app to reject implicit in-memory store')
 
 
 def test_create_intake_uses_agent_when_enabled(monkeypatch) -> None:
