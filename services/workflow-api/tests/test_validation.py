@@ -56,3 +56,24 @@ def test_validation_rejects_disallowed_models() -> None:
     assert len(issues) == 1
     assert issues[0].field == 'models'
     assert 'made_up_model' in issues[0].message
+
+
+def test_validation_accepts_gpu_neural_net_workflow_request() -> None:
+    registry = WorkflowRegistry(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions')
+    workflow = registry.get_workflow('gpu-neural-net-experiment')
+    assert workflow is not None
+
+    request = RunCreateRequest(
+        workflow_id='gpu-neural-net-experiment',
+        objective='Train a bounded neural-net experiment on the approved GPU worker.',
+        inputs={
+            'dataset_uri': 's3://datasets/neural-net/train',
+            'model_family': 'pytorch-template-v1',
+            'training_notes': 'Use a single GPU, bounded epochs, and report validation loss.',
+        },
+        models=['pytorch-template-v1'],
+        resource_profile='gpu-small',
+    )
+
+    issues = validate_run_request(request, workflow)
+    assert issues == []

@@ -29,18 +29,22 @@ def test_healthz_and_workflow_families() -> None:
 
     health = client.get('/healthz')
     assert health.status_code == 200
-    assert health.json()['workflow_count'] == 3
+    assert health.json()['workflow_count'] == 4
     assert health.json()['store_backend'] == 'memory'
 
     families = client.get('/workflow-families')
     assert families.status_code == 200
     payload = families.json()
     assert {entry['workflow_id'] for entry in payload} == {
+        'gpu-neural-net-experiment',
         'generic-tabular-benchmark',
         'literature-to-experiment',
         'replication-lite',
     }
     by_id = {entry['workflow_id']: entry for entry in payload}
+    assert by_id['gpu-neural-net-experiment']['execution_status'] == 'ready'
+    assert by_id['gpu-neural-net-experiment']['submission_backend'] == 'kubernetes'
+    assert by_id['gpu-neural-net-experiment']['resource_profile'] == 'gpu-small'
     assert by_id['generic-tabular-benchmark']['execution_status'] == 'ready'
     assert by_id['generic-tabular-benchmark']['submission_backend'] == 'kubernetes'
     assert by_id['replication-lite']['execution_status'] == 'declared_only'
@@ -2177,6 +2181,28 @@ def test_declared_only_workflow_reports_not_executable() -> None:
     assert payload['ready'] is False
     assert any('execution_status is declared_only' in issue for issue in payload['blocking_issues'])
     assert any('submission_backend is unimplemented' in issue for issue in payload['blocking_issues'])
+
+
+def test_gpu_workflow_execution_preflight_reports_gpu_contract() -> None:
+    client = build_client()
+
+    response = client.get('/workflow-families/gpu-neural-net-experiment/execution-preflight')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['workflow_id'] == 'gpu-neural-net-experiment'
+    assert payload['resource_profile'] == 'gpu-small'
+    assert payload['runner_image'] == 'ghcr.io/offensivegeneric/glasslab-gpu-neural-runner:0.1.0'
+    assert payload['resource_requests'] == {'cpu': '2', 'memory': '4Gi', 'nvidia.com/gpu': '1'}
+    assert payload['resource_limits'] == {'cpu': '4', 'memory': '8Gi', 'nvidia.com/gpu': '1'}
+    assert payload['node_selector'] == {
+        'glasslab.io/gpu-candidate': 'true',
+        'glasslab.io/gpu-vendor': 'nvidia',
+    }
+    assert payload['execution_status'] == 'ready'
+    assert payload['submission_backend'] == 'kubernetes'
+    assert payload['ready'] is True
+    assert any('preflight was skipped' in warning for warning in payload['warnings'])
 
 
 def test_get_run_reflects_disk_artifacts_and_status(tmp_path) -> None:

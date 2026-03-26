@@ -23,3 +23,7 @@ That means definitions should keep these fields honest:
 If a family is declared in Git but not actually runnable through `workflow-api`,
 it should be marked that way here instead of letting preflight or operator UX
 imply more than the backend can really do.
+
+Current approved templates include CPU tabular, literature-to-experiment, a
+declared-only replication lane, and a GPU neural-net experiment template that
+requests `nvidia.com/gpu` on GPU-candidate nodes.

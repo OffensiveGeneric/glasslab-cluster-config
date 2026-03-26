@@ -30,6 +30,13 @@ Current execution prerequisites:
   - cluster `nodes`
   - cluster `pods`
 
+Current approved execution templates include:
+
+- `generic-tabular-benchmark` on `cpu-small`
+- `literature-to-experiment` on `cpu-medium`
+- `gpu-neural-net-experiment` on `gpu-small`
+- `replication-lite` remains declared-only until its submission path is implemented
+
 The repo now includes a direct prereq checker:
 
 - `/home/gr66ss/cluster-config/scripts/check-v2-run-prereqs.sh`
