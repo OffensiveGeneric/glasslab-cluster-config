@@ -2006,6 +2006,106 @@ def test_research_session_skill_routes_drive_literature_flow(monkeypatch) -> Non
     assert payload['session']['latest_intake_id'] == intake.json()['intake_id']
 
 
+def test_research_session_skill_routes_advance_interpretation_assessment_and_design(monkeypatch) -> None:
+    client = build_client()
+
+    class FakeResponse:
+        def __init__(self, payload: dict) -> None:
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            import json
+            return json.dumps(self.payload).encode('utf-8')
+
+    monkeypatch.setattr(
+        main_module.urllib_request,
+        'urlopen',
+        lambda request_obj, timeout: FakeResponse(
+            {
+                'request_id': 'session-skill-queue-2',
+                'selected_tracks': [{'track_id': 'agent_evaluation', 'track': 'agent_evaluation'}],
+                'selected_queries': [{'queries': ['bounded literature harvest']}],
+                'selected_papers': [
+                    {
+                        'paper_id': 'mle_bench_arxiv_2024',
+                        'title': 'MLE-bench: Evaluating Machine Learning Agents on Machine Learning Engineering',
+                        'year': 2024,
+                        'venue': 'arXiv',
+                        'priority': 'P1',
+                        'tracks': ['agent_evaluation'],
+                        'bounded_job_fit': 4,
+                        'replication_complexity': 4,
+                        'official_page': 'https://arxiv.org/abs/2410.07095',
+                        'pdf_url': None,
+                        'why_seed': 'benchmark for bounded ML engineering work',
+                        'first_jobs': ['reduce the benchmark into a smaller internal harness'],
+                        'tags': ['agents'],
+                    }
+                ],
+                'warnings': [],
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        main_module,
+        'ingest_source_document',
+        lambda source_url, submitted_by, settings, store, session_id=None: main_module.SourceDocumentRecord(
+            document_id='session-skill-doc-2',
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            status='fetched',
+            source_url=source_url,
+            submitted_by=submitted_by,
+            storage_uri='file:///tmp/source-documents/session-skill-doc-2/source.html',
+            content_type='text/html',
+            size_bytes=42,
+            sha256='jkl012',
+            title='source.html',
+            text_excerpt='Session skill route document excerpt.',
+            session_id=session_id,
+        ),
+    )
+
+    session = client.post(
+        '/research-sessions',
+        json={
+            'goal_statement': 'Develop a bounded literature search around ML engineering benchmark papers.',
+        },
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    assert client.post(f'/research-sessions/{session_id}/skills/research-problem').status_code == 201
+    assert client.post(f'/research-sessions/{session_id}/skills/literature-harvest').status_code == 201
+    intake = client.post(f'/research-sessions/{session_id}/skills/paper-intake')
+    assert intake.status_code == 201
+
+    interpretation = client.post(f'/research-sessions/{session_id}/skills/interpretation')
+    assert interpretation.status_code == 201
+    assert interpretation.json()['session_id'] == session_id
+
+    assessment = client.post(f'/research-sessions/{session_id}/skills/assessment')
+    assert assessment.status_code == 201
+    assert assessment.json()['session_id'] == session_id
+
+    design = client.post(f'/research-sessions/{session_id}/skills/design')
+    assert design.status_code == 201
+    assert design.json()['session_id'] == session_id
+
+    context = client.get(f'/research-sessions/{session_id}/context')
+    assert context.status_code == 200
+    payload = context.json()
+    assert payload['session']['latest_interpretation_id'] == interpretation.json()['interpretation_id']
+    assert payload['session']['latest_assessment_id'] == assessment.json()['assessment_id']
+    assert payload['session']['latest_design_id'] == design.json()['design_id']
+
+
 def test_operation_records_capture_literature_harvest_and_paper_intake(monkeypatch) -> None:
     client = build_client()
 

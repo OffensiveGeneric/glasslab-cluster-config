@@ -80,15 +80,23 @@ Session-first skill endpoints:
 - `POST /research-sessions/{session_id}/skills/research-problem`
 - `POST /research-sessions/{session_id}/skills/literature-harvest`
 - `POST /research-sessions/{session_id}/skills/paper-intake`
+- `POST /research-sessions/{session_id}/skills/interpretation`
+- `POST /research-sessions/{session_id}/skills/assessment`
+- `POST /research-sessions/{session_id}/skills/design`
 - `POST /research-sessions/latest/skills/research-problem`
 - `POST /research-sessions/latest/skills/literature-harvest`
 - `POST /research-sessions/latest/skills/paper-intake`
+- `POST /research-sessions/latest/skills/interpretation`
+- `POST /research-sessions/latest/skills/assessment`
+- `POST /research-sessions/latest/skills/design`
 
 These are thin bounded aliases over the existing session-state path. The intent is:
 
 - sessions hold the research state
 - skills mutate that state in bounded ways
 - workflow families stay a later execution concern
+- design prefers the session's latest ready assessment when available, then falls
+  back to the latest intake path
 
 Operation-record endpoints:
 

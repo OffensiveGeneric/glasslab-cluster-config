@@ -440,7 +440,7 @@ const plugin = {
     api.registerTool(
       {
         name: "workflow_api_create_assessment_from_latest_interpretation",
-        description: "Create a replicability assessment from the latest interpretation record.",
+        description: "Apply the assessment skill to the latest research session.",
         parameters: {
           type: "object",
           additionalProperties: false,
@@ -448,7 +448,7 @@ const plugin = {
         },
         async execute() {
           try {
-            const { endpoint, payload } = await requestJson(api, "/replicability-assessments/from-latest-interpretation", {
+            const { endpoint, payload } = await requestJson(api, "/research-sessions/latest/skills/assessment", {
               method: "POST"
             });
             await appendAuditEvent({
@@ -515,7 +515,7 @@ const plugin = {
     api.registerTool(
       {
         name: "workflow_api_create_design_draft_from_last_intake",
-        description: "Create a design draft from the latest intake record.",
+        description: "Apply the design skill to the latest research session.",
         parameters: {
           type: "object",
           additionalProperties: false,
@@ -523,11 +523,11 @@ const plugin = {
         },
         async execute() {
           try {
-            const { endpoint, payload } = await requestJson(api, "/design-drafts/from-latest-intake", {
+            const { endpoint, payload } = await requestJson(api, "/research-sessions/latest/skills/design", {
               method: "POST"
             });
             await appendAuditEvent({
-              tool: "workflow_api_create_design_draft_from_last_intake",
+              tool: "workflow_api_create_design_draft_from_last_assessment",
               status: "ok",
               endpoint,
               design_id: payload?.design_id ?? null,
@@ -540,7 +540,7 @@ const plugin = {
             });
           } catch (error) {
             await appendAuditEvent({
-              tool: "workflow_api_create_design_draft_from_last_intake",
+              tool: "workflow_api_create_design_draft_from_last_assessment",
               status: "error",
               error: error instanceof Error ? error.message : String(error)
             });
@@ -554,7 +554,7 @@ const plugin = {
     api.registerTool(
       {
         name: "workflow_api_create_design_draft_from_last_assessment",
-        description: "Create a design draft from the latest assessment record.",
+        description: "Apply the design skill to the latest research session, preferring the latest ready assessment.",
         parameters: {
           type: "object",
           additionalProperties: false,
@@ -562,7 +562,7 @@ const plugin = {
         },
         async execute() {
           try {
-            const { endpoint, payload } = await requestJson(api, "/design-drafts/from-latest-assessment", {
+            const { endpoint, payload } = await requestJson(api, "/research-sessions/latest/skills/design", {
               method: "POST"
             });
             await appendAuditEvent({

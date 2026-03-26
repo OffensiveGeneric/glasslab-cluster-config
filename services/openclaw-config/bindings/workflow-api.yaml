@@ -21,13 +21,12 @@ routes:
   stage_next_intake_from_queue: POST /paper-intake-queues/{queue_id}/stage-next-intake
   get_latest_source_document: GET /source-documents/latest
   get_latest_operation: GET /operations/latest
-  create_interpretation_from_latest_intake: POST /interpretations/from-latest-intake
+  create_interpretation_from_latest_session: POST /research-sessions/latest/skills/interpretation
   get_latest_interpretation: GET /interpretations/latest
-  create_assessment_from_latest_interpretation: POST /replicability-assessments/from-latest-interpretation
+  create_assessment_from_latest_session: POST /research-sessions/latest/skills/assessment
   get_latest_assessment: GET /replicability-assessments/latest
   run_fresh_paper_pipeline: POST /paper-pipelines/fresh-paper
-  create_design_draft_from_latest_intake: POST /design-drafts/from-latest-intake
-  create_design_draft_from_latest_assessment: POST /design-drafts/from-latest-assessment
+  create_design_draft_from_latest_session: POST /research-sessions/latest/skills/design
   review_latest_design_draft: POST /design-drafts/latest/review
   get_latest_design_draft: GET /design-drafts/latest
   get_workflow_execution_preflight: GET /workflow-families/{workflow_id}/execution-preflight

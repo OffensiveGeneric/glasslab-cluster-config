@@ -36,11 +36,12 @@ Default posture:
 - use `workflow_api_get_last_intake` to recover the latest backend-owned intake record
 - use `workflow_api_get_latest_source_document` to inspect the latest fetched paper/webpage document record instead of guessing what was stored
 - use `workflow_api_get_latest_operation` to inspect what the backend most recently did during literature harvest, source-document fetch, or paper intake
+- use `workflow_api_create_interpretation_from_latest_intake` when the active session should apply the interpretation skill to its latest staged intake
 - use `workflow_api_get_latest_interpretation` to report the current literature-state summary, research gaps, and bounded experiment ideas
-- use `workflow_api_create_assessment_from_latest_interpretation` to advance the latest interpreted paper into an assessment
+- use `workflow_api_create_assessment_from_latest_interpretation` when the active session should apply the assessment skill to its latest interpretation
 - use `workflow_api_get_latest_assessment` to inspect the latest assessment before recommending design or execution
-- use `workflow_api_create_design_draft_from_last_intake` to map the latest intake onto one approved workflow path
-- use `workflow_api_create_design_draft_from_last_assessment` when the latest assessment should drive the design draft
+- use `workflow_api_create_design_draft_from_last_intake` when the active session should apply the design skill and no ready assessment exists yet
+- use `workflow_api_create_design_draft_from_last_assessment` when the active session should apply the design skill and a ready assessment should drive workflow selection
 - use `workflow_api_get_last_design_draft` to inspect the stored design draft instead of answering from memory
 - use `workflow_api_get_execution_preflight_from_last_design` before promising that a drafted experiment is runnable on the current cluster
 - use `workflow_api_review_last_design_for_literature_path` when the approved literature path needs its repo-managed dataset binding applied before run creation

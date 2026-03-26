@@ -179,6 +179,37 @@ def build_research_session_context(
     )
 
 
+def get_required_research_session(store: RunStore, session_id: str) -> ResearchSessionRecord:
+    session = store.get_research_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session not found')
+    return session
+
+
+def get_required_session_latest_intake(store: RunStore, session_id: str) -> IntakeRecord:
+    session = get_required_research_session(store, session_id)
+    intake = store.get_intake(session.latest_intake_id or '')
+    if intake is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session has no staged intake yet')
+    return intake
+
+
+def get_required_session_latest_interpretation(store: RunStore, session_id: str) -> InterpretationRecord:
+    session = get_required_research_session(store, session_id)
+    interpretation = store.get_interpretation(session.latest_interpretation_id or '')
+    if interpretation is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session has no interpretation yet')
+    return interpretation
+
+
+def get_required_session_latest_assessment(store: RunStore, session_id: str) -> ReplicabilityAssessmentRecord:
+    session = get_required_research_session(store, session_id)
+    assessment = store.get_replicability_assessment(session.latest_assessment_id or '')
+    if assessment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session has no assessment yet')
+    return assessment
+
+
 def summarize_intake(raw_request: str, notes: list[str]) -> str:
     summary = ' '.join(raw_request.split())
     if notes:
@@ -2264,6 +2295,9 @@ def create_app(
         intake = store.get_latest_intake()
         if intake is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='intake not found')
+        return create_interpretation_for_intake(intake)
+
+    def create_interpretation_for_intake(intake: IntakeRecord) -> InterpretationRecord:
         record = call_interpretation_agent(intake, settings, registry, store)
         source = 'agent'
         if record is None:
@@ -2279,6 +2313,18 @@ def create_app(
         )
         touch_research_session(store, record.session_id, latest_interpretation_id=record.interpretation_id)
         return record
+
+    @app.post('/research-sessions/{session_id}/skills/interpretation', response_model=InterpretationRecord, status_code=status.HTTP_201_CREATED)
+    def apply_session_interpretation_skill(session_id: str) -> InterpretationRecord:
+        intake = get_required_session_latest_intake(store, session_id)
+        return create_interpretation_for_intake(intake)
+
+    @app.post('/research-sessions/latest/skills/interpretation', response_model=InterpretationRecord, status_code=status.HTTP_201_CREATED)
+    def apply_latest_session_interpretation_skill() -> InterpretationRecord:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return apply_session_interpretation_skill(session.session_id)
 
     @app.get('/interpretations/latest', response_model=InterpretationRecord)
     def get_latest_interpretation() -> InterpretationRecord:
@@ -2303,6 +2349,11 @@ def create_app(
         interpretation = store.get_latest_interpretation()
         if interpretation is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='interpretation not found')
+        return create_replicability_assessment_for_interpretation(interpretation)
+
+    def create_replicability_assessment_for_interpretation(
+        interpretation: InterpretationRecord,
+    ) -> ReplicabilityAssessmentRecord:
         record = call_assessment_agent(interpretation, settings, registry)
         source = 'agent'
         if record is None:
@@ -2319,6 +2370,26 @@ def create_app(
         )
         touch_research_session(store, record.session_id, latest_assessment_id=record.assessment_id)
         return record
+
+    @app.post(
+        '/research-sessions/{session_id}/skills/assessment',
+        response_model=ReplicabilityAssessmentRecord,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def apply_session_assessment_skill(session_id: str) -> ReplicabilityAssessmentRecord:
+        interpretation = get_required_session_latest_interpretation(store, session_id)
+        return create_replicability_assessment_for_interpretation(interpretation)
+
+    @app.post(
+        '/research-sessions/latest/skills/assessment',
+        response_model=ReplicabilityAssessmentRecord,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def apply_latest_session_assessment_skill() -> ReplicabilityAssessmentRecord:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return apply_session_assessment_skill(session.session_id)
 
     @app.get('/replicability-assessments/latest', response_model=ReplicabilityAssessmentRecord)
     def get_latest_replicability_assessment() -> ReplicabilityAssessmentRecord:
@@ -2340,29 +2411,45 @@ def create_app(
         if intake is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='intake not found')
         latest_interpretation = store.get_latest_interpretation()
-        intake_for_design = enrich_intake_with_interpretation_context(
-            intake,
-            latest_interpretation if latest_interpretation and latest_interpretation.intake_id == intake.intake_id else None,
-        )
-        workflow = choose_workflow_for_intake(intake_for_design, registry)
+        interpretation = latest_interpretation if latest_interpretation and latest_interpretation.intake_id == intake.intake_id else None
+        return create_design_draft_for_intake(intake, interpretation=interpretation)
+
+    def create_design_draft_for_intake(
+        intake: IntakeRecord,
+        *,
+        interpretation: InterpretationRecord | None = None,
+        source_assessment_id: str | None = None,
+        submitted_by: str | None = None,
+        workflow_id: str | None = None,
+    ) -> DesignDraftRecord:
+        intake_for_design = enrich_intake_with_interpretation_context(intake, interpretation)
+        workflow = registry.get_workflow(workflow_id) if workflow_id else choose_workflow_for_intake(intake_for_design, registry)
         if workflow is None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='no approved workflow mapping found')
+        effective_submitted_by = submitted_by or intake.submitted_by
         record = call_design_agent(
             intake_for_design,
             workflow,
-            submitted_by=intake.submitted_by,
+            submitted_by=effective_submitted_by,
             settings=settings,
+            source_assessment_id=source_assessment_id,
         )
         source = 'agent'
         if record is None:
             source = 'deterministic'
-            record = build_design_draft(intake_for_design, workflow, submitted_by=intake.submitted_by)
+            record = build_design_draft(
+                intake_for_design,
+                workflow,
+                submitted_by=effective_submitted_by,
+                source_assessment_id=source_assessment_id,
+            )
         store.save_design_draft(record)
         log_stage_record_source(
             'design',
             source,
             record.design_id,
             intake_id=record.intake_id,
+            source_assessment_id=source_assessment_id,
             workflow_id=record.workflow_id,
             submitted_by=record.submitted_by,
         )
@@ -2382,38 +2469,45 @@ def create_app(
         if intake is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='intake not found')
         interpretation = store.get_interpretation(assessment.interpretation_id)
-        intake_for_design = enrich_intake_with_interpretation_context(intake, interpretation)
-        workflow = registry.get_workflow(assessment.recommended_workflow_id)
-        if workflow is None:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='workflow registry entry not found')
-        record = call_design_agent(
-            intake_for_design,
-            workflow,
+        return create_design_draft_for_intake(
+            intake,
+            interpretation=interpretation,
+            source_assessment_id=assessment.assessment_id,
             submitted_by=assessment.submitted_by,
-            settings=settings,
-            source_assessment_id=assessment.assessment_id,
+            workflow_id=assessment.recommended_workflow_id,
         )
-        source = 'agent'
-        if record is None:
-            source = 'deterministic'
-            record = build_design_draft(
-                intake_for_design,
-                workflow,
-                submitted_by=assessment.submitted_by,
-                source_assessment_id=assessment.assessment_id,
-            )
-        store.save_design_draft(record)
-        log_stage_record_source(
-            'design',
-            source,
-            record.design_id,
-            intake_id=record.intake_id,
-            source_assessment_id=assessment.assessment_id,
-            workflow_id=record.workflow_id,
-            submitted_by=record.submitted_by,
-        )
-        touch_research_session(store, record.session_id, latest_design_id=record.design_id)
-        return record
+
+    @app.post('/research-sessions/{session_id}/skills/design', response_model=DesignDraftRecord, status_code=status.HTTP_201_CREATED)
+    def apply_session_design_skill(session_id: str) -> DesignDraftRecord:
+        session = get_required_research_session(store, session_id)
+        assessment = store.get_replicability_assessment(session.latest_assessment_id or '')
+        if assessment is not None:
+            if assessment.status == 'ready_for_design' and assessment.recommendation == 'proceed':
+                if not assessment.recommended_workflow_id:
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='research session assessment has no recommended workflow')
+                intake = store.get_intake(assessment.intake_id)
+                if intake is None:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='intake not found')
+                interpretation = store.get_interpretation(assessment.interpretation_id)
+                return create_design_draft_for_intake(
+                    intake,
+                    interpretation=interpretation,
+                    source_assessment_id=assessment.assessment_id,
+                    submitted_by=assessment.submitted_by,
+                    workflow_id=assessment.recommended_workflow_id,
+                )
+        intake = get_required_session_latest_intake(store, session_id)
+        interpretation = store.get_interpretation(session.latest_interpretation_id or '')
+        if interpretation is not None and interpretation.intake_id != intake.intake_id:
+            interpretation = None
+        return create_design_draft_for_intake(intake, interpretation=interpretation)
+
+    @app.post('/research-sessions/latest/skills/design', response_model=DesignDraftRecord, status_code=status.HTTP_201_CREATED)
+    def apply_latest_session_design_skill() -> DesignDraftRecord:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return apply_session_design_skill(session.session_id)
 
     @app.get('/design-drafts/latest', response_model=DesignDraftRecord)
     def get_latest_design_draft() -> DesignDraftRecord:
