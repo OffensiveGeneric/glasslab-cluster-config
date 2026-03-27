@@ -168,6 +168,10 @@ The repo needs clearer boundaries for:
 - what still depends on `.44`
 - which storage and secret paths are authoritative
 
+Follow-through note:
+
+- `state-and-storage-map-2026-03-27.md` is now the canonical inventory for where session metadata, source documents, run artifacts, OpenClaw state, secrets, and images currently live.
+
 ## Immediate implementation candidates
 
 ### 1. Durable store backend for `workflow-api`

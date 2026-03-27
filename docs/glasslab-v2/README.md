@@ -90,6 +90,7 @@ Still-current supporting design notes:
 
 Operational and infrastructure references:
 - `cluster-primitives-gap-audit.md`: missing infrastructure primitives and next actions
+- `state-and-storage-map-2026-03-27.md`: current canonical map of where sessions, source documents, artifacts, OpenClaw state, images, and secrets actually live
 - `storage-and-state.md`: storage posture and persistence expectations
 - `stateful-service-recovery-matrix.md`: one-page classification of backup/restore versus relocation priorities
 - `node-loss-tolerance-phased-plan.md`: phased execution order for moving from restart durability toward node-loss tolerance
