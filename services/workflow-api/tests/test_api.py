@@ -1282,6 +1282,209 @@ def test_create_run_from_latest_ready_design_draft() -> None:
     assert payload['manifest']['inputs']['dataset_name'] == 'titanic'
 
 
+def test_get_latest_session_execution_preflight_uses_latest_session_design(monkeypatch) -> None:
+    client = build_client()
+
+    class FakeResponse:
+        def __init__(self, payload: dict) -> None:
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            import json
+            return json.dumps(self.payload).encode('utf-8')
+
+    monkeypatch.setattr(
+        main_module.urllib_request,
+        'urlopen',
+        lambda request_obj, timeout: FakeResponse(
+            {
+                'request_id': 'session-exec-queue-1',
+                'selected_tracks': [{'track_id': 'agent_evaluation', 'track': 'agent_evaluation'}],
+                'selected_queries': [{'queries': ['bounded literature harvest']}],
+                'selected_papers': [
+                    {
+                        'paper_id': 'mle_bench_arxiv_2024',
+                        'title': 'MLE-bench: Evaluating Machine Learning Agents on Machine Learning Engineering',
+                        'year': 2024,
+                        'venue': 'arXiv',
+                        'priority': 'P1',
+                        'tracks': ['agent_evaluation'],
+                        'bounded_job_fit': 4,
+                        'replication_complexity': 4,
+                        'official_page': 'https://arxiv.org/abs/2410.07095',
+                        'pdf_url': None,
+                        'why_seed': 'benchmark for bounded ML engineering work',
+                        'first_jobs': ['reduce the benchmark into a smaller internal harness'],
+                        'tags': ['agents'],
+                    }
+                ],
+                'warnings': [],
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        main_module,
+        'ingest_source_document',
+        lambda source_url, submitted_by, settings, store, session_id=None: main_module.SourceDocumentRecord(
+            document_id='session-exec-doc-1',
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            status='fetched',
+            source_url=source_url,
+            submitted_by=submitted_by,
+            storage_uri='file:///tmp/source-documents/session-exec-doc-1/source.html',
+            content_type='text/html',
+            size_bytes=42,
+            sha256='mno345',
+            title='source.html',
+            text_excerpt='Session execution route document excerpt.',
+            session_id=session_id,
+        ),
+    )
+
+    session = client.post(
+        '/research-sessions',
+        json={
+            'goal_statement': 'Benchmark the approved models on Titanic and create a validation run.',
+        },
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    problem = client.post(f'/research-sessions/{session_id}/skills/research-problem')
+    assert problem.status_code == 201
+    queue = client.post(f'/research-sessions/{session_id}/skills/literature-harvest')
+    assert queue.status_code == 201
+    intake = client.post(f'/research-sessions/{session_id}/skills/paper-intake')
+    assert intake.status_code == 201
+    interpretation = client.post(f'/research-sessions/{session_id}/skills/interpretation')
+    assert interpretation.status_code == 201
+    assessment = client.post(f'/research-sessions/{session_id}/skills/assessment')
+    assert assessment.status_code == 201
+    design = client.post(f'/research-sessions/{session_id}/skills/design')
+    assert design.status_code == 201
+
+    response = client.get('/research-sessions/latest/execution-preflight')
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['workflow_id'] == design.json()['workflow_id']
+    assert payload['resource_profile'] == design.json()['resource_profile']
+    assert payload['ready'] is True
+
+
+def test_get_latest_session_execution_preflight_requires_session_design() -> None:
+    client = build_client()
+
+    response = client.get('/research-sessions/latest/execution-preflight')
+    assert response.status_code == 404
+    assert response.json()['detail'] == 'no research session has been created yet'
+
+
+def test_create_run_from_latest_session_design(monkeypatch) -> None:
+    client = build_client()
+
+    class FakeResponse:
+        def __init__(self, payload: dict) -> None:
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            import json
+            return json.dumps(self.payload).encode('utf-8')
+
+    monkeypatch.setattr(
+        main_module.urllib_request,
+        'urlopen',
+        lambda request_obj, timeout: FakeResponse(
+            {
+                'request_id': 'session-exec-queue-2',
+                'selected_tracks': [{'track_id': 'agent_evaluation', 'track': 'agent_evaluation'}],
+                'selected_queries': [{'queries': ['bounded literature harvest']}],
+                'selected_papers': [
+                    {
+                        'paper_id': 'mle_bench_arxiv_2024',
+                        'title': 'MLE-bench: Evaluating Machine Learning Agents on Machine Learning Engineering',
+                        'year': 2024,
+                        'venue': 'arXiv',
+                        'priority': 'P1',
+                        'tracks': ['agent_evaluation'],
+                        'bounded_job_fit': 4,
+                        'replication_complexity': 4,
+                        'official_page': 'https://arxiv.org/abs/2410.07095',
+                        'pdf_url': None,
+                        'why_seed': 'benchmark for bounded ML engineering work',
+                        'first_jobs': ['reduce the benchmark into a smaller internal harness'],
+                        'tags': ['agents'],
+                    }
+                ],
+                'warnings': [],
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        main_module,
+        'ingest_source_document',
+        lambda source_url, submitted_by, settings, store, session_id=None: main_module.SourceDocumentRecord(
+            document_id='session-exec-doc-2',
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            status='fetched',
+            source_url=source_url,
+            submitted_by=submitted_by,
+            storage_uri='file:///tmp/source-documents/session-exec-doc-2/source.html',
+            content_type='text/html',
+            size_bytes=42,
+            sha256='pqr678',
+            title='source.html',
+            text_excerpt='Session execution route document excerpt.',
+            session_id=session_id,
+        ),
+    )
+
+    session = client.post(
+        '/research-sessions',
+        json={
+            'goal_statement': 'Benchmark the approved models on Titanic and create a validation run.',
+        },
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    problem = client.post(f'/research-sessions/{session_id}/skills/research-problem')
+    assert problem.status_code == 201
+    queue = client.post(f'/research-sessions/{session_id}/skills/literature-harvest')
+    assert queue.status_code == 201
+    intake = client.post(f'/research-sessions/{session_id}/skills/paper-intake')
+    assert intake.status_code == 201
+    interpretation = client.post(f'/research-sessions/{session_id}/skills/interpretation')
+    assert interpretation.status_code == 201
+    assessment = client.post(f'/research-sessions/{session_id}/skills/assessment')
+    assert assessment.status_code == 201
+    design = client.post(f'/research-sessions/{session_id}/skills/design')
+    assert design.status_code == 201
+    design_payload = design.json()
+
+    run = client.post('/research-sessions/latest/runs/from-design')
+    assert run.status_code == 201
+    payload = run.json()
+    assert payload['source_design_id'] == design_payload['design_id']
+    assert payload['source_intake_id'] == design_payload['intake_id']
+    assert payload['session_id'] == design_payload['session_id']
+    assert payload['run_purpose'] == 'validation'
+    assert payload['manifest']['inputs']['dataset_name'] == 'titanic'
+
+
 def test_create_run_from_latest_design_draft_blocks_non_ready_design() -> None:
     client = build_client()
 

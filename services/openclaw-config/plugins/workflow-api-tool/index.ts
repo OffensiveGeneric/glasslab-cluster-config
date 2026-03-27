@@ -727,26 +727,21 @@ const plugin = {
         },
         async execute() {
           try {
-            const { payload: design } = await requestJson(api, "/research-sessions/latest/design");
-            const workflowId = typeof design?.workflow_id === "string" ? design.workflow_id.trim() : "";
-            if (!workflowId) {
-              throw new Error("latest design draft did not include workflow_id");
-            }
             const { endpoint, payload } = await requestJson(
               api,
-              `/workflow-families/${encodeURIComponent(workflowId)}/execution-preflight`
+              "/research-sessions/latest/execution-preflight"
             );
             await appendAuditEvent({
               tool: "workflow_api_get_execution_preflight_from_last_design",
               status: "ok",
               endpoint,
-              workflow_id: workflowId,
+              workflow_id: payload?.workflow_id ?? null,
               ready: payload?.ready ?? null,
               eligible_node_count: Array.isArray(payload?.eligible_nodes) ? payload.eligible_nodes.length : null
             });
             return buildJsonResult({
               endpoint,
-              workflow_id: workflowId,
+              workflow_id: payload?.workflow_id ?? null,
               execution_preflight: payload
             });
           } catch (error) {
@@ -815,7 +810,7 @@ const plugin = {
         },
         async execute() {
           try {
-            const { endpoint, payload } = await requestJson(api, "/runs/from-latest-design-draft", {
+            const { endpoint, payload } = await requestJson(api, "/research-sessions/latest/runs/from-design", {
               method: "POST"
             });
             const runId = String(payload?.run_id || "").trim();

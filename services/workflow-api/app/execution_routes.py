@@ -22,6 +22,15 @@ def register_execution_routes(
     submitter: JobSubmitter,
     create_run_record: Callable[..., RunRecord],
 ) -> None:
+    def get_required_session_design(session_id: str):
+        session = store.get_research_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session not found')
+        design = store.get_design_draft(session.latest_design_id or '')
+        if design is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session has no design draft yet')
+        return design
+
     @app.get('/workflow-families', response_model=list[WorkflowFamilySummary])
     def list_workflow_families() -> list[WorkflowFamilySummary]:
         return [
@@ -54,8 +63,58 @@ def register_execution_routes(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=[{'field': 'workflow_id', 'message': f'unsupported workflow family: {request.workflow_id}'}],
-            )
+        )
         return create_run_record(request, workflow, settings, submitter, store)
+
+    @app.get('/research-sessions/latest/execution-preflight', response_model=ExecutionPreflightResult)
+    def get_latest_session_execution_preflight() -> ExecutionPreflightResult:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return get_session_execution_preflight(session.session_id)
+
+    @app.post('/research-sessions/latest/runs/from-design', response_model=RunRecord, status_code=status.HTTP_201_CREATED)
+    def create_run_from_latest_session_design() -> RunRecord:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return create_run_from_session_design(session.session_id)
+
+    @app.get('/research-sessions/{session_id}/execution-preflight', response_model=ExecutionPreflightResult)
+    def get_session_execution_preflight(session_id: str) -> ExecutionPreflightResult:
+        design = get_required_session_design(session_id)
+        workflow = registry.get_workflow(design.workflow_id)
+        if workflow is None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='workflow registry entry not found')
+        return build_execution_preflight_result(workflow, settings)
+
+    @app.post('/research-sessions/{session_id}/runs/from-design', response_model=RunRecord, status_code=status.HTTP_201_CREATED)
+    def create_run_from_session_design(session_id: str) -> RunRecord:
+        design = get_required_session_design(session_id)
+        if design.status != 'ready_for_run':
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='design draft is not ready_for_run')
+        workflow = registry.get_workflow(design.workflow_id)
+        if workflow is None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='workflow registry entry not found')
+        request = RunCreateRequest(
+            workflow_id=design.workflow_id,
+            objective=design.objective,
+            inputs=design.declared_inputs,
+            models=design.candidate_models or workflow.allowed_models[:1],
+            resource_profile=design.resource_profile,
+            submitted_by=design.submitted_by,
+        )
+        return create_run_record(
+            request,
+            workflow,
+            settings,
+            submitter,
+            store,
+            source_design_id=design.design_id,
+            source_intake_id=design.intake_id,
+            run_purpose='validation',
+            session_id=design.session_id,
+        )
 
     @app.post('/runs/from-latest-design-draft', response_model=RunRecord, status_code=status.HTTP_201_CREATED)
     def create_run_from_latest_design_draft() -> RunRecord:

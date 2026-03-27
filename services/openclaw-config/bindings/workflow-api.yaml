@@ -34,8 +34,9 @@ routes:
   create_design_draft_from_latest_session: POST /research-sessions/latest/skills/design
   review_latest_design_draft: POST /design-drafts/latest/review
   get_latest_session_design: GET /research-sessions/latest/design
+  get_latest_session_execution_preflight: GET /research-sessions/latest/execution-preflight
   get_workflow_execution_preflight: GET /workflow-families/{workflow_id}/execution-preflight
-  create_run_from_latest_design_draft: POST /runs/from-latest-design-draft
+  create_run_from_latest_design_draft: POST /research-sessions/latest/runs/from-design
   create_run: POST /runs
   get_run: GET /runs/{run_id}
   get_artifacts: GET /runs/{run_id}/artifacts
