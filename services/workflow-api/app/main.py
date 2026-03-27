@@ -14,13 +14,14 @@ from fastapi import FastAPI, HTTPException, status
 from services.common.schemas import ArtifactIndexEntry, ArtifactsIndex, RunManifest, RunStatus, WorkflowRegistryEntry
 
 from .config import Settings, get_settings
-from .digest_scheduling import build_digest_schedule, disable_schedule, execute_due_digest_schedules, schedule_is_due
+from .digest_scheduling import schedule_is_due
 from .execution_routes import register_execution_routes
 from .execution_preflight import build_execution_preflight_result
 from .job_submission import JobSubmitter, create_job_submitter
 from .literature_routes import register_literature_routes
 from .persistence import RunStore, create_run_store
 from .registry import WorkflowRegistry
+from .schedule_routes import register_schedule_routes
 from .source_documents import ingest_source_document, register_source_document_routes
 from .session_helpers import (
     append_research_session_memory,
@@ -43,7 +44,6 @@ from .run_artifacts import (
 from .schemas import (
     DesignDraftRecord,
     DesignDraftReviewRequest,
-    DigestScheduleCreateRequest,
     ExecutionPreflightResult,
     FreshPaperPipelineRequest,
     FreshPaperPipelineResponse,
@@ -60,7 +60,6 @@ from .schemas import (
     ResearchProblemRecord,
     ResearchProblemPipelineRequest,
     ResearchProblemPipelineResponse,
-    ApprovedRerunScheduleCreateRequest,
     ReplicabilityAssessmentRecord,
     RunArtifactsResponse,
     RunCreateRequest,
@@ -2374,64 +2373,15 @@ def create_app(
         submitter=submitter,
         create_run_record=lambda *args, **kwargs: create_run_record(*args, **kwargs),
     )
-
-    @app.post('/digest-schedules', response_model=ScheduledOperationRecord, status_code=status.HTTP_201_CREATED)
-    def create_digest_schedule(request: DigestScheduleCreateRequest) -> ScheduledOperationRecord:
-        record = build_digest_schedule(request, settings)
-        store.save_schedule(record)
-        return record
-
-    @app.get('/digest-schedules', response_model=list[ScheduledOperationRecord])
-    def list_digest_schedules() -> list[ScheduledOperationRecord]:
-        return store.list_schedules(operation_type='digest')
-
-    @app.post('/digest-schedules/{schedule_id}/disable', response_model=ScheduledOperationRecord)
-    def disable_digest_schedule(schedule_id: str) -> ScheduledOperationRecord:
-        record = store.get_schedule(schedule_id)
-        if record is None or record.operation_type != 'digest':
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='digest schedule not found')
-        updated = disable_schedule(record)
-        store.save_schedule(updated)
-        return updated
-
-    @app.post('/approved-rerun-schedules/from-latest-run', response_model=ScheduledOperationRecord, status_code=status.HTTP_201_CREATED)
-    def create_approved_rerun_schedule_from_latest_run(
-        request: ApprovedRerunScheduleCreateRequest,
-    ) -> ScheduledOperationRecord:
-        run = store.get_latest_run()
-        if run is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='run not found')
-        resolved_run = run.model_copy(update={'status': resolve_run_status(run, settings, submitter)})
-        record = build_approved_rerun_schedule(request, resolved_run, settings)
-        store.save_schedule(record)
-        return record
-
-    @app.get('/approved-rerun-schedules', response_model=list[ScheduledOperationRecord])
-    def list_approved_rerun_schedules() -> list[ScheduledOperationRecord]:
-        return store.list_schedules(operation_type='approved-rerun')
-
-    @app.post('/approved-rerun-schedules/{schedule_id}/disable', response_model=ScheduledOperationRecord)
-    def disable_approved_rerun_schedule(schedule_id: str) -> ScheduledOperationRecord:
-        record = store.get_schedule(schedule_id)
-        if record is None or record.operation_type != 'approved-rerun':
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='approved rerun schedule not found')
-        updated = disable_schedule(record)
-        store.save_schedule(updated)
-        return updated
-
-    @app.post('/digest-schedules/run-due', response_model=list[ScheduledExecutionRecord])
-    def run_due_digest_schedules() -> list[ScheduledExecutionRecord]:
-        now = datetime.now(timezone.utc)
-        return execute_due_digest_schedules(store, now)
-
-    @app.post('/approved-rerun-schedules/run-due', response_model=list[ScheduledExecutionRecord])
-    def run_due_approved_rerun_schedules() -> list[ScheduledExecutionRecord]:
-        now = datetime.now(timezone.utc)
-        return execute_due_approved_rerun_schedules(store, now, settings, registry, submitter)
-
-    @app.get('/scheduled-executions', response_model=list[ScheduledExecutionRecord])
-    def list_scheduled_executions(schedule_id: str | None = None) -> list[ScheduledExecutionRecord]:
-        return store.list_executions(schedule_id=schedule_id)
+    register_schedule_routes(
+        app,
+        settings=settings,
+        registry=registry,
+        store=store,
+        submitter=submitter,
+        build_approved_rerun_schedule=lambda *args, **kwargs: build_approved_rerun_schedule(*args, **kwargs),
+        execute_due_approved_rerun_schedules=lambda *args, **kwargs: execute_due_approved_rerun_schedules(*args, **kwargs),
+    )
 
     return app
 
