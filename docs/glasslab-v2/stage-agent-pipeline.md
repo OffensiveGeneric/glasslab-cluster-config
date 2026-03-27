@@ -9,6 +9,22 @@ This note sharpens the current Glasslab v2 direction:
 
 The system should move toward a pipeline of specialized backend agents rather than a single general chat agent trying to improvise the whole process.
 
+Current priority note:
+
+- this stage-agent split is still the right backend direction
+- but the immediate product bottleneck is the usability of the research loop itself
+- the near-term goal is not "more agents"
+- it is a usable session-centered workflow where a human can:
+  - start from an idea
+  - gather papers
+  - understand the literature
+  - draft bounded experiments
+  - run them
+  - compare results
+  - decide what to try next
+
+So for now, stage agents should be treated as bounded quality upgrades to the loop, not as the primary milestone.
+
 ## Current Status
 
 As of 2026-03-25, this roadmap is no longer purely conceptual.
@@ -28,9 +44,10 @@ Repo-backed progress now splits into two categories:
 
 That means the remaining work is primarily:
 
-- wiring the first bounded services into `workflow-api`
-- adding Kubernetes manifests and service wiring
-- validating live model-backed behavior only where it actually helps
+- making the session/skills UX usable for real research conversations
+- strengthening literature harvest and interpretation quality
+- making bounded experiment drafting and execution reliable
+- then using stage agents to improve the quality of those steps
 
 ## Goal
 
@@ -49,6 +66,13 @@ into:
 - an evaluation/report bundle
 
 with minimal operator friction and clear stage boundaries.
+
+Near-term version of that goal:
+
+- the human should be able to stay in one research session
+- the system should preserve intermediate understanding and decisions
+- bounded experiments should be proposed and compared explicitly
+- later stage-agent work should improve those transitions, not replace them with opaque autonomy
 
 ## Core Principle
 

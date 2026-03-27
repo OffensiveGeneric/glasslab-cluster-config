@@ -6,7 +6,7 @@ When a new idea shows up, compare it to this target before adding more moving pa
 
 ## Why This Exists
 
-The closest external shape to what Glasslab is trying to become is something like AutoResearchClaw:
+The closest external shape to what Glasslab is trying to become is something like `autoresearch`:
 
 - one human-facing entrypoint
 - a staged research workflow behind it
@@ -15,6 +15,18 @@ The closest external shape to what Glasslab is trying to become is something lik
 - operator-facing interaction through OpenClaw
 
 That is the right direction.
+
+The most important part of that inspiration is not "many agents" by itself.
+It is the research loop:
+
+- persistent context
+- literature gathering
+- hypothesis and design formation
+- bounded experiment execution
+- result comparison
+- explicit next-step proposals
+
+That is still the target product behavior for Glasslab.
 
 What Glasslab should not do is copy that shape blindly without respecting the constraints of this lab.
 
@@ -41,6 +53,13 @@ One important refinement:
 That means literature search, paper queues, stored source documents,
 interpretations, assessments, and design drafts should accumulate under a
 stateful research session before one execution family is finally chosen.
+
+Another important refinement:
+
+- stage agents are still useful
+- but they are no longer the main near-term product milestone
+- the near-term milestone is a usable session-centered research loop
+- stage agents should improve the quality of each bounded step inside that loop rather than substituting for the loop itself
 
 ## What Glasslab Should Be
 
@@ -208,6 +227,26 @@ Output:
 
 That is enough structure.
 Do not invent a 20-plus-stage workflow unless it is actually buying clarity.
+
+## The Near-Term Product Goal
+
+The near-term goal is narrower and more practical than the full long-term staged picture:
+
+1. start or resume a research session from a plain-language idea
+2. gather and inspect relevant literature inside that session
+3. retain notes, judgments, and candidate next experiments in persistent session memory
+4. draft one bounded experiment
+5. run it on the cluster
+6. record artifacts and results back into the same session
+7. propose the next bounded variation
+
+Examples of the kind of bounded next-step proposal Glasslab should eventually make:
+
+- try a different loss function used less often in the literature
+- compare one architecture family against another on the same dataset slice
+- swap one evaluation target or augmentation choice and measure the delta
+
+This is the product loop to optimize for before adding more autonomous complexity.
 
 ## The Glasslab Version Of “Autonomous”
 

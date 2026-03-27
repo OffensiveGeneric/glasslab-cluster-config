@@ -11,6 +11,12 @@ The product should read as session-first:
 - workflow families are execution templates selected only when the work is ready to run
 - the first operator step should recover the latest session or create one from the latest staged research problem before jumping to execution templates
 
+Current product priority:
+
+- make the session -> literature -> interpretation -> design -> bounded experiment loop usable first
+- treat the stage agents as backend quality improvements to that loop, not as the main near-term product milestone
+- keep the long-term target aligned with iterative research systems like `autoresearch`: persistent context, bounded experiments, result comparison, and explicit next-step proposals
+
 ## Operator Bootstrap
 
 If the operator is missing required state, keep the response narrow:
@@ -29,6 +35,12 @@ If the operator is missing required state, keep the response narrow:
 - `services/openclaw-config`: tracked OpenClaw agents, prompts, bindings, and policy. OpenClaw is the operator shell and gateway, not the workflow brain.
 
 ## Core flow
+
+Near-term usable loop:
+
+`idea -> research session -> literature harvest -> paper intake -> interpretation -> assessment -> design -> bounded experiment -> artifacts -> evaluation -> next-step decision`
+
+Execution-template view:
 
 `request -> workflow family lookup -> registry-backed validation -> canonical run_manifest -> Kubernetes Job submission -> artifacts -> evaluation -> report`
 
