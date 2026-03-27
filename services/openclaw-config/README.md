@@ -11,11 +11,20 @@ The OpenClaw container does not consume this YAML tree directly. `./scripts/expo
 Runtime contract:
 
 - source repo path: `services/openclaw-config`
+- runtime provenance file: `/var/lib/openclaw/runtime/PROVENANCE.json`
 - exported ConfigMap: `glasslab-openclaw-config`
 - exported ConfigMap key: `openclaw-runtime.tar.gz`
 - in-container runtime root: `/var/lib/openclaw/runtime`
 - in-container config path: `/var/lib/openclaw/runtime/openclaw.json`
 - in-container workspaces: `/var/lib/openclaw/runtime/workspaces/<agent>/`
+
+Provenance/debugging helpers:
+
+- `./scripts/export-openclaw-config.sh` now stamps:
+  - `glasslab.buildSourceRevision`
+  - `glasslab.buildSourceLabel`
+- live runtime provenance can be checked with:
+  - `/home/gr66ss/cluster-config/scripts/check-openclaw-provenance.sh`
 
 Live vs committed:
 

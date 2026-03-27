@@ -6,6 +6,10 @@ SOURCE_DIR="$ROOT_DIR/services/openclaw-config"
 KUBECTL="${KUBECTL:-kubectl}"
 NAMESPACE="${GLASSLAB_V2_NAMESPACE:-glasslab-v2}"
 CONFIGMAP_NAME="${GLASSLAB_OPENCLAW_CONFIGMAP_NAME:-glasslab-openclaw-config}"
+GIT_SHA="${GLASSLAB_GIT_SHA:-$(git -C "$ROOT_DIR" rev-parse --short HEAD)}"
+BUILD_SOURCE="${GLASSLAB_BUILD_SOURCE:-git:${GIT_SHA}}"
+export GLASSLAB_GIT_SHA="$GIT_SHA"
+export GLASSLAB_BUILD_SOURCE="$BUILD_SOURCE"
 OUTPUT_DIR=""
 APPLY_CONFIGMAP=true
 TMP_DIR=""
@@ -111,6 +115,8 @@ runtime_dir = Path(sys.argv[2])
 repo_root = source_dir.parents[1]
 registry_dir = repo_root / "services" / "workflow-registry" / "definitions"
 openclaw_local_secret_path = repo_root / "kubeadm" / "glasslab-v2" / "secrets" / "30-openclaw.local.yaml"
+build_source_revision = os.environ.get("GLASSLAB_GIT_SHA", "unknown").strip() or "unknown"
+build_source_label = os.environ.get("GLASSLAB_BUILD_SOURCE", "unspecified").strip() or "unspecified"
 
 required_files = [
     "agents/operator/agent.yaml",
@@ -448,6 +454,10 @@ if provider_api_key_env:
     provider_config["apiKey"] = "${" + provider_api_key_env + "}"
 
 runtime_config = {
+    "glasslab": {
+        "buildSourceRevision": build_source_revision,
+        "buildSourceLabel": build_source_label,
+    },
     "gateway": {
         "mode": "local",
         "bind": "lan",
@@ -560,6 +570,8 @@ runtime_contract_lines = [
     "# OpenClaw Runtime Contract",
     "",
     "- source repo config: `services/openclaw-config`",
+    "- build source revision: `" + build_source_revision + "`",
+    "- build source label: `" + build_source_label + "`",
     "- generated runtime root: `/var/lib/openclaw/runtime`",
     "- generated native config file: `/var/lib/openclaw/runtime/openclaw.json`",
     "- generated agent workspaces: `/var/lib/openclaw/runtime/workspaces/<agent>/`",
@@ -724,6 +736,19 @@ for agent_name, agent_cfg in agents.items():
     "\n".join(runtime_contract_lines) + "\n",
     encoding="utf-8",
 )
+(runtime_dir / "PROVENANCE.json").write_text(
+    json.dumps(
+        {
+            "build_source_revision": build_source_revision,
+            "build_source_label": build_source_label,
+            "source_repo_config": "services/openclaw-config",
+        },
+        indent=2,
+        sort_keys=True,
+    )
+    + "\n",
+    encoding="utf-8",
+)
 PY
 
 if [[ -n "$OUTPUT_DIR" ]]; then
@@ -743,6 +768,8 @@ if [[ "$APPLY_CONFIGMAP" == true ]]; then
 fi
 
 printf '[export-openclaw-config] source repo path: %s\n' "$SOURCE_DIR"
+printf '[export-openclaw-config] build source revision: %s\n' "$GIT_SHA"
+printf '[export-openclaw-config] build source label: %s\n' "$BUILD_SOURCE"
 printf '[export-openclaw-config] configmap key: openclaw-runtime.tar.gz\n'
 printf '[export-openclaw-config] in-container runtime root: /var/lib/openclaw/runtime\n'
 printf '[export-openclaw-config] in-container config path: /var/lib/openclaw/runtime/openclaw.json\n'
