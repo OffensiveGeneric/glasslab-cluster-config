@@ -31,6 +31,72 @@ function buildJsonResult(payload: unknown) {
   };
 }
 
+function extractWorkflowApiErrorDetail(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+  const match = error.message.match(/workflow-api request failed \(\d+\) for [^:]+: (.+)$/s);
+  return (match?.[1] ?? error.message).trim();
+}
+
+async function ensureLatestResearchSession(
+  api: any
+): Promise<{
+  bootstrapEndpoint: string;
+  bootstrapStatus: any;
+  session: any;
+  researchProblem: any | null;
+  createdOrRecovered: boolean;
+}> {
+  const { endpoint: bootstrapEndpoint, payload: bootstrapStatus } = await requestJson(
+    api,
+    "/research-sessions/bootstrap-status"
+  );
+
+  if (bootstrapStatus?.active_session) {
+    return {
+      bootstrapEndpoint,
+      bootstrapStatus,
+      session: bootstrapStatus.active_session,
+      researchProblem: bootstrapStatus?.staged_research_problem ?? null,
+      createdOrRecovered: false
+    };
+  }
+
+  if (bootstrapStatus?.can_create_session_from_latest_problem) {
+    const { payload } = await requestJson(api, "/research-sessions/from-latest-research-problem", {
+      method: "POST"
+    });
+    return {
+      bootstrapEndpoint,
+      bootstrapStatus,
+      session: payload,
+      researchProblem: bootstrapStatus?.staged_research_problem ?? null,
+      createdOrRecovered: true
+    };
+  }
+
+  if (bootstrapStatus?.recommended_next_action === "create-session-manually") {
+    const { payload } = await requestJson(api, "/research-sessions/bootstrap", {
+      method: "POST"
+    });
+    if (!payload?.session) {
+      throw new Error("workflow-api bootstrap did not return a research session");
+    }
+    return {
+      bootstrapEndpoint,
+      bootstrapStatus,
+      session: payload.session,
+      researchProblem: payload?.staged_research_problem ?? null,
+      createdOrRecovered: true
+    };
+  }
+
+  throw new Error(
+    `cannot apply session skills yet: ${String(bootstrapStatus?.detail || "no research session is available")}`
+  );
+}
+
 function resolvePaperIntakeRequest(api: any): Record<string, unknown> {
   const value = api?.pluginConfig?.paperIntakeRequest;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -1164,6 +1230,23 @@ const plugin = {
         },
         async execute() {
           try {
+            const ensured = await ensureLatestResearchSession(api);
+            if (ensured.researchProblem) {
+              await appendAuditEvent({
+                tool: "workflow_api_stage_research_problem_from_latest_session",
+                status: "ok",
+                endpoint: ensured.bootstrapEndpoint,
+                session_id: ensured.session?.session_id ?? null,
+                problem_id: ensured.researchProblem?.problem_id ?? null,
+                bootstrap_recovered: ensured.createdOrRecovered
+              });
+              return buildJsonResult({
+                endpoint: ensured.bootstrapEndpoint,
+                bootstrap_status: ensured.bootstrapStatus,
+                bootstrap_recovered: ensured.createdOrRecovered,
+                research_problem: ensured.researchProblem
+              });
+            }
             const { endpoint, payload } = await requestJson(
               api,
               "/research-sessions/latest/skills/research-problem",
@@ -1176,17 +1259,21 @@ const plugin = {
               status: "ok",
               endpoint,
               problem_id: payload?.problem_id ?? null,
-              session_id: payload?.session_id ?? null
+              session_id: payload?.session_id ?? null,
+              bootstrap_recovered: ensured.createdOrRecovered
             });
             return buildJsonResult({
               endpoint,
+              bootstrap_status: ensured.bootstrapStatus,
+              bootstrap_recovered: ensured.createdOrRecovered,
               research_problem: payload
             });
           } catch (error) {
             await appendAuditEvent({
               tool: "workflow_api_stage_research_problem_from_latest_session",
               status: "error",
-              error: error instanceof Error ? error.message : String(error)
+              error: error instanceof Error ? error.message : String(error),
+              error_detail: extractWorkflowApiErrorDetail(error)
             });
             throw error;
           }
@@ -1206,6 +1293,7 @@ const plugin = {
         },
         async execute() {
           try {
+            const ensured = await ensureLatestResearchSession(api);
             const { endpoint, payload } = await requestJson(
               api,
               "/research-sessions/latest/skills/literature-harvest",
@@ -1219,17 +1307,21 @@ const plugin = {
               endpoint,
               queue_id: payload?.queue_id ?? null,
               session_id: payload?.session_id ?? null,
-              candidate_count: Array.isArray(payload?.candidates) ? payload.candidates.length : null
+              candidate_count: Array.isArray(payload?.candidates) ? payload.candidates.length : null,
+              bootstrap_recovered: ensured.createdOrRecovered
             });
             return buildJsonResult({
               endpoint,
+              bootstrap_status: ensured.bootstrapStatus,
+              bootstrap_recovered: ensured.createdOrRecovered,
               queue: payload
             });
           } catch (error) {
             await appendAuditEvent({
               tool: "workflow_api_create_paper_intake_queue_from_latest_session",
               status: "error",
-              error: error instanceof Error ? error.message : String(error)
+              error: error instanceof Error ? error.message : String(error),
+              error_detail: extractWorkflowApiErrorDetail(error)
             });
             throw error;
           }
@@ -1249,6 +1341,7 @@ const plugin = {
         },
         async execute() {
           try {
+            const ensured = await ensureLatestResearchSession(api);
             const { endpoint, payload } = await requestJson(
               api,
               "/research-sessions/latest/skills/paper-intake",
@@ -1261,17 +1354,21 @@ const plugin = {
               status: "ok",
               endpoint,
               intake_id: payload?.intake_id ?? null,
-              session_id: payload?.session_id ?? null
+              session_id: payload?.session_id ?? null,
+              bootstrap_recovered: ensured.createdOrRecovered
             });
             return buildJsonResult({
               endpoint,
+              bootstrap_status: ensured.bootstrapStatus,
+              bootstrap_recovered: ensured.createdOrRecovered,
               intake: payload
             });
           } catch (error) {
             await appendAuditEvent({
               tool: "workflow_api_stage_next_intake_from_latest_session",
               status: "error",
-              error: error instanceof Error ? error.message : String(error)
+              error: error instanceof Error ? error.message : String(error),
+              error_detail: extractWorkflowApiErrorDetail(error)
             });
             throw error;
           }
