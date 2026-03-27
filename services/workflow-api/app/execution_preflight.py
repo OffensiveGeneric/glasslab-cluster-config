@@ -59,9 +59,23 @@ def build_execution_preflight_result(workflow: WorkflowRegistryEntry, settings: 
     resource_requests = dict(workflow.resource_profile.requests)
     resource_limits = dict(workflow.resource_profile.limits)
     node_selector = dict(workflow.resource_profile.node_selector)
+    runtime_requirements = dict(workflow.runtime_requirements)
 
     if not workflow.runner_image.strip():
         blocking_issues.append("workflow registry entry is missing runner_image")
+    if runtime_requirements.get('gpu') and not (
+        resource_requests.get('nvidia.com/gpu') or resource_limits.get('nvidia.com/gpu')
+    ):
+        blocking_issues.append('workflow declares gpu runtime_requirements but resource profile does not request nvidia.com/gpu')
+    required_python_packages = runtime_requirements.get('required_python_packages', [])
+    if required_python_packages:
+        warnings.append(
+            'runner image package prerequisites are declared but not introspected during preflight: '
+            + ', '.join(str(item) for item in required_python_packages)
+        )
+    modalities = runtime_requirements.get('modalities', [])
+    if modalities:
+        warnings.append('declared workload modalities: ' + ', '.join(str(item) for item in modalities))
 
     submission_blockers = validate_workflow_submission_support(workflow)
     for blocker in submission_blockers:
@@ -80,6 +94,7 @@ def build_execution_preflight_result(workflow: WorkflowRegistryEntry, settings: 
             job_submission_mode=settings.job_submission_mode,
             execution_status=workflow.execution_status,
             submission_backend=workflow.submission_backend,
+            runtime_requirements=runtime_requirements,
             ready=not blocking_issues,
             eligible_nodes=[],
             blocking_issues=blocking_issues,
@@ -102,6 +117,7 @@ def build_execution_preflight_result(workflow: WorkflowRegistryEntry, settings: 
             job_submission_mode=settings.job_submission_mode,
             execution_status=workflow.execution_status,
             submission_backend=workflow.submission_backend,
+            runtime_requirements=runtime_requirements,
             ready=False,
             eligible_nodes=[],
             blocking_issues=blocking_issues,
@@ -157,6 +173,7 @@ def build_execution_preflight_result(workflow: WorkflowRegistryEntry, settings: 
             job_submission_mode=settings.job_submission_mode,
             execution_status=workflow.execution_status,
             submission_backend=workflow.submission_backend,
+            runtime_requirements=runtime_requirements,
             ready=False,
             eligible_nodes=[],
             blocking_issues=blocking_issues,
@@ -220,6 +237,7 @@ def build_execution_preflight_result(workflow: WorkflowRegistryEntry, settings: 
         job_submission_mode=settings.job_submission_mode,
         execution_status=workflow.execution_status,
         submission_backend=workflow.submission_backend,
+        runtime_requirements=runtime_requirements,
         ready=not blocking_issues,
         eligible_nodes=eligible_nodes,
         blocking_issues=blocking_issues,

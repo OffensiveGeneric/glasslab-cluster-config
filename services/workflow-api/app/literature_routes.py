@@ -76,6 +76,9 @@ def register_literature_routes(
             for item in plan_payload.get('selected_papers', [])
             if isinstance(item, dict)
         ]
+        coverage_summary = plan_payload.get('coverage_summary', {})
+        if not isinstance(coverage_summary, dict):
+            coverage_summary = {}
         warnings = [
             warning.strip()
             for warning in plan_payload.get('warnings', [])
@@ -394,6 +397,9 @@ def register_literature_routes(
             for item in plan_payload.get('selected_papers', [])
             if isinstance(item, dict)
         ]
+        coverage_summary = plan_payload.get('coverage_summary', {})
+        if not isinstance(coverage_summary, dict):
+            coverage_summary = {}
         warnings = [
             warning.strip()
             for warning in plan_payload.get('warnings', [])
@@ -404,6 +410,7 @@ def register_literature_routes(
             selected_track_ids,
             selected_queries,
             selected_papers,
+            coverage_summary,
             warnings,
             settings,
         )

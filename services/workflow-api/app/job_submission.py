@@ -130,13 +130,13 @@ def _build_runner_spec(manifest: RunManifest) -> dict:
             raise ValueError('gpu-neural-net-experiment requires training_notes for runner submission')
 
         return {
-            'pipeline': 'gpu_neural_net_experiment',
+            'pipeline': 'gpu_experiment',
             'dataset': dataset_uri,
             'dataset_uri': dataset_uri,
             'model_family': model_family,
             'training_notes': training_notes,
             'models': manifest.requested_models,
-            'feature_profile': 'neural_net',
+            'feature_profile': 'gpu_ml',
             'resource_profile': manifest.resource_profile,
             'compare_to': 'baseline',
             'produce_submission': False,

@@ -38,6 +38,19 @@ Current approved execution templates include:
 - `gpu-neural-net-experiment` on `gpu-small`
 - `replication-lite` remains declared-only until its submission path is implemented
 
+Current GPU/CV execution contract:
+
+- the workflow family remains `gpu-neural-net-experiment` for now
+- the internal runner pipeline is `gpu_experiment`
+- the intent is broader than plain neural-net training:
+  - computer vision
+  - bounded GPU ML experiments
+  - adjacent accelerator-backed model investigations
+- execution preflight now surfaces declared `runtime_requirements` so the API can report:
+  - required Python packages
+  - supported modalities
+  - dataset layout expectations
+
 The repo now includes a direct prereq checker:
 
 - `/home/gr66ss/cluster-config/scripts/check-v2-run-prereqs.sh`
@@ -132,6 +145,14 @@ These let `workflow-api` persist a bounded queue of harvested paper candidates
 before interpretation/assessment/design work begins. The queue is intended to
 run in the background while later paper-understanding work is still being
 refined.
+
+Paper-intake queues now also preserve harvester coverage metadata, so the
+session can distinguish between:
+
+- strong corpus matches
+- thin lexical matches
+- fallback shortlist selection from the approved seed corpus
+- filtered results that were narrowed by policy or priority
 
 The newer session layer makes that state conversationally usable:
 

@@ -2460,7 +2460,7 @@ def test_gpu_workflow_execution_preflight_reports_gpu_contract() -> None:
     payload = response.json()
     assert payload['workflow_id'] == 'gpu-neural-net-experiment'
     assert payload['resource_profile'] == 'gpu-small'
-    assert payload['runner_image'] == 'ghcr.io/offensivegeneric/glasslab-gpu-neural-runner:0.1.0'
+    assert payload['runner_image'] == 'ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.1'
     assert payload['resource_requests'] == {'cpu': '2', 'memory': '4Gi', 'nvidia.com/gpu': '1'}
     assert payload['resource_limits'] == {'cpu': '4', 'memory': '8Gi', 'nvidia.com/gpu': '1'}
     assert payload['node_selector'] == {
@@ -2469,8 +2469,11 @@ def test_gpu_workflow_execution_preflight_reports_gpu_contract() -> None:
     }
     assert payload['execution_status'] == 'ready'
     assert payload['submission_backend'] == 'kubernetes'
+    assert payload['runtime_requirements']['gpu'] is True
+    assert 'computer_vision' in payload['runtime_requirements']['modalities']
     assert payload['ready'] is True
     assert any('preflight was skipped' in warning for warning in payload['warnings'])
+    assert any('torch' in warning for warning in payload['warnings'])
 
 
 def test_get_run_reflects_disk_artifacts_and_status(tmp_path) -> None:

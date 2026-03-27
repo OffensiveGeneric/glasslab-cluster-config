@@ -379,6 +379,7 @@ class ExecutionPreflightResult(BaseModel):
     job_submission_mode: str
     execution_status: str
     submission_backend: str
+    runtime_requirements: dict[str, Any] = Field(default_factory=dict)
     ready: bool
     eligible_nodes: list[str] = Field(default_factory=list)
     blocking_issues: list[str] = Field(default_factory=list)
@@ -432,6 +433,8 @@ class ResearchProblemPaperCandidate(BaseModel):
     why_seed: str
     first_jobs: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+    match_score: int = 0
+    match_reasons: list[str] = Field(default_factory=list)
 
 
 class PaperIntakeCandidateRecord(ResearchProblemPaperCandidate):
@@ -451,6 +454,7 @@ class PaperIntakeQueueRecord(BaseModel):
     problem_statement: str
     selected_tracks: list[str] = Field(default_factory=list)
     selected_queries: list[str] = Field(default_factory=list)
+    coverage_summary: dict[str, Any] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
     candidates: list[PaperIntakeCandidateRecord] = Field(default_factory=list)
     submitted_by: str

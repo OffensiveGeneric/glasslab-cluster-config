@@ -1,26 +1,26 @@
 {
   "workflow_id": "gpu-neural-net-experiment",
-  "display_name": "GPU Neural Net Experiment",
+  "display_name": "GPU Experiment",
   "workflow_family": "gpu-neural-net-experiment",
-  "description": "Run a bounded neural network experiment on a GPU worker with an explicit dataset, model-family, and training-note contract.",
+  "description": "Run a bounded GPU experiment on a GPU worker with an explicit dataset, model-family, and training-note contract, including computer-vision workloads.",
   "required_inputs": [
     {
       "name": "dataset_uri",
       "input_type": "dataset",
       "required": true,
-      "description": "Resolved dataset location for the neural-net experiment."
+      "description": "Resolved dataset location for the GPU experiment."
     },
     {
       "name": "model_family",
       "input_type": "parameter_set",
       "required": true,
-      "description": "Named model family or architecture template to train."
+      "description": "Named model family or architecture template to train or evaluate."
     },
     {
       "name": "training_notes",
       "input_type": "notes",
       "required": true,
-      "description": "Bounded notes describing the experimental goal and training constraints."
+      "description": "Bounded notes describing the experimental goal, modality, and training constraints."
     }
   ],
   "allowed_models": [
@@ -28,7 +28,7 @@
     "lightning-template-v1",
     "deterministic-template"
   ],
-  "runner_image": "ghcr.io/offensivegeneric/glasslab-gpu-neural-runner:0.1.0",
+  "runner_image": "ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.1",
   "evaluator_type": "gpu-training-metrics",
   "expected_artifacts": {
     "required": [
@@ -69,7 +69,10 @@
   "execution_blockers": [],
   "runtime_requirements": {
     "gpu": true,
-    "training_stack": ["pytorch"],
-    "purpose": "bounded neural-net experiment"
+    "training_stack": ["pytorch", "torchvision"],
+    "required_python_packages": ["torch", "torchvision"],
+    "modalities": ["computer_vision", "tabular"],
+    "dataset_layouts": ["imagefolder", "manifest", "artifact-bundle"],
+    "purpose": "bounded GPU experiment for neural-net, computer-vision, or adjacent ML workloads"
   }
 }

@@ -244,6 +244,24 @@ def score_paper_for_problem(paper: SeedPaperSummary, problem_tokens: set[str]) -
     return (len(overlap), paper.bounded_job_fit, -paper.replication_complexity)
 
 
+def build_paper_match_reasons(paper: SeedPaperSummary, problem_tokens: set[str]) -> list[str]:
+    reasons: list[str] = []
+    title_overlap = sorted(tokenize(paper.title).intersection(problem_tokens))
+    tag_overlap = sorted({token.lower() for token in paper.tags}.intersection(problem_tokens))
+    track_overlap = sorted(tokenize(" ".join(paper.tracks)).intersection(problem_tokens))
+    if title_overlap:
+        reasons.append('title overlap: ' + ', '.join(title_overlap[:4]))
+    if tag_overlap:
+        reasons.append('tag overlap: ' + ', '.join(tag_overlap[:4]))
+    if track_overlap:
+        reasons.append('track overlap: ' + ', '.join(track_overlap[:4]))
+    if paper.bounded_job_fit >= 4:
+        reasons.append(f'bounded job fit is strong ({paper.bounded_job_fit}/5)')
+    if not reasons:
+        reasons.append('selected from approved fallback seed corpus')
+    return reasons
+
+
 def build_coverage_summary(
     problem_statement: str,
     scored_tracks: list[tuple[int, TrackDefinition]],
@@ -317,7 +335,15 @@ def build_problem_harvester_plan(request: ProblemHarvesterPlanRequest) -> PaperH
         key=lambda paper: score_paper_for_problem(paper, problem_tokens),
         reverse=True,
     )
-    selected_papers = candidate_papers[:request.max_papers]
+    selected_papers = [
+        paper.model_copy(
+            update={
+                'match_score': score_paper_for_problem(paper, problem_tokens)[0],
+                'match_reasons': build_paper_match_reasons(paper, problem_tokens),
+            }
+        )
+        for paper in candidate_papers[:request.max_papers]
+    ]
 
     warnings: list[str] = []
     coverage_summary = build_coverage_summary(

@@ -103,3 +103,43 @@ def test_literature_runner_generates_expected_artifacts(tmp_path) -> None:
     assert method_spec['dataset_uri'] == 's3://datasets/paper-derived/train.csv'
     notebook = json.loads((artifact_dir / 'analysis_notebook.ipynb').read_text())
     assert any('method_spec.json' in ''.join(cell.get('source', [])) for cell in notebook['cells'])
+
+
+def test_gpu_experiment_runner_generates_expected_artifacts(tmp_path) -> None:
+    settings = Settings(
+        experiment_id='gpu-test',
+        trace_id='trace-gpu',
+        dataset_root=str(FIXTURE_ROOT),
+        artifacts_root=str(tmp_path),
+        manifest_json=json.dumps({'run_id': 'gpu-test', 'workflow_id': 'gpu-neural-net-experiment'}),
+        mlflow_enabled=False,
+        spec_json=json.dumps(
+            {
+                'pipeline': 'gpu_experiment',
+                'dataset': 's3://datasets/vision/train',
+                'dataset_uri': 's3://datasets/vision/train',
+                'model_family': 'resnet18-cv-template',
+                'training_notes': 'Use a bounded computer vision training plan with one GPU and short epochs.',
+                'models': ['pytorch-template-v1'],
+                'feature_profile': 'gpu_ml',
+                'resource_profile': 'gpu-small',
+                'compare_to': 'baseline',
+                'produce_submission': False,
+            }
+        ),
+    )
+
+    result = run_experiment(settings)
+    write_supporting_artifacts(settings, result, status='succeeded')
+    artifact_dir = tmp_path / 'gpu-test'
+
+    assert result['modality'] == 'computer_vision'
+    assert (artifact_dir / 'training_contract.json').exists()
+    assert (artifact_dir / 'design_notes.md').exists()
+    assert (artifact_dir / 'analysis_notebook.ipynb').exists()
+
+    training_contract = json.loads((artifact_dir / 'training_contract.json').read_text())
+    assert training_contract['model_family'] == 'resnet18-cv-template'
+    assert training_contract['modality'] == 'computer_vision'
+    notebook = json.loads((artifact_dir / 'analysis_notebook.ipynb').read_text())
+    assert any('training_contract.json' in ''.join(cell.get('source', [])) for cell in notebook['cells'])

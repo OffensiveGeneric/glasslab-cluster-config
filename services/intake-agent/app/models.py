@@ -89,6 +89,8 @@ class SeedPaperSummary(BaseModel):
     why_seed: str
     first_jobs: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+    match_score: int = 0
+    match_reasons: list[str] = Field(default_factory=list)
 
 
 class PaperHarvesterPlanRequest(BaseModel):

@@ -120,6 +120,123 @@ def run_literature_to_experiment(settings: Settings, spec: dict, artifact_dir: P
     return result_payload
 
 
+def infer_gpu_modality(model_family: str, training_notes: str, dataset_uri: str) -> str:
+    corpus = ' '.join([model_family, training_notes, dataset_uri]).lower()
+    if any(token in corpus for token in ('vision', 'image', 'cnn', 'resnet', 'vit', 'segmentation', 'detection')):
+        return 'computer_vision'
+    return 'generic_gpu_ml'
+
+
+def run_gpu_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> dict:
+    dataset_uri = str(spec.get('dataset_uri', '')).strip()
+    model_family = str(spec.get('model_family', '')).strip()
+    training_notes = str(spec.get('training_notes', '')).strip()
+    requested_models = [str(item).strip() for item in spec.get('models', []) if str(item).strip()]
+    if not dataset_uri:
+        raise ValueError('gpu_experiment requires dataset_uri')
+    if not model_family:
+        raise ValueError('gpu_experiment requires model_family')
+    if not training_notes:
+        raise ValueError('gpu_experiment requires training_notes')
+    if not requested_models:
+        raise ValueError('gpu_experiment requires at least one requested model')
+
+    modality = infer_gpu_modality(model_family, training_notes, dataset_uri)
+    torch_available = False
+    cuda_available = False
+    cuda_device_count = 0
+    try:
+        import torch  # type: ignore
+
+        torch_available = True
+        cuda_available = bool(torch.cuda.is_available())
+        cuda_device_count = int(torch.cuda.device_count())
+    except Exception:
+        torch_available = False
+
+    selected_model = requested_models[0]
+    training_contract = {
+        'dataset_uri': dataset_uri,
+        'model_family': model_family,
+        'selected_model': selected_model,
+        'requested_models': requested_models,
+        'resource_profile': spec.get('resource_profile'),
+        'pipeline': spec.get('pipeline'),
+        'modality': modality,
+        'training_notes': training_notes,
+        'runtime_probe': {
+            'torch_available': torch_available,
+            'cuda_available': cuda_available,
+            'cuda_device_count': cuda_device_count,
+        },
+        'execution_outline': [
+            'bind the resolved dataset URI',
+            'validate the requested model family against the bounded GPU experiment contract',
+            'record runtime GPU/CUDA availability',
+            'emit deterministic GPU experiment planning artifacts for later execution',
+        ],
+    }
+    metrics_payload = {
+        'metric_name': 'contract_readiness',
+        'best_model': selected_model,
+        'best_metric': 1.0 if torch_available else 0.8,
+        'models': {
+            selected_model: {
+                'score': 1.0 if torch_available else 0.8,
+                'score_name': 'contract_readiness',
+                'cuda_available': cuda_available,
+                'cuda_device_count': cuda_device_count,
+                'modality': modality,
+            }
+        },
+        'dataset_uri': dataset_uri,
+        'model_family': model_family,
+        'modality': modality,
+    }
+    result_payload = {
+        'experiment_id': settings.experiment_id,
+        'trace_id': settings.trace_id,
+        'pipeline': spec['pipeline'],
+        'dataset': dataset_uri,
+        'dataset_uri': dataset_uri,
+        'model_family': model_family,
+        'selected_model': selected_model,
+        'metric_name': 'contract_readiness',
+        'best_metric': metrics_payload['best_metric'],
+        'modality': modality,
+        'torch_available': torch_available,
+        'cuda_available': cuda_available,
+        'cuda_device_count': cuda_device_count,
+        'artifact_dir': str(artifact_dir),
+    }
+    design_notes = [
+        f'# GPU Experiment Draft {settings.experiment_id}',
+        '',
+        f'- dataset_uri: `{dataset_uri}`',
+        f'- model_family: `{model_family}`',
+        f'- selected_model: `{selected_model}`',
+        f'- modality: `{modality}`',
+        f'- torch_available: `{torch_available}`',
+        f'- cuda_available: `{cuda_available}`',
+        f'- cuda_device_count: `{cuda_device_count}`',
+        '',
+        '## Training Notes',
+        '',
+        training_notes,
+    ]
+
+    write_json(artifact_dir / 'metrics.json', metrics_payload)
+    write_json(artifact_dir / 'training_contract.json', training_contract)
+    write_json(artifact_dir / 'result_payload.json', result_payload)
+    (artifact_dir / 'design_notes.md').write_text('\n'.join(design_notes) + '\n')
+
+    LOGGER.info(
+        'completed gpu experiment draft run',
+        extra={'experiment_id': settings.experiment_id, 'model_family': model_family, 'modality': modality},
+    )
+    return result_payload
+
+
 def configure_logging(level: str, log_path: Path) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
@@ -147,6 +264,8 @@ def run_experiment(settings: Settings | None = None) -> dict:
     feature_profile = spec['feature_profile']
     if spec['pipeline'] == 'literature_to_experiment':
         return run_literature_to_experiment(settings, spec, artifact_dir)
+    if spec['pipeline'] == 'gpu_experiment':
+        return run_gpu_experiment(settings, spec, artifact_dir)
 
     dataset_root = Path(settings.dataset_root)
     train_path = dataset_root / 'train.csv'
@@ -422,6 +541,28 @@ def build_analysis_notebook(settings: Settings, result_payload: dict, status: st
                         "method_spec = json.loads((artifact_dir / 'method_spec.json').read_text())",
                         "design_notes = (artifact_dir / 'design_notes.md').read_text()",
                         'method_spec',
+                        '',
+                        "print('\\n--- design notes preview ---\\n')",
+                        'print(design_notes)',
+                    ]
+                ),
+            ]
+        )
+    elif pipeline == 'gpu_experiment':
+        cells.extend(
+            [
+                markdown_cell(
+                    [
+                        '## GPU Experiment Contract',
+                        '',
+                        'This notebook exposes the bounded GPU experiment planning artifacts and runtime probe.',
+                    ]
+                ),
+                code_cell(
+                    [
+                        "training_contract = json.loads((artifact_dir / 'training_contract.json').read_text())",
+                        "design_notes = (artifact_dir / 'design_notes.md').read_text()",
+                        'training_contract',
                         '',
                         "print('\\n--- design notes preview ---\\n')",
                         'print(design_notes)',
