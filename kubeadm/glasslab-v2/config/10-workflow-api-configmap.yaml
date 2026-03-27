@@ -5,6 +5,9 @@ metadata:
   namespace: glasslab-v2
 data:
   GLASSLAB_WORKFLOW_API_REGISTRY_DIR: /app/services/workflow-registry/definitions
+  GLASSLAB_WORKFLOW_API_STORE_BACKEND: json
+  GLASSLAB_WORKFLOW_API_ALLOW_INMEMORY_STORE: "false"
+  GLASSLAB_WORKFLOW_API_STORE_JSON_PATH: /mnt/artifacts/workflow-api/state/run-store.json
   GLASSLAB_WORKFLOW_API_RUNNER_NAMESPACE: glasslab-v2
   GLASSLAB_WORKFLOW_API_DEFAULT_SUBMITTED_BY: glasslab-operator
   GLASSLAB_WORKFLOW_API_JOB_SUBMISSION_MODE: kubernetes
