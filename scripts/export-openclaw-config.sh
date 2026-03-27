@@ -454,10 +454,6 @@ if provider_api_key_env:
     provider_config["apiKey"] = "${" + provider_api_key_env + "}"
 
 runtime_config = {
-    "glasslab": {
-        "buildSourceRevision": build_source_revision,
-        "buildSourceLabel": build_source_label,
-    },
     "gateway": {
         "mode": "local",
         "bind": "lan",
