@@ -17,16 +17,19 @@ Then decide which reviewed inference backend the runtime should target.
 
 Current supported patterns in the repo:
 
-- default in-cluster path: `http://vllm.glasslab-agents.svc.cluster.local:8000/v1`
-- reviewed external OpenAI-compatible path via export overrides
+- default interactive chat path: native Ollama on `.12`
+  - `http://192.168.1.12:11434`
+  - provider api: `ollama`
+  - default model: `qwen3:14b`
+- legacy vLLM path remains available only as an explicit override / fallback
 
-If you are using the default in-cluster path, verify the live `vllm` service exists:
+If you are intentionally using the legacy `vllm` path, verify the live `vllm` service exists:
 
 ```bash
 kubectl -n glasslab-agents get svc vllm
 ```
 
-For the backend-facing operator validation path, verify the live `vllm` deployment includes tool-call support:
+For the backend-facing legacy `vllm` validation path, verify the live deployment includes tool-call support:
 
 ```bash
 kubectl -n glasslab-agents get deploy vllm -o yaml | grep -E 'enable-auto-tool-choice|tool-call-parser'
@@ -45,8 +48,8 @@ Required file:
 
 Required keys:
 - `OPENCLAW_GATEWAY_TOKEN`
-- `OPENCLAW_VLLM_API_KEY`
 - `OPENCLAW_OLLAMA_API_KEY`
+- `OPENCLAW_VLLM_API_KEY` remains optional legacy compatibility unless you explicitly export against `vllm`
 
 Channel note:
 - the first WhatsApp validation path requires `OPENCLAW_WHATSAPP_OWNER` in `kubeadm/glasslab-v2/secrets/30-openclaw.local.yaml`
@@ -58,7 +61,6 @@ Channel note:
 Example creation flow:
 
 ```bash
-VLLM_API_KEY="$(kubectl -n glasslab-agents get secret glasslab-agent-secrets -o jsonpath='{.data.VLLM_API_KEY}' | base64 -d)"
 OLLAMA_API_KEY="ollama-local"
 cat > kubeadm/glasslab-v2/secrets/30-openclaw.local.yaml <<EOF
 apiVersion: v1
@@ -69,7 +71,6 @@ metadata:
 type: Opaque
 stringData:
   OPENCLAW_GATEWAY_TOKEN: $(openssl rand -hex 32)
-  OPENCLAW_VLLM_API_KEY: ${VLLM_API_KEY}
   OPENCLAW_OLLAMA_API_KEY: ${OLLAMA_API_KEY}
 EOF
 chmod 600 kubeadm/glasslab-v2/secrets/30-openclaw.local.yaml
@@ -83,14 +84,17 @@ find /tmp/openclaw-runtime -maxdepth 3 -type f | sort
 python3 -m json.tool /tmp/openclaw-runtime/openclaw.json | sed -n '1,240p'
 ```
 
-If you are targeting a reviewed external inference backend such as the Mac Studio path, provide the export overrides explicitly:
+The default export should now already target `.12` native Ollama. If you want to verify that explicitly:
 
 ```bash
-GLASSLAB_OPENCLAW_PROVIDER_BASE_URL="http://192.168.1.23:11434/v1" \
-GLASSLAB_OPENCLAW_DEFAULT_MODEL="deepseek-r1:32b" \
-GLASSLAB_OPENCLAW_MODEL_ALIAS="glasslab-mac-studio-primary" \
+GLASSLAB_OPENCLAW_PROVIDER_API="ollama" \
+GLASSLAB_OPENCLAW_PROVIDER_BASE_URL="http://192.168.1.12:11434" \
+GLASSLAB_OPENCLAW_DEFAULT_MODEL="qwen3:14b" \
+GLASSLAB_OPENCLAW_MODEL_ALIAS="qwen3:14b" \
 ./scripts/export-openclaw-config.sh --output-dir /tmp/openclaw-runtime --no-apply
 ```
+
+If you are targeting a different reviewed inference backend, provide the export overrides explicitly.
 
 6. Verify the generated runtime contract before scaling anything.
 
@@ -111,7 +115,7 @@ kubectl apply -f kubeadm/glasslab-v2/openclaw/
 kubectl -n glasslab-v2 get deploy glasslab-openclaw -o jsonpath='{.spec.replicas}{"\n"}'
 ```
 
-If you are using an external reviewed inference backend, re-run the same command with the same explicit overrides before the apply step.
+If you are using a non-default reviewed inference backend, re-run the same command with the same explicit overrides before the apply step.
 
 Operator note:
 - the repo manifest intentionally keeps `glasslab-openclaw` at `replicas: 0`

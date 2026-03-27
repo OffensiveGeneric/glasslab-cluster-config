@@ -24,6 +24,13 @@ Live vs committed:
 - the exported runtime bundle is the artifact actually mounted into the pod
 - the bundle can differ from this tree when local secrets or operator-only settings are applied
 
+Default inference path:
+
+- the committed default provider source is now `providers/local-ollama-native.yaml`
+- the default interactive chat model is `.12` native Ollama:
+  - `glasslab-ollama/qwen3:14b`
+- the legacy vLLM provider remains in the repo only as an explicit override / fallback path
+
 First channel notes:
 
 - the first validated chat front door is WhatsApp

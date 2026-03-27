@@ -124,6 +124,7 @@ required_files = [
     "bindings/workflow-api.yaml",
     "bindings/reporting.yaml",
     "channels/whatsapp.yaml",
+    "providers/local-ollama-native.yaml",
     "providers/local-vllm-openai-compatible.yaml",
     "policy/tool-policy.yaml",
     "policy/approval-tiers.yaml",
@@ -155,7 +156,7 @@ prompts = {
 workflow_binding = load_yaml("bindings/workflow-api.yaml")
 reporting_binding = load_yaml("bindings/reporting.yaml")
 whatsapp_channel = load_yaml("channels/whatsapp.yaml")
-provider = load_yaml("providers/local-vllm-openai-compatible.yaml")
+provider = load_yaml("providers/local-ollama-native.yaml")
 tool_policy = load_yaml("policy/tool-policy.yaml")
 approval_tiers = load_yaml("policy/approval-tiers.yaml")
 
@@ -186,7 +187,7 @@ def workflow_lookup_tool_name(workflow_id: str) -> str:
 generated_workflow_lookup_tools = [workflow_lookup_tool_name(workflow_id) for workflow_id in known_workflow_ids]
 
 expected_workflow_api = "http://glasslab-workflow-api.glasslab-v2.svc.cluster.local:8080"
-expected_vllm = "http://vllm.glasslab-agents.svc.cluster.local:8000/v1"
+expected_ollama = "http://192.168.1.12:11434"
 provider_base_url_override = os.environ.get("GLASSLAB_OPENCLAW_PROVIDER_BASE_URL", "").strip()
 provider_api_override = os.environ.get("GLASSLAB_OPENCLAW_PROVIDER_API", "").strip()
 provider_id_override = os.environ.get("GLASSLAB_OPENCLAW_PROVIDER_ID", "").strip()
@@ -200,17 +201,17 @@ if workflow_binding.get("base_url") != expected_workflow_api:
         f"{expected_workflow_api}, found {workflow_binding.get('base_url')!r}"
     )
 
-if not provider_base_url_override and provider.get("base_url") != expected_vllm:
+if not provider_base_url_override and provider.get("base_url") != expected_ollama:
     raise SystemExit(
         "provider base_url must point at "
-        f"{expected_vllm}, found {provider.get('base_url')!r}"
+        f"{expected_ollama}, found {provider.get('base_url')!r}"
     )
 
 provider_base_url = provider_base_url_override or provider.get("base_url")
 if not provider_base_url:
     raise SystemExit("provider base_url is required")
 
-provider_api = provider_api_override or provider.get("api") or "openai-completions"
+provider_api = provider_api_override or provider.get("api") or "ollama"
 if provider_api not in {"openai-completions", "ollama"}:
     raise SystemExit(
         "provider api must be one of 'openai-completions' or 'ollama', "

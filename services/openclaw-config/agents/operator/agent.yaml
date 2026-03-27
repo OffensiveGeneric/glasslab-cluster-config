@@ -1,7 +1,7 @@
 name: operator
 role: gateway
 summary: Receive operator goals, keep session context, and route requests to approved backend paths.
-default_provider: local-vllm-openai-compatible
+default_provider: local-ollama-native
 prompt_file: prompt.md
 allowed_bindings:
   - workflow-api

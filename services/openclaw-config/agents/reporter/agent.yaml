@@ -1,7 +1,7 @@
 name: reporter
 role: summarizer
 summary: Turn run manifests, metrics, and evaluator output into concise lab-facing summaries.
-default_provider: local-vllm-openai-compatible
+default_provider: local-ollama-native
 prompt_file: prompt.md
 allowed_bindings:
   - reporting

@@ -57,6 +57,17 @@ That proves two important things:
 
 `scripts/export-openclaw-config.sh` now supports provider-aware export overrides instead of forcing every external backend into `openai-completions`.
 
+As of 2026-03-27, the repo default is now also native Ollama:
+
+- committed provider source:
+  - `services/openclaw-config/providers/local-ollama-native.yaml`
+- committed default agent provider:
+  - `local-ollama-native`
+- default exported model ref:
+  - `glasslab-ollama/qwen3:14b`
+
+The old in-cluster `vllm` path remains in the repo only as an explicit legacy override.
+
 New environment overrides:
 
 - `GLASSLAB_OPENCLAW_PROVIDER_BASE_URL`

@@ -26,7 +26,7 @@ The audited live path was:
 
 - OpenClaw deployment in `glasslab-v2`
 - operator agent runtime exported by `scripts/export-openclaw-config.sh`
-- local provider `local-vllm-openai-compatible`
+- local provider at audit time: `local-vllm-openai-compatible`
 - vLLM deployment in `glasslab-agents`
 - model `Qwen/Qwen3-4B-Instruct-2507`
 - vLLM flags:
