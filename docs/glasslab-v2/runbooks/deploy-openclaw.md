@@ -139,7 +139,11 @@ kubectl -n glasslab-v2 scale deploy/glasslab-openclaw --replicas=1
 kubectl -n glasslab-v2 rollout status deploy/glasslab-openclaw --timeout=300s
 kubectl -n glasslab-v2 get pods -l app.kubernetes.io/name=glasslab-openclaw -o wide
 kubectl -n glasslab-v2 logs deploy/glasslab-openclaw --tail=200
+./scripts/check-openclaw-provenance.sh
 ```
+
+If the provenance check reports `{"missing":true,...}`, the deployment is up but
+the runtime bundle was not refreshed to a provenance-aware export yet.
 
 10. Verify internal-only access and mounted runtime state.
 

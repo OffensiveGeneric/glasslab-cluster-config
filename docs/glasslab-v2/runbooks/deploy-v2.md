@@ -76,7 +76,14 @@ Current storage caveat:
 ```bash
 ./scripts/smoke-test-v2.sh
 ./scripts/smoke-test-v2.sh --include-bounded-agents
+./scripts/check-live-provenance.sh
 ```
+
+The provenance check should make drift obvious:
+
+- `workflow-api` should report the expected `build_source_revision` and `build_source_label`
+- OpenClaw should expose runtime provenance from `/var/lib/openclaw/runtime/PROVENANCE.json`
+- if either side is missing provenance, the rollout is incomplete even if pods are `Running`
 
 Bounded-agent rollout check:
 
