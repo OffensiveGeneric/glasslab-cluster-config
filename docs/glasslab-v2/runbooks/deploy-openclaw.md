@@ -46,6 +46,7 @@ Required file:
 Required keys:
 - `OPENCLAW_GATEWAY_TOKEN`
 - `OPENCLAW_VLLM_API_KEY`
+- `OPENCLAW_OLLAMA_API_KEY`
 
 Channel note:
 - the first WhatsApp validation path requires `OPENCLAW_WHATSAPP_OWNER` in `kubeadm/glasslab-v2/secrets/30-openclaw.local.yaml`
@@ -58,6 +59,7 @@ Example creation flow:
 
 ```bash
 VLLM_API_KEY="$(kubectl -n glasslab-agents get secret glasslab-agent-secrets -o jsonpath='{.data.VLLM_API_KEY}' | base64 -d)"
+OLLAMA_API_KEY="ollama-local"
 cat > kubeadm/glasslab-v2/secrets/30-openclaw.local.yaml <<EOF
 apiVersion: v1
 kind: Secret
@@ -68,6 +70,7 @@ type: Opaque
 stringData:
   OPENCLAW_GATEWAY_TOKEN: $(openssl rand -hex 32)
   OPENCLAW_VLLM_API_KEY: ${VLLM_API_KEY}
+  OPENCLAW_OLLAMA_API_KEY: ${OLLAMA_API_KEY}
 EOF
 chmod 600 kubeadm/glasslab-v2/secrets/30-openclaw.local.yaml
 ```

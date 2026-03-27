@@ -222,7 +222,11 @@ provider_id = provider_id_override or default_provider_id
 if not provider_id:
     raise SystemExit("provider id is required")
 
-default_provider_api_key_env = "OPENCLAW_VLLM_API_KEY" if provider_api == "openai-completions" else ""
+default_provider_api_key_env = (
+    "OPENCLAW_VLLM_API_KEY"
+    if provider_api == "openai-completions"
+    else "OPENCLAW_OLLAMA_API_KEY"
+)
 provider_api_key_env = provider_api_key_env_override or default_provider_api_key_env
 
 parsed_provider_url = urlparse(provider_base_url)
