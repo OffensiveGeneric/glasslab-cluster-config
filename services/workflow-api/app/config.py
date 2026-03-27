@@ -21,6 +21,8 @@ class Settings(BaseSettings):
 
     app_name: str = 'glasslab-workflow-api'
     app_version: str = '0.1.0'
+    build_source_revision: str = 'unknown'
+    build_source_label: str = 'unspecified'
     log_level: str = 'INFO'
     registry_dir: str = str(DEFAULT_REGISTRY_DIR)
     store_backend: Literal['memory', 'json'] = 'memory'

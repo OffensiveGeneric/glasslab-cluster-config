@@ -6,6 +6,8 @@ IMAGE_REF="${GLASSLAB_WORKFLOW_API_IMAGE_REF:-ghcr.io/offensivegeneric/glasslab-
 REGISTRY_HOST="${GLASSLAB_WORKFLOW_API_REGISTRY_HOST:-ghcr.io}"
 REGISTRY_USERNAME="${GHCR_USERNAME:-${GITHUB_ACTOR:-OffensiveGeneric}}"
 REGISTRY_TOKEN="${GHCR_TOKEN:-}"
+GIT_SHA="${GLASSLAB_GIT_SHA:-$(git -C "$ROOT_DIR" rev-parse --short HEAD)}"
+BUILD_SOURCE="${GLASSLAB_BUILD_SOURCE:-git:${GIT_SHA}}"
 
 usage() {
   cat <<'USAGE'
@@ -49,8 +51,13 @@ fi
 printf '[push-workflow-api-image] logging into %s as %s\n' "$REGISTRY_HOST" "$REGISTRY_USERNAME"
 printf '%s' "$REGISTRY_TOKEN" | docker login "$REGISTRY_HOST" -u "$REGISTRY_USERNAME" --password-stdin >/dev/null
 
-printf '[push-workflow-api-image] building %s\n' "$IMAGE_REF"
-docker build -t "$IMAGE_REF" -f "$ROOT_DIR/services/workflow-api/Dockerfile" "$ROOT_DIR"
+printf '[push-workflow-api-image] building %s from %s (%s)\n' "$IMAGE_REF" "$BUILD_SOURCE" "$GIT_SHA"
+docker build \
+  --build-arg "GLASSLAB_GIT_SHA=$GIT_SHA" \
+  --build-arg "GLASSLAB_BUILD_SOURCE=$BUILD_SOURCE" \
+  -t "$IMAGE_REF" \
+  -f "$ROOT_DIR/services/workflow-api/Dockerfile" \
+  "$ROOT_DIR"
 
 printf '[push-workflow-api-image] pushing %s\n' "$IMAGE_REF"
 docker push "$IMAGE_REF"

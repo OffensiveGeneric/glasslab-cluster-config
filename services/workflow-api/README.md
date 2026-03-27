@@ -25,6 +25,7 @@ What is committed here:
 - session/skill route definitions
 - execution-preflight and job-submission behavior
 - source-document storage defaults
+- build/source provenance fields and checks
 
 What has been validated live recently:
 
@@ -38,6 +39,17 @@ What still depends on `.44` local state:
 - the currently deployed image tag before it is pushed and committed
 - local secret manifests consumed by the deployment
 - the exact live ConfigMap and Secret values in the cluster
+
+Current provenance/debugging helpers:
+
+- `/healthz` reports:
+  - `build_source_revision`
+  - `build_source_label`
+- image build scripts now stamp build provenance into the container env and OCI labels:
+  - `/home/gr66ss/cluster-config/scripts/push-workflow-api-image.sh`
+  - `/home/gr66ss/cluster-config/scripts/build-import-workflow-api-image.sh`
+- live deployment/image vs reported app provenance can be checked with:
+  - `/home/gr66ss/cluster-config/scripts/check-workflow-api-provenance.sh`
 
 Current durability warning:
 

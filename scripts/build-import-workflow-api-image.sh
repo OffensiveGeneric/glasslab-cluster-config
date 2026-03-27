@@ -6,6 +6,8 @@ IMAGE_REF="${GLASSLAB_WORKFLOW_API_IMAGE_REF:-ghcr.io/offensivegeneric/glasslab-
 NODE_HOST="${GLASSLAB_WORKFLOW_API_NODE_HOST:-192.168.1.50}"
 NODE_USER="${GLASSLAB_WORKFLOW_API_NODE_USER:-clusteradmin}"
 NODE_SSH_KEY="${GLASSLAB_WORKFLOW_API_NODE_SSH_KEY:-/home/glasslab/.ssh/id_ed25519}"
+GIT_SHA="${GLASSLAB_GIT_SHA:-$(git -C "$ROOT_DIR" rev-parse --short HEAD)}"
+BUILD_SOURCE="${GLASSLAB_BUILD_SOURCE:-git:${GIT_SHA}}"
 USE_PASSWORDLESS_SUDO=false
 USE_WRAPPER_SUDO=false
 LOCAL_TAR=""
@@ -103,9 +105,14 @@ need_cmd scp
   exit 1
 }
 
-printf '[build-import-workflow-api-image] building %s\n' "$IMAGE_REF"
+printf '[build-import-workflow-api-image] building %s from %s (%s)\n' "$IMAGE_REF" "$BUILD_SOURCE" "$GIT_SHA"
 cd "$ROOT_DIR"
-sudo docker build -t "$IMAGE_REF" -f services/workflow-api/Dockerfile .
+sudo docker build \
+  --build-arg "GLASSLAB_GIT_SHA=$GIT_SHA" \
+  --build-arg "GLASSLAB_BUILD_SOURCE=$BUILD_SOURCE" \
+  -t "$IMAGE_REF" \
+  -f services/workflow-api/Dockerfile \
+  .
 
 LOCAL_TAR="$(mktemp /tmp/glasslab-workflow-api-XXXXXX.tar)"
 REMOTE_TAR="/tmp/$(basename "$LOCAL_TAR")"

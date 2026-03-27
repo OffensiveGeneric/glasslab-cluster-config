@@ -1015,6 +1015,8 @@ def create_app(
             'status': 'ok',
             'app': settings.app_name,
             'version': settings.app_version,
+            'build_source_revision': settings.build_source_revision,
+            'build_source_label': settings.build_source_label,
             'workflow_count': len(registry.list_workflows()),
             'store_backend': settings.store_backend,
         }
