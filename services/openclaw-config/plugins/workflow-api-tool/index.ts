@@ -2,6 +2,7 @@ import { appendFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/p
 import { dirname, join } from "node:path";
 
 const DEFAULT_TIMEOUT_SECONDS = 10;
+const MAX_TIMEOUT_SECONDS = 90;
 const DEFAULT_STATE_DIR = "/var/lib/openclaw/state";
 
 function resolveBaseUrl(api: any): string {
@@ -17,7 +18,7 @@ function resolveTimeoutSeconds(api: any): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return DEFAULT_TIMEOUT_SECONDS;
   }
-  return Math.max(1, Math.min(30, Math.floor(value)));
+  return Math.max(1, Math.min(MAX_TIMEOUT_SECONDS, Math.floor(value)));
 }
 
 function buildJsonResult(payload: unknown) {

@@ -1,6 +1,6 @@
 name: workflow-api
 base_url: http://glasslab-workflow-api.glasslab-v2.svc.cluster.local:8080
-timeoutSeconds: 30
+timeoutSeconds: 90
 routes:
   list_workflows: GET /workflow-families
   create_intake: POST /intakes
