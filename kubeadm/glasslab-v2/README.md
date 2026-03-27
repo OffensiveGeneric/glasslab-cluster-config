@@ -26,3 +26,14 @@ Live `.44` state may still differ because:
 - runtime bundles and imported images are generated artifacts, not committed source
 
 When in doubt, treat `.44` as the source of live truth and this tree as the source of committed intent.
+
+Practical reading rule:
+
+- use this tree to answer:
+  - what should exist
+  - how it should be wired
+  - which PVCs, RBAC rules, services, and deployments are intended
+- use the live-state docs or `.44` directly to answer:
+  - what is actually running now
+  - which image tags are actually deployed
+  - which ignored secret manifests or local exports were applied

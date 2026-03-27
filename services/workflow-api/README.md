@@ -2,12 +2,42 @@
 
 `workflow-api` is the v2 orchestration backend. It accepts structured requests, validates them against the approved workflow registry, creates canonical run manifests, stores run state, and hands execution to a bounded job submission interface.
 
+Use this README with three buckets in mind:
+
+- committed intent:
+  - the API surface, schema expectations, and config defaults tracked in Git
+- recently validated live behavior:
+  - what has actually been checked from `.44` and documented in the live-state notes
+- `.44` local only:
+  - ignored secrets, current rollout image tags before push, and live cluster objects
+
 Current architectural reality:
 
 - sessions are becoming the primary product object
 - skills/stages mutate session-owned state
 - workflow families are increasingly execution templates, not the whole ontology
 - mutating `latest` routes are still present for operator convenience, but should not be treated as the durable primary contract for automation
+
+What is committed here:
+
+- API contracts
+- store/backend selection behavior
+- session/skill route definitions
+- execution-preflight and job-submission behavior
+- source-document storage defaults
+
+What has been validated live recently:
+
+- JSON-backed durable session metadata on the shared artifacts PVC
+- session persistence across `workflow-api` pod restart
+- execution preflight live against the current cluster
+- bounded run submission through the approved workflow path
+
+What still depends on `.44` local state:
+
+- the currently deployed image tag before it is pushed and committed
+- local secret manifests consumed by the deployment
+- the exact live ConfigMap and Secret values in the cluster
 
 Current durability warning:
 

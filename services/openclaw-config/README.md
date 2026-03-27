@@ -24,6 +24,16 @@ Live vs committed:
 - the exported runtime bundle is the artifact actually mounted into the pod
 - the bundle can differ from this tree when local secrets or operator-only settings are applied
 
+Read this tree through three buckets:
+
+- committed intent:
+  - prompts, bindings, providers, and policy reviewed in Git
+- validated live:
+  - whatever the current OpenClaw pod is actually running after export and rollout
+- `.44` local only:
+  - ignored OpenClaw secret manifest values
+  - the currently exported runtime bundle before or after local patching
+
 Default inference path:
 
 - the committed default provider source is now `providers/local-ollama-native.yaml`
@@ -41,6 +51,12 @@ First channel notes:
 - no broad allowlist or group routing is enabled in repo config
 
 Use `./scripts/export-openclaw-config.sh --output-dir /tmp/openclaw-runtime --no-apply` to inspect the generated runtime tree before applying it to the cluster.
+
+When debugging drift, always compare all three:
+
+1. this committed YAML tree
+2. the freshly exported runtime bundle
+3. the live `/var/lib/openclaw/runtime/openclaw.json` inside the pod
 
 Maintainer note:
 
