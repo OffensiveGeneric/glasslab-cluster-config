@@ -140,6 +140,9 @@ class ResearchSessionRecord(BaseModel):
     goal_statement: str
     priorities: list[str] = Field(default_factory=list)
     submitted_by: str
+    working_notes: list[str] = Field(default_factory=list)
+    decision_log: list[str] = Field(default_factory=list)
+    next_experiment_ideas: list[str] = Field(default_factory=list)
     latest_problem_id: str | None = None
     latest_queue_id: str | None = None
     latest_document_id: str | None = None
@@ -148,6 +151,24 @@ class ResearchSessionRecord(BaseModel):
     latest_assessment_id: str | None = None
     latest_design_id: str | None = None
     latest_run_id: str | None = None
+
+
+class ResearchSessionMemoryAppendRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    working_note: str | None = None
+    decision: str | None = None
+    experiment_idea: str | None = None
+
+    @field_validator('working_note', 'decision', 'experiment_idea')
+    @classmethod
+    def validate_optional_memory_entry(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = ' '.join(value.split()).strip()
+        if not cleaned:
+            raise ValueError('memory entries must not be empty')
+        return cleaned
 
 
 class ResearchProblemRecord(BaseModel):

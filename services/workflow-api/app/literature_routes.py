@@ -22,6 +22,7 @@ from .schemas import (
     ResearchSessionBootstrapResponse,
     ResearchSessionContextResponse,
     ResearchSessionCreateRequest,
+    ResearchSessionMemoryAppendRequest,
     ResearchSessionRecord,
     ResearchProblemPaperCandidate,
     ResearchProblemRecord,
@@ -42,6 +43,7 @@ def register_literature_routes(
     build_fresh_paper_request_from_problem: Callable[[ResearchProblemPipelineRequest, ResearchProblemPaperCandidate, list[str]], Any],
     build_research_session_record: Callable[[ResearchSessionCreateRequest, Settings], ResearchSessionRecord],
     build_research_session_context: Callable[[ResearchSessionRecord, RunStore], ResearchSessionContextResponse],
+    append_research_session_memory: Callable[..., ResearchSessionRecord],
     build_research_problem_request_from_session: Callable[[ResearchSessionRecord, Settings], ResearchProblemPipelineRequest],
     build_research_problem_record: Callable[..., ResearchProblemRecord],
     build_research_problem_request_from_record: Callable[[ResearchProblemRecord, Settings], ResearchProblemPipelineRequest],
@@ -194,6 +196,25 @@ def register_literature_routes(
         if record is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session not found')
         return record
+
+    @app.post('/research-sessions/{session_id}/notes', response_model=ResearchSessionRecord)
+    def append_research_session_note(session_id: str, request: ResearchSessionMemoryAppendRequest) -> ResearchSessionRecord:
+        if not any((request.working_note, request.decision, request.experiment_idea)):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='at least one memory field must be provided')
+        return append_research_session_memory(
+            store,
+            session_id,
+            working_note=request.working_note,
+            decision=request.decision,
+            experiment_idea=request.experiment_idea,
+        )
+
+    @app.post('/research-sessions/latest/memory', response_model=ResearchSessionRecord)
+    def append_latest_research_session_note(request: ResearchSessionMemoryAppendRequest) -> ResearchSessionRecord:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return append_research_session_note(session.session_id, request)
 
     @app.get('/research-sessions/latest/context', response_model=ResearchSessionContextResponse)
     def get_latest_research_session_context() -> ResearchSessionContextResponse:

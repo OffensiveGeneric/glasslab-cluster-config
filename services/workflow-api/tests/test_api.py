@@ -1885,6 +1885,39 @@ def test_stage_next_intake_from_paper_queue(monkeypatch) -> None:
     assert latest_document.json()['document_id'] == 'doc-1'
 
 
+def test_research_session_can_store_persistent_notes() -> None:
+    client = build_client()
+
+    create = client.post(
+        '/research-sessions',
+        json={
+            'goal_statement': 'Investigate computer vision methods for bounded research-agent experiments.',
+            'submitted_by': 'operator',
+        },
+    )
+    assert create.status_code == 201
+    session_id = create.json()['session_id']
+
+    note = client.post(
+        '/research-sessions/latest/memory',
+        json={
+            'working_note': 'Prioritize papers that compare alternative loss functions or curriculum strategies.',
+            'decision': 'Focus the first sweep on computer vision workloads.',
+            'experiment_idea': 'Compare a standard cross-entropy baseline to a focal-loss variant on the same bounded setup.',
+        },
+    )
+    assert note.status_code == 200
+    payload = note.json()
+    assert payload['session_id'] == session_id
+    assert 'computer vision workloads' in ' '.join(payload['decision_log'])
+    assert any('focal-loss variant' in item for item in payload['next_experiment_ideas'])
+
+    context = client.get('/research-sessions/latest/context')
+    assert context.status_code == 200
+    session_payload = context.json()['session']
+    assert any('alternative loss functions' in item for item in session_payload['working_notes'])
+
+
 def test_research_session_tracks_controlled_literature_state(monkeypatch) -> None:
     client = build_client()
 

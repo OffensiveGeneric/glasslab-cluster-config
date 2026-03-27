@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from uuid import uuid4
-from typing import Callable
+from typing import Any, Callable
 
 from fastapi import HTTPException, status
 
@@ -77,7 +77,7 @@ def build_research_problem_request_from_session(
 def touch_research_session(
     store: RunStore,
     session_id: str | None,
-    **updates: str | None,
+    **updates: Any,
 ) -> ResearchSessionRecord | None:
     if not session_id:
         return None
@@ -90,6 +90,34 @@ def touch_research_session(
     updated = session.model_copy(
         update={
             **normalized_updates,
+            'updated_at': datetime.now(timezone.utc),
+        }
+    )
+    store.save_research_session(updated)
+    return updated
+
+
+def append_research_session_memory(
+    store: RunStore,
+    session_id: str,
+    *,
+    working_note: str | None = None,
+    decision: str | None = None,
+    experiment_idea: str | None = None,
+) -> ResearchSessionRecord:
+    session = get_required_research_session(store, session_id)
+
+    def append_unique(items: list[str], value: str | None) -> list[str]:
+        updated = list(items)
+        if value and value not in updated:
+            updated.append(value)
+        return updated
+
+    updated = session.model_copy(
+        update={
+            'working_notes': append_unique(session.working_notes, working_note),
+            'decision_log': append_unique(session.decision_log, decision),
+            'next_experiment_ideas': append_unique(session.next_experiment_ideas, experiment_idea),
             'updated_at': datetime.now(timezone.utc),
         }
     )

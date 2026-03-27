@@ -968,6 +968,50 @@ const plugin = {
 
     api.registerTool(
       {
+        name: "workflow_api_capture_latest_user_message_as_session_note",
+        description: "Save the latest user message as a working note on the active research session.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const noteText = cleanLatestUserIdea(await loadLatestUserIdeaText());
+            if (noteText.length < 12) {
+              throw new Error("latest user message is too short to store as a research-session note");
+            }
+            const { endpoint, payload } = await requestJson(api, "/research-sessions/latest/memory", {
+              method: "POST",
+              body: JSON.stringify({ working_note: noteText })
+            });
+            await appendAuditEvent({
+              tool: "workflow_api_capture_latest_user_message_as_session_note",
+              status: "ok",
+              endpoint,
+              session_id: payload?.session_id ?? null,
+              note_excerpt: noteText.slice(0, 160)
+            });
+            return buildJsonResult({
+              endpoint,
+              note_saved: noteText,
+              session: payload
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_capture_latest_user_message_as_session_note",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
         name: "workflow_api_get_research_session_bootstrap_status",
         description: "Check whether the literature workspace already has an active session, a staged research problem, or needs manual session bootstrap.",
         parameters: {

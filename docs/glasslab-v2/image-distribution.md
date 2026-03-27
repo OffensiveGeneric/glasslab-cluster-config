@@ -4,7 +4,7 @@ Glasslab v2 currently mixes pull-based upstream images with private GHCR paths f
 
 ## Current state
 
-- `workflow-api` is now targeted at `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.25-local`.
+- `workflow-api` is now targeted at `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.26-local`.
 - `generic-tabular-benchmark` runs use `ghcr.io/offensivegeneric/glasslab-tabular-runner:0.1.2`.
 - `literature-to-experiment` runs use `ghcr.io/offensivegeneric/glasslab-literature-runner:0.1.2`.
 - `gpu-neural-net-experiment` runs use `ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.1`.

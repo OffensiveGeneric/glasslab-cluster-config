@@ -23,6 +23,7 @@ from .persistence import RunStore, create_run_store
 from .registry import WorkflowRegistry
 from .source_documents import ingest_source_document, register_source_document_routes
 from .session_helpers import (
+    append_research_session_memory,
     build_research_problem_request_from_session,
     build_research_session_context,
     build_research_session_record,
@@ -1867,7 +1868,12 @@ def create_app(
             intake_id=record.intake_id,
             submitted_by=record.submitted_by,
         )
-        touch_research_session(store, record.session_id, latest_interpretation_id=record.interpretation_id)
+        touch_research_session(
+            store,
+            record.session_id,
+            latest_interpretation_id=record.interpretation_id,
+            next_experiment_ideas=list(dict.fromkeys(record.bounded_experiment_ideas)),
+        )
         return record
 
     @app.post('/research-sessions/{session_id}/skills/interpretation', response_model=InterpretationRecord, status_code=status.HTTP_201_CREATED)
@@ -1935,7 +1941,19 @@ def create_app(
             interpretation_id=record.interpretation_id,
             submitted_by=record.submitted_by,
         )
-        touch_research_session(store, record.session_id, latest_assessment_id=record.assessment_id)
+        touch_research_session(
+            store,
+            record.session_id,
+            latest_assessment_id=record.assessment_id,
+            decision_log=list(
+                dict.fromkeys(
+                    [
+                        f'assessment recommendation: {record.recommendation}',
+                        *record.blocking_reasons,
+                    ]
+                )
+            ),
+        )
         return record
 
     @app.post(
@@ -2316,6 +2334,7 @@ def create_app(
         build_fresh_paper_request_from_problem=lambda *args, **kwargs: build_fresh_paper_request_from_problem(*args, **kwargs),
         build_research_session_record=lambda *args, **kwargs: build_research_session_record(*args, **kwargs),
         build_research_session_context=lambda *args, **kwargs: build_research_session_context(*args, **kwargs),
+        append_research_session_memory=lambda *args, **kwargs: append_research_session_memory(*args, **kwargs),
         build_research_problem_request_from_session=lambda *args, **kwargs: build_research_problem_request_from_session(*args, **kwargs),
         build_research_problem_record=lambda *args, **kwargs: build_research_problem_record(*args, **kwargs),
         build_research_problem_request_from_record=lambda *args, **kwargs: build_research_problem_request_from_record(*args, **kwargs),

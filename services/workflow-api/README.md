@@ -129,6 +129,17 @@ Use these as the primary read contract when OpenClaw or an operator is working
 inside a session. The older global `latest` stage endpoints remain available for
 compatibility, but they are no longer the preferred session-oriented surface.
 
+Session memory endpoints:
+
+- `POST /research-sessions/{session_id}/notes`
+- `POST /research-sessions/latest/memory`
+
+These let the active research session retain:
+
+- working notes from the conversation
+- concrete decisions about what is worth investigating
+- bounded next experiment ideas that should persist beyond one chat turn
+
 Operation-record endpoints:
 
 - `GET /operations`
