@@ -48,6 +48,7 @@ Short version:
 One important refinement:
 
 - workflow families are how we run
+- workflow families should stay coarse execution shapes, not topic-specific ontologies
 - research sessions are how we think across multiple conversational turns
 
 That means literature search, paper queues, stored source documents,

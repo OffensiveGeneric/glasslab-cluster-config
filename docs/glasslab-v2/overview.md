@@ -10,6 +10,7 @@ The product should read as session-first:
 - skills are bounded capabilities that update that session state in controlled steps
 - workflow families are execution templates selected only when the work is ready to run
 - the first operator step should recover the latest session or create one from the latest staged research problem before jumping to execution templates
+- execution templates should be coarse lab job shapes such as CPU tabular, literature-backed CPU experiments, GPU experiments, or replication runs, not research-topic labels
 
 Current product priority:
 

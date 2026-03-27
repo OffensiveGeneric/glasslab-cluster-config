@@ -36,15 +36,15 @@ def test_healthz_and_workflow_families() -> None:
     assert families.status_code == 200
     payload = families.json()
     assert {entry['workflow_id'] for entry in payload} == {
-        'gpu-neural-net-experiment',
+        'gpu-experiment',
         'generic-tabular-benchmark',
         'literature-to-experiment',
         'replication-lite',
     }
     by_id = {entry['workflow_id']: entry for entry in payload}
-    assert by_id['gpu-neural-net-experiment']['execution_status'] == 'ready'
-    assert by_id['gpu-neural-net-experiment']['submission_backend'] == 'kubernetes'
-    assert by_id['gpu-neural-net-experiment']['resource_profile'] == 'gpu-small'
+    assert by_id['gpu-experiment']['execution_status'] == 'ready'
+    assert by_id['gpu-experiment']['submission_backend'] == 'kubernetes'
+    assert by_id['gpu-experiment']['resource_profile'] == 'gpu-small'
     assert by_id['generic-tabular-benchmark']['execution_status'] == 'ready'
     assert by_id['generic-tabular-benchmark']['submission_backend'] == 'kubernetes'
     assert by_id['replication-lite']['execution_status'] == 'declared_only'
@@ -2690,11 +2690,11 @@ def test_declared_only_workflow_reports_not_executable() -> None:
 def test_gpu_workflow_execution_preflight_reports_gpu_contract() -> None:
     client = build_client()
 
-    response = client.get('/workflow-families/gpu-neural-net-experiment/execution-preflight')
+    response = client.get('/workflow-families/gpu-experiment/execution-preflight')
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload['workflow_id'] == 'gpu-neural-net-experiment'
+    assert payload['workflow_id'] == 'gpu-experiment'
     assert payload['resource_profile'] == 'gpu-small'
     assert payload['runner_image'] == 'ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.1'
     assert payload['resource_requests'] == {'cpu': '2', 'memory': '4Gi', 'nvidia.com/gpu': '1'}

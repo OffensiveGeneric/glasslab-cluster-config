@@ -118,16 +118,16 @@ def _build_runner_spec(manifest: RunManifest) -> dict:
             'produce_submission': False,
         }
 
-    if manifest.workflow_id == 'gpu-neural-net-experiment':
+    if manifest.workflow_id == 'gpu-experiment':
         dataset_uri = str(manifest.inputs.get('dataset_uri', '')).strip()
         model_family = str(manifest.inputs.get('model_family', '')).strip()
         training_notes = str(manifest.inputs.get('training_notes', '')).strip()
         if not dataset_uri:
-            raise ValueError('gpu-neural-net-experiment requires dataset_uri for runner submission')
+            raise ValueError('gpu-experiment requires dataset_uri for runner submission')
         if not model_family:
-            raise ValueError('gpu-neural-net-experiment requires model_family for runner submission')
+            raise ValueError('gpu-experiment requires model_family for runner submission')
         if not training_notes:
-            raise ValueError('gpu-neural-net-experiment requires training_notes for runner submission')
+            raise ValueError('gpu-experiment requires training_notes for runner submission')
 
         return {
             'pipeline': 'gpu_experiment',

@@ -112,7 +112,7 @@ Current limitation:
 
 - ranker-assisted intake is deployed, but still needs a tighter live proof that the reordered candidate set is materially different for a real literature prompt
 - the current harness can validate declared execution shape before submission, but it does not yet introspect runner images for Python/package prerequisites
-- the current workflow families are still CPU-oriented in practice; a dedicated GPU neural-net workflow family and runner image have not been added yet
+- the current workflow families are still CPU-oriented in practice; a dedicated coarse GPU experiment workflow family and runner image had not yet been added at that point
 
 ## Retired Today
 

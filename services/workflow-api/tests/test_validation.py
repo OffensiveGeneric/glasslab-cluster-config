@@ -60,11 +60,11 @@ def test_validation_rejects_disallowed_models() -> None:
 
 def test_validation_accepts_gpu_neural_net_workflow_request() -> None:
     registry = WorkflowRegistry(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions')
-    workflow = registry.get_workflow('gpu-neural-net-experiment')
+    workflow = registry.get_workflow('gpu-experiment')
     assert workflow is not None
 
     request = RunCreateRequest(
-        workflow_id='gpu-neural-net-experiment',
+        workflow_id='gpu-experiment',
         objective='Train a bounded neural-net experiment on the approved GPU worker.',
         inputs={
             'dataset_uri': 's3://datasets/neural-net/train',

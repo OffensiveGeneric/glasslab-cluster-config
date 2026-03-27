@@ -1,8 +1,8 @@
 {
-  "workflow_id": "gpu-neural-net-experiment",
+  "workflow_id": "gpu-experiment",
   "display_name": "GPU Experiment",
-  "workflow_family": "gpu-neural-net-experiment",
-  "description": "Run a bounded GPU experiment on a GPU worker with an explicit dataset, model-family, and training-note contract, including computer-vision workloads.",
+  "workflow_family": "gpu-experiment",
+  "description": "Run a bounded GPU-backed experiment on a GPU worker with an explicit dataset, model-family, and training-note contract, including computer-vision and adjacent ML workloads.",
   "required_inputs": [
     {
       "name": "dataset_uri",
@@ -73,6 +73,6 @@
     "required_python_packages": ["torch", "torchvision"],
     "modalities": ["computer_vision", "tabular"],
     "dataset_layouts": ["imagefolder", "manifest", "artifact-bundle"],
-    "purpose": "bounded GPU experiment for neural-net, computer-vision, or adjacent ML workloads"
+    "purpose": "bounded GPU experiment for computer-vision, neural-net, or adjacent ML workloads"
   }
 }

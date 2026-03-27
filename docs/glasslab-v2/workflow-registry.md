@@ -8,7 +8,7 @@ Every definition under `services/workflow-registry/definitions/` is a reviewed e
 
 - `workflow_id`: stable machine-readable identifier
 - `display_name`: short operator-facing name
-- `workflow_family`: broad family such as tabular benchmark or replication-lite
+- `workflow_family`: coarse execution-template identifier such as `gpu-experiment` or `replication-lite`
 - `description`: narrow statement of what the workflow is allowed to do
 - `required_inputs`: explicit input list with names, types, required flag, and description
 - `allowed_models`: models the workflow may request
@@ -27,3 +27,9 @@ Every definition under `services/workflow-registry/definitions/` is a reviewed e
 5. Add or update service tests before using the workflow through `workflow-api`.
 
 No plugin loading, runtime code generation, or implicit model expansion belongs here.
+
+Important modeling rule:
+
+- add a new workflow family when the lab can run a new execution shape
+- do not add a new workflow family for every research topic or AI/ML subdomain
+- topics like fake-art detection, interpretability, or vision robustness belong in research sessions and design drafts, not in the registry taxonomy

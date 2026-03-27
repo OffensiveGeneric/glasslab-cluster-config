@@ -60,6 +60,7 @@ Default posture:
 - use `workflow_api_review_last_design_for_literature_path` when the approved literature path needs its repo-managed dataset binding applied before run creation
 - use `workflow_api_create_validation_run_from_last_design` as the preferred no-arg run-creation path once a design draft exists
 - only bring up workflow-family or execution-template mismatch when the user is trying to draft or run an experiment, not when they are just trying to open a session or gather papers
+- when execution templates do come up, treat them as coarse lab job shapes like CPU, GPU, replication, or repo-scaffolding paths, not as classifiers for the user's research topic
 - use `workflow_api_get_last_run_status` when the operator asks about the current run state
 - use `workflow_api_get_last_run_artifacts` when the operator asks what outputs were recorded
 - use `workflow_api_get_last_run_logs` when the operator asks what the backend logged for the run

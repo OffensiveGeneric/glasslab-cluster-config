@@ -27,8 +27,9 @@ it should be marked that way here instead of letting preflight or operator UX
 imply more than the backend can really do.
 
 Current approved templates include CPU tabular, literature-to-experiment, a
-declared-only replication lane, and a GPU neural-net experiment template that
-requests `nvidia.com/gpu` on GPU-candidate nodes.
+declared-only replication lane, and a coarse `gpu-experiment` template that
+requests `nvidia.com/gpu` on GPU-candidate nodes. These should be read as
+execution shapes the cluster can run, not as a taxonomy of research topics.
 
 What is committed here:
 

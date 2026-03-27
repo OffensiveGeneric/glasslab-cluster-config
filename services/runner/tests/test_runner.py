@@ -111,7 +111,7 @@ def test_gpu_experiment_runner_generates_expected_artifacts(tmp_path) -> None:
         trace_id='trace-gpu',
         dataset_root=str(FIXTURE_ROOT),
         artifacts_root=str(tmp_path),
-        manifest_json=json.dumps({'run_id': 'gpu-test', 'workflow_id': 'gpu-neural-net-experiment'}),
+        manifest_json=json.dumps({'run_id': 'gpu-test', 'workflow_id': 'gpu-experiment'}),
         mlflow_enabled=False,
         spec_json=json.dumps(
             {

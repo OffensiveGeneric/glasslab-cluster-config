@@ -61,18 +61,18 @@ Current execution prerequisites:
   - cluster `nodes`
   - cluster `pods`
 
-Current approved execution templates include:
+Current approved execution templates include coarse job shapes, not research-topic labels:
 
 - `generic-tabular-benchmark` on `cpu-small`
 - `literature-to-experiment` on `cpu-medium`
-- `gpu-neural-net-experiment` on `gpu-small`
+- `gpu-experiment` on `gpu-small`
 - `replication-lite` remains declared-only until its submission path is implemented
 
 Current GPU/CV execution contract:
 
-- the workflow family remains `gpu-neural-net-experiment` for now
+- the workflow family is `gpu-experiment`
 - the internal runner pipeline is `gpu_experiment`
-- the intent is broader than plain neural-net training:
+- the intent is broader than any one ML subdomain:
   - computer vision
   - bounded GPU ML experiments
   - adjacent accelerator-backed model investigations

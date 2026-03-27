@@ -142,6 +142,7 @@ Outputs:
 
 - structured interpretation record
 - candidate workflow families
+- these candidates should stay coarse execution-template shapes, not one entry per research topic
 - extracted claims and experiment hints
 
 LLM use:
