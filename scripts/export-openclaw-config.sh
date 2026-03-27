@@ -519,6 +519,7 @@ runtime_config = {
                 "enabled": True,
                 "config": {
                     "baseUrl": workflow_binding["base_url"],
+                    "timeoutSeconds": workflow_binding.get("timeoutSeconds", 10),
                     "paperIntakeRequest": paper_intake_request,
                     "literatureIntakeRequest": literature_intake_request,
                     "replicationIntakeRequest": replication_intake_request,

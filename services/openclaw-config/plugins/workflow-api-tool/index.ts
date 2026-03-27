@@ -1164,14 +1164,9 @@ const plugin = {
         },
         async execute() {
           try {
-            const { payload: session } = await requestJson(api, "/research-sessions/latest");
-            const sessionId = typeof session?.session_id === "string" ? session.session_id.trim() : "";
-            if (!sessionId) {
-              throw new Error("latest research session did not include session_id");
-            }
             const { endpoint, payload } = await requestJson(
               api,
-              `/research-sessions/${encodeURIComponent(sessionId)}/skills/research-problem`,
+              "/research-sessions/latest/skills/research-problem",
               {
                 method: "POST"
               }
@@ -1211,14 +1206,9 @@ const plugin = {
         },
         async execute() {
           try {
-            const { payload: session } = await requestJson(api, "/research-sessions/latest");
-            const sessionId = typeof session?.session_id === "string" ? session.session_id.trim() : "";
-            if (!sessionId) {
-              throw new Error("latest research session did not include session_id");
-            }
             const { endpoint, payload } = await requestJson(
               api,
-              `/research-sessions/${encodeURIComponent(sessionId)}/skills/literature-harvest`,
+              "/research-sessions/latest/skills/literature-harvest",
               {
                 method: "POST"
               }
@@ -1259,14 +1249,9 @@ const plugin = {
         },
         async execute() {
           try {
-            const { payload: session } = await requestJson(api, "/research-sessions/latest");
-            const sessionId = typeof session?.session_id === "string" ? session.session_id.trim() : "";
-            if (!sessionId) {
-              throw new Error("latest research session did not include session_id");
-            }
             const { endpoint, payload } = await requestJson(
               api,
-              `/research-sessions/${encodeURIComponent(sessionId)}/skills/paper-intake`,
+              "/research-sessions/latest/skills/paper-intake",
               {
                 method: "POST"
               }
