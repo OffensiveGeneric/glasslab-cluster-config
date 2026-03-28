@@ -32,6 +32,7 @@ Canonical planning and architecture:
 - `adr/0001-session-skill-execution-model.md`: why sessions are the primary object and workflow families are execution templates
 - `research-pipeline-target.md`: the intended end-state product shape for Glasslab research workflows
 - `research-assistant-infra-proposal.md`: concrete infra and control-surface changes to get closest to the research-assistant vision without making OpenClaw the workflow brain
+- `research-assistant-implementation-checklist.md`: concrete execution order for the deterministic-router, one-shot-action, session-memory, and `gpu-experiment` path
 - `repo-review-2026-03-26.md`: current architecture concerns, bounded refactors, and issue follow-through after the shift toward session-centric research work
 - `stage-agent-pipeline.md`: specialized backend agent roles, handoffs, and why OpenClaw should stay at the edge
 - `stage-agent-rollout-order.md`: recommended stage-by-stage enablement order for the bounded-agent pipeline
