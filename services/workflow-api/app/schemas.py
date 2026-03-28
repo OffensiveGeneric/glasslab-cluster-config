@@ -97,7 +97,7 @@ class PaperIntakeQueueCreateRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     problem_statement: str = Field(min_length=12)
-    max_candidate_papers: int = Field(default=5, ge=1, le=25)
+    max_candidate_papers: int = Field(default=3, ge=1, le=25)
     priorities: list[str] = Field(default_factory=list)
     submitted_by: str | None = None
 

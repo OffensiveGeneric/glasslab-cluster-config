@@ -67,7 +67,7 @@ def build_research_problem_request_from_session(
 ) -> ResearchProblemPipelineRequest:
     return ResearchProblemPipelineRequest(
         problem_statement=session.goal_statement,
-        max_candidate_papers=5,
+        max_candidate_papers=2,
         priorities=session.priorities,
         submitted_by=session.submitted_by or settings.default_submitted_by,
         wait_for_terminal_state=False,
