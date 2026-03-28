@@ -51,7 +51,6 @@ async function sleep(ms: number): Promise<void> {
 
 async function recoverLatestQueueAfterTimeout(
   api: any,
-  *,
   path: string,
   attempts: number = 6,
   delayMs: number = 5000
@@ -1338,9 +1337,10 @@ const plugin = {
               if (!isWorkflowApiTimeout(error)) {
                 throw error;
               }
-              const recoveredQueue = await recoverLatestQueueAfterTimeout(api, {
-                path: "/research-sessions/latest/paper-intake-queue"
-              });
+              const recoveredQueue = await recoverLatestQueueAfterTimeout(
+                api,
+                "/research-sessions/latest/paper-intake-queue"
+              );
               if (recoveredQueue) {
                 endpoint = recoveredQueue.endpoint;
                 payload = recoveredQueue.payload;
@@ -1503,9 +1503,10 @@ const plugin = {
               if (!isWorkflowApiTimeout(error)) {
                 throw error;
               }
-              const recoveredQueue = await recoverLatestQueueAfterTimeout(api, {
-                path: "/paper-intake-queues/latest"
-              });
+              const recoveredQueue = await recoverLatestQueueAfterTimeout(
+                api,
+                "/paper-intake-queues/latest"
+              );
               if (recoveredQueue) {
                 endpoint = recoveredQueue.endpoint;
                 payload = recoveredQueue.payload;
