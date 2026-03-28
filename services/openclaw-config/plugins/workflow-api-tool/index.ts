@@ -40,6 +40,33 @@ function extractWorkflowApiErrorDetail(error: unknown): string {
   return (match?.[1] ?? error.message).trim();
 }
 
+function isWorkflowApiTimeout(error: unknown): boolean {
+  const detail = extractWorkflowApiErrorDetail(error).toLowerCase();
+  return detail.includes("aborted due to timeout") || detail.includes("signal timed out");
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function recoverLatestQueueAfterTimeout(
+  api: any,
+  *,
+  path: string,
+  attempts: number = 6,
+  delayMs: number = 5000
+): Promise<{ endpoint: string; payload: any } | null> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    await sleep(delayMs);
+    try {
+      return await requestJson(api, path);
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 async function ensureLatestResearchSession(
   api: any
 ): Promise<{
@@ -1295,13 +1322,32 @@ const plugin = {
         async execute() {
           try {
             const ensured = await ensureLatestResearchSession(api);
-            const { endpoint, payload } = await requestJson(
-              api,
-              "/research-sessions/latest/skills/literature-harvest",
-              {
-                method: "POST"
+            let endpoint: string;
+            let payload: any;
+            try {
+              const createdQueue = await requestJson(
+                api,
+                "/research-sessions/latest/skills/literature-harvest",
+                {
+                  method: "POST"
+                }
+              );
+              endpoint = createdQueue.endpoint;
+              payload = createdQueue.payload;
+            } catch (error) {
+              if (!isWorkflowApiTimeout(error)) {
+                throw error;
               }
-            );
+              const recoveredQueue = await recoverLatestQueueAfterTimeout(api, {
+                path: "/research-sessions/latest/paper-intake-queue"
+              });
+              if (recoveredQueue) {
+                endpoint = recoveredQueue.endpoint;
+                payload = recoveredQueue.payload;
+              } else {
+                throw error;
+              }
+            }
             await appendAuditEvent({
               tool: "workflow_api_create_paper_intake_queue_from_latest_session",
               status: "ok",
@@ -1309,12 +1355,14 @@ const plugin = {
               queue_id: payload?.queue_id ?? null,
               session_id: payload?.session_id ?? null,
               candidate_count: Array.isArray(payload?.candidates) ? payload.candidates.length : null,
-              bootstrap_recovered: ensured.createdOrRecovered
+              bootstrap_recovered: ensured.createdOrRecovered,
+              slow_harvest_recovered: endpoint.includes("/paper-intake-queue")
             });
             return buildJsonResult({
               endpoint,
               bootstrap_status: ensured.bootstrapStatus,
               bootstrap_recovered: ensured.createdOrRecovered,
+              slow_harvest_recovered: endpoint.includes("/paper-intake-queue"),
               queue: payload
             });
           } catch (error) {
@@ -1431,7 +1479,7 @@ const plugin = {
               max_candidate_papers:
                 typeof problem?.max_candidate_papers === "number"
                   ? Math.max(1, Math.min(25, Math.floor(problem.max_candidate_papers)))
-                  : 5,
+                  : 3,
               priorities: Array.isArray(problem?.priorities)
                 ? problem.priorities.filter((item: unknown) => typeof item === "string" && item.trim())
                 : [],
@@ -1442,26 +1490,48 @@ const plugin = {
             if (!requestBody.problem_statement) {
               throw new Error("latest research problem is missing problem_statement");
             }
-            const { endpoint, payload } = await requestJson(api, "/paper-intake-queues/from-research-problem", {
-              method: "POST",
-              body: JSON.stringify(requestBody)
-            });
+            let endpoint: string;
+            let payload: any;
+            try {
+              const createdQueue = await requestJson(api, "/paper-intake-queues/from-research-problem", {
+                method: "POST",
+                body: JSON.stringify(requestBody)
+              });
+              endpoint = createdQueue.endpoint;
+              payload = createdQueue.payload;
+            } catch (error) {
+              if (!isWorkflowApiTimeout(error)) {
+                throw error;
+              }
+              const recoveredQueue = await recoverLatestQueueAfterTimeout(api, {
+                path: "/paper-intake-queues/latest"
+              });
+              if (recoveredQueue) {
+                endpoint = recoveredQueue.endpoint;
+                payload = recoveredQueue.payload;
+              } else {
+                throw error;
+              }
+            }
             await appendAuditEvent({
               tool: "workflow_api_create_paper_intake_queue_from_latest_research_problem",
               status: "ok",
               endpoint,
               queue_id: payload?.queue_id ?? null,
-              candidate_count: Array.isArray(payload?.candidates) ? payload.candidates.length : null
+              candidate_count: Array.isArray(payload?.candidates) ? payload.candidates.length : null,
+              slow_harvest_recovered: endpoint.endsWith("/paper-intake-queues/latest")
             });
             return buildJsonResult({
               endpoint,
+              slow_harvest_recovered: endpoint.endsWith("/paper-intake-queues/latest"),
               queue: payload
             });
           } catch (error) {
             await appendAuditEvent({
               tool: "workflow_api_create_paper_intake_queue_from_latest_research_problem",
               status: "error",
-              error: error instanceof Error ? error.message : String(error)
+              error: error instanceof Error ? error.message : String(error),
+              error_detail: extractWorkflowApiErrorDetail(error)
             });
             throw error;
           }
