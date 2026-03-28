@@ -9,22 +9,12 @@ allowed_bindings:
 policy_profile: internal-default
 runtime_tools_profile: full
 runtime_tools_allow:
-  - web_fetch
-  - workflow_api_start_paper_intake
-  - workflow_api_start_literature_intake
-  - workflow_api_start_replication_intake
   - workflow_api_bootstrap_research_session_from_latest_user_message
-  - workflow_api_create_research_session_from_latest_research_problem
   - workflow_api_get_latest_research_session
   - workflow_api_get_latest_research_session_context
-  - workflow_api_stage_research_problem_from_latest_session
-  - workflow_api_create_paper_intake_queue_from_latest_session
   - workflow_api_stage_next_intake_from_latest_session
   - workflow_api_get_latest_operation
-  - workflow_api_run_latest_research_problem_pipeline
-  - workflow_api_create_paper_intake_queue_from_latest_research_problem
   - workflow_api_get_latest_paper_intake_queue
-  - workflow_api_stage_next_intake_from_latest_queue
   - workflow_api_get_last_intake
   - workflow_api_get_latest_source_document
   - workflow_api_get_latest_interpretation
@@ -33,15 +23,5 @@ runtime_tools_allow:
   - workflow_api_create_design_draft_from_last_intake
   - workflow_api_create_design_draft_from_last_assessment
   - workflow_api_get_last_design_draft
-  - workflow_api_get_execution_preflight_from_last_design
-  - workflow_api_review_last_design_for_literature_path
-  - workflow_api_create_validation_run_from_last_design
-  - workflow_api_get_last_run_status
-  - workflow_api_get_last_run_artifacts
-  - workflow_api_get_last_run_logs
-  - workflow_api_get_families
-  - workflow_api_create_validation_run
-  - workflow_api_get_last_validation_run
-  - workflow_api_get_family_by_id
 runtime_tools_deny:
   - web_fetch
