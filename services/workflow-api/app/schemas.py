@@ -543,6 +543,45 @@ class ResearchSessionBootstrapResponse(BaseModel):
     detail: str
 
 
+class StartLiteratureSearchRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    goal_statement: str | None = None
+    priorities: list[str] = Field(default_factory=list)
+    submitted_by: str | None = None
+
+    @field_validator('goal_statement')
+    @classmethod
+    def validate_optional_goal_statement(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = ' '.join(value.split()).strip()
+        if not cleaned:
+            raise ValueError('goal_statement must not be empty')
+        if len(cleaned) < 12:
+            raise ValueError('goal_statement must be at least 12 characters')
+        return cleaned
+
+    @field_validator('priorities')
+    @classmethod
+    def validate_unique_start_priorities(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value if item.strip()]
+        deduped = list(dict.fromkeys(cleaned))
+        if len(deduped) != len(cleaned):
+            raise ValueError('priorities entries must be unique')
+        return deduped
+
+
+class StartLiteratureSearchResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    action: str
+    session: ResearchSessionRecord
+    research_problem: ResearchProblemRecord
+    paper_intake_queue: PaperIntakeQueueRecord
+    operation: OperationRecord
+
+
 class FreshPaperPipelineResponse(BaseModel):
     model_config = ConfigDict(extra='forbid')
 

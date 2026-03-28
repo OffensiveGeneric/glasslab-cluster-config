@@ -28,6 +28,8 @@ from .schemas import (
     ResearchProblemRecord,
     ResearchProblemPipelineRequest,
     ResearchProblemPipelineResponse,
+    StartLiteratureSearchRequest,
+    StartLiteratureSearchResponse,
     SourceDocumentRecord,
 )
 
@@ -188,6 +190,81 @@ def register_literature_routes(
             session=None,
             staged_research_problem=None,
             detail='no active research session or staged research problem exists yet',
+        )
+
+    @app.post('/research-sessions/start-literature-search', response_model=StartLiteratureSearchResponse, status_code=status.HTTP_201_CREATED)
+    def start_literature_search(request: StartLiteratureSearchRequest) -> StartLiteratureSearchResponse:
+        started_at = datetime.now(timezone.utc)
+        action_parts: list[str] = []
+
+        session = store.get_latest_research_session()
+        if session is None:
+            problem = store.get_latest_research_problem()
+            if problem is not None and problem.session_id is None:
+                session = create_research_session_from_problem(problem, settings, build_research_session_record)
+                store.save_research_session(session)
+                problem = problem.model_copy(update={'session_id': session.session_id, 'updated_at': datetime.now(timezone.utc)})
+                store.save_research_problem(problem)
+                touch_research_session(store, session.session_id, latest_problem_id=problem.problem_id)
+                action_parts.append('created-session-from-latest-problem')
+            elif request.goal_statement:
+                session_request = ResearchSessionCreateRequest(
+                    title=None,
+                    goal_statement=request.goal_statement,
+                    priorities=request.priorities,
+                    submitted_by=request.submitted_by or 'openclaw-operator',
+                )
+                session = build_research_session_record(session_request, settings)
+                store.save_research_session(session)
+                action_parts.append('created-session-from-goal')
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail='no active research session or staged research problem exists yet',
+                )
+        else:
+            problem = store.get_research_problem(session.latest_problem_id or '')
+            action_parts.append('reused-active-session')
+
+        if problem is None:
+            problem_request = build_research_problem_request_from_session(session, settings)
+            problem = build_research_problem_record(problem_request, settings, session_id=session.session_id)
+            store.save_research_problem(problem)
+            session = touch_research_session(store, session.session_id, latest_problem_id=problem.problem_id) or session
+            action_parts.append('staged-research-problem')
+
+        queue = store.get_paper_intake_queue(session.latest_queue_id or '')
+        if queue is None:
+            queue_request = PaperIntakeQueueCreateRequest(
+                problem_statement=problem.problem_statement,
+                max_candidate_papers=min(problem.max_candidate_papers, 25),
+                priorities=problem.priorities,
+                submitted_by=problem.submitted_by,
+            )
+            queue = create_paper_intake_queue_from_research_problem(queue_request)
+            if queue.session_id != session.session_id:
+                queue = queue.model_copy(update={'session_id': session.session_id, 'updated_at': datetime.now(timezone.utc)})
+                store.save_paper_intake_queue(queue)
+            session = touch_research_session(store, session.session_id, latest_queue_id=queue.queue_id) or session
+            action_parts.append('started-literature-harvest')
+        else:
+            action_parts.append('reused-existing-queue')
+
+        operation = record_operation(
+            store,
+            operation_type='literature-search-start',
+            started_at=started_at,
+            status='completed',
+            session_id=session.session_id,
+            queue_id=queue.queue_id,
+            result_detail='started or resumed literature search for research session',
+        )
+        return StartLiteratureSearchResponse(
+            action='; '.join(action_parts),
+            session=session,
+            research_problem=problem,
+            paper_intake_queue=queue,
+            operation=operation,
         )
 
     @app.get('/research-sessions/{session_id}', response_model=ResearchSessionRecord)

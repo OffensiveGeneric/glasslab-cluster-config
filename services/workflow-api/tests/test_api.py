@@ -1831,6 +1831,71 @@ def test_research_session_bootstrap_creates_session_from_latest_problem() -> Non
     assert reused_payload['session']['session_id'] == payload['session']['session_id']
 
 
+def test_start_literature_search_creates_session_problem_and_queue(monkeypatch) -> None:
+    client = build_client()
+
+    class FakeResponse:
+        def __init__(self, payload: dict) -> None:
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            import json
+            return json.dumps(self.payload).encode('utf-8')
+
+    monkeypatch.setattr(
+        main_module.urllib_request,
+        'urlopen',
+        lambda request_obj, timeout: FakeResponse(
+            {
+                'request_id': 'start-literature-search-1',
+                'selected_tracks': [{'track_id': 'computer_vision', 'track': 'computer_vision'}],
+                'selected_queries': [{'queries': ['computer vision art forgery detection dataset']}],
+                'selected_papers': [
+                    {
+                        'paper_id': 'cv_forgery_2025',
+                        'title': 'A bounded computer vision benchmark for forged art detection',
+                        'year': 2025,
+                        'venue': 'arXiv',
+                        'priority': 'P1',
+                        'tracks': ['computer_vision'],
+                        'bounded_job_fit': 4,
+                        'replication_complexity': 3,
+                        'official_page': 'https://arxiv.org/abs/2501.00001',
+                        'pdf_url': None,
+                        'why_seed': 'matches the requested CV research direction',
+                        'first_jobs': ['compare baseline losses on a bounded image split'],
+                        'tags': ['computer_vision', 'forgery_detection'],
+                    }
+                ],
+                'warnings': [],
+            }
+        ),
+    )
+
+    response = client.post(
+        '/research-sessions/start-literature-search',
+        json={
+            'goal_statement': 'Detect forged art using computer vision methods and open image datasets.',
+            'priorities': ['computer vision', 'bounded experiments'],
+            'submitted_by': 'operator',
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload['session']['goal_statement'].startswith('Detect forged art')
+    assert payload['research_problem']['session_id'] == payload['session']['session_id']
+    assert payload['paper_intake_queue']['session_id'] == payload['session']['session_id']
+    assert payload['paper_intake_queue']['candidates'][0]['paper_id'] == 'cv_forgery_2025'
+    assert payload['operation']['operation_type'] == 'literature-search-start'
+
+
 def test_create_pipeline_from_latest_research_problem(monkeypatch) -> None:
     client = build_client()
 

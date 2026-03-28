@@ -135,26 +135,13 @@ async function bootstrapResearchSessionFromLatestUserMessage(api: any): Promise<
   queueEndpoint: string;
   bootstrapAction: string | null;
 }> {
-  const { endpoint: bootstrapEndpoint, payload: bootstrap } = await requestJson(
-    api,
-    "/research-sessions/bootstrap",
-    { method: "POST" }
-  );
-
   let goalStatement = "";
-  let sessionEndpoint = bootstrapEndpoint;
-  let session = bootstrap?.session ?? null;
-  let sessionId = typeof session?.session_id === "string" ? session.session_id.trim() : "";
-  let researchProblem = bootstrap?.staged_research_problem ?? null;
-  let problemEndpoint = bootstrapEndpoint;
-  let queue = null;
-  let queueEndpoint = bootstrapEndpoint;
-
-  if (!sessionId) {
+  try {
     goalStatement = await loadLatestUserIdeaText();
-    if (goalStatement.length < 24) {
-      throw new Error("latest user message is too short to bootstrap a research session safely");
-    }
+  } catch {
+    goalStatement = "";
+  }
+  if (goalStatement) {
     const genericCommand =
       /^(start|create|begin|open|make|do|try)\b/i.test(goalStatement) &&
       /\b(session|paper intake|literature harvest|research problem)\b/i.test(goalStatement) &&
@@ -162,53 +149,29 @@ async function bootstrapResearchSessionFromLatestUserMessage(api: any): Promise<
     if (genericCommand) {
       throw new Error("latest user message looks like an instruction, not a concrete research idea");
     }
-
-    const sessionRequest = {
-      title: null,
-      goal_statement: goalStatement,
-      priorities: [],
-      submitted_by: "openclaw-operator"
-    };
-    const createdSession = await requestJson(api, "/research-sessions", {
-      method: "POST",
-      body: JSON.stringify(sessionRequest)
-    });
-    sessionEndpoint = createdSession.endpoint;
-    session = createdSession.payload;
-    sessionId = typeof session?.session_id === "string" ? session.session_id.trim() : "";
-    if (!sessionId) {
-      throw new Error("created research session did not include session_id");
-    }
-  } else {
-    goalStatement = typeof session?.goal_statement === "string" ? session.goal_statement.trim() : "";
   }
 
-  if (!researchProblem) {
-    const createdProblem = await requestJson(
-      api,
-      `/research-sessions/${encodeURIComponent(sessionId)}/skills/research-problem`,
-      { method: "POST" }
-    );
-    problemEndpoint = createdProblem.endpoint;
-    researchProblem = createdProblem.payload;
-  }
+  const requestBody = {
+    goal_statement: goalStatement || null,
+    priorities: [],
+    submitted_by: "openclaw-operator"
+  };
+  const { endpoint: bootstrapEndpoint, payload } = await requestJson(
+    api,
+    "/research-sessions/start-literature-search",
+    { method: "POST", body: JSON.stringify(requestBody) }
+  );
 
-  if (session?.latest_queue_id) {
-    const existingQueue = await requestJson(
-      api,
-      `/research-sessions/${encodeURIComponent(sessionId)}/paper-intake-queue`
-    );
-    queueEndpoint = existingQueue.endpoint;
-    queue = existingQueue.payload;
-  } else {
-    const createdQueue = await requestJson(
-      api,
-      `/research-sessions/${encodeURIComponent(sessionId)}/skills/literature-harvest`,
-      { method: "POST" }
-    );
-    queueEndpoint = createdQueue.endpoint;
-    queue = createdQueue.payload;
+  const session = payload?.session ?? null;
+  const sessionId = typeof session?.session_id === "string" ? session.session_id.trim() : "";
+  if (!sessionId) {
+    throw new Error("workflow-api literature start did not return a research session");
   }
+  const researchProblem = payload?.research_problem ?? null;
+  const queue = payload?.paper_intake_queue ?? null;
+  const sessionEndpoint = bootstrapEndpoint;
+  const problemEndpoint = bootstrapEndpoint;
+  const queueEndpoint = bootstrapEndpoint;
 
   return {
     goalStatement,
@@ -219,7 +182,7 @@ async function bootstrapResearchSessionFromLatestUserMessage(api: any): Promise<
     sessionEndpoint,
     problemEndpoint,
     queueEndpoint,
-    bootstrapAction: bootstrap?.bootstrap_action ?? null
+    bootstrapAction: typeof payload?.action === "string" ? payload.action : null
   };
 }
 
