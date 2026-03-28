@@ -239,6 +239,70 @@ Important subpaths:
 - workflow-api-tool scratch state:
   - `/var/lib/openclaw/state/workflow-api-tool`
 
+## Recent Failure Modes
+
+These are high-value operational notes because they look similar from chat, but they have very different causes.
+
+### 1. Backend healthy, OpenClaw plugin broken
+
+Observed live during the March 27-28 work:
+
+- `workflow-api` remained healthy
+- WhatsApp transport remained healthy
+- but the `workflow-api-tool` plugin failed to load inside OpenClaw due to a runtime parse error
+
+Symptoms in chat:
+
+- OpenClaw claimed backend actions were unavailable or unreachable
+- allowed tool names appeared in the prompt, but none of them could actually run
+
+Where to confirm:
+
+- OpenClaw pod logs:
+  - plugin load errors for
+    - `/var/lib/openclaw/runtime/glasslab-config/plugins/workflow-api-tool/index.ts`
+
+Important implication:
+
+- a broken OpenClaw runtime plugin can make the whole backend appear down from chat
+- this is not the same failure as a dead `workflow-api` service
+
+### 2. Backend healthy, tool timeout too small
+
+Observed live during literature-harvest testing:
+
+- `workflow-api` successfully created paper-intake queues
+- but OpenClaw timed out waiting for the result and described that as backend failure
+
+Symptoms in logs:
+
+- OpenClaw:
+  - tool timeout / aborted operation
+- `workflow-api`:
+  - successful `201 Created` on paper-intake queue routes
+
+Important implication:
+
+- slow literature harvest and real backend outages must be debugged differently
+- the correct checks are:
+  - OpenClaw pod logs
+  - `workflow-api` pod logs
+  - live runtime provenance and runtime config
+
+### 3. Repo state and live runtime can diverge
+
+Observed repeatedly during the March 27 work:
+
+- laptop repo state was correct
+- `.44` source tree was older
+- or `.44` exporter script was older
+- or the live runtime bundle was older than the repo
+
+Important implication:
+
+- live behavior must be treated as a separate truth surface from committed code
+- provenance fields and explicit `.44` sync steps are not optional niceties; they are required debugging tools
+
 Important implication:
 
 - OpenClaw state is durable across pod replacement
