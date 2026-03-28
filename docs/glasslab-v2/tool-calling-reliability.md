@@ -4,6 +4,8 @@ Last validated: 2026-03-16 on the live `.44` cluster path
 
 Updated with lower-level gateway probe: 2026-03-19
 
+Updated with OpenClaw session/literature integration failures: 2026-03-28
+
 ## Current reliable pattern
 
 The current reliable OpenClaw operator pattern for Glasslab v2 is:
@@ -162,6 +164,40 @@ Recommended operating policy today:
 - keep no-arg tools for state-changing actions
 - allow tiny argumented tools only as explicitly experimental, low-risk reads
 - do not rely on argumented tools for required operator workflows until the model/runtime path changes or pinned tool-choice control is exposed cleanly
+
+## 2026-03-28 Session/Literature Findings
+
+Later live work on the session/skills literature path changed the backend shape significantly:
+
+- `workflow-api` now has one-shot session/literature actions such as:
+  - `POST /research-sessions/start-literature-search`
+- the backend path can create or resume a session, stage the research problem, create or reuse the paper queue, and persist an operation record in one call
+
+That backend path was verified live and returned a correct `201` response when called directly from inside the OpenClaw pod.
+
+What still failed was the OpenClaw seam itself.
+
+Observed live patterns:
+
+- OpenClaw sometimes called only `GET /research-sessions/bootstrap-status` and then stalled
+- OpenClaw sometimes made no state-changing backend call at all on an explicit "start a literature search" turn
+- OpenClaw sometimes claimed the API was unreachable when the backend was healthy and had already responded successfully
+- switching from `.12` `qwen3:14b` to `.23` `qwen3:30b` did not resolve this class of failure
+- on the 30B path, OpenClaw sometimes logged:
+  - `LLM request failed: network connection error. rawError=fetch failed`
+  - even though direct Ollama `/api/generate` and `/api/chat` requests to `.23` worked from both `.44` and from inside the OpenClaw pod
+
+The conclusion from the 2026-03-28 session is stronger than the earlier 2026-03-16 no-arg audit:
+
+- OpenClaw is usable as a thin conversational shell
+- OpenClaw is not yet reliable as the primary workflow planner for the research loop
+- backend-owned one-shot actions are necessary but not sufficient if the model can still choose not to call them
+
+Practical recommendation now:
+
+- keep common research-loop intents deterministic
+- route "start research session", "start literature search", and similar intents through backend-owned dispatch or a deterministic pre-router
+- use OpenClaw mainly to present results, summarize state, and ask brief clarifying questions
 
 ## Worthwhile next experiments
 
