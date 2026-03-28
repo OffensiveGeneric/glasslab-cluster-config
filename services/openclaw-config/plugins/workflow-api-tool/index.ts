@@ -124,6 +124,105 @@ async function ensureLatestResearchSession(
   );
 }
 
+async function bootstrapResearchSessionFromLatestUserMessage(api: any): Promise<{
+  goalStatement: string;
+  session: any;
+  researchProblem: any | null;
+  queue: any;
+  bootstrapEndpoint: string;
+  sessionEndpoint: string;
+  problemEndpoint: string;
+  queueEndpoint: string;
+  bootstrapAction: string | null;
+}> {
+  const { endpoint: bootstrapEndpoint, payload: bootstrap } = await requestJson(
+    api,
+    "/research-sessions/bootstrap",
+    { method: "POST" }
+  );
+
+  let goalStatement = "";
+  let sessionEndpoint = bootstrapEndpoint;
+  let session = bootstrap?.session ?? null;
+  let sessionId = typeof session?.session_id === "string" ? session.session_id.trim() : "";
+  let researchProblem = bootstrap?.staged_research_problem ?? null;
+  let problemEndpoint = bootstrapEndpoint;
+  let queue = null;
+  let queueEndpoint = bootstrapEndpoint;
+
+  if (!sessionId) {
+    goalStatement = await loadLatestUserIdeaText();
+    if (goalStatement.length < 24) {
+      throw new Error("latest user message is too short to bootstrap a research session safely");
+    }
+    const genericCommand =
+      /^(start|create|begin|open|make|do|try)\b/i.test(goalStatement) &&
+      /\b(session|paper intake|literature harvest|research problem)\b/i.test(goalStatement) &&
+      !/\b(on|about|for)\b/i.test(goalStatement);
+    if (genericCommand) {
+      throw new Error("latest user message looks like an instruction, not a concrete research idea");
+    }
+
+    const sessionRequest = {
+      title: null,
+      goal_statement: goalStatement,
+      priorities: [],
+      submitted_by: "openclaw-operator"
+    };
+    const createdSession = await requestJson(api, "/research-sessions", {
+      method: "POST",
+      body: JSON.stringify(sessionRequest)
+    });
+    sessionEndpoint = createdSession.endpoint;
+    session = createdSession.payload;
+    sessionId = typeof session?.session_id === "string" ? session.session_id.trim() : "";
+    if (!sessionId) {
+      throw new Error("created research session did not include session_id");
+    }
+  } else {
+    goalStatement = typeof session?.goal_statement === "string" ? session.goal_statement.trim() : "";
+  }
+
+  if (!researchProblem) {
+    const createdProblem = await requestJson(
+      api,
+      `/research-sessions/${encodeURIComponent(sessionId)}/skills/research-problem`,
+      { method: "POST" }
+    );
+    problemEndpoint = createdProblem.endpoint;
+    researchProblem = createdProblem.payload;
+  }
+
+  if (session?.latest_queue_id) {
+    const existingQueue = await requestJson(
+      api,
+      `/research-sessions/${encodeURIComponent(sessionId)}/paper-intake-queue`
+    );
+    queueEndpoint = existingQueue.endpoint;
+    queue = existingQueue.payload;
+  } else {
+    const createdQueue = await requestJson(
+      api,
+      `/research-sessions/${encodeURIComponent(sessionId)}/skills/literature-harvest`,
+      { method: "POST" }
+    );
+    queueEndpoint = createdQueue.endpoint;
+    queue = createdQueue.payload;
+  }
+
+  return {
+    goalStatement,
+    session,
+    researchProblem,
+    queue,
+    bootstrapEndpoint,
+    sessionEndpoint,
+    problemEndpoint,
+    queueEndpoint,
+    bootstrapAction: bootstrap?.bootstrap_action ?? null
+  };
+}
+
 function resolvePaperIntakeRequest(api: any): Record<string, unknown> {
   const value = api?.pluginConfig?.paperIntakeRequest;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -947,87 +1046,26 @@ const plugin = {
         },
         async execute() {
           try {
-            const { endpoint: bootstrapEndpoint, payload: bootstrap } = await requestJson(
-              api,
-              "/research-sessions/bootstrap",
-              { method: "POST" }
-            );
-
-            let goalStatement = "";
-            let sessionEndpoint = bootstrapEndpoint;
-            let session = bootstrap?.session ?? null;
-            let sessionId = typeof session?.session_id === "string" ? session.session_id.trim() : "";
-            let researchProblem = bootstrap?.staged_research_problem ?? null;
-            let problemEndpoint = bootstrapEndpoint;
-            let queue = null;
-            let queueEndpoint = bootstrapEndpoint;
-
-            if (!sessionId) {
-              goalStatement = await loadLatestUserIdeaText();
-              if (goalStatement.length < 24) {
-                throw new Error("latest user message is too short to bootstrap a research session safely");
-              }
-              const genericCommand =
-                /^(start|create|begin|open|make|do|try)\b/i.test(goalStatement) &&
-                /\b(session|paper intake|literature harvest|research problem)\b/i.test(goalStatement) &&
-                !/\b(on|about|for)\b/i.test(goalStatement);
-              if (genericCommand) {
-                throw new Error("latest user message looks like an instruction, not a concrete research idea");
-              }
-
-              const sessionRequest = {
-                title: null,
-                goal_statement: goalStatement,
-                priorities: [],
-                submitted_by: "openclaw-operator"
-              };
-              const createdSession = await requestJson(api, "/research-sessions", {
-                method: "POST",
-                body: JSON.stringify(sessionRequest)
-              });
-              sessionEndpoint = createdSession.endpoint;
-              session = createdSession.payload;
-              sessionId = typeof session?.session_id === "string" ? session.session_id.trim() : "";
-              if (!sessionId) {
-                throw new Error("created research session did not include session_id");
-              }
-            } else {
-              goalStatement = typeof session?.goal_statement === "string" ? session.goal_statement.trim() : "";
-            }
-
-            if (!researchProblem) {
-              const createdProblem = await requestJson(
-                api,
-                `/research-sessions/${encodeURIComponent(sessionId)}/skills/research-problem`,
-                { method: "POST" }
-              );
-              problemEndpoint = createdProblem.endpoint;
-              researchProblem = createdProblem.payload;
-            }
-
-            if (session?.latest_queue_id) {
-              const existingQueue = await requestJson(
-                api,
-                `/research-sessions/${encodeURIComponent(sessionId)}/paper-intake-queue`
-              );
-              queueEndpoint = existingQueue.endpoint;
-              queue = existingQueue.payload;
-            } else {
-              const createdQueue = await requestJson(
-                api,
-                `/research-sessions/${encodeURIComponent(sessionId)}/skills/literature-harvest`,
-                { method: "POST" }
-              );
-              queueEndpoint = createdQueue.endpoint;
-              queue = createdQueue.payload;
-            }
+            const {
+              goalStatement,
+              session,
+              researchProblem,
+              queue,
+              bootstrapEndpoint,
+              sessionEndpoint,
+              problemEndpoint,
+              queueEndpoint,
+              bootstrapAction
+            } = await bootstrapResearchSessionFromLatestUserMessage(api);
+            const sessionId =
+              typeof session?.session_id === "string" ? session.session_id.trim() : "";
 
             await appendAuditEvent({
               tool: "workflow_api_bootstrap_research_session_from_latest_user_message",
               status: "ok",
               session_id: sessionId,
               bootstrap_endpoint: bootstrapEndpoint,
-              bootstrap_action: bootstrap?.bootstrap_action ?? null,
+              bootstrap_action: bootstrapAction,
               session_endpoint: sessionEndpoint,
               problem_endpoint: problemEndpoint,
               queue_endpoint: queueEndpoint,
@@ -1044,6 +1082,63 @@ const plugin = {
           } catch (error) {
             await appendAuditEvent({
               tool: "workflow_api_bootstrap_research_session_from_latest_user_message",
+              status: "error",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
+        name: "workflow_api_start_literature_search_from_latest_user_message",
+        description: "Preferred first action for a new topic. Start or resume the research session from the latest user message, stage the research problem, and begin literature search immediately.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          try {
+            const {
+              goalStatement,
+              session,
+              researchProblem,
+              queue,
+              bootstrapEndpoint,
+              sessionEndpoint,
+              problemEndpoint,
+              queueEndpoint,
+              bootstrapAction
+            } = await bootstrapResearchSessionFromLatestUserMessage(api);
+            const sessionId =
+              typeof session?.session_id === "string" ? session.session_id.trim() : "";
+
+            await appendAuditEvent({
+              tool: "workflow_api_start_literature_search_from_latest_user_message",
+              status: "ok",
+              session_id: sessionId,
+              bootstrap_endpoint: bootstrapEndpoint,
+              bootstrap_action: bootstrapAction,
+              session_endpoint: sessionEndpoint,
+              problem_endpoint: problemEndpoint,
+              queue_endpoint: queueEndpoint,
+              queue_id: queue?.queue_id ?? null,
+              problem_id: researchProblem?.problem_id ?? null,
+              goal_excerpt: goalStatement.slice(0, 160)
+            });
+            return buildJsonResult({
+              goal_statement: goalStatement,
+              session,
+              research_problem: researchProblem,
+              paper_intake_queue: queue
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_start_literature_search_from_latest_user_message",
               status: "error",
               error: error instanceof Error ? error.message : String(error)
             });
