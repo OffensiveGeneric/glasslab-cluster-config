@@ -1,0 +1,83 @@
+from fastapi.testclient import TestClient
+
+from app.main import Settings, create_app
+
+
+def test_help_command_returns_local_text() -> None:
+    client = TestClient(create_app(settings=Settings(), requester=lambda *args, **kwargs: ("", {})))
+    response = client.post("/dispatch", json={"message": "!help"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["matched"] is True
+    assert payload["forward_to_openclaw"] is False
+    assert "!research <topic>" in payload["response_text"]
+
+
+def test_research_command_calls_start_endpoint() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        assert path == "/research-sessions/start-literature-search"
+        assert method == "POST"
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {
+                "session": {"title": "Forged Art Detection"},
+                "paper_intake_queue": {"candidates": [{"paper_id": "a"}], "coverage_summary": {"mode": "external"}},
+            },
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!research forged art detection with computer vision methods"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["command"] == "research"
+    assert "Started literature search" in payload["response_text"]
+    assert len(calls) == 1
+
+
+def test_more_papers_prefers_external_search() -> None:
+    def fake_requester(settings, path, method="GET", body=None):
+        assert path == "/research-sessions/latest/skills/external-literature-search"
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {
+                "candidates": [{"paper_id": "a"}, {"paper_id": "b"}],
+                "coverage_summary": {"mode": "external"},
+            },
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!more-papers"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["command"] == "more-papers"
+    assert "external literature search" in payload["response_text"]
+
+
+def test_add_paper_routes_to_manual_queue() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {"candidates": [{"title": "Manual paper candidate"}]},
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!add-paper https://arxiv.org/abs/2401.12345"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["command"] == "add-paper"
+    assert calls[0][0] == "/research-sessions/latest/paper-intake-queue/manual-paper"
+
+
+def test_non_command_turns_forward_to_openclaw() -> None:
+    client = TestClient(create_app(settings=Settings(), requester=lambda *args, **kwargs: ("", {})))
+    response = client.post("/dispatch", json={"message": "what do you think of this paper?"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["matched"] is False
+    assert payload["forward_to_openclaw"] is True

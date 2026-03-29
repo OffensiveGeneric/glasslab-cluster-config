@@ -35,6 +35,7 @@ Canonical planning and architecture:
 - `research-assistant-infra-proposal.md`: concrete infra and control-surface changes to get closest to the research-assistant vision without making OpenClaw the workflow brain
 - `research-assistant-implementation-checklist.md`: concrete execution order for the deterministic-router, one-shot-action, session-memory, and `gpu-experiment` path
 - `research-assistant-ux-boundary.md`: where deterministic routing should replace model-driven orchestration so the product can actually feel like a usable research assistant
+- `research-command-router.md`: explicit deterministic front-door service for `!research`, `!more-papers`, `!add-paper`, and related commands
 - `research-session-cli.md`: deterministic direct control path for the session/literature loop while OpenClaw still struggles with first-turn orchestration
 - `repo-review-2026-03-26.md`: current architecture concerns, bounded refactors, and issue follow-through after the shift toward session-centric research work
 - `stage-agent-pipeline.md`: specialized backend agent roles, handoffs, and why OpenClaw should stay at the edge
