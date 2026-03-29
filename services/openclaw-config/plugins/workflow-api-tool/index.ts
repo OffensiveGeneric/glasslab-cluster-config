@@ -1202,11 +1202,35 @@ const plugin = {
               if (!queueId) {
                 throw new Error("active research session has no paper intake queue yet");
               }
-              const { endpoint, payload } = await requestJson(
-                api,
-                `/paper-intake-queues/${queueId}/stage-next-intake`,
-                { method: "POST" }
-              );
+              let endpoint = "";
+              let payload: any = null;
+              try {
+                const result = await requestJson(
+                  api,
+                  `/paper-intake-queues/${queueId}/stage-next-intake`,
+                  { method: "POST" }
+                );
+                endpoint = result.endpoint;
+                payload = result.payload;
+              } catch (error) {
+                const detail = extractWorkflowApiErrorDetail(error);
+                if (detail.includes("409") || detail.toLowerCase().includes("conflict")) {
+                  await appendAuditEvent({
+                    tool: "workflow_api_dispatch_latest_user_message",
+                    status: "ok",
+                    routed_intent: routedIntent,
+                    queue_id: queueId,
+                    conflict_detail: detail
+                  });
+                  return buildJsonResult({
+                    routed_intent: routedIntent,
+                    queue_id: queueId,
+                    status: "conflict",
+                    detail
+                  });
+                }
+                throw error;
+              }
               await appendAuditEvent({
                 tool: "workflow_api_dispatch_latest_user_message",
                 status: "ok",
@@ -1312,7 +1336,7 @@ const plugin = {
             await appendAuditEvent({
               tool: "workflow_api_dispatch_latest_user_message",
               status: "error",
-              routed_intent,
+              routed_intent: routedIntent,
               error: error instanceof Error ? error.message : String(error),
               error_detail: extractWorkflowApiErrorDetail(error)
             });
