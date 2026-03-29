@@ -79,6 +79,36 @@ Owns:
 
 This layer can still feel agentic without being responsible for the brittle part of the workflow.
 
+## Important Current Reality
+
+The current command-mode path is only a partial version of this boundary.
+
+Today, explicit commands such as:
+
+- `!research`
+- `!more-papers`
+- `!add-paper`
+- `!next-paper`
+
+are parsed in the OpenClaw workflow-api plugin:
+
+- `services/openclaw-config/plugins/workflow-api-tool/index.ts`
+
+That parser is deterministic once it runs.
+
+But it is not yet a true pre-router, because the model still has to decide to call:
+
+- `workflow_api_dispatch_latest_user_message`
+
+first.
+
+So the current state is:
+
+- deterministic dispatcher: yes
+- true pre-router ahead of the model: no
+
+That distinction matters, because it explains why command-mode is materially better than free chat while still sometimes failing at the OpenClaw seam.
+
 ## Why This Still Fits The Vision
 
 This does not destroy the "ask to answer" idea.
