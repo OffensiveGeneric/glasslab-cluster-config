@@ -1290,7 +1290,7 @@ const plugin = {
                 latest_user_message: latestUserMessage.slice(0, 200)
               });
               return buildJsonResult({
-                routed_intent,
+                routed_intent: routedIntent,
                 latest_user_message: latestUserMessage,
                 help: commandHelpText()
               });
@@ -1299,11 +1299,11 @@ const plugin = {
             await appendAuditEvent({
                 tool: "workflow_api_dispatch_latest_user_message",
                 status: "unsupported",
-              routed_intent,
+              routed_intent: routedIntent,
               latest_user_message: latestUserMessage.slice(0, 200)
             });
             return buildJsonResult({
-              routed_intent,
+              routed_intent: routedIntent,
               latest_user_message: latestUserMessage,
               guidance:
                 "No deterministic research-loop action matched the latest user message. Use conversational reply or a narrower read tool."
