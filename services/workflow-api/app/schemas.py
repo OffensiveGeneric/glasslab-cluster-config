@@ -111,6 +111,25 @@ class PaperIntakeQueueCreateRequest(BaseModel):
         return deduped
 
 
+class ManualPaperCandidateCreateRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    title: str = Field(min_length=6)
+    official_page: str | None = None
+    pdf_url: str | None = None
+    year: int = Field(default=2026, ge=1900, le=2100)
+    venue: str = 'manual'
+    notes: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    submitted_by: str | None = None
+
+    @field_validator('notes', 'tags')
+    @classmethod
+    def validate_unique_manual_paper_lists(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value if item.strip()]
+        return list(dict.fromkeys(cleaned))
+
+
 class ResearchSessionCreateRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
 

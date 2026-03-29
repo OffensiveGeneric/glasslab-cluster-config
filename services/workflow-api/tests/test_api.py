@@ -1965,6 +1965,36 @@ def test_external_literature_search_skill_creates_session_queue(monkeypatch) -> 
     assert latest_context.json()['paper_intake_queue']['queue_id'] == payload['queue_id']
 
 
+def test_add_manual_paper_to_latest_session_queue() -> None:
+    client = build_client()
+
+    session = client.post(
+        '/research-sessions',
+        json={
+            'goal_statement': 'Detect forged art using computer vision methods and open image datasets.',
+            'submitted_by': 'operator',
+        },
+    )
+    assert session.status_code == 201
+
+    response = client.post(
+        '/research-sessions/latest/paper-intake-queue/manual-paper',
+        json={
+            'title': 'Forgery detection with vision transformers',
+            'official_page': 'https://arxiv.org/abs/2401.12345',
+            'tags': ['computer_vision', 'manual'],
+            'notes': ['check whether the loss differs from the current shortlist'],
+            'submitted_by': 'operator',
+        },
+    )
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload['status'] == 'ready'
+    assert payload['coverage_summary']['manual'] is True
+    assert payload['candidates'][-1]['title'] == 'Forgery detection with vision transformers'
+    assert payload['candidates'][-1]['official_page'] == 'https://arxiv.org/abs/2401.12345'
+
+
 def test_create_pipeline_from_latest_research_problem(monkeypatch) -> None:
     client = build_client()
 

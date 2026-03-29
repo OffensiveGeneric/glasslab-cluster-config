@@ -226,6 +226,7 @@ type RoutedUserIntent =
   | "start-literature-search"
   | "refresh-literature-queue"
   | "stage-next-paper"
+  | "add-manual-paper"
   | "summarize-session"
   | "capture-note"
   | "latest-operation"
@@ -236,6 +237,7 @@ type ExplicitCommand =
   | { command: "research"; argument: string }
   | { command: "more-papers"; argument: "" }
   | { command: "next-paper"; argument: "" }
+  | { command: "add-paper"; argument: string }
   | { command: "session"; argument: "" }
   | { command: "note"; argument: string }
   | { command: "op"; argument: "" }
@@ -260,6 +262,9 @@ function parseExplicitCommand(message: string): ExplicitCommand | null {
   if (command === "next-paper") {
     return { command: "next-paper", argument: "" };
   }
+  if (command === "add-paper") {
+    return { command: "add-paper", argument };
+  }
   if (command === "session") {
     return { command: "session", argument: "" };
   }
@@ -281,6 +286,7 @@ function commandHelpText(): string {
     "!research <topic>  or  research: <topic>",
     "!more-papers       or  papers:",
     "!next-paper        or  next-paper:",
+    "!add-paper <url|title> or  add-paper: <url|title>",
     "!session           or  session:",
     "!note <text>       or  note: <text>",
     "!op                or  op:",
@@ -305,6 +311,9 @@ function detectRoutedUserIntent(message: string): RoutedUserIntent {
     if (explicitCommand.command === "next-paper") {
       return "stage-next-paper";
     }
+    if (explicitCommand.command === "add-paper") {
+      return "add-manual-paper";
+    }
     if (explicitCommand.command === "session") {
       return "summarize-session";
     }
@@ -323,6 +332,10 @@ function detectRoutedUserIntent(message: string): RoutedUserIntent {
     /\b(next paper|next intake|another paper|stage next|ingest next|review next paper)\b/.test(text)
   ) {
     return "stage-next-paper";
+  }
+
+  if (/\b(add paper|queue paper|manual paper)\b/.test(text)) {
+    return "add-manual-paper";
   }
 
   if (
@@ -1274,6 +1287,50 @@ const plugin = {
                 endpoint = result.endpoint;
                 payload = result.payload;
               }
+              await appendAuditEvent({
+                tool: "workflow_api_dispatch_latest_user_message",
+                status: "ok",
+                routed_intent: routedIntent,
+                endpoint,
+                queue_id: payload?.queue_id ?? null,
+                candidate_count: Array.isArray(payload?.candidates) ? payload.candidates.length : null
+              });
+              return buildJsonResult({
+                routed_intent: routedIntent,
+                endpoint,
+                paper_intake_queue: payload
+              });
+            }
+
+            if (routedIntent === "add-manual-paper") {
+              const explicitCommand = parseExplicitCommand(latestUserMessage);
+              const argument =
+                explicitCommand?.command === "add-paper" ? explicitCommand.argument.trim() : "";
+              if (!argument) {
+                return buildJsonResult({
+                  routed_intent: routedIntent,
+                  status: "needs-input",
+                  detail: "use !add-paper <url|title> or add-paper: <url|title>"
+                });
+              }
+              const urlMatch = argument.match(/https?:\/\/\S+/i);
+              const officialPage = urlMatch ? urlMatch[0] : null;
+              const pdfUrl = officialPage && /\.pdf(?:$|\?)/i.test(officialPage) ? officialPage : null;
+              const { endpoint, payload } = await requestJson(
+                api,
+                "/research-sessions/latest/paper-intake-queue/manual-paper",
+                {
+                  method: "POST",
+                  body: JSON.stringify({
+                    title: officialPage ? argument.replace(officialPage, "").trim() || officialPage : argument,
+                    official_page: pdfUrl ? null : officialPage,
+                    pdf_url: pdfUrl,
+                    notes: ["manually queued from OpenClaw command"],
+                    tags: ["manual"],
+                    submitted_by: "openclaw-operator"
+                  })
+                }
+              );
               await appendAuditEvent({
                 tool: "workflow_api_dispatch_latest_user_message",
                 status: "ok",

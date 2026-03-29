@@ -16,6 +16,7 @@ from .schemas import (
     IntakeRecord,
     OperationRecord,
     PaperIntakeCandidateRecord,
+    ManualPaperCandidateCreateRequest,
     PaperIntakeQueueCreateRequest,
     PaperIntakeQueueRecord,
     ResearchSessionBootstrapStatusResponse,
@@ -711,3 +712,74 @@ def register_literature_routes(
     @app.post('/research-sessions/latest/skills/paper-intake', response_model=IntakeRecord, status_code=status.HTTP_201_CREATED)
     def apply_latest_session_paper_intake_skill() -> IntakeRecord:
         return stage_next_intake_from_latest_session_queue()
+
+    @app.post('/research-sessions/{session_id}/paper-intake-queue/manual-paper', response_model=PaperIntakeQueueRecord, status_code=status.HTTP_201_CREATED)
+    def add_manual_paper_to_session_queue(session_id: str, request: ManualPaperCandidateCreateRequest) -> PaperIntakeQueueRecord:
+        session = store.get_latest_research_session() if session_id == 'latest' else store.get_research_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session not found')
+
+        queue = store.get_paper_intake_queue(session.latest_queue_id or '')
+        if queue is None:
+            problem = store.get_research_problem(session.latest_problem_id or '')
+            queue = PaperIntakeQueueRecord(
+                queue_id=f'manual-{datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")}',
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+                status='ready',
+                problem_statement=(problem.problem_statement if problem is not None else session.goal_statement),
+                selected_tracks=['manual'],
+                selected_queries=[],
+                coverage_summary={'mode': 'manual'},
+                warnings=[],
+                candidates=[],
+                submitted_by=request.submitted_by or session.submitted_by,
+                session_id=session.session_id,
+            )
+
+        candidate = PaperIntakeCandidateRecord(
+            paper_id=(request.official_page or request.pdf_url or request.title).strip(),
+            title=request.title.strip(),
+            year=request.year,
+            venue=request.venue.strip() or 'manual',
+            priority='P1',
+            tracks=list(dict.fromkeys(['manual', *request.tags])),
+            bounded_job_fit=3,
+            replication_complexity=3,
+            official_page=request.official_page.strip() if request.official_page else None,
+            pdf_url=request.pdf_url.strip() if request.pdf_url else None,
+            why_seed='Manually added by the operator.',
+            first_jobs=request.notes[:3],
+            tags=list(dict.fromkeys(['manual', *request.tags])),
+            match_score=0,
+            match_reasons=['manual candidate'],
+        )
+
+        updated_queue = queue.model_copy(
+            update={
+                'updated_at': datetime.now(timezone.utc),
+                'status': 'ready',
+                'selected_tracks': list(dict.fromkeys([*queue.selected_tracks, 'manual'])),
+                'coverage_summary': {**queue.coverage_summary, 'manual': True},
+                'candidates': [*queue.candidates, candidate],
+            }
+        )
+        store.save_paper_intake_queue(updated_queue)
+        touch_research_session(store, session.session_id, latest_queue_id=updated_queue.queue_id)
+        record_operation(
+            store,
+            operation_type='manual-paper-add',
+            started_at=datetime.now(timezone.utc),
+            status='completed',
+            session_id=session.session_id,
+            queue_id=updated_queue.queue_id,
+            result_detail=f"added manual paper candidate '{candidate.title}'",
+        )
+        return updated_queue
+
+    @app.post('/research-sessions/latest/paper-intake-queue/manual-paper', response_model=PaperIntakeQueueRecord, status_code=status.HTTP_201_CREATED)
+    def add_manual_paper_to_latest_session_queue(request: ManualPaperCandidateCreateRequest) -> PaperIntakeQueueRecord:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return add_manual_paper_to_session_queue(session.session_id, request)
