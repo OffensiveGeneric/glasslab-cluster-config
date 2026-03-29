@@ -25,10 +25,22 @@ Inspect current session:
 ./scripts/research-session-remote.sh context
 ```
 
+Refresh the active queue:
+
+```bash
+./scripts/research-session-remote.sh more-papers
+```
+
 Stage the next paper from the active queue:
 
 ```bash
 ./scripts/research-session-remote.sh next-paper
+```
+
+Append a manual paper candidate:
+
+```bash
+./scripts/research-session-remote.sh add-paper "https://arxiv.org/abs/2401.12345"
 ```
 
 Save a note on the active session:
@@ -52,5 +64,16 @@ It exists because the deterministic backend/session path is currently more relia
 - starting a research session
 - starting literature search
 - staging the next paper
+
+The matching OpenClaw command surface is now:
+
+- `!research <topic>`
+- `!session`
+- `!more-papers`
+- `!add-paper <url|title>`
+- `!next-paper`
+- `!note <text>`
+- `!op`
+- `!help`
 
 That makes it the right control path while the OpenClaw UX boundary is being reworked.

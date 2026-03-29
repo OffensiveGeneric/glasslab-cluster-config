@@ -14,6 +14,7 @@ Current live validation reference:
 - `../live-state-2026-03-24.md`
 - `../live-state-2026-03-25.md`
 - `live-state-2026-03-28.md`
+- `live-state-2026-03-29.md`
 - `../machine-state-2026-03-24.md`
 - `../machine-state-2026-03-25.md`
 
