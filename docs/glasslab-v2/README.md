@@ -33,6 +33,7 @@ Canonical planning and architecture:
 - `research-pipeline-target.md`: the intended end-state product shape for Glasslab research workflows
 - `research-assistant-infra-proposal.md`: concrete infra and control-surface changes to get closest to the research-assistant vision without making OpenClaw the workflow brain
 - `research-assistant-implementation-checklist.md`: concrete execution order for the deterministic-router, one-shot-action, session-memory, and `gpu-experiment` path
+- `research-assistant-ux-boundary.md`: where deterministic routing should replace model-driven orchestration so the product can actually feel like a usable research assistant
 - `repo-review-2026-03-26.md`: current architecture concerns, bounded refactors, and issue follow-through after the shift toward session-centric research work
 - `stage-agent-pipeline.md`: specialized backend agent roles, handoffs, and why OpenClaw should stay at the edge
 - `stage-agent-rollout-order.md`: recommended stage-by-stage enablement order for the bounded-agent pipeline
