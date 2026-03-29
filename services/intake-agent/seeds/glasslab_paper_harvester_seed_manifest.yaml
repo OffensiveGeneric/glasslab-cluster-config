@@ -118,6 +118,16 @@ track_queries:
   queries:
   - site:arxiv.org automated scientific discovery language models
   - site:nature.com scientific discovery machine intelligence agents
+- track: computer_vision_forgery
+  queries:
+  - site:arxiv.org image forgery detection localization benchmark
+  - site:arxiv.org computer vision image manipulation detection
+  - site:openaccess.thecvf.com image forgery detection localization
+- track: art_authentication
+  queries:
+  - site:arxiv.org art authentication vision transformers
+  - site:arxiv.org art forgery detection computer vision
+  - site:arxiv.org painting authentication deep learning
 tracks:
 - id: tabular_baselines
   description: strong baselines and comparison targets that map cleanly to fixed-run
@@ -140,6 +150,14 @@ tracks:
   description: open-ended autonomous research systems; useful for architecture ideas,
     not first replication targets
   default_priority: P2
+- id: computer_vision_forgery
+  description: image forgery, manipulation detection, and localization work that maps
+    to bounded computer vision experiments
+  default_priority: P0
+- id: art_authentication
+  description: art authentication and forged-art detection using computer vision and
+    image analysis
+  default_priority: P0
 papers:
 - id: xgboost_kdd_2016
   title: 'XGBoost: A Scalable Tree Boosting System'
@@ -412,6 +430,100 @@ papers:
     summarization'
   - do not attempt full autonomous-paper generation before benchmark hygiene is in
     place
+- id: art_authentication_vit_2023
+  title: Art Authentication with Vision Transformers
+  year: 2023
+  venue: Neural Computing and Applications
+  venue_id: arxiv
+  official_page: https://arxiv.org/abs/2307.03039
+  tracks:
+  - art_authentication
+  - computer_vision_forgery
+  priority: P0
+  bounded_job_fit: 4
+  replication_complexity: 3
+  tags:
+  - art
+  - authentication
+  - paintings
+  - vision_transformer
+  - computer_vision
+  - forgery
+  why_seed: directly aligned with computer-vision support for art authentication and
+    forged-art screening
+  first_jobs:
+  - benchmark ViT-based authentication on public artwork image splits
+  - compare vision transformer baselines against simpler CNN baselines
+  - document which visual cues transfer to forged-art detection versus artist attribution
+- id: art_forgery_kan_cnn_2024
+  title: Art Forgery Detection using Kolmogorov Arnold and Convolutional Neural Networks
+  year: 2024
+  venue: arXiv
+  venue_id: arxiv
+  official_page: https://arxiv.org/abs/2410.04866
+  tracks:
+  - art_authentication
+  - computer_vision_forgery
+  priority: P0
+  bounded_job_fit: 4
+  replication_complexity: 3
+  tags:
+  - art
+  - forgery
+  - cnn
+  - computer_vision
+  - authentication
+  why_seed: directly targets forged-art detection rather than generic tabular or
+    literature triage workflows
+  first_jobs:
+  - compare KAN-CNN style forgery detection against plain CNN baselines
+  - evaluate whether artist-specific versus forger-specific training assumptions matter
+  - write bounded metrics for accuracy, recall, and false-positive rate on public image splits
+- id: gim_arxiv_2024
+  title: 'GIM: A Million-scale Benchmark for Generative Image Manipulation Detection and Localization'
+  year: 2024
+  venue: arXiv
+  venue_id: arxiv
+  official_page: https://arxiv.org/abs/2406.16531
+  tracks:
+  - computer_vision_forgery
+  priority: P0
+  bounded_job_fit: 4
+  replication_complexity: 4
+  tags:
+  - image_forgery
+  - manipulation_detection
+  - localization
+  - benchmark
+  - computer_vision
+  why_seed: strong benchmark anchor for image manipulation detection and localization,
+    even when the application domain is forged art
+  first_jobs:
+  - evaluate image manipulation detectors on a reduced benchmark subset
+  - compare classification-only versus localization-aware methods
+  - track generalization across manipulation types and image domains
+- id: loupe_arxiv_2025
+  title: 'Loupe: A Generalizable and Adaptive Framework for Image Forgery Detection'
+  year: 2025
+  venue: arXiv
+  venue_id: arxiv
+  official_page: https://arxiv.org/abs/2506.16819
+  tracks:
+  - computer_vision_forgery
+  priority: P1
+  bounded_job_fit: 4
+  replication_complexity: 4
+  tags:
+  - image_forgery
+  - localization
+  - adaptation
+  - computer_vision
+  - deepfake_detection
+  why_seed: current image forgery framework with explicit generalization and localization
+    targets
+  first_jobs:
+  - test whether adaptive patch-aware detection improves robustness on held-out manipulations
+  - compare image-level detection against mask-aware localization outputs
 recommended_initial_backlog:
   phase_1:
   - openml_benchmarking_suites_neurips_2021
@@ -424,10 +536,14 @@ recommended_initial_backlog:
   - tabnet_iclr_2020
   - tabpfn_iclr_2023
   - asreview_nat_mach_intell_2021
+  - art_authentication_vit_2023
+  - art_forgery_kan_cnn_2024
+  - gim_arxiv_2024
   phase_3:
   - mle_bench_arxiv_2024
   - mlgym_arxiv_2025
   - ai_scientist_arxiv_2024
+  - loupe_arxiv_2025
 output_schema_hints:
   required_fields_per_harvested_paper:
   - title
