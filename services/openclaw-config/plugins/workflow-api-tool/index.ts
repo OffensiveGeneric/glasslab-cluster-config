@@ -231,7 +231,7 @@ type RoutedUserIntent =
   | "help"
   | "unsupported";
 
-type SlashCommand =
+type ExplicitCommand =
   | { command: "research"; argument: string }
   | { command: "next-paper"; argument: "" }
   | { command: "session"; argument: "" }
@@ -239,12 +239,11 @@ type SlashCommand =
   | { command: "op"; argument: "" }
   | { command: "help"; argument: "" };
 
-function parseSlashCommand(message: string): SlashCommand | null {
+function parseExplicitCommand(message: string): ExplicitCommand | null {
   const trimmed = message.trim();
-  if (!trimmed.startsWith("/")) {
-    return null;
-  }
-  const match = trimmed.match(/^\/([a-z0-9-]+)(?:\s+([\s\S]+))?$/i);
+  let match =
+    trimmed.match(/^!([a-z0-9-]+)(?:\s+([\s\S]+))?$/i) ||
+    trimmed.match(/^([a-z0-9-]+):(?:\s*([\s\S]+))?$/i);
   if (!match) {
     return null;
   }
@@ -274,12 +273,12 @@ function parseSlashCommand(message: string): SlashCommand | null {
 function commandHelpText(): string {
   return [
     "Supported research commands:",
-    "/research <topic>  Start or resume a research session and begin literature search.",
-    "/next-paper        Stage the next paper intake from the active session queue.",
-    "/session           Show the current research-session context.",
-    "/note <text>       Save a working note on the active research session.",
-    "/op                Show the latest backend operation.",
-    "/help              Show this command help."
+    "!research <topic>  or  research: <topic>",
+    "!next-paper        or  next-paper:",
+    "!session           or  session:",
+    "!note <text>       or  note: <text>",
+    "!op                or  op:",
+    "!help              or  help:"
   ].join("\n");
 }
 
@@ -289,24 +288,24 @@ function detectRoutedUserIntent(message: string): RoutedUserIntent {
     return "unsupported";
   }
 
-  const slashCommand = parseSlashCommand(message);
-  if (slashCommand) {
-    if (slashCommand.command === "research") {
+  const explicitCommand = parseExplicitCommand(message);
+  if (explicitCommand) {
+    if (explicitCommand.command === "research") {
       return "start-literature-search";
     }
-    if (slashCommand.command === "next-paper") {
+    if (explicitCommand.command === "next-paper") {
       return "stage-next-paper";
     }
-    if (slashCommand.command === "session") {
+    if (explicitCommand.command === "session") {
       return "summarize-session";
     }
-    if (slashCommand.command === "note") {
+    if (explicitCommand.command === "note") {
       return "capture-note";
     }
-    if (slashCommand.command === "op") {
+    if (explicitCommand.command === "op") {
       return "latest-operation";
     }
-    if (slashCommand.command === "help") {
+    if (explicitCommand.command === "help") {
       return "help";
     }
   }
@@ -1166,12 +1165,12 @@ const plugin = {
         async execute() {
           const latestUserMessage = cleanLatestUserIdea(await loadLatestUserIdeaText());
           const routedIntent = detectRoutedUserIntent(latestUserMessage);
-          const slashCommand = parseSlashCommand(latestUserMessage);
+          const explicitCommand = parseExplicitCommand(latestUserMessage);
           try {
             if (routedIntent === "start-literature-search") {
               const goalStatement =
-                slashCommand?.command === "research" && slashCommand.argument
-                  ? slashCommand.argument
+                explicitCommand?.command === "research" && explicitCommand.argument
+                  ? explicitCommand.argument
                   : "";
               const result = goalStatement
                 ? await startLiteratureSearchForGoal(api, goalStatement)
@@ -1264,8 +1263,8 @@ const plugin = {
 
             if (routedIntent === "capture-note") {
               const noteText =
-                slashCommand?.command === "note" && slashCommand.argument
-                  ? slashCommand.argument
+                explicitCommand?.command === "note" && explicitCommand.argument
+                  ? explicitCommand.argument
                   : latestUserMessage;
               if (noteText.length < 12) {
                 throw new Error("latest user message is too short to store as a research-session note");
