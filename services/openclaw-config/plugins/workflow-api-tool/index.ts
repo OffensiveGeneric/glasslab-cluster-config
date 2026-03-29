@@ -1255,11 +1255,25 @@ const plugin = {
             }
 
             if (routedIntent === "refresh-literature-queue") {
-              const { endpoint, payload } = await requestJson(
-                api,
-                "/research-sessions/latest/skills/literature-harvest",
-                { method: "POST" }
-              );
+              let endpoint = "";
+              let payload: any;
+              try {
+                const result = await requestJson(
+                  api,
+                  "/research-sessions/latest/skills/external-literature-search",
+                  { method: "POST" }
+                );
+                endpoint = result.endpoint;
+                payload = result.payload;
+              } catch {
+                const result = await requestJson(
+                  api,
+                  "/research-sessions/latest/skills/literature-harvest",
+                  { method: "POST" }
+                );
+                endpoint = result.endpoint;
+                payload = result.payload;
+              }
               await appendAuditEvent({
                 tool: "workflow_api_dispatch_latest_user_message",
                 status: "ok",

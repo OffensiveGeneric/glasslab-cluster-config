@@ -1896,6 +1896,75 @@ def test_start_literature_search_creates_session_problem_and_queue(monkeypatch) 
     assert payload['operation']['operation_type'] == 'literature-search-start'
 
 
+def test_external_literature_search_skill_creates_session_queue(monkeypatch) -> None:
+    from app.external_literature import ExternalLiteratureResult
+    from app.schemas import ResearchProblemPaperCandidate
+
+    client = build_client()
+
+    session = client.post(
+        '/research-sessions',
+        json={
+            'goal_statement': 'Detect forged art using computer vision methods and open image datasets.',
+            'priorities': ['computer vision', 'art authentication'],
+            'submitted_by': 'operator',
+        },
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    problem = client.post(f'/research-sessions/{session_id}/skills/research-problem')
+    assert problem.status_code == 201
+
+    monkeypatch.setattr(
+        main_module,
+        'search_external_literature',
+        lambda **kwargs: ExternalLiteratureResult(
+            selected_tracks=['external_literature', 'openalex', 'arxiv'],
+            selected_queries=['forged art computer vision dataset'],
+            selected_papers=[
+                ResearchProblemPaperCandidate(
+                    paper_id='https://openalex.org/W123',
+                    title='Vision Transformers for Art Authentication',
+                    year=2024,
+                    venue='CVPR Workshops',
+                    venue_id='https://openalex.org/S123',
+                    priority='P1',
+                    tracks=['external_literature', 'openalex'],
+                    bounded_job_fit=3,
+                    replication_complexity=3,
+                    official_page='https://openalex.org/W123',
+                    pdf_url='https://arxiv.org/pdf/2401.12345.pdf',
+                    why_seed='Matched the external literature query through OpenAlex.',
+                    first_jobs=['compare the loss function and dataset split against session priorities'],
+                    tags=['computer_vision', 'art_authentication'],
+                    match_score=4,
+                    match_reasons=["matched term 'forged'", "matched term 'vision'"],
+                )
+            ],
+            coverage_summary={
+                'mode': 'external_search',
+                'provider_counts': {'openalex': 1, 'arxiv': 1, 'crossref': 0},
+                'selected_candidate_count': 1,
+                'selected_provider_mix': ['openalex', 'arxiv'],
+            },
+            warnings=[],
+        ),
+    )
+
+    response = client.post(f'/research-sessions/{session_id}/skills/external-literature-search')
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload['session_id'] == session_id
+    assert payload['coverage_summary']['mode'] == 'external_search'
+    assert payload['candidates'][0]['title'] == 'Vision Transformers for Art Authentication'
+    assert payload['candidates'][0]['pdf_url'] == 'https://arxiv.org/pdf/2401.12345.pdf'
+
+    latest_context = client.get('/research-sessions/latest/context')
+    assert latest_context.status_code == 200
+    assert latest_context.json()['paper_intake_queue']['queue_id'] == payload['queue_id']
+
+
 def test_create_pipeline_from_latest_research_problem(monkeypatch) -> None:
     client = build_client()
 

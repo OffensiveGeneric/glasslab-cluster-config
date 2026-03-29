@@ -120,6 +120,7 @@ Recent paper-intake endpoints:
 - `POST /research-sessions/latest/research-problems/from-session-goal`
 - `POST /research-sessions/latest/paper-intake-queues/from-latest-problem`
 - `POST /research-sessions/latest/paper-intake-queues/stage-next-intake`
+- `POST /research-sessions/latest/skills/external-literature-search`
 - `POST /paper-intake-queues/from-research-problem`
 - `GET /paper-intake-queues`
 - `GET /paper-intake-queues/latest`
@@ -136,12 +137,14 @@ Session-first skill endpoints:
 
 - `POST /research-sessions/{session_id}/skills/research-problem`
 - `POST /research-sessions/{session_id}/skills/literature-harvest`
+- `POST /research-sessions/{session_id}/skills/external-literature-search`
 - `POST /research-sessions/{session_id}/skills/paper-intake`
 - `POST /research-sessions/{session_id}/skills/interpretation`
 - `POST /research-sessions/{session_id}/skills/assessment`
 - `POST /research-sessions/{session_id}/skills/design`
 - `POST /research-sessions/latest/skills/research-problem`
 - `POST /research-sessions/latest/skills/literature-harvest`
+- `POST /research-sessions/latest/skills/external-literature-search`
 - `POST /research-sessions/latest/skills/paper-intake`
 - `POST /research-sessions/latest/skills/interpretation`
 - `POST /research-sessions/latest/skills/assessment`
@@ -207,6 +210,11 @@ session can distinguish between:
 - fallback shortlist selection from the approved seed corpus
 - filtered results that were narrowed by policy or priority
 
+There are now two queue-generation paths:
+
+- `literature-harvest`: bounded approved seed-manifest selection
+- `external-literature-search`: external metadata search that writes durable candidates back into the same session queue structure
+
 The newer session layer makes that state conversationally usable:
 
 - a `ResearchSessionRecord` is now the stateful literature workspace
@@ -220,6 +228,10 @@ creates a `SourceDocumentRecord`. Storage is explicit:
 
 - filesystem mode: writes under `GLASSLAB_WORKFLOW_API_SOURCE_DOCUMENT_STORAGE_DIR`
 - MinIO mode: writes to `GLASSLAB_WORKFLOW_API_SOURCE_DOCUMENT_BUCKET`
+
+By default, filesystem storage writes paper/source blobs under:
+
+- `/mnt/artifacts/source-documents`
 
 Interpretation now carries forward:
 

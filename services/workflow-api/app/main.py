@@ -16,6 +16,7 @@ from .config import Settings, get_settings
 from .digest_scheduling import schedule_is_due
 from .execution_routes import register_execution_routes
 from .execution_preflight import build_execution_preflight_result
+from .external_literature import search_external_literature
 from .job_submission import JobSubmitter, create_job_submitter
 from .literature_routes import register_literature_routes
 from .paper_pipeline import (
@@ -1440,6 +1441,7 @@ def create_app(
         build_intake_request_from_problem_candidate=lambda *args, **kwargs: build_intake_request_from_problem_candidate(*args, **kwargs),
         stage_intake_from_request=lambda *args, **kwargs: stage_intake_from_request(*args, **kwargs),
         record_operation=lambda *args, **kwargs: record_operation(*args, **kwargs),
+        search_external_literature=lambda *args, **kwargs: search_external_literature(*args, **kwargs),
     )
 
     register_source_document_routes(app, store=store)

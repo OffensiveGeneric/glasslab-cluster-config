@@ -67,6 +67,12 @@ class Settings(BaseSettings):
     minio_access_key: str | None = None
     minio_secret_key: str | None = None
     minio_secure: bool = False
+    external_literature_enabled: bool = True
+    external_literature_openalex_url: str = 'https://api.openalex.org/works'
+    external_literature_crossref_url: str = 'https://api.crossref.org/works'
+    external_literature_arxiv_url: str = 'https://export.arxiv.org/api/query'
+    external_literature_timeout_seconds: float = 20.0
+    external_literature_mailto: str | None = None
 
     @model_validator(mode='after')
     def validate_store_backend(self) -> 'Settings':

@@ -32,6 +32,7 @@ from .schemas import (
     StartLiteratureSearchResponse,
     SourceDocumentRecord,
 )
+from .external_literature import ExternalLiteratureResult
 
 
 def register_literature_routes(
@@ -55,6 +56,7 @@ def register_literature_routes(
     build_intake_request_from_problem_candidate: Callable[..., Any],
     stage_intake_from_request: Callable[..., IntakeRecord],
     record_operation: Callable[..., OperationRecord],
+    search_external_literature: Callable[..., ExternalLiteratureResult],
 ) -> None:
     @app.post('/paper-pipelines/from-research-problem', response_model=ResearchProblemPipelineResponse, status_code=status.HTTP_201_CREATED)
     def create_pipeline_from_research_problem(request: ResearchProblemPipelineRequest) -> ResearchProblemPipelineResponse:
@@ -443,6 +445,66 @@ def register_literature_routes(
     def apply_session_literature_harvest_skill(session_id: str) -> PaperIntakeQueueRecord:
         return create_paper_intake_queue_from_session_latest_problem(session_id)
 
+    @app.post('/research-sessions/{session_id}/skills/external-literature-search', response_model=PaperIntakeQueueRecord, status_code=status.HTTP_201_CREATED)
+    def apply_session_external_literature_search_skill(session_id: str) -> PaperIntakeQueueRecord:
+        session = store.get_research_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session not found')
+        problem = store.get_research_problem(session.latest_problem_id or '')
+        if problem is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session has no staged research problem yet')
+        if not settings.external_literature_enabled:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail='external literature search is disabled')
+
+        started_at = datetime.now(timezone.utc)
+        try:
+            result = search_external_literature(
+                problem_statement=problem.problem_statement,
+                priorities=problem.priorities,
+                max_candidate_papers=min(problem.max_candidate_papers, 25),
+                settings=settings,
+            )
+        except Exception as exc:
+            record_operation(
+                store,
+                operation_type='external-literature-search',
+                started_at=started_at,
+                status='failed',
+                session_id=session.session_id,
+                result_detail='external literature search failed',
+                error_detail=str(exc),
+            )
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f'external literature search failed: {exc}')
+
+        queue_request = PaperIntakeQueueCreateRequest(
+            problem_statement=problem.problem_statement,
+            max_candidate_papers=min(problem.max_candidate_papers, 25),
+            priorities=problem.priorities,
+            submitted_by=problem.submitted_by,
+        )
+        record = build_paper_intake_queue_record(
+            queue_request,
+            result.selected_tracks,
+            result.selected_queries,
+            result.selected_papers,
+            result.coverage_summary,
+            result.warnings,
+            settings,
+            session_id=session.session_id,
+        )
+        store.save_paper_intake_queue(record)
+        touch_research_session(store, session.session_id, latest_queue_id=record.queue_id)
+        record_operation(
+            store,
+            operation_type='external-literature-search',
+            started_at=started_at,
+            status='completed',
+            session_id=session.session_id,
+            queue_id=record.queue_id,
+            result_detail=f'created external literature queue with {len(record.candidates)} candidates',
+        )
+        return record
+
     @app.post('/research-sessions/latest/paper-intake-queues/from-latest-problem', response_model=PaperIntakeQueueRecord, status_code=status.HTTP_201_CREATED)
     def create_paper_intake_queue_from_latest_session_problem() -> PaperIntakeQueueRecord:
         session = store.get_latest_research_session()
@@ -453,6 +515,13 @@ def register_literature_routes(
     @app.post('/research-sessions/latest/skills/literature-harvest', response_model=PaperIntakeQueueRecord, status_code=status.HTTP_201_CREATED)
     def apply_latest_session_literature_harvest_skill() -> PaperIntakeQueueRecord:
         return create_paper_intake_queue_from_latest_session_problem()
+
+    @app.post('/research-sessions/latest/skills/external-literature-search', response_model=PaperIntakeQueueRecord, status_code=status.HTTP_201_CREATED)
+    def apply_latest_session_external_literature_search_skill() -> PaperIntakeQueueRecord:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return apply_session_external_literature_search_skill(session.session_id)
 
     @app.post('/paper-intake-queues/from-research-problem', response_model=PaperIntakeQueueRecord, status_code=status.HTTP_201_CREATED)
     def create_paper_intake_queue_from_research_problem(request: PaperIntakeQueueCreateRequest) -> PaperIntakeQueueRecord:
