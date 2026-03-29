@@ -224,6 +224,7 @@ async function startLiteratureSearchForGoal(
 
 type RoutedUserIntent =
   | "start-literature-search"
+  | "refresh-literature-queue"
   | "stage-next-paper"
   | "summarize-session"
   | "capture-note"
@@ -233,6 +234,7 @@ type RoutedUserIntent =
 
 type ExplicitCommand =
   | { command: "research"; argument: string }
+  | { command: "more-papers"; argument: "" }
   | { command: "next-paper"; argument: "" }
   | { command: "session"; argument: "" }
   | { command: "note"; argument: string }
@@ -251,6 +253,9 @@ function parseExplicitCommand(message: string): ExplicitCommand | null {
   const argument = (match[2] || "").trim();
   if (command === "research") {
     return { command: "research", argument };
+  }
+  if (command === "more-papers" || command === "papers") {
+    return { command: "more-papers", argument: "" };
   }
   if (command === "next-paper") {
     return { command: "next-paper", argument: "" };
@@ -274,6 +279,7 @@ function commandHelpText(): string {
   return [
     "Supported research commands:",
     "!research <topic>  or  research: <topic>",
+    "!more-papers       or  papers:",
     "!next-paper        or  next-paper:",
     "!session           or  session:",
     "!note <text>       or  note: <text>",
@@ -292,6 +298,9 @@ function detectRoutedUserIntent(message: string): RoutedUserIntent {
   if (explicitCommand) {
     if (explicitCommand.command === "research") {
       return "start-literature-search";
+    }
+    if (explicitCommand.command === "more-papers") {
+      return "refresh-literature-queue";
     }
     if (explicitCommand.command === "next-paper") {
       return "stage-next-paper";
@@ -1242,6 +1251,27 @@ const plugin = {
                 routed_intent: routedIntent,
                 endpoint,
                 intake: payload
+              });
+            }
+
+            if (routedIntent === "refresh-literature-queue") {
+              const { endpoint, payload } = await requestJson(
+                api,
+                "/research-sessions/latest/skills/literature-harvest",
+                { method: "POST" }
+              );
+              await appendAuditEvent({
+                tool: "workflow_api_dispatch_latest_user_message",
+                status: "ok",
+                routed_intent: routedIntent,
+                endpoint,
+                queue_id: payload?.queue_id ?? null,
+                candidate_count: Array.isArray(payload?.candidates) ? payload.candidates.length : null
+              });
+              return buildJsonResult({
+                routed_intent: routedIntent,
+                endpoint,
+                paper_intake_queue: payload
               });
             }
 
