@@ -186,17 +186,129 @@ async function bootstrapResearchSessionFromLatestUserMessage(api: any): Promise<
   };
 }
 
+async function startLiteratureSearchForGoal(
+  api: any,
+  goalStatement: string
+): Promise<{
+  goalStatement: string;
+  session: any;
+  researchProblem: any | null;
+  queue: any;
+  bootstrapEndpoint: string;
+  bootstrapAction: string | null;
+}> {
+  const requestBody = {
+    goal_statement: goalStatement || null,
+    priorities: [],
+    submitted_by: "openclaw-operator"
+  };
+  const { endpoint: bootstrapEndpoint, payload } = await requestJson(
+    api,
+    "/research-sessions/start-literature-search",
+    { method: "POST", body: JSON.stringify(requestBody) }
+  );
+  const session = payload?.session ?? null;
+  const sessionId = typeof session?.session_id === "string" ? session.session_id.trim() : "";
+  if (!sessionId) {
+    throw new Error("workflow-api literature start did not return a research session");
+  }
+  return {
+    goalStatement,
+    session,
+    researchProblem: payload?.research_problem ?? null,
+    queue: payload?.paper_intake_queue ?? null,
+    bootstrapEndpoint,
+    bootstrapAction: typeof payload?.action === "string" ? payload.action : null
+  };
+}
+
 type RoutedUserIntent =
   | "start-literature-search"
   | "stage-next-paper"
   | "summarize-session"
   | "capture-note"
+  | "latest-operation"
+  | "help"
   | "unsupported";
+
+type SlashCommand =
+  | { command: "research"; argument: string }
+  | { command: "next-paper"; argument: "" }
+  | { command: "session"; argument: "" }
+  | { command: "note"; argument: string }
+  | { command: "op"; argument: "" }
+  | { command: "help"; argument: "" };
+
+function parseSlashCommand(message: string): SlashCommand | null {
+  const trimmed = message.trim();
+  if (!trimmed.startsWith("/")) {
+    return null;
+  }
+  const match = trimmed.match(/^\/([a-z0-9-]+)(?:\s+([\s\S]+))?$/i);
+  if (!match) {
+    return null;
+  }
+  const command = match[1].toLowerCase();
+  const argument = (match[2] || "").trim();
+  if (command === "research") {
+    return { command: "research", argument };
+  }
+  if (command === "next-paper") {
+    return { command: "next-paper", argument: "" };
+  }
+  if (command === "session") {
+    return { command: "session", argument: "" };
+  }
+  if (command === "note") {
+    return { command: "note", argument };
+  }
+  if (command === "op") {
+    return { command: "op", argument: "" };
+  }
+  if (command === "help") {
+    return { command: "help", argument: "" };
+  }
+  return null;
+}
+
+function commandHelpText(): string {
+  return [
+    "Supported research commands:",
+    "/research <topic>  Start or resume a research session and begin literature search.",
+    "/next-paper        Stage the next paper intake from the active session queue.",
+    "/session           Show the current research-session context.",
+    "/note <text>       Save a working note on the active research session.",
+    "/op                Show the latest backend operation.",
+    "/help              Show this command help."
+  ].join("\n");
+}
 
 function detectRoutedUserIntent(message: string): RoutedUserIntent {
   const text = message.trim().toLowerCase();
   if (!text) {
     return "unsupported";
+  }
+
+  const slashCommand = parseSlashCommand(message);
+  if (slashCommand) {
+    if (slashCommand.command === "research") {
+      return "start-literature-search";
+    }
+    if (slashCommand.command === "next-paper") {
+      return "stage-next-paper";
+    }
+    if (slashCommand.command === "session") {
+      return "summarize-session";
+    }
+    if (slashCommand.command === "note") {
+      return "capture-note";
+    }
+    if (slashCommand.command === "op") {
+      return "latest-operation";
+    }
+    if (slashCommand.command === "help") {
+      return "help";
+    }
   }
 
   if (
@@ -1054,9 +1166,16 @@ const plugin = {
         async execute() {
           const latestUserMessage = cleanLatestUserIdea(await loadLatestUserIdeaText());
           const routedIntent = detectRoutedUserIntent(latestUserMessage);
+          const slashCommand = parseSlashCommand(latestUserMessage);
           try {
             if (routedIntent === "start-literature-search") {
-              const result = await bootstrapResearchSessionFromLatestUserMessage(api);
+              const goalStatement =
+                slashCommand?.command === "research" && slashCommand.argument
+                  ? slashCommand.argument
+                  : "";
+              const result = goalStatement
+                ? await startLiteratureSearchForGoal(api, goalStatement)
+                : await bootstrapResearchSessionFromLatestUserMessage(api);
               await appendAuditEvent({
                 tool: "workflow_api_dispatch_latest_user_message",
                 status: "ok",
@@ -1075,10 +1194,17 @@ const plugin = {
             }
 
             if (routedIntent === "stage-next-paper") {
-              const ensured = await ensureLatestResearchSession(api);
+              const { payload: contextPayload } = await requestJson(api, "/research-sessions/latest/context");
+              const queueId =
+                typeof contextPayload?.paper_intake_queue?.queue_id === "string"
+                  ? contextPayload.paper_intake_queue.queue_id.trim()
+                  : "";
+              if (!queueId) {
+                throw new Error("active research session has no paper intake queue yet");
+              }
               const { endpoint, payload } = await requestJson(
                 api,
-                "/research-sessions/latest/skills/paper-intake",
+                `/paper-intake-queues/${queueId}/stage-next-intake`,
                 { method: "POST" }
               );
               await appendAuditEvent({
@@ -1086,7 +1212,7 @@ const plugin = {
                 status: "ok",
                 routed_intent: routedIntent,
                 endpoint,
-                session_id: payload?.session_id ?? ensured.session?.session_id ?? null,
+                session_id: payload?.session_id ?? contextPayload?.session?.session_id ?? null,
                 intake_id: payload?.intake_id ?? null
               });
               return buildJsonResult({
@@ -1113,12 +1239,16 @@ const plugin = {
             }
 
             if (routedIntent === "capture-note") {
-              if (latestUserMessage.length < 12) {
+              const noteText =
+                slashCommand?.command === "note" && slashCommand.argument
+                  ? slashCommand.argument
+                  : latestUserMessage;
+              if (noteText.length < 12) {
                 throw new Error("latest user message is too short to store as a research-session note");
               }
               const { endpoint, payload } = await requestJson(api, "/research-sessions/latest/memory", {
                 method: "POST",
-                body: JSON.stringify({ working_note: latestUserMessage })
+                body: JSON.stringify({ working_note: noteText })
               });
               await appendAuditEvent({
                 tool: "workflow_api_dispatch_latest_user_message",
@@ -1126,19 +1256,49 @@ const plugin = {
                 routed_intent: routedIntent,
                 endpoint,
                 session_id: payload?.session_id ?? null,
-                note_excerpt: latestUserMessage.slice(0, 160)
+                note_excerpt: noteText.slice(0, 160)
               });
               return buildJsonResult({
                 routed_intent: routedIntent,
                 endpoint,
-                note_saved: latestUserMessage,
+                note_saved: noteText,
                 session: payload
               });
             }
 
+            if (routedIntent === "latest-operation") {
+              const { endpoint, payload } = await requestJson(api, "/operations/latest");
+              await appendAuditEvent({
+                tool: "workflow_api_dispatch_latest_user_message",
+                status: "ok",
+                routed_intent: routedIntent,
+                endpoint,
+                operation_id: payload?.operation_id ?? null
+              });
+              return buildJsonResult({
+                routed_intent: routedIntent,
+                endpoint,
+                operation: payload
+              });
+            }
+
+            if (routedIntent === "help") {
+              await appendAuditEvent({
+                tool: "workflow_api_dispatch_latest_user_message",
+                status: "ok",
+                routed_intent: routedIntent,
+                latest_user_message: latestUserMessage.slice(0, 200)
+              });
+              return buildJsonResult({
+                routed_intent,
+                latest_user_message: latestUserMessage,
+                help: commandHelpText()
+              });
+            }
+
             await appendAuditEvent({
-              tool: "workflow_api_dispatch_latest_user_message",
-              status: "unsupported",
+                tool: "workflow_api_dispatch_latest_user_message",
+                status: "unsupported",
               routed_intent,
               latest_user_message: latestUserMessage.slice(0, 200)
             });

@@ -10,19 +10,7 @@ policy_profile: internal-default
 runtime_tools_profile: full
 runtime_tools_allow:
   - workflow_api_dispatch_latest_user_message
-  - workflow_api_bootstrap_research_session_from_latest_user_message
-  - workflow_api_get_latest_research_session
   - workflow_api_get_latest_research_session_context
-  - workflow_api_stage_next_intake_from_latest_session
   - workflow_api_get_latest_operation
-  - workflow_api_get_latest_paper_intake_queue
-  - workflow_api_get_last_intake
-  - workflow_api_get_latest_source_document
-  - workflow_api_get_latest_interpretation
-  - workflow_api_create_assessment_from_latest_interpretation
-  - workflow_api_get_latest_assessment
-  - workflow_api_create_design_draft_from_last_intake
-  - workflow_api_create_design_draft_from_last_assessment
-  - workflow_api_get_last_design_draft
 runtime_tools_deny:
   - web_fetch
