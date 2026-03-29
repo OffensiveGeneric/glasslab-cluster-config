@@ -186,6 +186,50 @@ async function bootstrapResearchSessionFromLatestUserMessage(api: any): Promise<
   };
 }
 
+type RoutedUserIntent =
+  | "start-literature-search"
+  | "stage-next-paper"
+  | "summarize-session"
+  | "capture-note"
+  | "unsupported";
+
+function detectRoutedUserIntent(message: string): RoutedUserIntent {
+  const text = message.trim().toLowerCase();
+  if (!text) {
+    return "unsupported";
+  }
+
+  if (
+    /\b(next paper|next intake|another paper|stage next|ingest next|review next paper)\b/.test(text)
+  ) {
+    return "stage-next-paper";
+  }
+
+  if (
+    /\b(summarize|summary|what('| i)?s the current state|where are we|current literature|session context|what did you find)\b/.test(
+      text
+    )
+  ) {
+    return "summarize-session";
+  }
+
+  if (
+    /\b(note|remember|keep in mind|save this|capture this|focus on|prioritize)\b/.test(text)
+  ) {
+    return "capture-note";
+  }
+
+  if (
+    /\b(start|begin|open|create|help me investigate|investigate|research|literature search|gather papers|look for papers|find papers)\b/.test(
+      text
+    )
+  ) {
+    return "start-literature-search";
+  }
+
+  return "unsupported";
+}
+
 function resolvePaperIntakeRequest(api: any): Record<string, unknown> {
   const value = api?.pluginConfig?.paperIntakeRequest;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -990,6 +1034,127 @@ const plugin = {
               tool: "workflow_api_create_validation_run_from_last_design",
               status: "error",
               error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+          }
+        }
+      },
+      { optional: true }
+    );
+
+    api.registerTool(
+      {
+        name: "workflow_api_dispatch_latest_user_message",
+        description: "Preferred first tool for action-oriented research chat. Deterministically route the latest user message to the right session/literature backend action.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {}
+        },
+        async execute() {
+          const latestUserMessage = cleanLatestUserIdea(await loadLatestUserIdeaText());
+          const routedIntent = detectRoutedUserIntent(latestUserMessage);
+          try {
+            if (routedIntent === "start-literature-search") {
+              const result = await bootstrapResearchSessionFromLatestUserMessage(api);
+              await appendAuditEvent({
+                tool: "workflow_api_dispatch_latest_user_message",
+                status: "ok",
+                routed_intent: routedIntent,
+                session_id: result.session?.session_id ?? null,
+                queue_id: result.queue?.queue_id ?? null,
+                goal_excerpt: result.goalStatement.slice(0, 160)
+              });
+              return buildJsonResult({
+                routed_intent: routedIntent,
+                goal_statement: result.goalStatement,
+                session: result.session,
+                research_problem: result.researchProblem,
+                paper_intake_queue: result.queue
+              });
+            }
+
+            if (routedIntent === "stage-next-paper") {
+              const ensured = await ensureLatestResearchSession(api);
+              const { endpoint, payload } = await requestJson(
+                api,
+                "/research-sessions/latest/skills/paper-intake",
+                { method: "POST" }
+              );
+              await appendAuditEvent({
+                tool: "workflow_api_dispatch_latest_user_message",
+                status: "ok",
+                routed_intent: routedIntent,
+                endpoint,
+                session_id: payload?.session_id ?? ensured.session?.session_id ?? null,
+                intake_id: payload?.intake_id ?? null
+              });
+              return buildJsonResult({
+                routed_intent: routedIntent,
+                endpoint,
+                intake: payload
+              });
+            }
+
+            if (routedIntent === "summarize-session") {
+              const { endpoint, payload } = await requestJson(api, "/research-sessions/latest/context");
+              await appendAuditEvent({
+                tool: "workflow_api_dispatch_latest_user_message",
+                status: "ok",
+                routed_intent: routedIntent,
+                endpoint,
+                session_id: payload?.session?.session_id ?? null
+              });
+              return buildJsonResult({
+                routed_intent: routedIntent,
+                endpoint,
+                session_context: payload
+              });
+            }
+
+            if (routedIntent === "capture-note") {
+              if (latestUserMessage.length < 12) {
+                throw new Error("latest user message is too short to store as a research-session note");
+              }
+              const { endpoint, payload } = await requestJson(api, "/research-sessions/latest/memory", {
+                method: "POST",
+                body: JSON.stringify({ working_note: latestUserMessage })
+              });
+              await appendAuditEvent({
+                tool: "workflow_api_dispatch_latest_user_message",
+                status: "ok",
+                routed_intent: routedIntent,
+                endpoint,
+                session_id: payload?.session_id ?? null,
+                note_excerpt: latestUserMessage.slice(0, 160)
+              });
+              return buildJsonResult({
+                routed_intent: routedIntent,
+                endpoint,
+                note_saved: latestUserMessage,
+                session: payload
+              });
+            }
+
+            await appendAuditEvent({
+              tool: "workflow_api_dispatch_latest_user_message",
+              status: "unsupported",
+              routed_intent,
+              latest_user_message: latestUserMessage.slice(0, 200)
+            });
+            return buildJsonResult({
+              routed_intent,
+              latest_user_message: latestUserMessage,
+              guidance:
+                "No deterministic research-loop action matched the latest user message. Use conversational reply or a narrower read tool."
+            });
+          } catch (error) {
+            await appendAuditEvent({
+              tool: "workflow_api_dispatch_latest_user_message",
+              status: "error",
+              routed_intent,
+              error: error instanceof Error ? error.message : String(error),
+              error_detail: extractWorkflowApiErrorDetail(error)
             });
             throw error;
           }

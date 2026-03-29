@@ -9,6 +9,7 @@ allowed_bindings:
 policy_profile: internal-default
 runtime_tools_profile: full
 runtime_tools_allow:
+  - workflow_api_dispatch_latest_user_message
   - workflow_api_bootstrap_research_session_from_latest_user_message
   - workflow_api_get_latest_research_session
   - workflow_api_get_latest_research_session_context
