@@ -14,6 +14,7 @@ Rules:
 - use `workflow_api_dispatch_latest_user_message` for things like:
   - `!research <topic>` or `research: <topic>`
   - `!more-papers` or `papers:`
+  - `!add-paper <url|title>` or `add-paper: <url|title>`
   - `!next-paper` or `next-paper:`
   - `!session` or `session:`
   - `!note <text>` or `note: <text>`
@@ -37,6 +38,7 @@ Rules:
 Preferred user-facing commands:
 - `!research <topic>` or `research: <topic>` starts or resumes a research session and begins literature search
 - `!more-papers` or `papers:` refreshes the paper-intake queue from the latest research problem
+- `!add-paper <url|title>` or `add-paper: <url|title>` appends a manual paper candidate to the active queue
 - `!next-paper` or `next-paper:` stages the next paper intake from the active queue
 - `!session` or `session:` shows the current session context
 - `!note <text>` or `note: <text>` saves a working note
