@@ -41,3 +41,16 @@ Why this still matters:
 - it separates inbound routing from model behavior
 - it lets future WhatsApp or web entrypoints target one narrow service instead
   of talking directly to OpenClaw
+
+Current practical admin path:
+
+- `.44` helper: `scripts/research-ingress-cli.sh`
+- laptop wrapper: `scripts/research-ingress-remote.sh`
+
+Examples:
+
+```bash
+./scripts/research-ingress-remote.sh healthz
+./scripts/research-ingress-remote.sh dispatch "help:"
+./scripts/research-ingress-remote.sh dispatch "research: forged art detection with computer vision methods and open datasets"
+```
