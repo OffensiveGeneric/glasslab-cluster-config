@@ -19,6 +19,41 @@ from .schemas import SourceDocumentRecord
 HTML_TAG_RE = re.compile(r'<[^>]+>')
 
 
+def derive_arxiv_pdf_url(source_url: str | None) -> str | None:
+    if not source_url:
+        return None
+    normalized = source_url.strip()
+    if not normalized:
+        return None
+    if 'arxiv.org/pdf/' in normalized:
+        return normalized
+    match = re.search(r'arxiv\.org/abs/([^?#/]+)', normalized)
+    if match:
+        return f'https://arxiv.org/pdf/{match.group(1)}.pdf'
+    return None
+
+
+def build_source_fetch_candidates(official_page: str | None, pdf_url: str | None) -> list[str]:
+    candidates: list[str] = []
+
+    derived_pdf = derive_arxiv_pdf_url(pdf_url) or derive_arxiv_pdf_url(official_page)
+    if derived_pdf:
+        candidates.append(derived_pdf)
+    if pdf_url and pdf_url.strip():
+        candidates.append(pdf_url.strip())
+    if official_page and official_page.strip():
+        candidates.append(official_page.strip())
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        deduped.append(candidate)
+        seen.add(candidate)
+    return deduped
+
+
 def guess_document_title(source_url: str) -> str:
     parsed = source_url.rstrip('/').rsplit('/', 1)[-1]
     return parsed or 'source-document'

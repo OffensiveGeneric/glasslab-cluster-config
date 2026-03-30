@@ -27,6 +27,7 @@ from .paper_pipeline import (
 )
 from .persistence import RunStore, create_run_store
 from .registry import WorkflowRegistry
+from .source_documents import build_source_fetch_candidates
 from .schedule_routes import register_schedule_routes
 from .source_documents import ingest_source_document, register_source_document_routes
 from .stage_interpretation import (
@@ -326,7 +327,10 @@ def build_fresh_paper_request_from_problem(
     chosen_paper: ResearchProblemPaperCandidate,
     selected_track_ids: list[str],
 ) -> FreshPaperPipelineRequest:
-    paper_ref = chosen_paper.official_page or chosen_paper.pdf_url or chosen_paper.paper_id
+    paper_ref = (
+        next(iter(build_source_fetch_candidates(chosen_paper.official_page, chosen_paper.pdf_url)), None)
+        or chosen_paper.paper_id
+    )
     notes = [chosen_paper.why_seed]
     notes.extend(chosen_paper.first_jobs[:2])
     if selected_track_ids:
@@ -434,7 +438,10 @@ def build_intake_request_from_problem_candidate(
     candidate: PaperIntakeCandidateRecord,
     document_refs: list[str] | None = None,
 ) -> IntakeCreateRequest:
-    paper_ref = candidate.official_page or candidate.pdf_url or candidate.paper_id
+    paper_ref = (
+        next(iter(build_source_fetch_candidates(candidate.official_page, candidate.pdf_url)), None)
+        or candidate.paper_id
+    )
     notes = [candidate.why_seed]
     notes.extend(candidate.first_jobs[:2])
     if queue.selected_tracks:

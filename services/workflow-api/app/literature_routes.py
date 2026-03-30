@@ -34,6 +34,7 @@ from .schemas import (
     SourceDocumentRecord,
 )
 from .external_literature import ExternalLiteratureResult
+from .source_documents import build_source_fetch_candidates, derive_arxiv_pdf_url
 
 
 def register_literature_routes(
@@ -624,16 +625,27 @@ def register_literature_routes(
         if next_candidate is None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='paper intake queue is exhausted')
 
-        paper_ref = next_candidate.official_page or next_candidate.pdf_url
+        paper_ref = (
+            next(iter(build_source_fetch_candidates(next_candidate.official_page, next_candidate.pdf_url)), None)
+            or next_candidate.paper_id
+        )
         document_refs: list[str] = []
         if paper_ref:
-            source_document = ingest_source_document(
-                paper_ref,
-                submitted_by=queue.submitted_by,
-                settings=settings,
-                store=store,
-                session_id=queue.session_id,
-            )
+            source_document = None
+            source_fetch_candidates = build_source_fetch_candidates(next_candidate.official_page, next_candidate.pdf_url)
+            if not source_fetch_candidates:
+                source_fetch_candidates = [paper_ref]
+            for source_candidate in source_fetch_candidates:
+                source_document = ingest_source_document(
+                    source_candidate,
+                    submitted_by=queue.submitted_by,
+                    settings=settings,
+                    store=store,
+                    session_id=queue.session_id,
+                )
+                if source_document.status == 'fetched':
+                    break
+            assert source_document is not None
             store.save_source_document(source_document)
             record_operation(
                 store,
@@ -747,7 +759,11 @@ def register_literature_routes(
             bounded_job_fit=3,
             replication_complexity=3,
             official_page=request.official_page.strip() if request.official_page else None,
-            pdf_url=request.pdf_url.strip() if request.pdf_url else None,
+            pdf_url=(
+                request.pdf_url.strip()
+                if request.pdf_url
+                else derive_arxiv_pdf_url(request.official_page)
+            ),
             why_seed='Manually added by the operator.',
             first_jobs=request.notes[:3],
             tags=list(dict.fromkeys(['manual', *request.tags])),

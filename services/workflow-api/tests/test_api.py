@@ -1993,6 +1993,7 @@ def test_add_manual_paper_to_latest_session_queue() -> None:
     assert payload['coverage_summary']['manual'] is True
     assert payload['candidates'][-1]['title'] == 'Forgery detection with vision transformers'
     assert payload['candidates'][-1]['official_page'] == 'https://arxiv.org/abs/2401.12345'
+    assert payload['candidates'][-1]['pdf_url'] == 'https://arxiv.org/pdf/2401.12345.pdf'
 
 
 def test_create_pipeline_from_latest_research_problem(monkeypatch) -> None:
@@ -2232,7 +2233,7 @@ def test_stage_next_intake_from_paper_queue(monkeypatch) -> None:
     stage = client.post(f'/paper-intake-queues/{queue_id}/stage-next-intake')
     assert stage.status_code == 201
     intake = stage.json()
-    assert intake['source_refs'][0] == 'https://arxiv.org/abs/2410.07095'
+    assert intake['source_refs'][0] == 'https://arxiv.org/pdf/2410.07095.pdf'
     assert intake['document_refs'] == ['doc-1']
     assert intake['status'] == 'ready_for_design'
 
@@ -2250,6 +2251,94 @@ def test_stage_next_intake_from_paper_queue(monkeypatch) -> None:
     latest_document = client.get('/source-documents/latest')
     assert latest_document.status_code == 200
     assert latest_document.json()['document_id'] == 'doc-1'
+
+
+def test_stage_next_intake_falls_back_from_pdf_to_official_page(monkeypatch) -> None:
+    client = build_client()
+
+    class FakeResponse:
+        def __init__(self, payload: dict) -> None:
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            import json
+            return json.dumps(self.payload).encode('utf-8')
+
+    monkeypatch.setattr(
+        main_module.urllib_request,
+        'urlopen',
+        lambda request_obj, timeout: FakeResponse(
+            {
+                'request_id': 'paper-queue-3',
+                'selected_tracks': [{'track_id': 'agent_evaluation', 'track': 'agent_evaluation'}],
+                'selected_queries': [{'queries': ['site:arxiv.org machine learning agents benchmark Kaggle']}],
+                'selected_papers': [
+                    {
+                        'paper_id': 'mle_bench_arxiv_2024',
+                        'title': 'MLE-bench: Evaluating Machine Learning Agents on Machine Learning Engineering',
+                        'year': 2024,
+                        'venue': 'arXiv',
+                        'priority': 'P1',
+                        'tracks': ['agent_evaluation'],
+                        'bounded_job_fit': 4,
+                        'replication_complexity': 4,
+                        'official_page': 'https://arxiv.org/abs/2410.07095',
+                        'pdf_url': 'https://arxiv.org/pdf/2410.07095.pdf',
+                        'why_seed': 'benchmark for measuring whether agents can do bounded ML engineering work on real tasks',
+                        'first_jobs': ['adapt a reduced internal benchmark using 3-5 public competitions or equivalent tasks'],
+                        'tags': ['agents'],
+                    }
+                ],
+                'warnings': [],
+            }
+        ),
+    )
+
+    attempted_urls: list[str] = []
+
+    def fake_ingest(source_url, submitted_by, settings, store, session_id=None):
+        attempted_urls.append(source_url)
+        status_value = 'fetch-failed' if source_url.endswith('.pdf') else 'fetched'
+        return main_module.SourceDocumentRecord(
+            document_id='doc-fallback' if status_value == 'fetched' else 'doc-failed',
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            status=status_value,
+            source_url=source_url,
+            submitted_by=submitted_by,
+            storage_uri='file:///tmp/source-documents/doc-fallback/source.html' if status_value == 'fetched' else None,
+            content_type='text/html' if status_value == 'fetched' else None,
+            size_bytes=42 if status_value == 'fetched' else None,
+            sha256='abc123' if status_value == 'fetched' else None,
+            title='source.html',
+            fetch_error='pdf fetch failed' if status_value == 'fetch-failed' else None,
+            session_id=session_id,
+        )
+
+    monkeypatch.setattr(main_module, 'ingest_source_document', fake_ingest)
+
+    create = client.post(
+        '/paper-intake-queues/from-research-problem',
+        json={
+            'problem_statement': 'Find bounded literature we can stage into intake before doing deeper understanding.',
+            'max_candidate_papers': 1,
+        },
+    )
+    assert create.status_code == 201
+    queue_id = create.json()['queue_id']
+
+    stage = client.post(f'/paper-intake-queues/{queue_id}/stage-next-intake')
+    assert stage.status_code == 201
+    assert attempted_urls == [
+        'https://arxiv.org/pdf/2410.07095.pdf',
+        'https://arxiv.org/abs/2410.07095',
+    ]
 
 
 def test_research_session_can_store_persistent_notes() -> None:
