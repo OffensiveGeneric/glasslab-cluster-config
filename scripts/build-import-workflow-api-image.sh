@@ -119,6 +119,7 @@ REMOTE_TAR="/tmp/$(basename "$LOCAL_TAR")"
 
 printf '[build-import-workflow-api-image] saving image archive to %s\n' "$LOCAL_TAR"
 sudo docker save -o "$LOCAL_TAR" "$IMAGE_REF"
+sudo chown "$(id -u)":"$(id -g)" "$LOCAL_TAR"
 
 printf '[build-import-workflow-api-image] copying archive to %s:%s\n' "$NODE_HOST" "$REMOTE_TAR"
 scp -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "$LOCAL_TAR" "${NODE_USER}@${NODE_HOST}:${REMOTE_TAR}"
