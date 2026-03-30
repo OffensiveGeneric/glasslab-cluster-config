@@ -71,6 +71,29 @@ def _normalize_terms(problem_statement: str, priorities: list[str]) -> list[str]
     return list(dict.fromkeys(tokens))
 
 
+def _truncate(value: str | None, limit: int = 1200) -> str | None:
+    if not value:
+        return None
+    normalized = " ".join(value.split()).strip()
+    return normalized[:limit] or None
+
+
+def _openalex_abstract(item: dict[str, Any]) -> str | None:
+    inverted = item.get("abstract_inverted_index")
+    if not isinstance(inverted, dict):
+        return None
+    words: dict[int, str] = {}
+    for token, positions in inverted.items():
+        if not isinstance(token, str) or not isinstance(positions, list):
+            continue
+        for position in positions:
+            if isinstance(position, int):
+                words[position] = token
+    if not words:
+        return None
+    return _truncate(" ".join(words[index] for index in sorted(words)))
+
+
 def _candidate_provider(candidate: ResearchProblemPaperCandidate) -> str:
     for provider in candidate.tracks:
         if provider in {"openalex", "arxiv", "crossref"}:
@@ -90,8 +113,16 @@ def _title_tokens(title: str) -> set[str]:
 def _score_candidate(candidate: ResearchProblemPaperCandidate, terms: list[str]) -> ResearchProblemPaperCandidate:
     title_text = candidate.title.lower()
     tag_text = " ".join(candidate.tags).lower()
+    abstract_text = (candidate.abstract_excerpt or "").lower()
     aux_text = " ".join(
-        part for part in [candidate.why_seed, " ".join(candidate.tracks), " ".join(candidate.first_jobs), candidate.venue] if part
+        part
+        for part in [
+            candidate.why_seed,
+            " ".join(candidate.tracks),
+            " ".join(candidate.first_jobs),
+            candidate.venue,
+        ]
+        if part
     ).lower()
     match_reasons: list[str] = []
     score = 0
@@ -99,6 +130,9 @@ def _score_candidate(candidate: ResearchProblemPaperCandidate, terms: list[str])
         if term in title_text:
             score += 3
             match_reasons.append(f"title matched '{term}'")
+        elif term in abstract_text:
+            score += 2
+            match_reasons.append(f"abstract matched '{term}'")
         elif term in tag_text:
             score += 2
             match_reasons.append(f"tags matched '{term}'")
@@ -220,6 +254,7 @@ def _openalex_candidates(query: str, max_results: int, settings: Settings) -> li
             replication_complexity=3,
             official_page=official_page,
             pdf_url=str(pdf_url).strip() or None,
+            abstract_excerpt=_openalex_abstract(item),
             why_seed="Matched the external literature query through OpenAlex.",
             first_jobs=first_jobs,
             tags=list(dict.fromkeys(tags + _provider_tag(official_page, venue))),
@@ -252,6 +287,7 @@ def _crossref_candidates(query: str, max_results: int, settings: Settings) -> li
         venue = str(venue_values[0] if venue_values else item.get("type") or "Crossref").strip()
         doi = str(item.get("DOI") or "").strip()
         official_page = f"https://doi.org/{doi}" if doi else None
+        abstract_excerpt = _truncate(str(item.get("abstract") or "").replace("<jats:p>", " ").replace("</jats:p>", " "))
         link_items = item.get("link") if isinstance(item.get("link"), list) else []
         pdf_url = None
         for link in link_items:
@@ -273,6 +309,7 @@ def _crossref_candidates(query: str, max_results: int, settings: Settings) -> li
             replication_complexity=3,
             official_page=official_page,
             pdf_url=pdf_url,
+            abstract_excerpt=abstract_excerpt,
             why_seed="Matched the external literature query through Crossref metadata.",
             first_jobs=["review the abstract or landing page and compare to the session problem"],
             tags=_provider_tag(official_page, venue),
@@ -303,6 +340,7 @@ def _arxiv_candidates(query: str, max_results: int, settings: Settings) -> list[
         except ValueError:
             year = 1900
         official_page = (entry.findtext("atom:id", default="", namespaces=ns) or "").strip() or None
+        abstract_excerpt = _truncate(entry.findtext("atom:summary", default="", namespaces=ns) or "")
         pdf_url = None
         for link in entry.findall("atom:link", ns):
             if link.attrib.get("title") == "pdf":
@@ -320,6 +358,7 @@ def _arxiv_candidates(query: str, max_results: int, settings: Settings) -> list[
             replication_complexity=3,
             official_page=official_page,
             pdf_url=pdf_url,
+            abstract_excerpt=abstract_excerpt,
             why_seed="Matched the external literature query through arXiv search.",
             first_jobs=["review the abstract and identify a bounded baseline worth testing"],
             tags=["arxiv"],

@@ -470,6 +470,7 @@ class ResearchProblemPaperCandidate(BaseModel):
     replication_complexity: int
     official_page: str | None = None
     pdf_url: str | None = None
+    abstract_excerpt: str | None = None
     why_seed: str
     first_jobs: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
