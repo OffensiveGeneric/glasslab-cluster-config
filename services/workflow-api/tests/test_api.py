@@ -2343,6 +2343,8 @@ def test_stage_next_intake_falls_back_from_pdf_to_official_page(monkeypatch) -> 
         'https://arxiv.org/pdf/2410.07095.pdf',
         'https://arxiv.org/abs/2410.07095',
     ]
+    payload = stage.json()
+    assert any('did not match expected paper title' in note for note in payload['notes'])
 
 
 def test_validate_document_identity_marks_title_mismatch() -> None:

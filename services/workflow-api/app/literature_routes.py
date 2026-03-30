@@ -630,6 +630,7 @@ def register_literature_routes(
             or next_candidate.paper_id
         )
         document_refs: list[str] = []
+        intake_notes: list[str] = []
         if paper_ref:
             source_document = None
             source_fetch_candidates = build_source_fetch_candidates(next_candidate.official_page, next_candidate.pdf_url)
@@ -644,6 +645,11 @@ def register_literature_routes(
                     session_id=queue.session_id,
                     expected_title=next_candidate.title,
                 )
+                if source_document.validation_status == 'mismatch':
+                    intake_notes.append(
+                        'Fetched source did not match expected paper title: '
+                        + '; '.join(source_document.validation_notes)
+                    )
                 if source_document.status == 'fetched' and source_document.validation_status != 'mismatch':
                     break
             assert source_document is not None
@@ -667,7 +673,12 @@ def register_literature_routes(
                 document_refs.append(source_document.document_id)
             touch_research_session(store, queue.session_id, latest_document_id=source_document.document_id)
 
-        intake_request = build_intake_request_from_problem_candidate(queue, next_candidate, document_refs=document_refs)
+        intake_request = build_intake_request_from_problem_candidate(
+            queue,
+            next_candidate,
+            document_refs=document_refs,
+            extra_notes=intake_notes,
+        )
         intake = stage_intake_from_request(intake_request, settings, registry, store, session_id=queue.session_id)
 
         updated_candidates: list[PaperIntakeCandidateRecord] = []

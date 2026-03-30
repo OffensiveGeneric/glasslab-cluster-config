@@ -437,6 +437,7 @@ def build_intake_request_from_problem_candidate(
     queue: PaperIntakeQueueRecord,
     candidate: PaperIntakeCandidateRecord,
     document_refs: list[str] | None = None,
+    extra_notes: list[str] | None = None,
 ) -> IntakeCreateRequest:
     paper_ref = (
         next(iter(build_source_fetch_candidates(candidate.official_page, candidate.pdf_url)), None)
@@ -446,6 +447,8 @@ def build_intake_request_from_problem_candidate(
     notes.extend(candidate.first_jobs[:2])
     if queue.selected_tracks:
         notes.append('Selected tracks: ' + ', '.join(queue.selected_tracks))
+    if extra_notes:
+        notes.extend(extra_notes)
     return IntakeCreateRequest(
         raw_request=(
             'Investigate this research problem with a bounded literature-derived experiment: '
