@@ -642,8 +642,9 @@ def register_literature_routes(
                     settings=settings,
                     store=store,
                     session_id=queue.session_id,
+                    expected_title=next_candidate.title,
                 )
-                if source_document.status == 'fetched':
+                if source_document.status == 'fetched' and source_document.validation_status != 'mismatch':
                     break
             assert source_document is not None
             store.save_source_document(source_document)
@@ -651,14 +652,18 @@ def register_literature_routes(
                 store,
                 operation_type='source-document-fetch',
                 started_at=started_at,
-                status='completed' if source_document.status == 'fetched' else 'failed',
+                status='completed' if source_document.status == 'fetched' and source_document.validation_status != 'mismatch' else 'failed',
                 session_id=queue.session_id,
                 queue_id=queue.queue_id,
                 document_id=source_document.document_id,
-                result_detail='source document fetched' if source_document.status == 'fetched' else 'source document fetch failed',
-                error_detail=source_document.fetch_error,
+                result_detail=(
+                    'source document fetched'
+                    if source_document.status == 'fetched' and source_document.validation_status != 'mismatch'
+                    else 'source document fetch failed or did not match expected paper'
+                ),
+                error_detail=source_document.fetch_error or '; '.join(source_document.validation_notes),
             )
-            if source_document.status == 'fetched':
+            if source_document.status == 'fetched' and source_document.validation_status != 'mismatch':
                 document_refs.append(source_document.document_id)
             touch_research_session(store, queue.session_id, latest_document_id=source_document.document_id)
 

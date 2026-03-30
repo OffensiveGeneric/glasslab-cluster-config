@@ -10,6 +10,7 @@ for module_name in list(sys.modules):
 
 from app.config import Settings
 import app.main as main_module
+import app.source_documents as source_documents
 from app.main import create_app
 from app.persistence import InMemoryRunStore
 from app.registry import WorkflowRegistry
@@ -493,7 +494,7 @@ def test_create_interpretation_uses_stored_source_document_context(monkeypatch) 
     monkeypatch.setattr(
         main_module,
         'ingest_source_document',
-        lambda source_url, submitted_by, settings, store, session_id=None: main_module.SourceDocumentRecord(
+        lambda source_url, submitted_by, settings, store, session_id=None, expected_title=None: main_module.SourceDocumentRecord(
             document_id='doc-ctx-1',
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -1331,7 +1332,7 @@ def test_get_latest_session_execution_preflight_uses_latest_session_design(monke
     monkeypatch.setattr(
         main_module,
         'ingest_source_document',
-        lambda source_url, submitted_by, settings, store, session_id=None: main_module.SourceDocumentRecord(
+        lambda source_url, submitted_by, settings, store, session_id=None, expected_title=None: main_module.SourceDocumentRecord(
             document_id='session-exec-doc-1',
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -1435,7 +1436,7 @@ def test_create_run_from_latest_session_design(monkeypatch) -> None:
     monkeypatch.setattr(
         main_module,
         'ingest_source_document',
-        lambda source_url, submitted_by, settings, store, session_id=None: main_module.SourceDocumentRecord(
+        lambda source_url, submitted_by, settings, store, session_id=None, expected_title=None: main_module.SourceDocumentRecord(
             document_id='session-exec-doc-2',
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -2204,7 +2205,7 @@ def test_stage_next_intake_from_paper_queue(monkeypatch) -> None:
     monkeypatch.setattr(
         main_module,
         'ingest_source_document',
-        lambda source_url, submitted_by, settings, store, session_id=None: main_module.SourceDocumentRecord(
+        lambda source_url, submitted_by, settings, store, session_id=None, expected_title=None: main_module.SourceDocumentRecord(
             document_id='doc-1',
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -2251,6 +2252,7 @@ def test_stage_next_intake_from_paper_queue(monkeypatch) -> None:
     latest_document = client.get('/source-documents/latest')
     assert latest_document.status_code == 200
     assert latest_document.json()['document_id'] == 'doc-1'
+    assert latest_document.json()['validation_status'] == 'unknown'
 
 
 def test_stage_next_intake_falls_back_from_pdf_to_official_page(monkeypatch) -> None:
@@ -2302,22 +2304,24 @@ def test_stage_next_intake_falls_back_from_pdf_to_official_page(monkeypatch) -> 
 
     attempted_urls: list[str] = []
 
-    def fake_ingest(source_url, submitted_by, settings, store, session_id=None):
+    def fake_ingest(source_url, submitted_by, settings, store, session_id=None, expected_title=None):
         attempted_urls.append(source_url)
-        status_value = 'fetch-failed' if source_url.endswith('.pdf') else 'fetched'
+        mismatch = source_url.endswith('.pdf')
         return main_module.SourceDocumentRecord(
-            document_id='doc-fallback' if status_value == 'fetched' else 'doc-failed',
+            document_id='doc-fallback' if not mismatch else 'doc-mismatch',
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
-            status=status_value,
+            status='fetched',
             source_url=source_url,
             submitted_by=submitted_by,
-            storage_uri='file:///tmp/source-documents/doc-fallback/source.html' if status_value == 'fetched' else None,
-            content_type='text/html' if status_value == 'fetched' else None,
-            size_bytes=42 if status_value == 'fetched' else None,
-            sha256='abc123' if status_value == 'fetched' else None,
+            storage_uri='file:///tmp/source-documents/doc-fallback/source.html',
+            content_type='text/html',
+            size_bytes=42,
+            sha256='abc123',
             title='source.html',
-            fetch_error='pdf fetch failed' if status_value == 'fetch-failed' else None,
+            expected_title='MLE-bench: Evaluating Machine Learning Agents on Machine Learning Engineering',
+            validation_status='mismatch' if mismatch else 'matched',
+            validation_notes=['expected title terms not found'] if mismatch else ['matched title terms: benchmark'],
             session_id=session_id,
         )
 
@@ -2339,6 +2343,16 @@ def test_stage_next_intake_falls_back_from_pdf_to_official_page(monkeypatch) -> 
         'https://arxiv.org/pdf/2410.07095.pdf',
         'https://arxiv.org/abs/2410.07095',
     ]
+
+
+def test_validate_document_identity_marks_title_mismatch() -> None:
+    status, notes = source_documents.validate_document_identity(
+        expected_title='Forgery detection with vision transformers',
+        fetched_title='2401.12345.pdf',
+        text_excerpt='Distributionally Robust Receive Combining for Wireless Transmission',
+    )
+    assert status == 'mismatch'
+    assert notes
 
 
 def test_research_session_can_store_persistent_notes() -> None:
@@ -2423,7 +2437,7 @@ def test_research_session_tracks_controlled_literature_state(monkeypatch) -> Non
     monkeypatch.setattr(
         main_module,
         'ingest_source_document',
-        lambda source_url, submitted_by, settings, store, session_id=None: main_module.SourceDocumentRecord(
+        lambda source_url, submitted_by, settings, store, session_id=None, expected_title=None: main_module.SourceDocumentRecord(
             document_id='session-doc-1',
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -2524,7 +2538,7 @@ def test_research_session_skill_routes_drive_literature_flow(monkeypatch) -> Non
     monkeypatch.setattr(
         main_module,
         'ingest_source_document',
-        lambda source_url, submitted_by, settings, store, session_id=None: main_module.SourceDocumentRecord(
+        lambda source_url, submitted_by, settings, store, session_id=None, expected_title=None: main_module.SourceDocumentRecord(
             document_id='session-skill-doc-1',
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -2621,7 +2635,7 @@ def test_research_session_skill_routes_advance_interpretation_assessment_and_des
     monkeypatch.setattr(
         main_module,
         'ingest_source_document',
-        lambda source_url, submitted_by, settings, store, session_id=None: main_module.SourceDocumentRecord(
+        lambda source_url, submitted_by, settings, store, session_id=None, expected_title=None: main_module.SourceDocumentRecord(
             document_id='session-skill-doc-2',
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -2721,7 +2735,7 @@ def test_research_session_read_routes_return_session_scoped_records(monkeypatch)
     monkeypatch.setattr(
         main_module,
         'ingest_source_document',
-        lambda source_url, submitted_by, settings, store, session_id=None: main_module.SourceDocumentRecord(
+        lambda source_url, submitted_by, settings, store, session_id=None, expected_title=None: main_module.SourceDocumentRecord(
             document_id='session-read-doc-1',
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -2812,7 +2826,7 @@ def test_operation_records_capture_literature_harvest_and_paper_intake(monkeypat
     monkeypatch.setattr(
         main_module,
         'ingest_source_document',
-        lambda source_url, submitted_by, settings, store, session_id=None: main_module.SourceDocumentRecord(
+        lambda source_url, submitted_by, settings, store, session_id=None, expected_title=None: main_module.SourceDocumentRecord(
             document_id='operations-doc-1',
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),

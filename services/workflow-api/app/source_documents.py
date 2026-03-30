@@ -17,6 +17,12 @@ from .persistence import RunStore
 from .schemas import SourceDocumentRecord
 
 HTML_TAG_RE = re.compile(r'<[^>]+>')
+TITLE_WORD_RE = re.compile(r"[A-Za-z0-9]+")
+COMMON_TITLE_WORDS = {
+    'the', 'and', 'for', 'with', 'from', 'using', 'into', 'towards', 'through',
+    'over', 'under', 'based', 'study', 'learning', 'vision', 'method', 'methods',
+    'approach', 'approaches', 'analysis', 'data', 'model', 'models', 'paper',
+}
 
 
 def derive_arxiv_pdf_url(source_url: str | None) -> str | None:
@@ -57,6 +63,38 @@ def build_source_fetch_candidates(official_page: str | None, pdf_url: str | None
 def guess_document_title(source_url: str) -> str:
     parsed = source_url.rstrip('/').rsplit('/', 1)[-1]
     return parsed or 'source-document'
+
+
+def _title_terms(value: str | None) -> list[str]:
+    if not value:
+        return []
+    terms: list[str] = []
+    for match in TITLE_WORD_RE.findall(value.lower()):
+        if len(match) < 4 or match in COMMON_TITLE_WORDS:
+            continue
+        terms.append(match)
+    return list(dict.fromkeys(terms))
+
+
+def validate_document_identity(
+    *,
+    expected_title: str | None,
+    fetched_title: str | None,
+    text_excerpt: str | None,
+) -> tuple[str, list[str]]:
+    if not expected_title:
+        return 'unknown', []
+
+    expected_terms = _title_terms(expected_title)
+    if not expected_terms:
+        return 'unknown', ['expected title had no distinctive validation terms']
+
+    haystack = ' '.join(part for part in [fetched_title or '', text_excerpt or '']).lower()
+    matched_terms = [term for term in expected_terms if term in haystack]
+    if len(matched_terms) >= min(2, len(expected_terms)):
+        return 'matched', [f"matched title terms: {', '.join(matched_terms[:4])}"]
+
+    return 'mismatch', [f"expected title terms not found: {', '.join(expected_terms[:4])}"]
 
 
 def extract_text_excerpt(content: bytes, content_type: str | None, source_url: str) -> str | None:
@@ -158,11 +196,19 @@ def ingest_source_document(
     settings: Settings,
     store: RunStore,
     session_id: str | None = None,
+    expected_title: str | None = None,
 ) -> SourceDocumentRecord:
     now = datetime.now(timezone.utc)
     document_id = uuid4().hex
     try:
         content, content_type = fetch_source_document_bytes(source_url)
+        fetched_title = guess_document_title(source_url)
+        text_excerpt = extract_text_excerpt(content, content_type, source_url)
+        validation_status, validation_notes = validate_document_identity(
+            expected_title=expected_title,
+            fetched_title=fetched_title,
+            text_excerpt=text_excerpt,
+        )
         storage_uri = persist_source_document_bytes(
             document_id=document_id,
             source_url=source_url,
@@ -181,8 +227,11 @@ def ingest_source_document(
             content_type=content_type,
             size_bytes=len(content),
             sha256=hashlib.sha256(content).hexdigest(),
-            title=guess_document_title(source_url),
-            text_excerpt=extract_text_excerpt(content, content_type, source_url),
+            title=fetched_title,
+            text_excerpt=text_excerpt,
+            expected_title=expected_title,
+            validation_status=validation_status,
+            validation_notes=validation_notes,
             session_id=session_id,
         )
     except Exception as exc:
@@ -195,6 +244,7 @@ def ingest_source_document(
             submitted_by=submitted_by,
             fetch_error=str(exc),
             title=guess_document_title(source_url),
+            expected_title=expected_title,
             session_id=session_id,
         )
     store.save_source_document(record)

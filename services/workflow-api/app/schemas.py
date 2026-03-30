@@ -516,6 +516,9 @@ class SourceDocumentRecord(BaseModel):
     sha256: str | None = None
     title: str | None = None
     text_excerpt: str | None = None
+    expected_title: str | None = None
+    validation_status: Literal['unknown', 'matched', 'mismatch'] = 'unknown'
+    validation_notes: list[str] = Field(default_factory=list)
     fetch_error: str | None = None
     session_id: str | None = None
 
