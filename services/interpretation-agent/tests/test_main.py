@@ -29,6 +29,7 @@ main_module = load_package_module(f'{PACKAGE_NAME}.main', APP_ROOT / 'main.py')
 
 app = main_module.app
 build_interpretation_draft = main_module.build_interpretation_draft
+interpret_with_backends = main_module.interpret_with_backends
 InterpretationRequest = models_module.InterpretationRequest
 
 
@@ -72,7 +73,15 @@ def test_build_interpretation_draft_prefers_matching_candidates() -> None:
     assert draft.bounded_experiment_ideas
 
 
-def test_interpret_intake_endpoint_returns_bounded_draft_shape() -> None:
+def test_interpret_intake_endpoint_returns_bounded_draft_shape(monkeypatch) -> None:
+    def fake_interpret_with_backends(request):
+        return (
+            build_interpretation_draft(request),
+            main_module.PRIMARY_BACKEND.metadata(),
+            ['stubbed interpretation backend'],
+        )
+
+    monkeypatch.setattr(main_module, 'interpret_with_backends', fake_interpret_with_backends)
     client = TestClient(app)
     response = client.post('/interpret-intake', json=build_request().model_dump())
 
@@ -85,6 +94,39 @@ def test_interpret_intake_endpoint_returns_bounded_draft_shape() -> None:
     assert 'research_gaps' in payload['draft']
     assert payload['draft']['bounded_experiment_ideas']
     assert payload['model_backend']['provider'] == 'ollama'
-    assert payload['warnings'] == [
-        'current implementation is deterministic scaffold logic; live model integration is not enabled yet',
-    ]
+    assert payload['warnings'] == ['stubbed interpretation backend']
+
+
+def test_interpretation_agent_uses_fallback_backend(monkeypatch) -> None:
+    request = build_request()
+    calls: list[str] = []
+
+    def fake_call_backend(req, backend):
+        calls.append(backend.base_url)
+        if backend.base_url.endswith('.23:11434'):
+            raise ValueError('primary unavailable')
+        draft = build_interpretation_draft(req)
+        draft.extracted_method_summary = 'Fallback model interpretation.'
+        return draft
+
+    monkeypatch.setattr(main_module, 'call_backend', fake_call_backend)
+    draft, backend, warnings = interpret_with_backends(request)
+
+    assert draft.extracted_method_summary == 'Fallback model interpretation.'
+    assert backend.base_url == 'http://192.168.1.12:11434'
+    assert calls == ['http://192.168.1.23:11434', 'http://192.168.1.12:11434']
+    assert 'used fallback interpretation backend' in warnings
+
+
+def test_interpretation_agent_falls_back_to_deterministic_scaffold(monkeypatch) -> None:
+    request = build_request()
+
+    def failing_call_backend(_req, _backend):
+        raise ValueError('backend failed')
+
+    monkeypatch.setattr(main_module, 'call_backend', failing_call_backend)
+    draft, backend, warnings = interpret_with_backends(request)
+
+    assert draft.candidate_workflow_families[0] == 'generic-tabular-benchmark'
+    assert backend.base_url == 'http://192.168.1.23:11434'
+    assert any('all model backends failed' in warning for warning in warnings)

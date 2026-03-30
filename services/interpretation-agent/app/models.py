@@ -41,6 +41,16 @@ class InterpretationDraft(BaseModel):
     extracted_claims: list[str] = Field(default_factory=list)
     research_gaps: list[str] = Field(default_factory=list)
     bounded_experiment_ideas: list[str] = Field(default_factory=list)
+    recommended_method_family: str | None = None
+    recommended_datasets: list[str] = Field(default_factory=list)
+    recommended_metrics: list[str] = Field(default_factory=list)
+    recommended_baselines: list[str] = Field(default_factory=list)
+    recommended_architectures: list[str] = Field(default_factory=list)
+    recommended_python_packages: list[str] = Field(default_factory=list)
+    preferred_workflow_id: str | None = None
+    preferred_resource_profile: str | None = None
+    gpu_required: bool = False
+    mutation_axes: list[str] = Field(default_factory=list)
     unresolved_questions: list[str] = Field(default_factory=list)
 
 

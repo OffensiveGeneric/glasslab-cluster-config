@@ -15,17 +15,19 @@ The intended caller is `workflow-api`, not OpenClaw directly.
 
 ## Current Scope
 
-Current implementation is a scaffold:
+Current implementation is a bounded Ollama-backed service:
 
 - `GET /healthz`
 - `POST /interpret-intake`
-- deterministic bounded draft generation
+- primary bounded interpretation against `.23` `qwen3:30b`
+- fallback bounded interpretation against `.12` `qwen3:14b`
+- deterministic bounded draft fallback if both backends fail
 - accepts `document_refs` from `workflow-api` so stored source-document context
-  can be threaded into later model-backed interpretation
+  can be threaded into model-backed interpretation
 - response metadata that records the configured model backend
 
-This is enough to make the service boundary concrete and testable before live model
-integration is added.
+This keeps the stage bounded and reviewable while allowing stronger model-backed
+interpretation where available.
 
 ## Intended Deployment Shape
 
@@ -40,6 +42,10 @@ integration is added.
 - `GLASSLAB_INTERPRETATION_AGENT_PROVIDER_BASE_URL`
 - `GLASSLAB_INTERPRETATION_AGENT_MODEL`
 - `GLASSLAB_INTERPRETATION_AGENT_TIMEOUT_SECONDS`
+- `GLASSLAB_INTERPRETATION_AGENT_FALLBACK_PROVIDER_API`
+- `GLASSLAB_INTERPRETATION_AGENT_FALLBACK_PROVIDER_BASE_URL`
+- `GLASSLAB_INTERPRETATION_AGENT_FALLBACK_MODEL`
+- `GLASSLAB_INTERPRETATION_AGENT_FALLBACK_TIMEOUT_SECONDS`
 
 ## Example
 
