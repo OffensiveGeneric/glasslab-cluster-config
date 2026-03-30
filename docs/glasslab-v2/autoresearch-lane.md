@@ -8,6 +8,10 @@ The first supported loop is:
 
 `session or design context -> methodology drafts -> approved execution template -> short validation run -> score/compare -> keep/discard/review -> propose next bounded variants`
 
+The first pass can also materialize a reviewable notebook scaffold from the current methodology draft:
+
+`methodology draft -> deterministic notebook scaffold -> human review or later coding-model refinement`
+
 This stays inside the current v2 rules:
 
 - sessions remain the durable workspace
@@ -118,3 +122,10 @@ The first pass does **not** attempt:
 ## Current implementation note
 
 This lane should be treated as the first bounded vertical slice for methodology exploration, not the finished research assistant. It is useful exactly because it is reviewable and narrow enough to fit the existing v2 architecture.
+
+Notebook drafting in the first pass is deterministic. A stronger coding model may later help refine notebook cells, but the backend should still own:
+
+- which methodology draft is being materialized
+- which approved template it targets
+- which structured inputs are embedded
+- where the notebook is stored

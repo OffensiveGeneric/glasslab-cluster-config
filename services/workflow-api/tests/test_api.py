@@ -1,4 +1,5 @@
 import sys
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -3578,3 +3579,55 @@ def test_session_autoresearch_transition_chain(tmp_path) -> None:
     summary = client.get(f'/research-sessions/{session_id}/autoresearch-summary')
     assert summary.status_code == 200
     assert summary.json()['campaign']['session_id'] == session_id
+
+
+def test_autoresearch_notebook_draft_is_written(tmp_path) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        artifacts_mount_path=str(tmp_path),
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Draft a notebook scaffold for a bounded autoresearch methodology variant.'},
+    )
+    session_id = session.json()['session_id']
+
+    client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Benchmark one bounded Titanic variant and expose the review path in a notebook.',
+            'source_refs': ['https://example.org/titanic-notebook-note'],
+            'notes': ['Notebook draft should stay tied to the methodology record.'],
+        },
+    )
+    design = client.post('/design-drafts/from-latest-intake').json()
+    client.post(
+        f"/design-drafts/{design['design_id']}/review",
+        json={
+            'resolved_inputs': {
+                'dataset_name': 'titanic',
+                'train_uri': 's3://datasets/titanic/train.csv',
+                'test_uri': 's3://datasets/titanic/test.csv',
+                'target_column': 'Survived',
+            },
+            'review_notes': ['Notebook draft test review.'],
+        },
+    )
+    client.post(f'/research-sessions/{session_id}/transitions/start-autoresearch-campaign')
+    client.post(f'/research-sessions/{session_id}/transitions/draft-methodologies')
+
+    notebook = client.post(f'/research-sessions/{session_id}/transitions/draft-autoresearch-notebook')
+    assert notebook.status_code == 201
+    payload = notebook.json()
+    assert payload['storage_uri'].endswith('/analysis_notebook.ipynb')
+    assert payload['notebook']['nbformat'] == 4
+    assert payload['methodology_draft']['workflow_id'] == 'generic-tabular-benchmark'
+
+    path = Path(payload['storage_uri'].removeprefix('file://'))
+    assert path.exists()
+    saved = json.loads(path.read_text())
+    assert saved['metadata']['glasslab']['kind'] == 'autoresearch-notebook-draft'

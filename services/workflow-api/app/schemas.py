@@ -773,6 +773,16 @@ class AutoresearchCampaignSummaryResponse(BaseModel):
     proposed_next_variants: list[str] = Field(default_factory=list)
 
 
+class AutoresearchNotebookDraftResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    campaign: AutoresearchCampaignRecord
+    methodology_draft: MethodologyDraftRecord
+    created_at: datetime
+    storage_uri: str
+    notebook: dict[str, Any]
+
+
 class FreshPaperPipelineResponse(BaseModel):
     model_config = ConfigDict(extra='forbid')
 

@@ -10,6 +10,7 @@ from .autoresearch import (
     build_campaign_and_seed,
     build_decision,
     build_iteration_comparison,
+    build_autoresearch_notebook,
     draft_initial_methodologies,
     get_campaign_iterations,
     get_next_launchable_methodology_draft,
@@ -17,6 +18,7 @@ from .autoresearch import (
     methodology_to_run_request,
     summarize_campaign,
     summarize_iteration_run,
+    write_autoresearch_notebook_draft,
 )
 from .config import Settings
 from .job_submission import JobSubmitter
@@ -31,6 +33,7 @@ from .schemas import (
     AutoresearchDraftMethodologiesResponse,
     AutoresearchIterationRecord,
     AutoresearchLaunchIterationResponse,
+    AutoresearchNotebookDraftResponse,
     MethodologyDraftRecord,
     OperationRecord,
     RunRecord,
@@ -334,6 +337,33 @@ def register_autoresearch_routes(
         return summarize_campaign(store, campaign)
 
     @app.post(
+        '/autoresearch/campaigns/{campaign_id}/draft-analysis-notebook',
+        response_model=AutoresearchNotebookDraftResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def draft_autoresearch_analysis_notebook(campaign_id: str) -> AutoresearchNotebookDraftResponse:
+        campaign = get_required_campaign(store, campaign_id)
+        methodology_id = campaign.current_best_methodology_draft_id
+        if methodology_id is None:
+            drafts = get_campaign_iterations(store, campaign_id)
+            if drafts:
+                methodology_id = drafts[-1].child_methodology_draft_id
+        methodology = store.get_methodology_draft(methodology_id or '')
+        if methodology is None:
+            drafts = store.list_methodology_drafts(campaign_id)
+            if not drafts:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='campaign has no methodology drafts yet')
+            methodology = drafts[-1]
+        storage_uri, notebook = write_autoresearch_notebook_draft(settings, campaign, methodology)
+        return AutoresearchNotebookDraftResponse(
+            campaign=campaign,
+            methodology_draft=methodology,
+            created_at=datetime.now(timezone.utc),
+            storage_uri=storage_uri,
+            notebook=notebook,
+        )
+
+    @app.post(
         '/research-sessions/{session_id}/transitions/start-autoresearch-campaign',
         response_model=AutoresearchCampaignRecord,
         status_code=status.HTTP_201_CREATED,
@@ -434,3 +464,23 @@ def register_autoresearch_routes(
         if session is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
         return get_session_autoresearch_summary(session.session_id)
+
+    @app.post(
+        '/research-sessions/{session_id}/transitions/draft-autoresearch-notebook',
+        response_model=AutoresearchNotebookDraftResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def transition_draft_session_autoresearch_notebook(session_id: str) -> AutoresearchNotebookDraftResponse:
+        campaign = get_required_session_campaign(session_id)
+        return draft_autoresearch_analysis_notebook(campaign.campaign_id)
+
+    @app.post(
+        '/research-sessions/latest/transitions/draft-autoresearch-notebook',
+        response_model=AutoresearchNotebookDraftResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def transition_draft_latest_session_autoresearch_notebook() -> AutoresearchNotebookDraftResponse:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return transition_draft_session_autoresearch_notebook(session.session_id)

@@ -167,8 +167,15 @@ Session-scoped autoresearch transitions:
 - `POST /research-sessions/{session_id}/transitions/draft-methodologies`
 - `POST /research-sessions/{session_id}/transitions/launch-autoresearch-iteration`
 - `POST /research-sessions/{session_id}/transitions/decide-autoresearch-latest`
+- `POST /research-sessions/{session_id}/transitions/draft-autoresearch-notebook`
 - `GET /research-sessions/{session_id}/autoresearch-summary`
 - matching `latest` aliases under `/research-sessions/latest/...`
+
+Notebook drafting:
+
+- `POST /autoresearch/campaigns/{campaign_id}/draft-analysis-notebook`
+
+This writes a deterministic `analysis_notebook.ipynb` scaffold under the shared artifacts path for the selected methodology draft. The first pass is backend-owned and template-driven, not free-form model notebook generation.
 
 The first pass is intentionally narrow:
 

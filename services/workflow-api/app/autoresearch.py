@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -407,6 +408,129 @@ def summarize_campaign(
         latest_run=latest_run,
         proposed_next_variants=proposed_next_variants,
     )
+
+
+def markdown_cell(lines: list[str]) -> dict[str, Any]:
+    return {
+        'cell_type': 'markdown',
+        'metadata': {},
+        'source': [line + '\n' for line in lines],
+    }
+
+
+def code_cell(lines: list[str]) -> dict[str, Any]:
+    return {
+        'cell_type': 'code',
+        'execution_count': None,
+        'metadata': {},
+        'outputs': [],
+        'source': [line + '\n' for line in lines],
+    }
+
+
+def build_autoresearch_notebook(
+    campaign: AutoresearchCampaignRecord,
+    methodology: MethodologyDraftRecord,
+) -> dict[str, Any]:
+    cells: list[dict[str, Any]] = [
+        markdown_cell(
+            [
+                f'# Glasslab Autoresearch Campaign {campaign.campaign_id[:8]}',
+                '',
+                f'- objective: `{campaign.objective}`',
+                f'- workflow: `{methodology.workflow_id}`',
+                f'- methodology draft: `{methodology.methodology_draft_id}`',
+                f'- method family: `{methodology.method_family}`',
+            ]
+        ),
+        markdown_cell(
+            [
+                '## Hypothesis',
+                '',
+                methodology.hypothesis,
+            ]
+        ),
+        markdown_cell(
+            [
+                '## Structured methodology',
+                '',
+                f'- datasets: `{", ".join(methodology.datasets) or "unknown"}`',
+                f'- architectures: `{", ".join(methodology.architectures) or "unknown"}`',
+                f'- baselines: `{", ".join(methodology.baselines) or "unknown"}`',
+                f'- metrics: `{", ".join(methodology.metrics) or "unknown"}`',
+                f'- resource profile: `{methodology.resource_profile}`',
+                f'- bounded experimentability: `{methodology.bounded_experimentability}`',
+            ]
+        ),
+        code_cell(
+            [
+                'import json',
+                'from pprint import pprint',
+                '',
+                'methodology_draft = ' + json.dumps(methodology.model_dump(mode='json'), indent=2),
+                '',
+                'pprint(methodology_draft)',
+            ]
+        ),
+        markdown_cell(
+            [
+                '## Mutation diff',
+                '',
+                'This notebook is a reviewable scaffold derived from the bounded methodology draft. It is not an executable authority by itself.',
+            ]
+        ),
+        code_cell(
+            [
+                'mutation_diff = ' + json.dumps(methodology.mutation_diff, indent=2),
+                'mutation_diff',
+            ]
+        ),
+        markdown_cell(
+            [
+                '## Next checks',
+                '',
+                '- confirm the approved workflow inputs are still correct',
+                '- confirm the selected model family fits the bounded template',
+                '- confirm the metric emphasis matches the research objective',
+                '- only then launch the bounded validation run',
+            ]
+        ),
+    ]
+    return {
+        'cells': cells,
+        'metadata': {
+            'kernelspec': {
+                'display_name': 'Python 3',
+                'language': 'python',
+                'name': 'python3',
+            },
+            'language_info': {
+                'name': 'python',
+                'version': '3.11',
+            },
+            'glasslab': {
+                'campaign_id': campaign.campaign_id,
+                'methodology_draft_id': methodology.methodology_draft_id,
+                'workflow_id': methodology.workflow_id,
+                'kind': 'autoresearch-notebook-draft',
+            },
+        },
+        'nbformat': 4,
+        'nbformat_minor': 5,
+    }
+
+
+def write_autoresearch_notebook_draft(
+    settings: Settings,
+    campaign: AutoresearchCampaignRecord,
+    methodology: MethodologyDraftRecord,
+) -> tuple[str, dict[str, Any]]:
+    notebook = build_autoresearch_notebook(campaign, methodology)
+    target_dir = Path(settings.artifacts_mount_path) / 'workflow-api' / 'notebook-drafts' / campaign.campaign_id
+    target_dir.mkdir(parents=True, exist_ok=True)
+    path = target_dir / 'analysis_notebook.ipynb'
+    path.write_text(json.dumps(notebook, indent=2), encoding='utf-8')
+    return (path.as_uri(), notebook)
 
 
 def build_campaign_and_seed(
