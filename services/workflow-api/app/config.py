@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     intake_agent_timeout_seconds: float = 30.0
     interpretation_agent_enabled: bool = False
     interpretation_agent_url: str = 'http://glasslab-interpretation-agent.glasslab-v2.svc.cluster.local:8091'
-    interpretation_agent_timeout_seconds: float = 45.0
+    interpretation_agent_timeout_seconds: float = 90.0
     assessment_agent_enabled: bool = False
     assessment_agent_url: str = 'http://glasslab-assessment-agent.glasslab-v2.svc.cluster.local:8092'
     assessment_agent_timeout_seconds: float = 45.0
