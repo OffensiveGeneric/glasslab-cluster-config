@@ -3660,7 +3660,16 @@ def test_autoresearch_campaign_happy_path(tmp_path) -> None:
     assert summary_payload['campaign']['campaign_id'] == campaign_id
     assert summary_payload['best_methodology_draft']['methodology_draft_id'] == child_draft_id
     assert summary_payload['latest_run']['run_id'] == run_id
+    assert summary_payload['recommended_model'] == 'logistic_regression'
+    assert summary_payload['model_comparison']
+    assert summary_payload['model_comparison'][0]['candidate_models'] == ['logistic_regression']
     assert summary_payload['proposed_next_variants']
+
+    comparison = client.get(f'/autoresearch/campaigns/{campaign_id}/model-comparison')
+    assert comparison.status_code == 200
+    comparison_payload = comparison.json()
+    assert comparison_payload['recommended_model'] == 'logistic_regression'
+    assert comparison_payload['model_comparison'][0]['decision'] == 'keep'
 
 
 def test_session_autoresearch_transition_chain(tmp_path) -> None:

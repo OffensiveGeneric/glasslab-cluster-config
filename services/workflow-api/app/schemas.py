@@ -784,6 +784,8 @@ class AutoresearchCampaignSummaryResponse(BaseModel):
     decisions: list[AutoresearchDecisionRecord] = Field(default_factory=list)
     best_methodology_draft: MethodologyDraftRecord | None = None
     latest_run: RunRecord | None = None
+    recommended_model: str | None = None
+    model_comparison: list[dict[str, Any]] = Field(default_factory=list)
     proposed_next_variants: list[str] = Field(default_factory=list)
 
 

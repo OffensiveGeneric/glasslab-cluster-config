@@ -337,6 +337,11 @@ def register_autoresearch_routes(
         campaign = get_required_campaign(store, campaign_id)
         return summarize_campaign(store, campaign)
 
+    @app.get('/autoresearch/campaigns/{campaign_id}/model-comparison', response_model=AutoresearchCampaignSummaryResponse)
+    def get_autoresearch_campaign_model_comparison(campaign_id: str) -> AutoresearchCampaignSummaryResponse:
+        campaign = get_required_campaign(store, campaign_id)
+        return summarize_campaign(store, campaign)
+
     @app.post(
         '/autoresearch/campaigns/{campaign_id}/draft-analysis-notebook',
         response_model=AutoresearchNotebookDraftResponse,
@@ -525,6 +530,24 @@ def register_autoresearch_routes(
         if session is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
         return get_session_autoresearch_summary(session.session_id)
+
+    @app.get(
+        '/research-sessions/{session_id}/autoresearch-model-comparison',
+        response_model=AutoresearchCampaignSummaryResponse,
+    )
+    def get_session_autoresearch_model_comparison(session_id: str) -> AutoresearchCampaignSummaryResponse:
+        campaign = get_required_session_campaign(session_id)
+        return get_autoresearch_campaign_model_comparison(campaign.campaign_id)
+
+    @app.get(
+        '/research-sessions/latest/autoresearch-model-comparison',
+        response_model=AutoresearchCampaignSummaryResponse,
+    )
+    def get_latest_session_autoresearch_model_comparison() -> AutoresearchCampaignSummaryResponse:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return get_session_autoresearch_model_comparison(session.session_id)
 
     @app.post(
         '/research-sessions/{session_id}/transitions/draft-autoresearch-notebook',

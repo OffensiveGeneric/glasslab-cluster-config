@@ -383,6 +383,64 @@ def build_decision(
     return ('escalate_for_review', 'Insufficient evidence for an automatic keep/discard decision.')
 
 
+def build_model_comparison_rows(
+    drafts: list[MethodologyDraftRecord],
+    iterations: list[AutoresearchIterationRecord],
+    decisions: list[AutoresearchDecisionRecord],
+) -> list[dict[str, Any]]:
+    draft_by_id = {draft.methodology_draft_id: draft for draft in drafts}
+    decision_by_iteration = {record.iteration_id: record for record in decisions}
+    rows: list[dict[str, Any]] = []
+    for iteration in iterations:
+        draft = draft_by_id.get(iteration.child_methodology_draft_id)
+        if draft is None:
+            continue
+        models = draft.candidate_models or draft.architectures or draft.baselines
+        metric_name = iteration.score_summary.get('primary_metric_name')
+        metric_value = iteration.score_summary.get('primary_metric_value')
+        decision = decision_by_iteration.get(iteration.iteration_id)
+        rows.append(
+            {
+                'iteration_id': iteration.iteration_id,
+                'methodology_draft_id': draft.methodology_draft_id,
+                'candidate_models': list(models),
+                'primary_metric_name': metric_name,
+                'primary_metric_value': metric_value,
+                'decision': decision.decision_type if decision is not None else iteration.decision,
+                'comparison_delta': iteration.comparison_summary.get('delta'),
+                'run_id': iteration.run_id,
+                'resource_profile': draft.resource_profile,
+            }
+        )
+    rows.sort(
+        key=lambda row: (
+            0 if row.get('decision') == 'keep' else 1,
+            -(float(row['primary_metric_value']) if isinstance(row.get('primary_metric_value'), (int, float)) else -1e9),
+            row['iteration_id'],
+        )
+    )
+    return rows
+
+
+def select_recommended_model(
+    rows: list[dict[str, Any]],
+    best_draft: MethodologyDraftRecord | None,
+) -> str | None:
+    if best_draft is not None:
+        models = best_draft.candidate_models or best_draft.architectures or best_draft.baselines
+        if len(models) == 1:
+            return models[0]
+    for row in rows:
+        models = list(row.get('candidate_models') or [])
+        if row.get('decision') == 'keep' and len(models) == 1:
+            return models[0]
+    for row in rows:
+        models = list(row.get('candidate_models') or [])
+        if len(models) == 1:
+            return models[0]
+    return None
+
+
 def summarize_campaign(
     store: RunStore,
     campaign: AutoresearchCampaignRecord,
@@ -396,6 +454,8 @@ def summarize_campaign(
         latest_iteration = store.get_autoresearch_iteration(campaign.latest_iteration_id)
         if latest_iteration is not None:
             latest_run = store.get_run(latest_iteration.run_id)
+    model_comparison = build_model_comparison_rows(drafts, iterations, decisions)
+    recommended_model = select_recommended_model(model_comparison, best_draft)
     proposed_next_variants: list[str] = []
     if best_draft is not None:
         if len(best_draft.candidate_models) == 1:
@@ -409,6 +469,8 @@ def summarize_campaign(
         decisions=decisions,
         best_methodology_draft=best_draft,
         latest_run=latest_run,
+        recommended_model=recommended_model,
+        model_comparison=model_comparison,
         proposed_next_variants=proposed_next_variants,
     )
 
