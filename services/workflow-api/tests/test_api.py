@@ -768,6 +768,8 @@ def test_create_and_fetch_design_draft_from_latest_titanic_intake() -> None:
     assert payload['workflow_id'] == 'generic-tabular-benchmark'
     assert payload['status'] == 'ready_for_run'
     assert payload['declared_inputs']['dataset_name'] == 'titanic'
+    assert payload['declared_inputs']['validation_strategy'] == 'holdout'
+    assert payload['declared_inputs']['validation_split'] == '0.2'
     assert payload['unresolved_inputs'] == []
     joined_notes = ' '.join(payload['design_notes'])
     assert 'Literature state:' in joined_notes
@@ -3669,6 +3671,10 @@ def test_autoresearch_campaign_happy_path(tmp_path) -> None:
     drafted_payload = drafted.json()
     assert drafted_payload['campaign']['status'] == 'drafted'
     assert len(drafted_payload['methodology_drafts']) >= 1
+    assert any(
+        draft['declared_inputs'].get('validation_strategy') == 'stratified_holdout'
+        for draft in drafted_payload['methodology_drafts']
+    )
     child_draft_id = drafted_payload['methodology_drafts'][0]['methodology_draft_id']
 
     launched = client.post(f'/autoresearch/campaigns/{campaign_id}/launch-next-iteration')

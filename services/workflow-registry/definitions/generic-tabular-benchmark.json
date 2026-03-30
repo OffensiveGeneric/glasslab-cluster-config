@@ -23,6 +23,18 @@
       "description": "Resolved URI for the test or holdout split."
     },
     {
+      "name": "validation_strategy",
+      "input_type": "parameter_set",
+      "required": false,
+      "description": "Declared split or validation policy used to guard against overfitting, such as holdout or stratified_holdout."
+    },
+    {
+      "name": "validation_split",
+      "input_type": "parameter_set",
+      "required": false,
+      "description": "Declared validation split fraction when the workflow uses an internal validation partition."
+    },
+    {
       "name": "target_column",
       "input_type": "parameter_set",
       "required": true,

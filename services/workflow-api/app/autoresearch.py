@@ -77,6 +77,13 @@ def _extract_dataset_hints(design: DesignDraftRecord) -> list[str]:
     return _dedupe(candidates)
 
 
+def _default_validation_inputs(declared_inputs: dict[str, Any]) -> dict[str, Any]:
+    updated = dict(declared_inputs)
+    updated.setdefault('validation_strategy', 'holdout')
+    updated.setdefault('validation_split', '0.2')
+    return updated
+
+
 def _extract_risks(design: DesignDraftRecord) -> list[str]:
     risks = [note for note in design.design_notes if 'risk' in note.lower() or 'unresolved' in note.lower()]
     if design.unresolved_inputs:
@@ -119,7 +126,7 @@ def build_seed_methodology_draft(
         status='seed',
         workflow_id=workflow.workflow_id,
         workflow_family=workflow.workflow_family,
-        declared_inputs=design.declared_inputs,
+        declared_inputs=_default_validation_inputs(design.declared_inputs),
         candidate_models=models,
         resource_profile=design.resource_profile,
         approval_tier=design.approval_tier,
@@ -142,6 +149,7 @@ def _build_variant_specs(seed: MethodologyDraftRecord, workflow: WorkflowRegistr
                 'metrics': list(seed.metrics),
                 'hypothesis': f'{models[0]} provides a stable bounded baseline on the approved dataset split.',
                 'mutation_diff': {'model_family': {'from': models, 'to': [models[0]]}},
+                'declared_inputs': dict(seed.declared_inputs),
                 'notes': ['single-model baseline variant'],
             }
         )
@@ -154,6 +162,7 @@ def _build_variant_specs(seed: MethodologyDraftRecord, workflow: WorkflowRegistr
                 'metrics': list(seed.metrics),
                 'hypothesis': f'{models[1]} may outperform the baseline under the same approved template.',
                 'mutation_diff': {'model_family': {'from': [models[0]], 'to': [models[1]]}},
+                'declared_inputs': dict(seed.declared_inputs),
                 'notes': ['alternative model variant'],
             }
         )
@@ -168,10 +177,30 @@ def _build_variant_specs(seed: MethodologyDraftRecord, workflow: WorkflowRegistr
                     'baseline_inclusion': {'enabled': True},
                     'model_family': {'from': [models[0]], 'to': models[:2]},
                 },
+                'declared_inputs': dict(seed.declared_inputs),
                 'notes': ['pairwise comparison variant'],
             }
         )
-    return specs[:3]
+    if seed.workflow_id == 'generic-tabular-benchmark':
+        split_variant_inputs = dict(seed.declared_inputs)
+        split_variant_inputs['validation_strategy'] = 'stratified_holdout'
+        split_variant_inputs['validation_split'] = '0.25'
+        specs.append(
+            {
+                'candidate_models': [models[0]],
+                'architectures': [models[0]],
+                'baselines': [models[0]],
+                'metrics': list(seed.metrics),
+                'hypothesis': 'A stricter stratified holdout split may reveal overfitting that is hidden under the default split.',
+                'mutation_diff': {
+                    'validation_strategy': {'from': seed.declared_inputs.get('validation_strategy', 'holdout'), 'to': 'stratified_holdout'},
+                    'validation_split': {'from': seed.declared_inputs.get('validation_split', '0.2'), 'to': '0.25'},
+                },
+                'declared_inputs': split_variant_inputs,
+                'notes': ['validation-strategy comparison variant'],
+            }
+        )
+    return specs[:4]
 
 
 def draft_initial_methodologies(
@@ -204,7 +233,7 @@ def draft_initial_methodologies(
                 status='ready_for_execution',
                 workflow_id=seed.workflow_id,
                 workflow_family=seed.workflow_family,
-                declared_inputs=dict(seed.declared_inputs),
+                declared_inputs=dict(spec.get('declared_inputs', seed.declared_inputs)),
                 candidate_models=spec['candidate_models'],
                 resource_profile=seed.resource_profile,
                 approval_tier=seed.approval_tier,

@@ -244,14 +244,18 @@ def derive_design_from_intake(intake: IntakeRecord, workflow: WorkflowRegistryEn
                 'dataset_name': 'titanic',
                 'train_uri': 's3://datasets/titanic/train.csv',
                 'test_uri': 's3://datasets/titanic/test.csv',
+                'validation_strategy': 'holdout',
+                'validation_split': '0.2',
                 'target_column': 'Survived',
             }
             design_notes.append('Resolved approved Titanic benchmark inputs deterministically.')
+            design_notes.append('Declared holdout validation strategy with a 0.2 validation split to help guard against overfitting.')
         else:
             declared_inputs = {
                 'dataset_name': 'UNRESOLVED_DATASET_NAME',
                 'train_uri': 'UNRESOLVED_TRAIN_URI',
                 'test_uri': 'UNRESOLVED_TEST_URI',
+                'validation_strategy': 'UNRESOLVED_VALIDATION_STRATEGY',
                 'target_column': 'UNRESOLVED_TARGET_COLUMN',
             }
             design_notes.append('Dataset-specific benchmark inputs still require operator review.')
