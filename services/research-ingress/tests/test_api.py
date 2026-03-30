@@ -80,3 +80,40 @@ def test_inbound_marks_non_command_turn_for_openclaw() -> None:
     assert payload["handled"] is False
     assert payload["forward_to_openclaw"] is True
     assert payload["route"] == "openclaw-fallback"
+
+
+def test_inbound_handles_add_paper_command() -> None:
+    def fake_router(settings, message, submitted_by):
+        assert message.startswith("!add-paper")
+        assert submitted_by == "whatsapp:+15555550123"
+        return {
+            "matched": True,
+            "response_text": "Added manual paper candidate 'Manual paper candidate' to the current queue.",
+            "command": "add-paper",
+            "workflow_api_endpoint": "http://workflow-api/research-sessions/latest/paper-intake-queue/manual-paper",
+            "payload": {"candidates": [{"title": "Manual paper candidate"}]},
+        }
+
+    import app.main as main_module
+
+    original = main_module._request_router
+    main_module._request_router = fake_router
+    try:
+        client = TestClient(create_app(settings=Settings()))
+        response = client.post(
+            "/inbound",
+            json={
+                "message": "!add-paper https://arxiv.org/abs/2401.12345",
+                "sender": "+15555550123",
+                "channel": "whatsapp",
+            },
+        )
+    finally:
+        main_module._request_router = original
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["handled"] is True
+    assert payload["forward_to_openclaw"] is False
+    assert payload["route"] == "deterministic-router"
+    assert payload["router_payload"]["command"] == "add-paper"

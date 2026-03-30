@@ -53,4 +53,16 @@ Examples:
 ./scripts/research-ingress-remote.sh healthz
 ./scripts/research-ingress-remote.sh dispatch "help:"
 ./scripts/research-ingress-remote.sh dispatch "research: forged art detection with computer vision methods and open datasets"
+./scripts/research-ingress-remote.sh dispatch "!add-paper https://arxiv.org/abs/2401.12345"
 ```
+
+Important deterministic commands currently covered by the repo-owned ingress path:
+
+- `!research <topic>`
+- `!more-papers`
+- `!next-paper`
+- `!add-paper <url|title>`
+- `!session`
+- `!note <text>`
+- `!op`
+- `!help`

@@ -16,6 +16,7 @@ Usage:
 Examples:
   research-ingress-cli.sh dispatch "help:"
   research-ingress-cli.sh dispatch "research: forged art detection with computer vision methods" "+19145550123" whatsapp
+  research-ingress-cli.sh dispatch "!add-paper https://arxiv.org/abs/2401.12345" "+19145550123" whatsapp
   research-ingress-cli.sh healthz
 USAGE
   exit 2
