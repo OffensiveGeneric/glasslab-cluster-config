@@ -2357,6 +2357,25 @@ def test_validate_document_identity_marks_title_mismatch() -> None:
     assert notes
 
 
+def test_extract_document_metadata_from_arxiv_abstract_page() -> None:
+    excerpt = (
+        '[2401.12345] Distributionally Robust Receive Combining '
+        'Title: Distributionally Robust Receive Combining '
+        'Authors: Shixiong Wang, Wei Dai, Geoffrey Ye Li '
+        'View PDF HTML (experimental) '
+        'Abstract: This article investigates signal estimation in wireless transmission. '
+        'Subjects: Signal Processing'
+    )
+    metadata = source_documents.extract_document_metadata(
+        source_url='https://arxiv.org/abs/2401.12345',
+        guessed_title='2401.12345',
+        text_excerpt=excerpt,
+    )
+    assert metadata['title'] == 'Distributionally Robust Receive Combining'
+    assert metadata['authors'] == ['Shixiong Wang', 'Wei Dai', 'Geoffrey Ye Li']
+    assert 'signal estimation' in (metadata['abstract_excerpt'] or '').lower()
+
+
 def test_research_session_can_store_persistent_notes() -> None:
     client = build_client()
 

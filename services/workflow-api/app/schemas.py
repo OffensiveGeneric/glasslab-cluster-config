@@ -516,6 +516,10 @@ class SourceDocumentRecord(BaseModel):
     sha256: str | None = None
     title: str | None = None
     text_excerpt: str | None = None
+    authors: list[str] = Field(default_factory=list)
+    abstract_excerpt: str | None = None
+    method_hints: list[str] = Field(default_factory=list)
+    dataset_hints: list[str] = Field(default_factory=list)
     expected_title: str | None = None
     validation_status: Literal['unknown', 'matched', 'mismatch'] = 'unknown'
     validation_notes: list[str] = Field(default_factory=list)

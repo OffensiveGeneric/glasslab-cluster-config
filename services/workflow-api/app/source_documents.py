@@ -23,6 +23,31 @@ COMMON_TITLE_WORDS = {
     'over', 'under', 'based', 'study', 'learning', 'vision', 'method', 'methods',
     'approach', 'approaches', 'analysis', 'data', 'model', 'models', 'paper',
 }
+METHOD_KEYWORDS = [
+    'vision transformer',
+    'transformer',
+    'cnn',
+    'convolutional neural network',
+    'resnet',
+    'vit',
+    'focal loss',
+    'cross entropy',
+    'contrastive learning',
+    'diffusion',
+    'gan',
+]
+DATASET_KEYWORDS = [
+    'cifar',
+    'imagenet',
+    'mnist',
+    'coco',
+    'laion',
+    'artbench',
+    'wikiart',
+    'kaggle',
+    'openml',
+    'titanic',
+]
 
 
 def derive_arxiv_pdf_url(source_url: str | None) -> str | None:
@@ -95,6 +120,69 @@ def validate_document_identity(
         return 'matched', [f"matched title terms: {', '.join(matched_terms[:4])}"]
 
     return 'mismatch', [f"expected title terms not found: {', '.join(expected_terms[:4])}"]
+
+
+def _truncate_text(value: str | None, limit: int = 1200) -> str | None:
+    if not value:
+        return None
+    normalized = ' '.join(value.split()).strip()
+    if not normalized:
+        return None
+    return normalized[:limit]
+
+
+def extract_document_metadata(
+    *,
+    source_url: str,
+    guessed_title: str | None,
+    text_excerpt: str | None,
+) -> dict[str, object]:
+    excerpt = text_excerpt or ''
+    normalized = ' '.join(excerpt.split())
+
+    extracted_title = guessed_title
+    authors: list[str] = []
+    abstract_excerpt = None
+
+    arxiv_match = re.search(
+        r'Title:\s*(.*?)\s+Authors:\s*(.*?)\s+View PDF\s+HTML.*?Abstract:\s*(.*?)\s+Subjects:',
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if arxiv_match:
+        extracted_title = _truncate_text(arxiv_match.group(1), 300) or extracted_title
+        authors = [
+            author.strip()
+            for author in re.split(r',| and ', arxiv_match.group(2))
+            if author.strip()
+        ][:8]
+        abstract_excerpt = _truncate_text(arxiv_match.group(3), 1500)
+    else:
+        abstract_match = re.search(
+            r'Abstract[:\s]+(.*?)(?:\s+(?:Index Terms|Keywords|Introduction|I\.\s+INTRODUCTION)\b)',
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if abstract_match:
+            abstract_excerpt = _truncate_text(abstract_match.group(1), 1500)
+
+        # For PDFs, a coarse first-line title guess is still better than the filename.
+        if guessed_title and re.fullmatch(r'[\w.-]+(?:\.pdf|\.html)?', guessed_title):
+            lines = [line.strip() for line in excerpt.splitlines() if line.strip()]
+            if lines:
+                extracted_title = _truncate_text(lines[0], 300) or guessed_title
+
+    haystack = f'{normalized} {(abstract_excerpt or "")}'.lower()
+    method_hints = [keyword for keyword in METHOD_KEYWORDS if keyword in haystack]
+    dataset_hints = [keyword for keyword in DATASET_KEYWORDS if keyword in haystack]
+
+    return {
+        'title': extracted_title,
+        'authors': list(dict.fromkeys(authors)),
+        'abstract_excerpt': abstract_excerpt,
+        'method_hints': list(dict.fromkeys(method_hints)),
+        'dataset_hints': list(dict.fromkeys(dataset_hints)),
+    }
 
 
 def extract_text_excerpt(content: bytes, content_type: str | None, source_url: str) -> str | None:
@@ -204,6 +292,12 @@ def ingest_source_document(
         content, content_type = fetch_source_document_bytes(source_url)
         fetched_title = guess_document_title(source_url)
         text_excerpt = extract_text_excerpt(content, content_type, source_url)
+        metadata = extract_document_metadata(
+            source_url=source_url,
+            guessed_title=fetched_title,
+            text_excerpt=text_excerpt,
+        )
+        fetched_title = str(metadata.get('title') or fetched_title)
         validation_status, validation_notes = validate_document_identity(
             expected_title=expected_title,
             fetched_title=fetched_title,
@@ -229,6 +323,10 @@ def ingest_source_document(
             sha256=hashlib.sha256(content).hexdigest(),
             title=fetched_title,
             text_excerpt=text_excerpt,
+            authors=list(metadata.get('authors') or []),
+            abstract_excerpt=metadata.get('abstract_excerpt'),
+            method_hints=list(metadata.get('method_hints') or []),
+            dataset_hints=list(metadata.get('dataset_hints') or []),
             expected_title=expected_title,
             validation_status=validation_status,
             validation_notes=validation_notes,
