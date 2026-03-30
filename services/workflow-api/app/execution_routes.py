@@ -31,6 +31,60 @@ def register_execution_routes(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session has no design draft yet')
         return design
 
+    def enrich_preflight_with_interpretation(
+        preflight: ExecutionPreflightResult,
+        *,
+        session_id: str,
+        intake_id: str,
+        workflow_id: str,
+        resource_profile: str,
+    ) -> ExecutionPreflightResult:
+        interpretation = store.get_latest_interpretation()
+        if interpretation is None:
+            return preflight
+        if interpretation.intake_id != intake_id:
+            return preflight
+        if interpretation.session_id not in {None, session_id}:
+            return preflight
+
+        warnings = list(preflight.warnings)
+        required_python_packages = [
+            str(item) for item in preflight.runtime_requirements.get('required_python_packages', [])
+        ]
+        recommended_python_packages = [str(item) for item in interpretation.recommended_python_packages]
+        if required_python_packages and recommended_python_packages:
+            missing_from_runtime = [
+                package for package in recommended_python_packages if package not in required_python_packages
+            ]
+            if missing_from_runtime:
+                warnings.append(
+                    'interpretation recommends Python packages outside the declared workflow runtime: '
+                    + ', '.join(missing_from_runtime)
+                )
+            else:
+                warnings.append(
+                    'interpretation-recommended Python packages fit the declared workflow runtime: '
+                    + ', '.join(recommended_python_packages)
+                )
+        if interpretation.preferred_workflow_id and interpretation.preferred_workflow_id != workflow_id:
+            warnings.append(
+                f'interpretation preferred workflow {interpretation.preferred_workflow_id} '
+                f'but session design selected {workflow_id}'
+            )
+        if interpretation.preferred_resource_profile and interpretation.preferred_resource_profile != resource_profile:
+            warnings.append(
+                f'interpretation preferred resource profile {interpretation.preferred_resource_profile} '
+                f'but session design selected {resource_profile}'
+            )
+        workflow_requires_gpu = bool(preflight.runtime_requirements.get('gpu'))
+        if interpretation.gpu_required and not workflow_requires_gpu:
+            warnings.append('interpretation indicates GPU is required but selected workflow runtime does not declare GPU support')
+        if interpretation.dataset_hints:
+            warnings.append('interpretation dataset hints: ' + ', '.join(interpretation.dataset_hints[:3]))
+        if interpretation.evaluation_targets:
+            warnings.append('interpretation evaluation targets: ' + ', '.join(interpretation.evaluation_targets[:3]))
+        return preflight.model_copy(update={'warnings': warnings})
+
     @app.get('/workflow-families', response_model=list[WorkflowFamilySummary])
     def list_workflow_families() -> list[WorkflowFamilySummary]:
         return [
@@ -86,7 +140,14 @@ def register_execution_routes(
         workflow = registry.get_workflow(design.workflow_id)
         if workflow is None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='workflow registry entry not found')
-        return build_execution_preflight_result(workflow, settings)
+        preflight = build_execution_preflight_result(workflow, settings)
+        return enrich_preflight_with_interpretation(
+            preflight,
+            session_id=session_id,
+            intake_id=design.intake_id,
+            workflow_id=design.workflow_id,
+            resource_profile=design.resource_profile,
+        )
 
     @app.post('/research-sessions/{session_id}/runs/from-design', response_model=RunRecord, status_code=status.HTTP_201_CREATED)
     def create_run_from_session_design(session_id: str) -> RunRecord:

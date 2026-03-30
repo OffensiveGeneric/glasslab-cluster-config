@@ -3404,6 +3404,59 @@ def test_workflow_execution_preflight_reports_current_contract() -> None:
     payload = response.json()
     assert payload['workflow_id'] == 'literature-to-experiment'
     assert payload['resource_profile'] == 'cpu-medium'
+
+
+def test_session_execution_preflight_surfaces_interpretation_runtime_hints() -> None:
+    settings = Settings(registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'))
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Check interpretation-aware execution preflight for a GPU-shaped paper.'},
+    )
+    session_id = session.json()['session_id']
+
+    intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Vision-transformer image forgery detection with PyTorch and timm.',
+            'source_refs': ['https://example.org/forgery-vit-note'],
+            'notes': ['Prefer GPU execution and explicit package checks.'],
+        },
+    )
+    assert intake.status_code == 201
+
+    interpretation = client.post('/interpretations/from-latest-intake')
+    assert interpretation.status_code == 201
+    interpretation_payload = interpretation.json()
+    assert 'torch' in interpretation_payload['recommended_python_packages']
+
+    design = client.post('/design-drafts/from-latest-intake')
+    assert design.status_code == 201
+    design_payload = design.json()
+    store.save_research_session(
+        store.get_research_session(session_id).model_copy(
+            update={'latest_design_id': design_payload['design_id']}
+        )
+    )
+
+    response = client.get(f"/research-sessions/{session_id}/execution-preflight")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['workflow_id'] == design_payload['workflow_id']
+    assert any(
+        fragment in warning
+        for warning in payload['warnings']
+        for fragment in (
+            'interpretation recommended',
+            'interpretation preferred',
+            'interpretation dataset hints:',
+            'interpretation evaluation targets:',
+            'interpretation indicates GPU is required',
+        )
+    )
     assert payload['runner_image'] == 'ghcr.io/offensivegeneric/glasslab-literature-runner:0.1.2'
     assert payload['resource_requests'] == {'cpu': '1', 'memory': '2Gi'}
     assert payload['resource_limits'] == {'cpu': '2', 'memory': '4Gi'}
