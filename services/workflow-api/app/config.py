@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     design_agent_enabled: bool = False
     design_agent_url: str = 'http://glasslab-design-agent.glasslab-v2.svc.cluster.local:8093'
     design_agent_timeout_seconds: float = 45.0
+    coding_notebook_agent_enabled: bool = False
+    coding_notebook_agent_url: str = 'http://192.168.1.12:11434/api/chat'
+    coding_notebook_agent_timeout_seconds: float = 90.0
+    coding_notebook_model: str = 'qwen2.5-coder:14b'
     ranker_enabled: bool = False
     ranker_url: str = 'http://192.168.1.12:8181/rank/workflow-family'
     ranker_timeout_seconds: float = 15.0

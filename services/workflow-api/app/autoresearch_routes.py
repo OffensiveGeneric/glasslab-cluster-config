@@ -7,6 +7,7 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException, status
 
 from .autoresearch import (
+    call_coding_notebook_agent,
     build_campaign_and_seed,
     build_decision,
     build_iteration_comparison,
@@ -354,13 +355,58 @@ def register_autoresearch_routes(
             if not drafts:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='campaign has no methodology drafts yet')
             methodology = drafts[-1]
-        storage_uri, notebook = write_autoresearch_notebook_draft(settings, campaign, methodology)
+        workflow = registry.get_workflow(methodology.workflow_id)
+        storage_uri, notebook = write_autoresearch_notebook_draft(settings, campaign, methodology, workflow=workflow)
         return AutoresearchNotebookDraftResponse(
             campaign=campaign,
             methodology_draft=methodology,
             created_at=datetime.now(timezone.utc),
             storage_uri=storage_uri,
             notebook=notebook,
+        )
+
+    @app.post(
+        '/autoresearch/campaigns/{campaign_id}/refine-analysis-notebook',
+        response_model=AutoresearchNotebookDraftResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def refine_autoresearch_analysis_notebook(campaign_id: str) -> AutoresearchNotebookDraftResponse:
+        campaign = get_required_campaign(store, campaign_id)
+        methodology_id = campaign.current_best_methodology_draft_id
+        if methodology_id is None:
+            iterations = get_campaign_iterations(store, campaign_id)
+            if iterations:
+                methodology_id = iterations[-1].child_methodology_draft_id
+        methodology = store.get_methodology_draft(methodology_id or '')
+        if methodology is None:
+            drafts = store.list_methodology_drafts(campaign_id)
+            if not drafts:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='campaign has no methodology drafts yet')
+            methodology = drafts[-1]
+        workflow = registry.get_workflow(methodology.workflow_id)
+        base_storage_uri, base_notebook = write_autoresearch_notebook_draft(settings, campaign, methodology, workflow=workflow)
+        refined_notebook, warnings = call_coding_notebook_agent(campaign, methodology, workflow, base_notebook, settings)
+        refinement_source = 'deterministic'
+        storage_uri = base_storage_uri
+        notebook = base_notebook
+        if refined_notebook is not None:
+            storage_uri, notebook = write_autoresearch_notebook_draft(
+                settings,
+                campaign,
+                methodology,
+                workflow=workflow,
+                notebook=refined_notebook,
+                filename='analysis_notebook_refined.ipynb',
+            )
+            refinement_source = 'coding-model'
+        return AutoresearchNotebookDraftResponse(
+            campaign=campaign,
+            methodology_draft=methodology,
+            created_at=datetime.now(timezone.utc),
+            storage_uri=storage_uri,
+            notebook=notebook,
+            refinement_source=refinement_source,
+            warnings=warnings,
         )
 
     @app.post(
@@ -484,3 +530,23 @@ def register_autoresearch_routes(
         if session is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
         return transition_draft_session_autoresearch_notebook(session.session_id)
+
+    @app.post(
+        '/research-sessions/{session_id}/transitions/refine-autoresearch-notebook',
+        response_model=AutoresearchNotebookDraftResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def transition_refine_session_autoresearch_notebook(session_id: str) -> AutoresearchNotebookDraftResponse:
+        campaign = get_required_session_campaign(session_id)
+        return refine_autoresearch_analysis_notebook(campaign.campaign_id)
+
+    @app.post(
+        '/research-sessions/latest/transitions/refine-autoresearch-notebook',
+        response_model=AutoresearchNotebookDraftResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def transition_refine_latest_session_autoresearch_notebook() -> AutoresearchNotebookDraftResponse:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return transition_refine_session_autoresearch_notebook(session.session_id)

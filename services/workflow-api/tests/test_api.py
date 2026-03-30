@@ -3669,3 +3669,51 @@ def test_autoresearch_notebook_draft_is_written(tmp_path) -> None:
     assert path.exists()
     saved = json.loads(path.read_text())
     assert saved['metadata']['glasslab']['kind'] == 'autoresearch-notebook-draft'
+
+
+def test_autoresearch_notebook_refinement_falls_back_cleanly(tmp_path) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        artifacts_mount_path=str(tmp_path),
+        coding_notebook_agent_enabled=False,
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Refine a bounded autoresearch notebook through the coding-model fallback spine.'},
+    )
+    session_id = session.json()['session_id']
+
+    client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Benchmark one bounded Titanic variant and capture the executable review path.',
+            'source_refs': ['https://example.org/titanic-refine-note'],
+            'notes': ['Notebook refinement should remain bounded and reviewable.'],
+        },
+    )
+    design = client.post('/design-drafts/from-latest-intake').json()
+    client.post(
+        f"/design-drafts/{design['design_id']}/review",
+        json={
+            'resolved_inputs': {
+                'dataset_name': 'titanic',
+                'train_uri': 's3://datasets/titanic/train.csv',
+                'test_uri': 's3://datasets/titanic/test.csv',
+                'target_column': 'Survived',
+            },
+            'review_notes': ['Notebook refinement fallback test review.'],
+        },
+    )
+    client.post(f'/research-sessions/{session_id}/transitions/start-autoresearch-campaign')
+    client.post(f'/research-sessions/{session_id}/transitions/draft-methodologies')
+
+    refined = client.post(f'/research-sessions/{session_id}/transitions/refine-autoresearch-notebook')
+    assert refined.status_code == 201
+    payload = refined.json()
+    assert payload['refinement_source'] == 'deterministic'
+    assert payload['warnings']
+    assert payload['storage_uri'].endswith('/analysis_notebook.ipynb')

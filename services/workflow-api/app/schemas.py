@@ -792,6 +792,8 @@ class AutoresearchNotebookDraftResponse(BaseModel):
     created_at: datetime
     storage_uri: str
     notebook: dict[str, Any]
+    refinement_source: Literal['deterministic', 'coding-model'] = 'deterministic'
+    warnings: list[str] = Field(default_factory=list)
 
 
 class FreshPaperPipelineResponse(BaseModel):

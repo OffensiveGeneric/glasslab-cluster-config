@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 from typing import Any
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 from uuid import uuid4
 
 from fastapi import HTTPException, status
@@ -431,7 +433,11 @@ def code_cell(lines: list[str]) -> dict[str, Any]:
 def build_autoresearch_notebook(
     campaign: AutoresearchCampaignRecord,
     methodology: MethodologyDraftRecord,
+    workflow: WorkflowRegistryEntry | None = None,
 ) -> dict[str, Any]:
+    runtime_requirements = workflow.runtime_requirements if workflow is not None else {}
+    required_python_packages = runtime_requirements.get('required_python_packages', [])
+    training_stack = runtime_requirements.get('training_stack', [])
     cells: list[dict[str, Any]] = [
         markdown_cell(
             [
@@ -460,6 +466,8 @@ def build_autoresearch_notebook(
                 f'- metrics: `{", ".join(methodology.metrics) or "unknown"}`',
                 f'- resource profile: `{methodology.resource_profile}`',
                 f'- bounded experimentability: `{methodology.bounded_experimentability}`',
+                f'- preferred Python packages: `{", ".join(required_python_packages) or "unspecified"}`',
+                f'- training stack: `{", ".join(training_stack) or "unspecified"}`',
             ]
         ),
         code_cell(
@@ -490,6 +498,8 @@ def build_autoresearch_notebook(
                 '## Next checks',
                 '',
                 '- confirm the approved workflow inputs are still correct',
+                '- confirm the required Python packages are available in the chosen runner image',
+                '- confirm GPU scheduling only when the preferred workflow and resource profile require it',
                 '- confirm the selected model family fits the bounded template',
                 '- confirm the metric emphasis matches the research objective',
                 '- only then launch the bounded validation run',
@@ -524,13 +534,68 @@ def write_autoresearch_notebook_draft(
     settings: Settings,
     campaign: AutoresearchCampaignRecord,
     methodology: MethodologyDraftRecord,
+    workflow: WorkflowRegistryEntry | None = None,
+    *,
+    notebook: dict[str, Any] | None = None,
+    filename: str = 'analysis_notebook.ipynb',
 ) -> tuple[str, dict[str, Any]]:
-    notebook = build_autoresearch_notebook(campaign, methodology)
+    notebook = notebook or build_autoresearch_notebook(campaign, methodology, workflow=workflow)
     target_dir = Path(settings.artifacts_mount_path) / 'workflow-api' / 'notebook-drafts' / campaign.campaign_id
     target_dir.mkdir(parents=True, exist_ok=True)
-    path = target_dir / 'analysis_notebook.ipynb'
+    path = target_dir / filename
     path.write_text(json.dumps(notebook, indent=2), encoding='utf-8')
     return (path.as_uri(), notebook)
+
+
+def build_coding_notebook_refinement_payload(
+    campaign: AutoresearchCampaignRecord,
+    methodology: MethodologyDraftRecord,
+    workflow: WorkflowRegistryEntry | None,
+    notebook: dict[str, Any],
+    settings: Settings,
+) -> dict[str, Any]:
+    return {
+        'request_id': methodology.methodology_draft_id,
+        'model': settings.coding_notebook_model,
+        'campaign': campaign.model_dump(mode='json'),
+        'methodology_draft': methodology.model_dump(mode='json'),
+        'workflow': workflow.model_dump(mode='json') if workflow is not None else None,
+        'notebook': notebook,
+        'instructions': [
+            'Refine this Glasslab notebook without changing its bounded research objective.',
+            'Do not introduce arbitrary execution manifests or unrestricted shell/code mutation.',
+            'Keep the notebook reviewable and tied to the approved workflow template.',
+            'Prefer clarifying cells for dataset loading, package requirements, metrics, and experiment checks.',
+        ],
+    }
+
+
+def call_coding_notebook_agent(
+    campaign: AutoresearchCampaignRecord,
+    methodology: MethodologyDraftRecord,
+    workflow: WorkflowRegistryEntry | None,
+    notebook: dict[str, Any],
+    settings: Settings,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    if not settings.coding_notebook_agent_enabled:
+        return None, ['coding notebook agent is disabled; using deterministic notebook scaffold']
+
+    payload = build_coding_notebook_refinement_payload(campaign, methodology, workflow, notebook, settings)
+    request_obj = urllib_request.Request(
+        settings.coding_notebook_agent_url,
+        data=json.dumps(payload).encode('utf-8'),
+        headers={'Content-Type': 'application/json'},
+        method='POST',
+    )
+    try:
+        with urllib_request.urlopen(request_obj, timeout=settings.coding_notebook_agent_timeout_seconds) as response:
+            body = json.loads(response.read().decode('utf-8'))
+        refined = body.get('notebook')
+        if not isinstance(refined, dict):
+            raise ValueError('coding notebook agent response missing notebook object')
+        return refined, []
+    except (urllib_error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        return None, [f'coding notebook agent fallback: {exc}']
 
 
 def build_campaign_and_seed(
