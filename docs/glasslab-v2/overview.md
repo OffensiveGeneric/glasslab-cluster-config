@@ -15,6 +15,7 @@ The product should read as session-first:
 Current product priority:
 
 - make the session -> literature -> interpretation -> design -> bounded experiment loop usable first
+- add a bounded autoresearch lane for methodology drafts, approved validation runs, explicit scoring, and reviewable keep/discard decisions
 - treat the stage agents as backend quality improvements to that loop, not as the main near-term product milestone
 - keep the long-term target aligned with iterative research systems like `autoresearch`: persistent context, bounded experiments, result comparison, and explicit next-step proposals
 

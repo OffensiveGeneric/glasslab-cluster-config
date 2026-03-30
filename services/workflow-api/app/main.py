@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException, status
 from services.common.schemas import ArtifactIndexEntry, ArtifactsIndex, RunManifest, RunStatus, WorkflowRegistryEntry
 
 from .config import Settings, get_settings
+from .autoresearch_routes import register_autoresearch_routes
 from .digest_scheduling import schedule_is_due
 from .execution_routes import register_execution_routes
 from .execution_preflight import build_execution_preflight_result
@@ -1512,6 +1513,15 @@ def create_app(
         store=store,
         submitter=submitter,
         create_run_record=lambda *args, **kwargs: create_run_record(*args, **kwargs),
+    )
+    register_autoresearch_routes(
+        app,
+        settings=settings,
+        registry=registry,
+        store=store,
+        submitter=submitter,
+        create_run_record=lambda *args, **kwargs: create_run_record(*args, **kwargs),
+        record_operation=lambda *args, **kwargs: record_operation(*args, **kwargs),
     )
     register_schedule_routes(
         app,

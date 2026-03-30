@@ -9,10 +9,14 @@ from typing import Any, TypeVar
 from services.common.schemas import ArtifactsIndex
 
 from .schemas import (
+    AutoresearchCampaignRecord,
+    AutoresearchDecisionRecord,
+    AutoresearchIterationRecord,
     DesignDraftRecord,
     IntakeRecord,
     InterpretationRecord,
     LogEntry,
+    MethodologyDraftRecord,
     OperationRecord,
     PaperIntakeQueueRecord,
     ResearchSessionRecord,
@@ -28,6 +32,70 @@ ModelT = TypeVar('ModelT')
 
 
 class RunStore(ABC):
+    @abstractmethod
+    def save_methodology_draft(self, record: MethodologyDraftRecord) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_methodology_draft(self, methodology_draft_id: str) -> MethodologyDraftRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_latest_methodology_draft(self) -> MethodologyDraftRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_methodology_drafts(self, campaign_id: str | None = None) -> list[MethodologyDraftRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def save_autoresearch_campaign(self, record: AutoresearchCampaignRecord) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_autoresearch_campaign(self, campaign_id: str) -> AutoresearchCampaignRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_latest_autoresearch_campaign(self) -> AutoresearchCampaignRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_autoresearch_campaigns(self) -> list[AutoresearchCampaignRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def save_autoresearch_iteration(self, record: AutoresearchIterationRecord) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_autoresearch_iteration(self, iteration_id: str) -> AutoresearchIterationRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_latest_autoresearch_iteration(self) -> AutoresearchIterationRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_autoresearch_iterations(self, campaign_id: str | None = None) -> list[AutoresearchIterationRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def save_autoresearch_decision(self, record: AutoresearchDecisionRecord) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_autoresearch_decision(self, decision_id: str) -> AutoresearchDecisionRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_latest_autoresearch_decision(self) -> AutoresearchDecisionRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_autoresearch_decisions(self, campaign_id: str | None = None) -> list[AutoresearchDecisionRecord]:
+        raise NotImplementedError
+
     @abstractmethod
     def save_research_session(self, record: ResearchSessionRecord) -> None:
         raise NotImplementedError
@@ -222,6 +290,14 @@ def _parse_logs_map(items: dict[str, Any]) -> dict[str, list[LogEntry]]:
 
 class InMemoryRunStore(RunStore):
     def __init__(self) -> None:
+        self._methodology_drafts: dict[str, MethodologyDraftRecord] = {}
+        self._latest_methodology_draft_id: str | None = None
+        self._autoresearch_campaigns: dict[str, AutoresearchCampaignRecord] = {}
+        self._latest_autoresearch_campaign_id: str | None = None
+        self._autoresearch_iterations: dict[str, AutoresearchIterationRecord] = {}
+        self._latest_autoresearch_iteration_id: str | None = None
+        self._autoresearch_decisions: dict[str, AutoresearchDecisionRecord] = {}
+        self._latest_autoresearch_decision_id: str | None = None
         self._research_sessions: dict[str, ResearchSessionRecord] = {}
         self._latest_research_session_id: str | None = None
         self._intakes: dict[str, IntakeRecord] = {}
@@ -247,6 +323,92 @@ class InMemoryRunStore(RunStore):
         self._operations: dict[str, OperationRecord] = {}
         self._latest_operation_id: str | None = None
         self._lock = Lock()
+
+    def save_methodology_draft(self, record: MethodologyDraftRecord) -> None:
+        with self._lock:
+            self._methodology_drafts[record.methodology_draft_id] = record
+            self._latest_methodology_draft_id = record.methodology_draft_id
+
+    def get_methodology_draft(self, methodology_draft_id: str) -> MethodologyDraftRecord | None:
+        with self._lock:
+            return self._methodology_drafts.get(methodology_draft_id)
+
+    def get_latest_methodology_draft(self) -> MethodologyDraftRecord | None:
+        with self._lock:
+            if self._latest_methodology_draft_id is None:
+                return None
+            return self._methodology_drafts.get(self._latest_methodology_draft_id)
+
+    def list_methodology_drafts(self, campaign_id: str | None = None) -> list[MethodologyDraftRecord]:
+        with self._lock:
+            records = list(self._methodology_drafts.values())
+        if campaign_id is not None:
+            records = [record for record in records if record.campaign_id == campaign_id]
+        return sorted(records, key=lambda record: record.created_at)
+
+    def save_autoresearch_campaign(self, record: AutoresearchCampaignRecord) -> None:
+        with self._lock:
+            self._autoresearch_campaigns[record.campaign_id] = record
+            self._latest_autoresearch_campaign_id = record.campaign_id
+
+    def get_autoresearch_campaign(self, campaign_id: str) -> AutoresearchCampaignRecord | None:
+        with self._lock:
+            return self._autoresearch_campaigns.get(campaign_id)
+
+    def get_latest_autoresearch_campaign(self) -> AutoresearchCampaignRecord | None:
+        with self._lock:
+            if self._latest_autoresearch_campaign_id is None:
+                return None
+            return self._autoresearch_campaigns.get(self._latest_autoresearch_campaign_id)
+
+    def list_autoresearch_campaigns(self) -> list[AutoresearchCampaignRecord]:
+        with self._lock:
+            records = list(self._autoresearch_campaigns.values())
+        return sorted(records, key=lambda record: record.created_at)
+
+    def save_autoresearch_iteration(self, record: AutoresearchIterationRecord) -> None:
+        with self._lock:
+            self._autoresearch_iterations[record.iteration_id] = record
+            self._latest_autoresearch_iteration_id = record.iteration_id
+
+    def get_autoresearch_iteration(self, iteration_id: str) -> AutoresearchIterationRecord | None:
+        with self._lock:
+            return self._autoresearch_iterations.get(iteration_id)
+
+    def get_latest_autoresearch_iteration(self) -> AutoresearchIterationRecord | None:
+        with self._lock:
+            if self._latest_autoresearch_iteration_id is None:
+                return None
+            return self._autoresearch_iterations.get(self._latest_autoresearch_iteration_id)
+
+    def list_autoresearch_iterations(self, campaign_id: str | None = None) -> list[AutoresearchIterationRecord]:
+        with self._lock:
+            records = list(self._autoresearch_iterations.values())
+        if campaign_id is not None:
+            records = [record for record in records if record.campaign_id == campaign_id]
+        return sorted(records, key=lambda record: record.created_at)
+
+    def save_autoresearch_decision(self, record: AutoresearchDecisionRecord) -> None:
+        with self._lock:
+            self._autoresearch_decisions[record.decision_id] = record
+            self._latest_autoresearch_decision_id = record.decision_id
+
+    def get_autoresearch_decision(self, decision_id: str) -> AutoresearchDecisionRecord | None:
+        with self._lock:
+            return self._autoresearch_decisions.get(decision_id)
+
+    def get_latest_autoresearch_decision(self) -> AutoresearchDecisionRecord | None:
+        with self._lock:
+            if self._latest_autoresearch_decision_id is None:
+                return None
+            return self._autoresearch_decisions.get(self._latest_autoresearch_decision_id)
+
+    def list_autoresearch_decisions(self, campaign_id: str | None = None) -> list[AutoresearchDecisionRecord]:
+        with self._lock:
+            records = list(self._autoresearch_decisions.values())
+        if campaign_id is not None:
+            records = [record for record in records if record.campaign_id == campaign_id]
+        return sorted(records, key=lambda record: record.created_at)
 
     def save_research_session(self, record: ResearchSessionRecord) -> None:
         with self._lock:
@@ -479,6 +641,23 @@ class JsonFileRunStore(InMemoryRunStore):
             return
         payload = json.loads(self._state_path.read_text(encoding='utf-8'))
         with self._lock:
+            self._methodology_drafts = _parse_record_map(payload.get('methodology_drafts', {}), MethodologyDraftRecord)
+            self._latest_methodology_draft_id = payload.get('latest_methodology_draft_id')
+            self._autoresearch_campaigns = _parse_record_map(
+                payload.get('autoresearch_campaigns', {}),
+                AutoresearchCampaignRecord,
+            )
+            self._latest_autoresearch_campaign_id = payload.get('latest_autoresearch_campaign_id')
+            self._autoresearch_iterations = _parse_record_map(
+                payload.get('autoresearch_iterations', {}),
+                AutoresearchIterationRecord,
+            )
+            self._latest_autoresearch_iteration_id = payload.get('latest_autoresearch_iteration_id')
+            self._autoresearch_decisions = _parse_record_map(
+                payload.get('autoresearch_decisions', {}),
+                AutoresearchDecisionRecord,
+            )
+            self._latest_autoresearch_decision_id = payload.get('latest_autoresearch_decision_id')
             self._research_sessions = _parse_record_map(
                 payload.get('research_sessions', {}),
                 ResearchSessionRecord,
@@ -516,6 +695,22 @@ class JsonFileRunStore(InMemoryRunStore):
     def _flush(self) -> None:
         with self._lock:
             payload = {
+                'methodology_drafts': {
+                    key: record.model_dump(mode='json') for key, record in self._methodology_drafts.items()
+                },
+                'latest_methodology_draft_id': self._latest_methodology_draft_id,
+                'autoresearch_campaigns': {
+                    key: record.model_dump(mode='json') for key, record in self._autoresearch_campaigns.items()
+                },
+                'latest_autoresearch_campaign_id': self._latest_autoresearch_campaign_id,
+                'autoresearch_iterations': {
+                    key: record.model_dump(mode='json') for key, record in self._autoresearch_iterations.items()
+                },
+                'latest_autoresearch_iteration_id': self._latest_autoresearch_iteration_id,
+                'autoresearch_decisions': {
+                    key: record.model_dump(mode='json') for key, record in self._autoresearch_decisions.items()
+                },
+                'latest_autoresearch_decision_id': self._latest_autoresearch_decision_id,
                 'research_sessions': {key: record.model_dump(mode='json') for key, record in self._research_sessions.items()},
                 'latest_research_session_id': self._latest_research_session_id,
                 'intakes': {key: record.model_dump(mode='json') for key, record in self._intakes.items()},
@@ -554,6 +749,22 @@ class JsonFileRunStore(InMemoryRunStore):
 
     def save_research_session(self, record: ResearchSessionRecord) -> None:
         super().save_research_session(record)
+        self._flush()
+
+    def save_methodology_draft(self, record: MethodologyDraftRecord) -> None:
+        super().save_methodology_draft(record)
+        self._flush()
+
+    def save_autoresearch_campaign(self, record: AutoresearchCampaignRecord) -> None:
+        super().save_autoresearch_campaign(record)
+        self._flush()
+
+    def save_autoresearch_iteration(self, record: AutoresearchIterationRecord) -> None:
+        super().save_autoresearch_iteration(record)
+        self._flush()
+
+    def save_autoresearch_decision(self, record: AutoresearchDecisionRecord) -> None:
+        super().save_autoresearch_decision(record)
         self._flush()
 
     def save_intake(self, record: IntakeRecord) -> None:

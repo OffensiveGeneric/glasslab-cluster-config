@@ -3400,3 +3400,109 @@ def test_get_run_reflects_disk_artifacts_and_status(tmp_path) -> None:
     logs = client.get(f'/runs/{run_id}/logs')
     assert logs.status_code == 200
     assert logs.json()['logs'][0]['message'] == 'completed Titanic baseline run'
+
+
+def test_autoresearch_campaign_happy_path(tmp_path) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        artifacts_mount_path=str(tmp_path),
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Explore bounded methodology variants for a tabular benchmark session.'},
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Benchmark bounded tabular baselines on Titanic and compare a small set of approved models.',
+            'source_refs': ['https://example.org/titanic-benchmark-note'],
+            'notes': ['Focus on approved tabular baselines and simple accuracy-driven comparison.'],
+        },
+    )
+    assert intake.status_code == 201
+
+    design = client.post('/design-drafts/from-latest-intake')
+    assert design.status_code == 201
+    design_payload = design.json()
+
+    reviewed = client.post(
+        f"/design-drafts/{design_payload['design_id']}/review",
+        json={
+            'resolved_inputs': {
+                'dataset_name': 'titanic',
+                'train_uri': 's3://datasets/titanic/train.csv',
+                'test_uri': 's3://datasets/titanic/test.csv',
+                'target_column': 'Survived',
+            },
+            'review_notes': ['Autoresearch seed inputs resolved for bounded validation.'],
+        },
+    )
+    assert reviewed.status_code == 200
+    assert reviewed.json()['status'] == 'ready_for_run'
+
+    campaign = client.post(
+        '/autoresearch/campaigns',
+        json={
+            'session_id': session_id,
+            'source_design_id': design_payload['design_id'],
+            'objective': 'Compare a small set of approved tabular methodology variants on Titanic.',
+            'max_iterations': 2,
+        },
+    )
+    assert campaign.status_code == 201
+    campaign_payload = campaign.json()
+    campaign_id = campaign_payload['campaign_id']
+    assert campaign_payload['source_design_id'] == design_payload['design_id']
+
+    latest = client.get('/autoresearch/campaigns/latest')
+    assert latest.status_code == 200
+    assert latest.json()['campaign_id'] == campaign_id
+
+    drafted = client.post(f'/autoresearch/campaigns/{campaign_id}/draft-initial-methodologies')
+    assert drafted.status_code == 201
+    drafted_payload = drafted.json()
+    assert drafted_payload['campaign']['status'] == 'drafted'
+    assert len(drafted_payload['methodology_drafts']) >= 1
+    child_draft_id = drafted_payload['methodology_drafts'][0]['methodology_draft_id']
+
+    launched = client.post(f'/autoresearch/campaigns/{campaign_id}/launch-next-iteration')
+    assert launched.status_code == 201
+    launched_payload = launched.json()
+    run_id = launched_payload['run']['run_id']
+    assert launched_payload['methodology_draft']['status'] == 'launched'
+    assert launched_payload['run']['run_purpose'] == 'autoresearch-validation'
+    assert launched_payload['iteration']['child_methodology_draft_id'] == child_draft_id
+
+    run_dir = tmp_path / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / 'status.json').write_text(
+        '{"run_id":"%s","status":"succeeded","updated_at":"2026-03-30T16:00:00Z","detail":"autoresearch iteration complete"}'
+        % run_id
+    )
+    (run_dir / 'metrics.json').write_text('{"accuracy": 0.84, "loss": 0.41}')
+
+    iterations = client.get(f'/autoresearch/campaigns/{campaign_id}/iterations')
+    assert iterations.status_code == 200
+    assert len(iterations.json()) == 1
+
+    decision = client.post(f'/autoresearch/campaigns/{campaign_id}/decide-latest')
+    assert decision.status_code == 201
+    decision_payload = decision.json()
+    assert decision_payload['decision']['decision_type'] == 'keep'
+    assert decision_payload['iteration']['decision'] == 'keep'
+    assert decision_payload['campaign']['current_best_methodology_draft_id'] == child_draft_id
+
+    summary = client.get(f'/autoresearch/campaigns/{campaign_id}/summary')
+    assert summary.status_code == 200
+    summary_payload = summary.json()
+    assert summary_payload['campaign']['campaign_id'] == campaign_id
+    assert summary_payload['best_methodology_draft']['methodology_draft_id'] == child_draft_id
+    assert summary_payload['latest_run']['run_id'] == run_id
+    assert summary_payload['proposed_next_variants']

@@ -150,6 +150,24 @@ Session-first skill endpoints:
 - `POST /research-sessions/latest/skills/assessment`
 - `POST /research-sessions/latest/skills/design`
 
+Autoresearch endpoints:
+
+- `POST /autoresearch/campaigns`
+- `GET /autoresearch/campaigns/latest`
+- `GET /autoresearch/campaigns/{campaign_id}`
+- `POST /autoresearch/campaigns/{campaign_id}/draft-initial-methodologies`
+- `POST /autoresearch/campaigns/{campaign_id}/launch-next-iteration`
+- `GET /autoresearch/campaigns/{campaign_id}/iterations`
+- `POST /autoresearch/campaigns/{campaign_id}/decide-latest`
+- `GET /autoresearch/campaigns/{campaign_id}/summary`
+
+The first pass is intentionally narrow:
+
+- campaign creation is design-backed and session-owned
+- methodology drafts are structured records, not free-form model plans
+- run launch still passes through the approved workflow registry path
+- automatic decisions stay conservative and escalate when evidence is weak
+
 These are thin bounded aliases over the existing session-state path. The intent is:
 
 - sessions hold the research state

@@ -170,6 +170,10 @@ class ResearchSessionRecord(BaseModel):
     latest_assessment_id: str | None = None
     latest_design_id: str | None = None
     latest_run_id: str | None = None
+    latest_methodology_draft_id: str | None = None
+    latest_autoresearch_campaign_id: str | None = None
+    latest_autoresearch_iteration_id: str | None = None
+    latest_autoresearch_decision_id: str | None = None
 
 
 class ResearchSessionMemoryAppendRequest(BaseModel):
@@ -286,6 +290,85 @@ class DesignDraftRecord(BaseModel):
     design_notes: list[str] = Field(default_factory=list)
     submitted_by: str
     session_id: str | None = None
+
+
+class MethodologyDraftRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    methodology_draft_id: str
+    campaign_id: str
+    session_id: str
+    source_intake_id: str | None = None
+    source_design_id: str | None = None
+    parent_methodology_draft_id: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    objective: str
+    hypothesis: str
+    method_family: str
+    datasets: list[str] = Field(default_factory=list)
+    architectures: list[str] = Field(default_factory=list)
+    baselines: list[str] = Field(default_factory=list)
+    metrics: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    bounded_experimentability: str
+    status: Literal['seed', 'ready_for_execution', 'launched', 'kept', 'discarded', 'needs_review']
+    workflow_id: str
+    workflow_family: str
+    declared_inputs: dict[str, Any] = Field(default_factory=dict)
+    candidate_models: list[str] = Field(default_factory=list)
+    resource_profile: str
+    approval_tier: str
+    mutation_diff: dict[str, Any] = Field(default_factory=dict)
+    notes: list[str] = Field(default_factory=list)
+
+
+class AutoresearchCampaignRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    campaign_id: str
+    session_id: str
+    created_at: datetime
+    updated_at: datetime
+    status: Literal['created', 'drafted', 'active', 'needs_review', 'completed']
+    objective: str
+    source_design_id: str | None = None
+    seed_methodology_draft_ids: list[str] = Field(default_factory=list)
+    current_best_methodology_draft_id: str | None = None
+    latest_iteration_id: str | None = None
+    latest_decision_id: str | None = None
+    max_iterations: int = Field(default=3, ge=1, le=25)
+    evaluation_policy: str
+    mutation_policy: str
+    notes: list[str] = Field(default_factory=list)
+
+
+class AutoresearchIterationRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    iteration_id: str
+    campaign_id: str
+    parent_methodology_draft_id: str | None = None
+    child_methodology_draft_id: str
+    run_id: str
+    created_at: datetime
+    updated_at: datetime
+    status: Literal['launched', 'completed', 'decided', 'needs_review']
+    score_summary: dict[str, Any] = Field(default_factory=dict)
+    comparison_summary: dict[str, Any] = Field(default_factory=dict)
+    decision: Literal['keep', 'discard', 'escalate_for_review'] | None = None
+
+
+class AutoresearchDecisionRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    decision_id: str
+    campaign_id: str
+    iteration_id: str
+    created_at: datetime
+    decision_type: Literal['keep', 'discard', 'escalate_for_review']
+    rationale: str
+    evidence_refs: list[str] = Field(default_factory=list)
 
 
 class DesignDraftReviewRequest(BaseModel):
@@ -631,6 +714,63 @@ class StartLiteratureSearchResponse(BaseModel):
     research_problem: ResearchProblemRecord
     paper_intake_queue: PaperIntakeQueueRecord
     operation: OperationRecord
+
+
+class AutoresearchCampaignCreateRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    session_id: str | None = None
+    source_design_id: str | None = None
+    objective: str | None = None
+    max_iterations: int = Field(default=3, ge=1, le=25)
+    evaluation_policy: str = 'metrics-first-v1'
+    mutation_policy: str = 'methodology-variants-v1'
+    notes: list[str] = Field(default_factory=list)
+
+    @field_validator('notes')
+    @classmethod
+    def validate_unique_campaign_notes(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value if item.strip()]
+        return list(dict.fromkeys(cleaned))
+
+
+class AutoresearchDraftMethodologiesResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    campaign: AutoresearchCampaignRecord
+    methodology_drafts: list[MethodologyDraftRecord] = Field(default_factory=list)
+    operation: OperationRecord
+
+
+class AutoresearchLaunchIterationResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    campaign: AutoresearchCampaignRecord
+    methodology_draft: MethodologyDraftRecord
+    iteration: AutoresearchIterationRecord
+    run: RunRecord
+    operation: OperationRecord
+
+
+class AutoresearchDecisionResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    campaign: AutoresearchCampaignRecord
+    iteration: AutoresearchIterationRecord
+    decision: AutoresearchDecisionRecord
+    operation: OperationRecord
+
+
+class AutoresearchCampaignSummaryResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    campaign: AutoresearchCampaignRecord
+    methodology_drafts: list[MethodologyDraftRecord] = Field(default_factory=list)
+    iterations: list[AutoresearchIterationRecord] = Field(default_factory=list)
+    decisions: list[AutoresearchDecisionRecord] = Field(default_factory=list)
+    best_methodology_draft: MethodologyDraftRecord | None = None
+    latest_run: RunRecord | None = None
+    proposed_next_variants: list[str] = Field(default_factory=list)
 
 
 class FreshPaperPipelineResponse(BaseModel):

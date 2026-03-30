@@ -32,6 +32,7 @@ Canonical planning and architecture:
 - `adr/README.md`: architecture decision records for the session/skill/template model
 - `adr/0001-session-skill-execution-model.md`: why sessions are the primary object and workflow families are execution templates
 - `research-pipeline-target.md`: the intended end-state product shape for Glasslab research workflows
+- `autoresearch-lane.md`: first bounded methodology-exploration loop for session-backed, registry-approved autoresearch campaigns
 - `research-assistant-infra-proposal.md`: concrete infra and control-surface changes to get closest to the research-assistant vision without making OpenClaw the workflow brain
 - `research-assistant-implementation-checklist.md`: concrete execution order for the deterministic-router, one-shot-action, session-memory, and `gpu-experiment` path
 - `research-assistant-ux-boundary.md`: where deterministic routing should replace model-driven orchestration so the product can actually feel like a usable research assistant
