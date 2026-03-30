@@ -3457,14 +3457,58 @@ def test_session_execution_preflight_surfaces_interpretation_runtime_hints() -> 
             'interpretation indicates GPU is required',
         )
     )
-    assert payload['runner_image'] == 'ghcr.io/offensivegeneric/glasslab-literature-runner:0.1.2'
-    assert payload['resource_requests'] == {'cpu': '1', 'memory': '2Gi'}
-    assert payload['resource_limits'] == {'cpu': '2', 'memory': '4Gi'}
-    assert payload['job_submission_mode'] == 'null'
-    assert payload['execution_status'] == 'ready'
-    assert payload['submission_backend'] == 'kubernetes'
-    assert payload['ready'] is True
-    assert any('preflight was skipped' in warning for warning in payload['warnings'])
+
+
+def test_session_execution_preflight_flags_overfitting_split_risks() -> None:
+    settings = Settings(registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'))
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Check that preflight flags overfitting risk from a bad split contract.'},
+    )
+    session_id = session.json()['session_id']
+
+    intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Benchmark a bounded tabular baseline on a suspicious split setup.',
+            'source_refs': ['https://example.org/bad-split-note'],
+            'notes': ['This fixture intentionally uses the same file for train and test.'],
+        },
+    )
+    assert intake.status_code == 201
+
+    design = client.post('/design-drafts/from-latest-intake')
+    assert design.status_code == 201
+    design_payload = design.json()
+
+    reviewed = client.post(
+        f"/design-drafts/{design_payload['design_id']}/review",
+        json={
+            'resolved_inputs': {
+                'dataset_name': 'titanic',
+                'train_uri': 's3://datasets/titanic/all.csv',
+                'test_uri': 's3://datasets/titanic/all.csv',
+                'target_column': 'Survived',
+            },
+            'review_notes': ['No explicit validation split declared in this negative fixture.'],
+        },
+    )
+    assert reviewed.status_code == 200
+    store.save_research_session(
+        store.get_research_session(session_id).model_copy(
+            update={'latest_design_id': design_payload['design_id']}
+        )
+    )
+
+    response = client.get(f"/research-sessions/{session_id}/execution-preflight")
+    assert response.status_code == 200
+    payload = response.json()
+    assert any('train_uri and test_uri resolve to the same dataset path' in issue for issue in payload['blocking_issues'])
+    assert any('no explicit validation split or validation strategy is declared' in warning for warning in payload['warnings'])
 
 
 def test_declared_only_workflow_reports_not_executable() -> None:

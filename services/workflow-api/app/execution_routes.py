@@ -34,20 +34,42 @@ def register_execution_routes(
     def enrich_preflight_with_interpretation(
         preflight: ExecutionPreflightResult,
         *,
+        design,
         session_id: str,
         intake_id: str,
         workflow_id: str,
         resource_profile: str,
     ) -> ExecutionPreflightResult:
+        warnings = list(preflight.warnings)
+        blocking_issues = list(preflight.blocking_issues)
+        declared_inputs = dict(getattr(design, 'declared_inputs', {}) or {})
+
+        train_uri = str(declared_inputs.get('train_uri', '')).strip()
+        test_uri = str(declared_inputs.get('test_uri', '')).strip()
+        validation_uri = str(declared_inputs.get('validation_uri', '')).strip()
+        validation_strategy = str(declared_inputs.get('validation_strategy', '')).strip()
+        validation_split = str(declared_inputs.get('validation_split', '')).strip()
+
+        if train_uri and test_uri and train_uri == test_uri:
+            blocking_issues.append('train_uri and test_uri resolve to the same dataset path; this risks direct overfitting')
+        if not validation_uri and not validation_strategy and not validation_split:
+            warnings.append(
+                'no explicit validation split or validation strategy is declared; overfitting checks may be weak even if a test split exists'
+            )
+        elif validation_split:
+            warnings.append(f'declared validation split: {validation_split}')
+        elif validation_strategy:
+            warnings.append(f'declared validation strategy: {validation_strategy}')
+        elif validation_uri:
+            warnings.append('declared dedicated validation dataset split is present')
+
         interpretation = store.get_latest_interpretation()
         if interpretation is None:
-            return preflight
+            return preflight.model_copy(update={'warnings': warnings, 'blocking_issues': blocking_issues})
         if interpretation.intake_id != intake_id:
-            return preflight
+            return preflight.model_copy(update={'warnings': warnings, 'blocking_issues': blocking_issues})
         if interpretation.session_id not in {None, session_id}:
-            return preflight
-
-        warnings = list(preflight.warnings)
+            return preflight.model_copy(update={'warnings': warnings, 'blocking_issues': blocking_issues})
         required_python_packages = [
             str(item) for item in preflight.runtime_requirements.get('required_python_packages', [])
         ]
@@ -83,7 +105,7 @@ def register_execution_routes(
             warnings.append('interpretation dataset hints: ' + ', '.join(interpretation.dataset_hints[:3]))
         if interpretation.evaluation_targets:
             warnings.append('interpretation evaluation targets: ' + ', '.join(interpretation.evaluation_targets[:3]))
-        return preflight.model_copy(update={'warnings': warnings})
+        return preflight.model_copy(update={'warnings': warnings, 'blocking_issues': blocking_issues})
 
     @app.get('/workflow-families', response_model=list[WorkflowFamilySummary])
     def list_workflow_families() -> list[WorkflowFamilySummary]:
@@ -143,6 +165,7 @@ def register_execution_routes(
         preflight = build_execution_preflight_result(workflow, settings)
         return enrich_preflight_with_interpretation(
             preflight,
+            design=design,
             session_id=session_id,
             intake_id=design.intake_id,
             workflow_id=design.workflow_id,
