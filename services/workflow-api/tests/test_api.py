@@ -415,6 +415,9 @@ def test_create_interpretation_uses_agent_when_enabled(monkeypatch) -> None:
     assert payload['research_gaps'] == ['Agent gap']
     assert payload['bounded_experiment_ideas'] == ['Agent idea']
     assert payload['status'] == 'ready_for_assessment'
+    assert payload['interpretation_source'] == 'agent-primary'
+    assert payload['interpretation_backend'] is None
+    assert payload['interpretation_warnings'] == []
 
 
 def test_create_interpretation_falls_back_when_agent_returns_none(monkeypatch) -> None:
@@ -443,6 +446,65 @@ def test_create_interpretation_falls_back_when_agent_returns_none(monkeypatch) -
     payload = create_interpretation.json()
     assert 'generic-tabular-benchmark' in payload['candidate_workflow_families']
     assert payload['normalized_summary'].startswith('Read this paper intake')
+    assert payload['interpretation_source'] == 'deterministic'
+    assert payload['interpretation_backend'] is None
+    assert payload['interpretation_warnings'] == []
+
+
+def test_create_interpretation_records_agent_backend_metadata(monkeypatch) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        interpretation_agent_enabled=True,
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    create_intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Read this paper intake and determine whether the approved Titanic benchmark path is a good fit.',
+            'source_refs': ['https://example.org/titanic-paper'],
+            'notes': ['The paper compares a baseline on Titanic.'],
+        },
+    )
+    assert create_intake.status_code == 201
+
+    def fake_call_interpretation_agent(intake, settings, registry, store):
+        return main_module.build_interpretation_record_from_agent_draft(
+            intake,
+            {
+                'source_type': intake.source_type,
+                'normalized_summary': 'agent-normalized summary',
+                'extracted_method_summary': 'agent-produced method summary',
+                'literature_state_summary': 'agent literature-state summary',
+                'candidate_workflow_families': ['generic-tabular-benchmark'],
+                'dataset_hints': ['titanic'],
+                'evaluation_targets': ['baseline comparison'],
+                'extracted_claims': ['Agent extracted claim'],
+                'research_gaps': ['Agent gap'],
+                'bounded_experiment_ideas': ['Agent idea'],
+                'unresolved_questions': [],
+            },
+            interpretation_source='agent-fallback',
+            interpretation_backend={
+                'provider': 'ollama',
+                'base_url': 'http://192.168.1.12:11434',
+                'model': 'qwen3:14b',
+                'timeout_seconds': 30.0,
+            },
+            interpretation_warnings=['used fallback interpretation backend'],
+        )
+
+    monkeypatch.setattr(main_module, 'call_interpretation_agent', fake_call_interpretation_agent)
+
+    create_interpretation = client.post('/interpretations/from-latest-intake')
+    assert create_interpretation.status_code == 201
+    payload = create_interpretation.json()
+    assert payload['interpretation_source'] == 'agent-fallback'
+    assert payload['interpretation_backend']['base_url'] == 'http://192.168.1.12:11434'
+    assert payload['interpretation_backend']['model'] == 'qwen3:14b'
+    assert payload['interpretation_warnings'] == ['used fallback interpretation backend']
 
 
 def test_create_interpretation_uses_stored_source_document_context(monkeypatch) -> None:

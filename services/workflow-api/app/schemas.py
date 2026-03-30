@@ -254,6 +254,9 @@ class InterpretationRecord(BaseModel):
     preferred_resource_profile: str | None = None
     gpu_required: bool = False
     mutation_axes: list[str] = Field(default_factory=list)
+    interpretation_source: str = 'deterministic'
+    interpretation_backend: dict[str, Any] | None = None
+    interpretation_warnings: list[str] = Field(default_factory=list)
     unresolved_questions: list[str] = Field(default_factory=list)
     submitted_by: str
     session_id: str | None = None

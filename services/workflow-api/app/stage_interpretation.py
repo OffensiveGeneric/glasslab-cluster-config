@@ -72,6 +72,10 @@ def validate_interpretation_agent_draft(
 def build_interpretation_record_from_agent_draft(
     intake: IntakeRecord,
     validated_draft: dict[str, Any],
+    *,
+    interpretation_source: str = 'agent-primary',
+    interpretation_backend: dict[str, Any] | None = None,
+    interpretation_warnings: list[str] | None = None,
 ) -> InterpretationRecord:
     now = datetime.now(timezone.utc)
     unresolved_questions = list(validated_draft["unresolved_questions"])
@@ -91,16 +95,19 @@ def build_interpretation_record_from_agent_draft(
         extracted_claims=validated_draft["extracted_claims"],
         research_gaps=validated_draft["research_gaps"],
         bounded_experiment_ideas=validated_draft["bounded_experiment_ideas"],
-        recommended_method_family=validated_draft["recommended_method_family"],
-        recommended_datasets=validated_draft["recommended_datasets"],
-        recommended_metrics=validated_draft["recommended_metrics"],
-        recommended_baselines=validated_draft["recommended_baselines"],
-        recommended_architectures=validated_draft["recommended_architectures"],
-        recommended_python_packages=validated_draft["recommended_python_packages"],
-        preferred_workflow_id=validated_draft["preferred_workflow_id"],
-        preferred_resource_profile=validated_draft["preferred_resource_profile"],
-        gpu_required=validated_draft["gpu_required"],
-        mutation_axes=validated_draft["mutation_axes"],
+        recommended_method_family=validated_draft.get("recommended_method_family"),
+        recommended_datasets=list(validated_draft.get("recommended_datasets", [])),
+        recommended_metrics=list(validated_draft.get("recommended_metrics", [])),
+        recommended_baselines=list(validated_draft.get("recommended_baselines", [])),
+        recommended_architectures=list(validated_draft.get("recommended_architectures", [])),
+        recommended_python_packages=list(validated_draft.get("recommended_python_packages", [])),
+        preferred_workflow_id=validated_draft.get("preferred_workflow_id"),
+        preferred_resource_profile=validated_draft.get("preferred_resource_profile"),
+        gpu_required=bool(validated_draft.get("gpu_required", False)),
+        mutation_axes=list(validated_draft.get("mutation_axes", [])),
+        interpretation_source=interpretation_source,
+        interpretation_backend=interpretation_backend,
+        interpretation_warnings=list(interpretation_warnings or []),
         unresolved_questions=unresolved_questions,
         submitted_by=intake.submitted_by,
         session_id=intake.session_id,
@@ -143,8 +150,22 @@ def call_interpretation_agent(
         draft = body.get("draft")
         if not isinstance(draft, dict):
             raise ValueError("interpretation agent response missing draft object")
+        backend = body.get("model_backend")
+        normalized_backend = backend if isinstance(backend, dict) else None
+        warnings = normalize_unique_strings([str(item) for item in body.get("warnings", [])])
+        interpretation_source = 'agent-primary'
+        if any('used fallback interpretation backend' in warning for warning in warnings):
+            interpretation_source = 'agent-fallback'
+        if any('all model backends failed' in warning for warning in warnings):
+            interpretation_source = 'agent-deterministic'
         validated_draft = validate_interpretation_agent_draft(draft, intake, registry)
-        return build_interpretation_record_from_agent_draft(intake, validated_draft)
+        return build_interpretation_record_from_agent_draft(
+            intake,
+            validated_draft,
+            interpretation_source=interpretation_source,
+            interpretation_backend=normalized_backend,
+            interpretation_warnings=warnings,
+        )
     except (urllib_error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
         LOGGER.warning("interpretation-agent fallback for intake %s: %s", intake.intake_id, exc)
         return None
