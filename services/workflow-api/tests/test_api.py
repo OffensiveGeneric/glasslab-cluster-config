@@ -2357,6 +2357,45 @@ def test_validate_document_identity_marks_title_mismatch() -> None:
     assert notes
 
 
+def test_build_intake_request_dedupes_manual_and_validation_notes() -> None:
+    queue = main_module.PaperIntakeQueueRecord(
+        queue_id='queue-1',
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        status='ready',
+        problem_statement='Investigate forged-art detection with computer vision.',
+        selected_tracks=['computer_vision_forgery'],
+        selected_queries=['forged art detection'],
+        candidates=[],
+        coverage_summary={},
+        submitted_by='operator',
+    )
+    candidate = main_module.PaperIntakeCandidateRecord(
+        paper_id='manual-paper-1',
+        title='Forgery Detection with Vision Transformers',
+        year=2026,
+        venue='manual',
+        priority='manual',
+        tracks=['computer_vision_forgery'],
+        bounded_job_fit=3,
+        replication_complexity=2,
+        official_page='https://arxiv.org/abs/2501.00001',
+        pdf_url='https://arxiv.org/pdf/2501.00001.pdf',
+        why_seed='Manually added by the operator.',
+        first_jobs=['Manually added by the operator.'],
+        tags=['manual'],
+    )
+
+    intake = main_module.build_intake_request_from_problem_candidate(
+        queue,
+        candidate,
+        extra_notes=['Manually added by the operator.', 'Fetched source did not match expected paper title: forgery'],
+    )
+
+    assert intake.notes.count('Manually added by the operator.') == 1
+    assert any('did not match expected paper title' in note for note in intake.notes)
+
+
 def test_extract_document_metadata_from_arxiv_abstract_page() -> None:
     excerpt = (
         '[2401.12345] Distributionally Robust Receive Combining '

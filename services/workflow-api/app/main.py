@@ -440,16 +440,24 @@ def build_intake_request_from_problem_candidate(
     document_refs: list[str] | None = None,
     extra_notes: list[str] | None = None,
 ) -> IntakeCreateRequest:
+    def append_unique_note(target: list[str], value: str | None) -> None:
+        if not value or value in target:
+            return
+        target.append(value)
+
     paper_ref = (
         next(iter(build_source_fetch_candidates(candidate.official_page, candidate.pdf_url)), None)
         or candidate.paper_id
     )
-    notes = [candidate.why_seed]
-    notes.extend(candidate.first_jobs[:2])
+    notes: list[str] = []
+    append_unique_note(notes, candidate.why_seed)
+    for note in candidate.first_jobs[:2]:
+        append_unique_note(notes, note)
     if queue.selected_tracks:
-        notes.append('Selected tracks: ' + ', '.join(queue.selected_tracks))
+        append_unique_note(notes, 'Selected tracks: ' + ', '.join(queue.selected_tracks))
     if extra_notes:
-        notes.extend(extra_notes)
+        for note in extra_notes:
+            append_unique_note(notes, note)
     return IntakeCreateRequest(
         raw_request=(
             'Investigate this research problem with a bounded literature-derived experiment: '
