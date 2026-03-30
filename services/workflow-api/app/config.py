@@ -71,6 +71,7 @@ class Settings(BaseSettings):
     external_literature_openalex_url: str = 'https://api.openalex.org/works'
     external_literature_crossref_url: str = 'https://api.crossref.org/works'
     external_literature_arxiv_url: str = 'https://export.arxiv.org/api/query'
+    external_literature_dblp_url: str = 'https://dblp.org/search/publ/api'
     external_literature_timeout_seconds: float = 20.0
     external_literature_mailto: str | None = None
 

@@ -120,7 +120,7 @@ def _openalex_abstract(item: dict[str, Any]) -> str | None:
 
 def _candidate_provider(candidate: ResearchProblemPaperCandidate) -> str:
     for provider in candidate.tracks:
-        if provider in {"openalex", "arxiv", "crossref"}:
+        if provider in {"openalex", "arxiv", "crossref", "dblp"}:
             return provider
     return "unknown"
 
@@ -405,6 +405,70 @@ def _arxiv_candidates(query: str, max_results: int, settings: Settings) -> list[
     return results
 
 
+def _dblp_candidates(query: str, max_results: int, settings: Settings) -> list[ResearchProblemPaperCandidate]:
+    params = urllib_parse.urlencode(
+        {
+            "q": query,
+            "h": str(max_results),
+            "format": "json",
+        }
+    )
+    payload = _request_json(f"{settings.external_literature_dblp_url}?{params}", settings=settings)
+    result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+    hits = result.get("hits") if isinstance(result.get("hits"), dict) else {}
+    hit_items = hits.get("hit")
+    if isinstance(hit_items, dict):
+        hit_iterable = [hit_items]
+    elif isinstance(hit_items, list):
+        hit_iterable = hit_items
+    else:
+        hit_iterable = []
+
+    results: list[ResearchProblemPaperCandidate] = []
+    for item in hit_iterable:
+        if not isinstance(item, dict):
+            continue
+        info = item.get("info") if isinstance(item.get("info"), dict) else {}
+        title = str(info.get("title") or "").strip()
+        if not title:
+            continue
+        try:
+            year = int(str(info.get("year") or "1900"))
+        except ValueError:
+            year = 1900
+        venue = str(info.get("venue") or info.get("type") or "DBLP").strip()
+        venue_id = str(info.get("key") or "").strip() or None
+        official_page = str(info.get("url") or "").strip() or None
+        ee_value = info.get("ee")
+        if isinstance(ee_value, list):
+            ee_candidates = [str(entry).strip() for entry in ee_value if str(entry).strip()]
+            ee_url = ee_candidates[0] if ee_candidates else None
+        else:
+            ee_url = str(ee_value or "").strip() or None
+        pdf_url = ee_url if ee_url and ee_url.lower().endswith(".pdf") else None
+        tags = _provider_tag(official_page or ee_url, venue)
+        tags.append("dblp")
+        candidate = ResearchProblemPaperCandidate(
+            paper_id=venue_id or official_page or ee_url or title,
+            title=title,
+            year=year,
+            venue=venue,
+            venue_id=venue_id,
+            priority="P2",
+            tracks=["external_literature", "dblp"],
+            bounded_job_fit=3,
+            replication_complexity=3,
+            official_page=official_page or ee_url,
+            pdf_url=pdf_url,
+            abstract_excerpt=None,
+            why_seed="Matched the external literature query through DBLP metadata.",
+            first_jobs=["review the landing page and determine whether it matches the current session problem"],
+            tags=list(dict.fromkeys(tags)),
+        )
+        results.append(candidate)
+    return results
+
+
 def search_external_literature(
     *,
     problem_statement: str,
@@ -427,6 +491,7 @@ def search_external_literature(
         ("openalex", _openalex_candidates),
         ("arxiv", _arxiv_candidates),
         ("crossref", _crossref_candidates),
+        ("dblp", _dblp_candidates),
     ]
     for provider_name, provider_fn in providers:
         try:
@@ -468,7 +533,7 @@ def search_external_literature(
                 provider
                 for candidate in selected_papers
                 for provider in candidate.tracks
-                if provider in {"openalex", "arxiv", "crossref"}
+                if provider in {"openalex", "arxiv", "crossref", "dblp"}
             }
         ),
     }

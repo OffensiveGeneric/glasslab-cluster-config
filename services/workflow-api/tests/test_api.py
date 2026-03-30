@@ -2029,6 +2029,42 @@ def test_external_literature_reranker_prefers_relevant_and_diverse_candidates() 
     assert {candidate.paper_id for candidate in selected} == {'paper-a', 'paper-c'}
 
 
+def test_dblp_candidates_parse_search_results(monkeypatch) -> None:
+    from app.config import Settings
+    from app.external_literature import _dblp_candidates
+
+    monkeypatch.setattr(
+        'app.external_literature._request_json',
+        lambda *args, **kwargs: {
+            'result': {
+                'hits': {
+                    'hit': [
+                        {
+                            'info': {
+                                'title': 'Forgery Detection with Vision Transformers',
+                                'year': '2024',
+                                'venue': 'ICCV Workshops',
+                                'key': 'conf/iccv/Forgery2024',
+                                'url': 'https://dblp.org/rec/conf/iccv/Forgery2024',
+                                'ee': 'https://example.org/forgery2024.pdf',
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    candidates = _dblp_candidates('forgery detection vision transformers', 5, Settings())
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.title == 'Forgery Detection with Vision Transformers'
+    assert candidate.tracks == ['external_literature', 'dblp']
+    assert candidate.pdf_url == 'https://example.org/forgery2024.pdf'
+    assert candidate.official_page == 'https://dblp.org/rec/conf/iccv/Forgery2024'
+
+
 def test_add_manual_paper_to_latest_session_queue() -> None:
     client = build_client()
 
