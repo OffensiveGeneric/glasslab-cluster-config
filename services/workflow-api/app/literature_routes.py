@@ -14,6 +14,7 @@ from .session_helpers import create_research_session_from_problem
 from .schemas import (
     FreshPaperPipelineResponse,
     IntakeRecord,
+    LiteratureDigestResponse,
     OperationRecord,
     PaperIntakeCandidateRecord,
     ManualPaperCandidateCreateRequest,
@@ -48,6 +49,7 @@ def register_literature_routes(
     build_fresh_paper_request_from_problem: Callable[[ResearchProblemPipelineRequest, ResearchProblemPaperCandidate, list[str]], Any],
     build_research_session_record: Callable[[ResearchSessionCreateRequest, Settings], ResearchSessionRecord],
     build_research_session_context: Callable[[ResearchSessionRecord, RunStore], ResearchSessionContextResponse],
+    build_research_session_literature_digest: Callable[[ResearchSessionRecord, RunStore], LiteratureDigestResponse],
     append_research_session_memory: Callable[..., ResearchSessionRecord],
     build_research_problem_request_from_session: Callable[[ResearchSessionRecord, Settings], ResearchProblemPipelineRequest],
     build_research_problem_record: Callable[..., ResearchProblemRecord],
@@ -310,6 +312,40 @@ def register_literature_routes(
         if session is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session not found')
         return build_research_session_context(session, store)
+
+    @app.get('/research-sessions/latest/source-documents', response_model=list[SourceDocumentRecord])
+    def list_latest_session_source_documents() -> list[SourceDocumentRecord]:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return list_session_source_documents(session.session_id)
+
+    @app.get('/research-sessions/{session_id}/source-documents', response_model=list[SourceDocumentRecord])
+    def list_session_source_documents(session_id: str) -> list[SourceDocumentRecord]:
+        session = store.get_research_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session not found')
+        records = [
+            record
+            for record in store.list_source_documents()
+            if record.session_id == session.session_id
+        ]
+        records.sort(key=lambda record: record.created_at, reverse=True)
+        return records
+
+    @app.get('/research-sessions/latest/literature-digest', response_model=LiteratureDigestResponse)
+    def get_latest_research_session_literature_digest() -> LiteratureDigestResponse:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return build_research_session_literature_digest(session, store)
+
+    @app.get('/research-sessions/{session_id}/literature-digest', response_model=LiteratureDigestResponse)
+    def get_research_session_literature_digest(session_id: str) -> LiteratureDigestResponse:
+        session = store.get_research_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session not found')
+        return build_research_session_literature_digest(session, store)
 
     @app.get('/research-sessions/latest/research-problem', response_model=ResearchProblemRecord)
     def get_latest_session_research_problem() -> ResearchProblemRecord:

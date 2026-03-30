@@ -541,6 +541,20 @@ class ResearchSessionContextResponse(BaseModel):
     run: RunRecord | None = None
 
 
+class LiteratureDigestResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    session_id: str
+    source_documents: list[SourceDocumentRecord] = Field(default_factory=list)
+    matched_document_count: int = 0
+    mismatched_document_count: int = 0
+    fetch_failed_document_count: int = 0
+    top_methods: list[str] = Field(default_factory=list)
+    top_datasets: list[str] = Field(default_factory=list)
+    notable_titles: list[str] = Field(default_factory=list)
+    summary_notes: list[str] = Field(default_factory=list)
+
+
 class ResearchSessionBootstrapStatusResponse(BaseModel):
     model_config = ConfigDict(extra='forbid')
 

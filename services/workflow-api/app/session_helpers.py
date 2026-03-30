@@ -11,6 +11,7 @@ from .persistence import RunStore
 from .schemas import (
     IntakeRecord,
     InterpretationRecord,
+    LiteratureDigestResponse,
     ResearchProblemPipelineRequest,
     ResearchSessionContextResponse,
     ResearchSessionCreateRequest,
@@ -139,6 +140,75 @@ def build_research_session_context(
         assessment=store.get_replicability_assessment(session.latest_assessment_id) if session.latest_assessment_id else None,
         design=store.get_design_draft(session.latest_design_id) if session.latest_design_id else None,
         run=store.get_run(session.latest_run_id) if session.latest_run_id else None,
+    )
+
+
+def build_research_session_literature_digest(
+    session: ResearchSessionRecord,
+    store: RunStore,
+) -> LiteratureDigestResponse:
+    source_documents = [
+        record
+        for record in store.list_source_documents()
+        if record.session_id == session.session_id
+    ]
+    source_documents.sort(key=lambda record: record.created_at, reverse=True)
+
+    matched_document_count = sum(1 for record in source_documents if record.validation_status == 'matched')
+    mismatched_document_count = sum(1 for record in source_documents if record.validation_status == 'mismatch')
+    fetch_failed_document_count = sum(1 for record in source_documents if record.status == 'fetch-failed')
+
+    def top_terms(values: list[str]) -> list[str]:
+        counts: dict[str, int] = {}
+        first_seen: dict[str, datetime] = {}
+        for record in source_documents:
+            for value in values_for_record(record, values):
+                counts[value] = counts.get(value, 0) + 1
+                first_seen.setdefault(value, record.created_at)
+        ranked = sorted(
+            counts,
+            key=lambda value: (-counts[value], -first_seen[value].timestamp(), value),
+        )
+        return ranked[:8]
+
+    def values_for_record(record: Any, attribute_names: list[str]) -> list[str]:
+        items: list[str] = []
+        for attribute_name in attribute_names:
+            items.extend(getattr(record, attribute_name))
+        return list(dict.fromkeys(item for item in items if item))
+
+    top_methods = top_terms(['method_hints'])
+    top_datasets = top_terms(['dataset_hints'])
+    notable_titles = list(
+        dict.fromkeys(
+            record.title
+            for record in source_documents
+            if record.validation_status == 'matched' and record.title
+        )
+    )[:8]
+
+    summary_notes: list[str] = []
+    if matched_document_count:
+        summary_notes.append(f'{matched_document_count} validated source document(s) are attached to this session.')
+    if mismatched_document_count:
+        summary_notes.append(f'{mismatched_document_count} fetched source document(s) did not match the expected paper title.')
+    if fetch_failed_document_count:
+        summary_notes.append(f'{fetch_failed_document_count} source fetch attempt(s) failed.')
+    if top_methods:
+        summary_notes.append(f'Method hints seen so far: {", ".join(top_methods[:4])}.')
+    if top_datasets:
+        summary_notes.append(f'Dataset hints seen so far: {", ".join(top_datasets[:4])}.')
+
+    return LiteratureDigestResponse(
+        session_id=session.session_id,
+        source_documents=source_documents,
+        matched_document_count=matched_document_count,
+        mismatched_document_count=mismatched_document_count,
+        fetch_failed_document_count=fetch_failed_document_count,
+        top_methods=top_methods,
+        top_datasets=top_datasets,
+        notable_titles=notable_titles,
+        summary_notes=summary_notes,
     )
 
 

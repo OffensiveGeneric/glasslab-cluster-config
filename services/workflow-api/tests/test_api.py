@@ -2510,6 +2510,112 @@ def test_research_session_tracks_controlled_literature_state(monkeypatch) -> Non
     assert payload['source_document']['document_id'] == 'session-doc-1'
 
 
+def test_research_session_literature_digest_includes_document_metadata(monkeypatch) -> None:
+    client = build_client()
+
+    class FakeResponse:
+        def __init__(self, payload: dict) -> None:
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            import json
+            return json.dumps(self.payload).encode('utf-8')
+
+    monkeypatch.setattr(
+        main_module.urllib_request,
+        'urlopen',
+        lambda request_obj, timeout: FakeResponse(
+            {
+                'request_id': 'session-digest-1',
+                'selected_tracks': [{'track_id': 'computer_vision_forgery', 'track': 'computer_vision_forgery'}],
+                'selected_queries': [{'queries': ['forged art computer vision detection']}],
+                'selected_papers': [
+                    {
+                        'paper_id': 'forgery_vit_2026',
+                        'title': 'Forgery Detection with Vision Transformers',
+                        'year': 2026,
+                        'venue': 'arXiv',
+                        'priority': 'P1',
+                        'tracks': ['computer_vision_forgery'],
+                        'bounded_job_fit': 4,
+                        'replication_complexity': 3,
+                        'official_page': 'https://arxiv.org/abs/2501.00001',
+                        'pdf_url': 'https://arxiv.org/pdf/2501.00001.pdf',
+                        'why_seed': 'vision-transformer baseline for art-forgery detection',
+                        'first_jobs': ['compare transformer and cnn baselines'],
+                        'tags': ['vision transformer', 'wikiart'],
+                    }
+                ],
+                'warnings': [],
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        main_module,
+        'ingest_source_document',
+        lambda source_url, submitted_by, settings, store, session_id=None, expected_title=None: main_module.SourceDocumentRecord(
+            document_id='session-doc-digest-1',
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            status='fetched',
+            source_url=source_url,
+            submitted_by=submitted_by,
+            storage_uri='file:///tmp/source-documents/session-doc-digest-1/source.pdf',
+            content_type='application/pdf',
+            size_bytes=4096,
+            sha256='digest123',
+            title='Forgery Detection with Vision Transformers',
+            text_excerpt='Abstract: We compare a vision transformer and cnn baseline on WikiArt forgery detection.',
+            authors=['Alice Example', 'Bob Example'],
+            abstract_excerpt='We compare a vision transformer and cnn baseline on WikiArt forgery detection.',
+            method_hints=['vision transformer', 'cnn'],
+            dataset_hints=['wikiart'],
+            expected_title=expected_title,
+            validation_status='matched',
+            validation_notes=['matched title terms: forgery, detection'],
+            session_id=session_id,
+        ),
+    )
+
+    session = client.post(
+        '/research-sessions',
+        json={
+            'goal_statement': 'Investigate forged-art detection with computer vision methods and open datasets.',
+            'priorities': ['computer vision', 'art forgery'],
+        },
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    assert client.post(f'/research-sessions/{session_id}/research-problems/from-session-goal').status_code == 201
+    queue = client.post(f'/research-sessions/{session_id}/paper-intake-queues/from-latest-problem')
+    assert queue.status_code == 201
+    assert client.post(f'/paper-intake-queues/{queue.json()["queue_id"]}/stage-next-intake').status_code == 201
+
+    documents = client.get('/research-sessions/latest/source-documents')
+    assert documents.status_code == 200
+    docs_payload = documents.json()
+    assert len(docs_payload) == 1
+    assert docs_payload[0]['storage_uri'].endswith('/source.pdf')
+    assert docs_payload[0]['authors'] == ['Alice Example', 'Bob Example']
+
+    digest = client.get('/research-sessions/latest/literature-digest')
+    assert digest.status_code == 200
+    digest_payload = digest.json()
+    assert digest_payload['session_id'] == session_id
+    assert digest_payload['matched_document_count'] == 1
+    assert digest_payload['top_methods'][:2] == ['cnn', 'vision transformer'] or digest_payload['top_methods'][:2] == ['vision transformer', 'cnn']
+    assert digest_payload['top_datasets'] == ['wikiart']
+    assert digest_payload['notable_titles'] == ['Forgery Detection with Vision Transformers']
+    assert any('validated source document' in note for note in digest_payload['summary_notes'])
+
+
 def test_research_session_skill_routes_drive_literature_flow(monkeypatch) -> None:
     client = build_client()
 
