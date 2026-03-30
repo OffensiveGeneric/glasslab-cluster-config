@@ -40,6 +40,22 @@ def validate_interpretation_agent_draft(
         "extracted_claims": normalize_unique_strings(list(draft.get("extracted_claims", [])))[:3],
         "research_gaps": normalize_unique_strings(list(draft.get("research_gaps", [])))[:4],
         "bounded_experiment_ideas": normalize_unique_strings(list(draft.get("bounded_experiment_ideas", [])))[:3],
+        "recommended_method_family": (
+            " ".join(str(draft.get("recommended_method_family", "")).split())[:120] or None
+        ),
+        "recommended_datasets": normalize_unique_strings(list(draft.get("recommended_datasets", [])))[:4],
+        "recommended_metrics": normalize_unique_strings(list(draft.get("recommended_metrics", [])))[:4],
+        "recommended_baselines": normalize_unique_strings(list(draft.get("recommended_baselines", [])))[:4],
+        "recommended_architectures": normalize_unique_strings(list(draft.get("recommended_architectures", [])))[:4],
+        "recommended_python_packages": normalize_unique_strings(list(draft.get("recommended_python_packages", [])))[:6],
+        "preferred_workflow_id": (
+            " ".join(str(draft.get("preferred_workflow_id", "")).split())[:120] or None
+        ),
+        "preferred_resource_profile": (
+            " ".join(str(draft.get("preferred_resource_profile", "")).split())[:120] or None
+        ),
+        "gpu_required": bool(draft.get("gpu_required", False)),
+        "mutation_axes": normalize_unique_strings(list(draft.get("mutation_axes", [])))[:6],
         "unresolved_questions": normalize_unique_strings(list(draft.get("unresolved_questions", []))),
     }
 
@@ -75,6 +91,16 @@ def build_interpretation_record_from_agent_draft(
         extracted_claims=validated_draft["extracted_claims"],
         research_gaps=validated_draft["research_gaps"],
         bounded_experiment_ideas=validated_draft["bounded_experiment_ideas"],
+        recommended_method_family=validated_draft["recommended_method_family"],
+        recommended_datasets=validated_draft["recommended_datasets"],
+        recommended_metrics=validated_draft["recommended_metrics"],
+        recommended_baselines=validated_draft["recommended_baselines"],
+        recommended_architectures=validated_draft["recommended_architectures"],
+        recommended_python_packages=validated_draft["recommended_python_packages"],
+        preferred_workflow_id=validated_draft["preferred_workflow_id"],
+        preferred_resource_profile=validated_draft["preferred_resource_profile"],
+        gpu_required=validated_draft["gpu_required"],
+        mutation_axes=validated_draft["mutation_axes"],
         unresolved_questions=unresolved_questions,
         submitted_by=intake.submitted_by,
         session_id=intake.session_id,

@@ -541,6 +541,9 @@ def test_create_interpretation_uses_stored_source_document_context(monkeypatch) 
     assert 'kaggle' in payload['dataset_hints']
     assert 'accuracy' in payload['evaluation_targets']
     assert 'kaggle-style engineering tasks' in payload['literature_state_summary'].lower()
+    assert payload['preferred_workflow_id'] == 'literature-to-experiment'
+    assert payload['preferred_resource_profile'] == 'cpu-medium'
+    assert payload['gpu_required'] is False
     joined_gaps = ' '.join(payload['research_gaps']).lower()
     assert 'concrete dataset' not in joined_gaps
     assert payload['bounded_experiment_ideas']
@@ -2538,6 +2541,22 @@ def test_extract_document_metadata_from_arxiv_abstract_page() -> None:
     assert 'baseline' in metadata['baseline_hints']
     assert 'accuracy' in metadata['metric_hints']
     assert 'kaggle' in metadata['dataset_hints']
+
+
+def test_extract_document_metadata_captures_python_library_hints() -> None:
+    excerpt = (
+        'We implement the method in PyTorch with torchvision and timm, '
+        'train a ViT backbone, and compare against a scikit-learn baseline.'
+    )
+    metadata = source_documents.extract_document_metadata(
+        source_url='https://example.org/paper.pdf',
+        guessed_title='paper',
+        text_excerpt=excerpt,
+    )
+    assert 'torch' in metadata['python_library_hints']
+    assert 'torchvision' in metadata['python_library_hints']
+    assert 'timm' in metadata['python_library_hints']
+    assert 'scikit-learn' in metadata['python_library_hints']
 
 
 def test_research_session_can_store_persistent_notes() -> None:

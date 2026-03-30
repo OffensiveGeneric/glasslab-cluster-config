@@ -115,6 +115,24 @@ DOMAIN_TASK_KEYWORDS = [
     'tabular classification',
     'benchmarking',
 ]
+PYTHON_LIBRARY_KEYWORDS = [
+    'torch',
+    'torchvision',
+    'pytorch lightning',
+    'lightning',
+    'transformers',
+    'diffusers',
+    'accelerate',
+    'timm',
+    'scikit-learn',
+    'sklearn',
+    'xgboost',
+    'catboost',
+    'tensorflow',
+    'keras',
+    'jax',
+    'flax',
+]
 
 
 def derive_arxiv_pdf_url(source_url: str | None) -> str | None:
@@ -261,6 +279,7 @@ def extract_document_metadata(
     baseline_hints = [keyword for keyword in BASELINE_KEYWORDS if keyword in haystack]
     metric_hints = [keyword for keyword in METRIC_KEYWORDS if keyword in haystack]
     domain_task_hints = [keyword for keyword in DOMAIN_TASK_KEYWORDS if keyword in haystack]
+    python_library_hints = [keyword for keyword in PYTHON_LIBRARY_KEYWORDS if keyword in haystack]
 
     return {
         'title': extracted_title,
@@ -273,6 +292,7 @@ def extract_document_metadata(
         'baseline_hints': list(dict.fromkeys(baseline_hints)),
         'metric_hints': list(dict.fromkeys(metric_hints)),
         'domain_task_hints': list(dict.fromkeys(domain_task_hints)),
+        'python_library_hints': list(dict.fromkeys(python_library_hints)),
     }
 
 
@@ -423,6 +443,7 @@ def ingest_source_document(
             baseline_hints=list(metadata.get('baseline_hints') or []),
             metric_hints=list(metadata.get('metric_hints') or []),
             domain_task_hints=list(metadata.get('domain_task_hints') or []),
+            python_library_hints=list(metadata.get('python_library_hints') or []),
             expected_title=expected_title,
             validation_status=validation_status,
             validation_notes=validation_notes,

@@ -12,7 +12,7 @@ from .config import Settings
 from .persistence import RunStore
 from .registry import WorkflowRegistry
 from .session_helpers import build_research_session_literature_digest
-from .source_documents import DATASET_KEYWORDS, METRIC_KEYWORDS
+from .source_documents import ARCHITECTURE_KEYWORDS, BASELINE_KEYWORDS, DATASET_KEYWORDS, LOSS_KEYWORDS, METRIC_KEYWORDS, PYTHON_LIBRARY_KEYWORDS
 from .schemas import IntakeCreateRequest, IntakeRecord, InterpretationRecord
 
 LOGGER = logging.getLogger(__name__)
@@ -374,6 +374,75 @@ def infer_bounded_experiment_ideas(
     return list(dict.fromkeys(ideas))[:3]
 
 
+def infer_recommended_method_family(candidate_workflows: list[str]) -> str | None:
+    if 'generic-tabular-benchmark' in candidate_workflows:
+        return 'tabular_benchmark'
+    if 'replication-lite' in candidate_workflows:
+        return 'lightweight_replication'
+    if 'literature-to-experiment' in candidate_workflows:
+        return 'literature_derived_experiment'
+    return None
+
+
+def infer_keyword_hints(intake: IntakeRecord, keywords: list[str]) -> list[str]:
+    lowered = ' '.join([intake.raw_request, intake.normalized_summary, *intake.notes, *intake.source_refs]).lower()
+    return list(dict.fromkeys(keyword for keyword in keywords if keyword in lowered))
+
+
+def infer_mutation_axes(
+    candidate_workflows: list[str],
+    dataset_hints: list[str],
+    evaluation_targets: list[str],
+    architectures: list[str],
+    baselines: list[str],
+    losses: list[str],
+) -> list[str]:
+    axes: list[str] = []
+    if architectures:
+        axes.append('architecture choice')
+    if baselines:
+        axes.append('baseline inclusion')
+    if losses:
+        axes.append('loss/objective variant')
+    if dataset_hints:
+        axes.append('dataset selection')
+    if evaluation_targets:
+        axes.append('metric emphasis')
+    if 'replication-lite' in candidate_workflows:
+        axes.append('resource profile')
+    return list(dict.fromkeys(axes))
+
+
+def infer_gpu_required(
+    recommended_architectures: list[str],
+    python_packages: list[str],
+    candidate_workflows: list[str],
+) -> bool:
+    if 'gpu-experiment' in candidate_workflows:
+        return True
+    gpu_packages = {'torch', 'torchvision', 'pytorch lightning', 'lightning', 'diffusers', 'accelerate', 'timm', 'tensorflow', 'jax', 'flax'}
+    if any(package in gpu_packages for package in python_packages):
+        return True
+    gpu_architectures = {'vision transformer', 'transformer', 'cnn', 'convolutional neural network', 'unet', 'u-net', 'efficientnet', 'clip', 'gan', 'diffusion'}
+    return any(item in gpu_architectures for item in recommended_architectures)
+
+
+def infer_preferred_execution_surface(
+    candidate_workflows: list[str],
+    dataset_hints: list[str],
+    gpu_required: bool,
+) -> tuple[str | None, str | None]:
+    if gpu_required:
+        return 'gpu-experiment', 'gpu-small'
+    if 'generic-tabular-benchmark' in candidate_workflows or 'titanic' in dataset_hints or 'tabular dataset' in dataset_hints:
+        return 'generic-tabular-benchmark', 'cpu-small'
+    if 'literature-to-experiment' in candidate_workflows:
+        return 'literature-to-experiment', 'cpu-medium'
+    if 'replication-lite' in candidate_workflows:
+        return 'replication-lite', 'cpu-medium'
+    return None, None
+
+
 def build_document_context(intake: IntakeRecord, store: RunStore) -> str:
     parts: list[str] = []
     for document_id in intake.document_refs:
@@ -459,6 +528,25 @@ def build_interpretation_record(intake: IntakeRecord, store: RunStore | None = N
     literature_state_summary = infer_literature_state_summary(enriched_intake)
     research_gaps = infer_research_gaps(enriched_intake, dataset_hints, evaluation_targets)
     bounded_experiment_ideas = infer_bounded_experiment_ideas(enriched_intake, candidate_workflows, dataset_hints)
+    recommended_method_family = infer_recommended_method_family(candidate_workflows)
+    recommended_baselines = infer_keyword_hints(enriched_intake, BASELINE_KEYWORDS)
+    recommended_architectures = infer_keyword_hints(enriched_intake, ARCHITECTURE_KEYWORDS)
+    recommended_losses = infer_keyword_hints(enriched_intake, LOSS_KEYWORDS)
+    recommended_python_packages = infer_keyword_hints(enriched_intake, PYTHON_LIBRARY_KEYWORDS)
+    gpu_required = infer_gpu_required(recommended_architectures, recommended_python_packages, candidate_workflows)
+    preferred_workflow_id, preferred_resource_profile = infer_preferred_execution_surface(
+        candidate_workflows,
+        dataset_hints,
+        gpu_required,
+    )
+    mutation_axes = infer_mutation_axes(
+        candidate_workflows,
+        dataset_hints,
+        evaluation_targets,
+        recommended_architectures,
+        recommended_baselines,
+        recommended_losses,
+    )
     unresolved_questions = infer_unresolved_questions(intake, candidate_workflows, dataset_hints, evaluation_targets)
     return InterpretationRecord(
         interpretation_id=uuid4().hex,
@@ -480,6 +568,16 @@ def build_interpretation_record(intake: IntakeRecord, store: RunStore | None = N
         extracted_claims=extracted_claims,
         research_gaps=research_gaps,
         bounded_experiment_ideas=bounded_experiment_ideas,
+        recommended_method_family=recommended_method_family,
+        recommended_datasets=dataset_hints,
+        recommended_metrics=evaluation_targets,
+        recommended_baselines=recommended_baselines,
+        recommended_architectures=recommended_architectures,
+        recommended_python_packages=recommended_python_packages,
+        preferred_workflow_id=preferred_workflow_id,
+        preferred_resource_profile=preferred_resource_profile,
+        gpu_required=gpu_required,
+        mutation_axes=mutation_axes,
         unresolved_questions=unresolved_questions,
         submitted_by=intake.submitted_by,
         session_id=intake.session_id,

@@ -362,11 +362,41 @@ def enrich_intake_with_interpretation_context(
         extra_notes.append('Literature state: ' + interpretation.literature_state_summary)
     if interpretation.bounded_experiment_ideas:
         extra_notes.append('Bounded experiment ideas: ' + '; '.join(interpretation.bounded_experiment_ideas[:2]))
+    handoff_parts: list[str] = []
+    if interpretation.recommended_method_family:
+        handoff_parts.append(f'method_family={interpretation.recommended_method_family}')
+    if interpretation.recommended_datasets:
+        handoff_parts.append(f"datasets={', '.join(interpretation.recommended_datasets[:3])}")
+    if interpretation.recommended_metrics:
+        handoff_parts.append(f"metrics={', '.join(interpretation.recommended_metrics[:3])}")
+    if interpretation.recommended_baselines:
+        handoff_parts.append(f"baselines={', '.join(interpretation.recommended_baselines[:3])}")
+    if interpretation.recommended_architectures:
+        handoff_parts.append(f"architectures={', '.join(interpretation.recommended_architectures[:3])}")
+    if interpretation.recommended_python_packages:
+        handoff_parts.append(f"python_packages={', '.join(interpretation.recommended_python_packages[:4])}")
+    if interpretation.preferred_workflow_id:
+        handoff_parts.append(f'preferred_workflow={interpretation.preferred_workflow_id}')
+    if interpretation.preferred_resource_profile:
+        handoff_parts.append(f'resource_profile={interpretation.preferred_resource_profile}')
+    if interpretation.gpu_required:
+        handoff_parts.append('gpu_required=true')
+    if interpretation.mutation_axes:
+        handoff_parts.append(f"mutation_axes={', '.join(interpretation.mutation_axes[:4])}")
+    if handoff_parts:
+        extra_notes.append('Methodology handoff: ' + '; '.join(handoff_parts))
     if interpretation.research_gaps:
         extra_notes.append('Research gaps: ' + '; '.join(interpretation.research_gaps[:2]))
     return intake.model_copy(
         update={
             'notes': normalize_unique_strings(extra_notes),
+            'workflow_family_candidates': normalize_unique_strings(
+                [
+                    *intake.workflow_family_candidates,
+                    *interpretation.candidate_workflow_families,
+                    *( [interpretation.preferred_workflow_id] if interpretation.preferred_workflow_id else [] ),
+                ]
+            ),
             'updated_at': datetime.now(timezone.utc),
         }
     )
