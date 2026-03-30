@@ -48,6 +48,15 @@ def register_autoresearch_routes(
     create_run_record: Callable[..., RunRecord],
     record_operation: Callable[..., OperationRecord],
 ) -> None:
+    def get_required_session_campaign(session_id: str) -> AutoresearchCampaignRecord:
+        session = store.get_research_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session not found')
+        campaign = store.get_autoresearch_campaign(session.latest_autoresearch_campaign_id or '')
+        if campaign is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session has no autoresearch campaign yet')
+        return campaign
+
     @app.post('/autoresearch/campaigns', response_model=AutoresearchCampaignRecord, status_code=status.HTTP_201_CREATED)
     def create_autoresearch_campaign(request: AutoresearchCampaignCreateRequest) -> AutoresearchCampaignRecord:
         campaign, _seed = build_campaign_and_seed(
@@ -323,3 +332,105 @@ def register_autoresearch_routes(
     def get_autoresearch_campaign_summary(campaign_id: str) -> AutoresearchCampaignSummaryResponse:
         campaign = get_required_campaign(store, campaign_id)
         return summarize_campaign(store, campaign)
+
+    @app.post(
+        '/research-sessions/{session_id}/transitions/start-autoresearch-campaign',
+        response_model=AutoresearchCampaignRecord,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def transition_start_autoresearch_campaign(session_id: str) -> AutoresearchCampaignRecord:
+        return create_autoresearch_campaign(AutoresearchCampaignCreateRequest(session_id=session_id))
+
+    @app.post(
+        '/research-sessions/latest/transitions/start-autoresearch-campaign',
+        response_model=AutoresearchCampaignRecord,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def transition_start_latest_autoresearch_campaign() -> AutoresearchCampaignRecord:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return transition_start_autoresearch_campaign(session.session_id)
+
+    @app.post(
+        '/research-sessions/{session_id}/transitions/draft-methodologies',
+        response_model=AutoresearchDraftMethodologiesResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def transition_draft_session_methodologies(session_id: str) -> AutoresearchDraftMethodologiesResponse:
+        session = store.get_research_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session not found')
+        campaign = store.get_autoresearch_campaign(session.latest_autoresearch_campaign_id or '')
+        if campaign is None:
+            campaign = transition_start_autoresearch_campaign(session_id)
+        return campaign_draft_initial_methodologies(campaign.campaign_id)
+
+    @app.post(
+        '/research-sessions/latest/transitions/draft-methodologies',
+        response_model=AutoresearchDraftMethodologiesResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def transition_draft_latest_session_methodologies() -> AutoresearchDraftMethodologiesResponse:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return transition_draft_session_methodologies(session.session_id)
+
+    @app.post(
+        '/research-sessions/{session_id}/transitions/launch-autoresearch-iteration',
+        response_model=AutoresearchLaunchIterationResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def transition_launch_session_autoresearch_iteration(session_id: str) -> AutoresearchLaunchIterationResponse:
+        campaign = get_required_session_campaign(session_id)
+        return campaign_launch_next_iteration(campaign.campaign_id)
+
+    @app.post(
+        '/research-sessions/latest/transitions/launch-autoresearch-iteration',
+        response_model=AutoresearchLaunchIterationResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def transition_launch_latest_session_autoresearch_iteration() -> AutoresearchLaunchIterationResponse:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return transition_launch_session_autoresearch_iteration(session.session_id)
+
+    @app.post(
+        '/research-sessions/{session_id}/transitions/decide-autoresearch-latest',
+        response_model=AutoresearchDecisionResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def transition_decide_session_autoresearch_latest(session_id: str) -> AutoresearchDecisionResponse:
+        campaign = get_required_session_campaign(session_id)
+        return decide_latest_autoresearch_iteration(campaign.campaign_id)
+
+    @app.post(
+        '/research-sessions/latest/transitions/decide-autoresearch-latest',
+        response_model=AutoresearchDecisionResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def transition_decide_latest_session_autoresearch_latest() -> AutoresearchDecisionResponse:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return transition_decide_session_autoresearch_latest(session.session_id)
+
+    @app.get(
+        '/research-sessions/{session_id}/autoresearch-summary',
+        response_model=AutoresearchCampaignSummaryResponse,
+    )
+    def get_session_autoresearch_summary(session_id: str) -> AutoresearchCampaignSummaryResponse:
+        campaign = get_required_session_campaign(session_id)
+        return get_autoresearch_campaign_summary(campaign.campaign_id)
+
+    @app.get(
+        '/research-sessions/latest/autoresearch-summary',
+        response_model=AutoresearchCampaignSummaryResponse,
+    )
+    def get_latest_session_autoresearch_summary() -> AutoresearchCampaignSummaryResponse:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return get_session_autoresearch_summary(session.session_id)

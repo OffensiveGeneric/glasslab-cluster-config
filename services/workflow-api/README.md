@@ -161,6 +161,15 @@ Autoresearch endpoints:
 - `POST /autoresearch/campaigns/{campaign_id}/decide-latest`
 - `GET /autoresearch/campaigns/{campaign_id}/summary`
 
+Session-scoped autoresearch transitions:
+
+- `POST /research-sessions/{session_id}/transitions/start-autoresearch-campaign`
+- `POST /research-sessions/{session_id}/transitions/draft-methodologies`
+- `POST /research-sessions/{session_id}/transitions/launch-autoresearch-iteration`
+- `POST /research-sessions/{session_id}/transitions/decide-autoresearch-latest`
+- `GET /research-sessions/{session_id}/autoresearch-summary`
+- matching `latest` aliases under `/research-sessions/latest/...`
+
 The first pass is intentionally narrow:
 
 - campaign creation is design-backed and session-owned

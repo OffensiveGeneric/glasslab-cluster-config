@@ -40,6 +40,8 @@ def _find_latest_design_for_campaign(
     session = get_required_research_session(store, session_id)
     design = store.get_design_draft(session.latest_design_id or '')
     if design is None:
+        design = store.get_latest_design_draft()
+    if design is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session has no design draft yet')
     return design
 
