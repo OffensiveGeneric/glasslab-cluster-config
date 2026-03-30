@@ -755,7 +755,7 @@ def register_literature_routes(
 
     @app.post('/research-sessions/{session_id}/skills/paper-intake', response_model=IntakeRecord, status_code=status.HTTP_201_CREATED)
     def apply_session_paper_intake_skill(session_id: str) -> IntakeRecord:
-        session = store.get_research_session(session_id)
+        session = store.get_latest_research_session() if session_id == 'latest' else store.get_research_session(session_id)
         if session is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session not found')
         queue_id = session.latest_queue_id or ''
@@ -776,6 +776,22 @@ def register_literature_routes(
     @app.post('/research-sessions/latest/skills/paper-intake', response_model=IntakeRecord, status_code=status.HTTP_201_CREATED)
     def apply_latest_session_paper_intake_skill() -> IntakeRecord:
         return stage_next_intake_from_latest_session_queue()
+
+    @app.post(
+        '/research-sessions/{session_id}/transitions/promote-paper-to-intake',
+        response_model=IntakeRecord,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def transition_promote_paper_to_intake(session_id: str) -> IntakeRecord:
+        return apply_session_paper_intake_skill(session_id)
+
+    @app.post(
+        '/research-sessions/latest/transitions/promote-paper-to-intake',
+        response_model=IntakeRecord,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def transition_promote_latest_paper_to_intake() -> IntakeRecord:
+        return apply_latest_session_paper_intake_skill()
 
     @app.post('/research-sessions/{session_id}/paper-intake-queue/manual-paper', response_model=PaperIntakeQueueRecord, status_code=status.HTTP_201_CREATED)
     def add_manual_paper_to_session_queue(session_id: str, request: ManualPaperCandidateCreateRequest) -> PaperIntakeQueueRecord:

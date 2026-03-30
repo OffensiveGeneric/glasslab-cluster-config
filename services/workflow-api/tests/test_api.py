@@ -3150,6 +3150,98 @@ def test_operation_records_capture_literature_harvest_and_paper_intake(monkeypat
     assert latest.json()['intake_id'] == intake.json()['intake_id']
 
 
+def test_research_session_transition_routes_promote_intake_and_create_interpretation(monkeypatch) -> None:
+    client = build_client()
+
+    class FakeResponse:
+        def __init__(self, payload: dict) -> None:
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            import json
+            return json.dumps(self.payload).encode('utf-8')
+
+    monkeypatch.setattr(
+        main_module.urllib_request,
+        'urlopen',
+        lambda request_obj, timeout: FakeResponse(
+            {
+                'request_id': 'session-transition-queue-1',
+                'selected_tracks': [{'track_id': 'agent_evaluation', 'track': 'agent_evaluation'}],
+                'selected_queries': [{'queries': ['bounded literature harvest']}],
+                'selected_papers': [
+                    {
+                        'paper_id': 'mle_bench_arxiv_2024',
+                        'title': 'MLE-bench: Evaluating Machine Learning Agents on Machine Learning Engineering',
+                        'year': 2024,
+                        'venue': 'arXiv',
+                        'priority': 'P1',
+                        'tracks': ['agent_evaluation'],
+                        'bounded_job_fit': 4,
+                        'replication_complexity': 4,
+                        'official_page': 'https://arxiv.org/abs/2410.07095',
+                        'pdf_url': None,
+                        'why_seed': 'benchmark for bounded ML engineering work',
+                        'first_jobs': ['reduce the benchmark into a smaller internal harness'],
+                        'tags': ['agents'],
+                    }
+                ],
+                'warnings': [],
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        main_module,
+        'ingest_source_document',
+        lambda source_url, submitted_by, settings, store, session_id=None, expected_title=None: main_module.SourceDocumentRecord(
+            document_id='session-transition-doc-1',
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            status='fetched',
+            source_url=source_url,
+            submitted_by=submitted_by,
+            storage_uri='file:///tmp/source-documents/session-transition-doc-1/source.html',
+            content_type='text/html',
+            size_bytes=42,
+            sha256='ghi789',
+            title='source.html',
+            text_excerpt='Session transition route document excerpt.',
+            session_id=session_id,
+        ),
+    )
+
+    session = client.post('/research-sessions', json={'goal_statement': 'Explore bounded ML engineering benchmark literature.'})
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    assert client.post(f'/research-sessions/{session_id}/skills/research-problem').status_code == 201
+    assert client.post(f'/research-sessions/{session_id}/skills/literature-harvest').status_code == 201
+
+    intake = client.post(f'/research-sessions/{session_id}/transitions/promote-paper-to-intake')
+    assert intake.status_code == 201
+    intake_payload = intake.json()
+
+    interpretation = client.post(f'/research-sessions/{session_id}/transitions/create-interpretation')
+    assert interpretation.status_code == 201
+    interpretation_payload = interpretation.json()
+
+    latest_interpretation = client.post('/research-sessions/latest/transitions/create-interpretation')
+    assert latest_interpretation.status_code == 201
+
+    context = client.get(f'/research-sessions/{session_id}/context')
+    assert context.status_code == 200
+    context_payload = context.json()
+    assert context_payload['session']['latest_intake_id'] == intake_payload['intake_id']
+    assert context_payload['session']['latest_interpretation_id'] == latest_interpretation.json()['interpretation_id']
+    assert interpretation_payload['session_id'] == session_id
+
+
 def test_resolve_intake_agent_base_url_handles_normalize_endpoint() -> None:
     settings = Settings(
         registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),

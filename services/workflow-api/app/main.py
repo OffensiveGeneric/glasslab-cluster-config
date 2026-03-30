@@ -994,6 +994,11 @@ def create_app(
 
     @app.post('/research-sessions/{session_id}/skills/interpretation', response_model=InterpretationRecord, status_code=status.HTTP_201_CREATED)
     def apply_session_interpretation_skill(session_id: str) -> InterpretationRecord:
+        if session_id == 'latest':
+            session = store.get_latest_research_session()
+            if session is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+            session_id = session.session_id
         intake = get_required_session_latest_intake(store, session_id)
         return create_interpretation_for_intake(intake)
 
@@ -1003,6 +1008,22 @@ def create_app(
         if session is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
         return apply_session_interpretation_skill(session.session_id)
+
+    @app.post(
+        '/research-sessions/{session_id}/transitions/create-interpretation',
+        response_model=InterpretationRecord,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def transition_create_interpretation(session_id: str) -> InterpretationRecord:
+        return apply_session_interpretation_skill(session_id)
+
+    @app.post(
+        '/research-sessions/latest/transitions/create-interpretation',
+        response_model=InterpretationRecord,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def transition_create_latest_interpretation() -> InterpretationRecord:
+        return apply_latest_session_interpretation_skill()
 
     @app.get('/interpretations/latest', response_model=InterpretationRecord)
     def get_latest_interpretation() -> InterpretationRecord:
