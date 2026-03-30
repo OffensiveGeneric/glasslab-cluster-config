@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import re
 from typing import Any
 from urllib import error as urllib_error
 from urllib import request as urllib_request
@@ -555,19 +556,116 @@ def build_coding_notebook_refinement_payload(
     settings: Settings,
 ) -> dict[str, Any]:
     return {
-        'request_id': methodology.methodology_draft_id,
         'model': settings.coding_notebook_model,
-        'campaign': campaign.model_dump(mode='json'),
-        'methodology_draft': methodology.model_dump(mode='json'),
-        'workflow': workflow.model_dump(mode='json') if workflow is not None else None,
-        'notebook': notebook,
-        'instructions': [
-            'Refine this Glasslab notebook without changing its bounded research objective.',
-            'Do not introduce arbitrary execution manifests or unrestricted shell/code mutation.',
-            'Keep the notebook reviewable and tied to the approved workflow template.',
-            'Prefer clarifying cells for dataset loading, package requirements, metrics, and experiment checks.',
+        'stream': False,
+        'format': 'json',
+        'messages': [
+            {
+                'role': 'system',
+                'content': (
+                    'You refine Glasslab Jupyter notebooks for bounded, reviewable methodology validation. '
+                    'Do not change the research objective, do not introduce unrestricted shell/code mutation, '
+                    'and do not invent execution manifests. '
+                    'Return only valid JSON with top-level keys "notebook" and optional "warnings".'
+                ),
+            },
+            {
+                'role': 'user',
+                'content': json.dumps(
+                    {
+                        'request_id': methodology.methodology_draft_id,
+                        'campaign': campaign.model_dump(mode='json'),
+                        'methodology_draft': methodology.model_dump(mode='json'),
+                        'workflow': workflow.model_dump(mode='json') if workflow is not None else None,
+                        'notebook': notebook,
+                        'instructions': [
+                            'Refine this Glasslab notebook without changing its bounded research objective.',
+                            'Keep the notebook reviewable and tied to the approved workflow template.',
+                            'Prefer clarifying cells for dataset loading, package requirements, metrics, experiment checks, and result interpretation.',
+                            'Only mention Python packages that are already required by or clearly compatible with the workflow runtime requirements.',
+                            'Preserve nbformat metadata and return the full notebook object.',
+                        ],
+                    },
+                    indent=2,
+                ),
+            },
         ],
     }
+
+
+def _extract_json_object(text: str) -> dict[str, Any]:
+    text = text.strip()
+    if not text:
+        raise ValueError('coding notebook model returned empty content')
+    try:
+        payload = json.loads(text)
+        if isinstance(payload, dict):
+            return payload
+    except json.JSONDecodeError:
+        pass
+    match = re.search(r'\{.*\}', text, re.DOTALL)
+    if not match:
+        raise ValueError('coding notebook model response did not contain a JSON object')
+    payload = json.loads(match.group(0))
+    if not isinstance(payload, dict):
+        raise ValueError('coding notebook model response JSON was not an object')
+    return payload
+
+
+def _validate_notebook_payload(notebook: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(notebook, dict):
+        raise ValueError('coding notebook model response missing notebook object')
+    if not isinstance(notebook.get('cells'), list):
+        raise ValueError('refined notebook is missing cells list')
+    if notebook.get('nbformat') != 4:
+        notebook['nbformat'] = 4
+    notebook.setdefault('nbformat_minor', 5)
+    metadata = notebook.get('metadata')
+    if not isinstance(metadata, dict):
+        notebook['metadata'] = {}
+    return notebook
+
+
+def _extract_imported_python_packages(notebook: dict[str, Any]) -> list[str]:
+    packages: list[str] = []
+    for cell in notebook.get('cells', []):
+        if not isinstance(cell, dict) or cell.get('cell_type') != 'code':
+            continue
+        source = ''.join(cell.get('source', []))
+        for raw_line in source.splitlines():
+            line = raw_line.strip()
+            if line.startswith('import '):
+                targets = line.removeprefix('import ').split(',')
+                for target in targets:
+                    package = target.strip().split(' as ')[0].split('.')[0].strip()
+                    if package:
+                        packages.append(package)
+            elif line.startswith('from '):
+                package = line.removeprefix('from ').split(' import ')[0].split('.')[0].strip()
+                if package:
+                    packages.append(package)
+    return _dedupe(packages)
+
+
+def _validate_notebook_runtime_contract(
+    notebook: dict[str, Any],
+    workflow: WorkflowRegistryEntry | None,
+) -> list[str]:
+    if workflow is None:
+        return []
+    runtime_requirements = workflow.runtime_requirements or {}
+    allowed_packages = _dedupe([str(item) for item in runtime_requirements.get('required_python_packages', [])])
+    if not allowed_packages:
+        return []
+    imported_packages = _extract_imported_python_packages(notebook)
+    extras = [package for package in imported_packages if package not in allowed_packages and package not in {'json', 'pathlib', 'pprint'}]
+    if not extras:
+        return []
+    return [
+        'refined notebook imports packages outside the approved workflow runtime: '
+        + ', '.join(extras)
+        + '; review before execution'
+    ]
 
 
 def call_coding_notebook_agent(
@@ -590,10 +688,18 @@ def call_coding_notebook_agent(
     try:
         with urllib_request.urlopen(request_obj, timeout=settings.coding_notebook_agent_timeout_seconds) as response:
             body = json.loads(response.read().decode('utf-8'))
-        refined = body.get('notebook')
-        if not isinstance(refined, dict):
-            raise ValueError('coding notebook agent response missing notebook object')
-        return refined, []
+        content = (
+            body.get('message', {}).get('content')
+            if isinstance(body.get('message'), dict)
+            else None
+        )
+        if not isinstance(content, str):
+            raise ValueError('coding notebook model response missing message.content')
+        parsed = _extract_json_object(content)
+        refined = _validate_notebook_payload(parsed.get('notebook'))
+        warnings = [str(item) for item in parsed.get('warnings', []) if isinstance(item, str)]
+        warnings.extend(_validate_notebook_runtime_contract(refined, workflow))
+        return refined, warnings
     except (urllib_error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
         return None, [f'coding notebook agent fallback: {exc}']
 

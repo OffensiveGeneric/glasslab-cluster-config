@@ -10,6 +10,7 @@ for module_name in list(sys.modules):
         del sys.modules[module_name]
 
 from app.config import Settings
+import app.autoresearch as autoresearch_module
 import app.main as main_module
 import app.source_documents as source_documents
 from app.main import create_app
@@ -3779,3 +3780,111 @@ def test_autoresearch_notebook_refinement_falls_back_cleanly(tmp_path) -> None:
     assert payload['refinement_source'] == 'deterministic'
     assert payload['warnings']
     assert payload['storage_uri'].endswith('/analysis_notebook.ipynb')
+
+
+def test_autoresearch_notebook_refinement_uses_coding_model_response(tmp_path, monkeypatch) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        artifacts_mount_path=str(tmp_path),
+        coding_notebook_agent_enabled=True,
+        coding_notebook_agent_url='http://example.invalid/api/chat',
+        coding_notebook_model='qwen2.5-coder:14b',
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Refine a bounded autoresearch notebook with a coding model.'},
+    )
+    session_id = session.json()['session_id']
+
+    client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Benchmark one bounded Titanic variant and capture a notebook with explicit package/runtime checks.',
+            'source_refs': ['https://example.org/titanic-coder-note'],
+            'notes': ['Notebook refinement should stay inside the approved template contract.'],
+        },
+    )
+    design = client.post('/design-drafts/from-latest-intake').json()
+    client.post(
+        f"/design-drafts/{design['design_id']}/review",
+        json={
+            'resolved_inputs': {
+                'dataset_name': 'titanic',
+                'train_uri': 's3://datasets/titanic/train.csv',
+                'test_uri': 's3://datasets/titanic/test.csv',
+                'target_column': 'Survived',
+            },
+            'review_notes': ['Notebook refinement coding-model test review.'],
+        },
+    )
+    client.post(f'/research-sessions/{session_id}/transitions/start-autoresearch-campaign')
+    client.post(f'/research-sessions/{session_id}/transitions/draft-methodologies')
+
+    class FakeResponse:
+        def __init__(self, payload: dict) -> None:
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            return json.dumps(self.payload).encode('utf-8')
+
+    def fake_urlopen(request_obj, timeout):
+        request_payload = json.loads(request_obj.data.decode('utf-8'))
+        assert request_payload['model'] == 'qwen2.5-coder:14b'
+        response_notebook = {
+            'cells': [
+                {
+                    'cell_type': 'markdown',
+                    'metadata': {},
+                    'source': ['# Refined notebook\n'],
+                },
+                {
+                    'cell_type': 'code',
+                    'execution_count': None,
+                    'metadata': {},
+                    'outputs': [],
+                    'source': ['import torch\n', 'import torchvision\n', "print('ok')\n"],
+                },
+            ],
+            'metadata': {
+                'glasslab': {
+                    'kind': 'autoresearch-notebook-draft',
+                }
+            },
+            'nbformat': 4,
+            'nbformat_minor': 5,
+        }
+        return FakeResponse(
+            {
+                'message': {
+                    'content': json.dumps(
+                        {
+                            'notebook': response_notebook,
+                            'warnings': ['coding model refined notebook structure'],
+                        }
+                    )
+                }
+            }
+        )
+
+    monkeypatch.setattr(autoresearch_module.urllib_request, 'urlopen', fake_urlopen)
+
+    refined = client.post(f'/research-sessions/{session_id}/transitions/refine-autoresearch-notebook')
+    assert refined.status_code == 201
+    payload = refined.json()
+    assert payload['refinement_source'] == 'coding-model'
+    assert 'coding model refined notebook structure' in payload['warnings']
+    assert payload['storage_uri'].endswith('/analysis_notebook_refined.ipynb')
+    assert payload['notebook']['cells'][1]['source'][0] == 'import torch\n'
+
+    path = Path(payload['storage_uri'].removeprefix('file://'))
+    assert path.exists()
