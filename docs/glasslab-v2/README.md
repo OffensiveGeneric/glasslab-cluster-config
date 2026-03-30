@@ -37,6 +37,7 @@ Canonical planning and architecture:
 - `research-assistant-ux-boundary.md`: where deterministic routing should replace model-driven orchestration so the product can actually feel like a usable research assistant
 - `research-command-router.md`: explicit deterministic front-door service for `!research`, `!more-papers`, `!add-paper`, and related commands
 - `research-ingress.md`: repo-owned inbound message router that makes the research assistant entrypoint explicit instead of delegating ingress semantics to OpenClaw
+- `chat-ingress-and-openclaw-boundary.md`: current product stance for keeping one chat interface while moving deterministic control out of OpenClaw and into repo-owned ingress
 - `research-session-cli.md`: deterministic direct control path for the session/literature loop while OpenClaw still struggles with first-turn orchestration
 - `repo-review-2026-03-26.md`: current architecture concerns, bounded refactors, and issue follow-through after the shift toward session-centric research work
 - `stage-agent-pipeline.md`: specialized backend agent roles, handoffs, and why OpenClaw should stay at the edge
