@@ -18,7 +18,7 @@ from .job_submission import JobSubmitter
 from .persistence import RunStore
 from .registry import WorkflowRegistry
 from .run_artifacts import artifact_run_dir, resolve_run_status
-from .schemas import AutoresearchCampaignCreateRequest, AutoresearchCampaignRecord, AutoresearchCampaignSummaryResponse, AutoresearchDecisionRecord, AutoresearchIterationRecord, DesignDraftRecord, MethodologyDraftRecord, RunCreateRequest, RunRecord
+from .schemas import AutoresearchCampaignCreateRequest, AutoresearchCampaignRecord, AutoresearchCampaignSummaryResponse, AutoresearchDecisionRecord, AutoresearchIterationRecord, DesignDraftRecord, InterpretationRecord, MethodologyDraftRecord, RunCreateRequest, RunRecord
 from .session_helpers import get_required_research_session, touch_research_session
 
 
@@ -554,7 +554,11 @@ def build_coding_notebook_refinement_payload(
     workflow: WorkflowRegistryEntry | None,
     notebook: dict[str, Any],
     settings: Settings,
+    *,
+    design: DesignDraftRecord | None = None,
+    interpretation: InterpretationRecord | None = None,
 ) -> dict[str, Any]:
+    runtime_requirements = workflow.runtime_requirements if workflow is not None else {}
     return {
         'model': settings.coding_notebook_model,
         'stream': False,
@@ -577,11 +581,15 @@ def build_coding_notebook_refinement_payload(
                         'campaign': campaign.model_dump(mode='json'),
                         'methodology_draft': methodology.model_dump(mode='json'),
                         'workflow': workflow.model_dump(mode='json') if workflow is not None else None,
+                        'design_draft': design.model_dump(mode='json') if design is not None else None,
+                        'interpretation': interpretation.model_dump(mode='json') if interpretation is not None else None,
+                        'runtime_requirements': runtime_requirements,
                         'notebook': notebook,
                         'instructions': [
                             'Refine this Glasslab notebook without changing its bounded research objective.',
                             'Keep the notebook reviewable and tied to the approved workflow template.',
-                            'Prefer clarifying cells for dataset loading, package requirements, metrics, experiment checks, and result interpretation.',
+                            'Add concrete but bounded cells for dataset loading, package requirements, metrics, experiment checks, and result interpretation where helpful.',
+                            'Prefer one additional code cell for dataset or artifact loading and one additional markdown cell for runtime or evaluation checks.',
                             'Only mention Python packages that are already required by or clearly compatible with the workflow runtime requirements.',
                             'Preserve nbformat metadata and return the full notebook object.',
                         ],
@@ -674,11 +682,22 @@ def call_coding_notebook_agent(
     workflow: WorkflowRegistryEntry | None,
     notebook: dict[str, Any],
     settings: Settings,
+    *,
+    design: DesignDraftRecord | None = None,
+    interpretation: InterpretationRecord | None = None,
 ) -> tuple[dict[str, Any] | None, list[str]]:
     if not settings.coding_notebook_agent_enabled:
         return None, ['coding notebook agent is disabled; using deterministic notebook scaffold']
 
-    payload = build_coding_notebook_refinement_payload(campaign, methodology, workflow, notebook, settings)
+    payload = build_coding_notebook_refinement_payload(
+        campaign,
+        methodology,
+        workflow,
+        notebook,
+        settings,
+        design=design,
+        interpretation=interpretation,
+    )
     request_obj = urllib_request.Request(
         settings.coding_notebook_agent_url,
         data=json.dumps(payload).encode('utf-8'),

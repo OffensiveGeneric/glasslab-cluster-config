@@ -384,8 +384,23 @@ def register_autoresearch_routes(
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='campaign has no methodology drafts yet')
             methodology = drafts[-1]
         workflow = registry.get_workflow(methodology.workflow_id)
+        design = store.get_design_draft(methodology.source_design_id or '')
+        interpretation = store.get_latest_interpretation()
+        if interpretation is not None:
+            if methodology.source_intake_id and interpretation.intake_id != methodology.source_intake_id:
+                interpretation = None
+            elif methodology.session_id and interpretation.session_id not in {None, methodology.session_id}:
+                interpretation = None
         base_storage_uri, base_notebook = write_autoresearch_notebook_draft(settings, campaign, methodology, workflow=workflow)
-        refined_notebook, warnings = call_coding_notebook_agent(campaign, methodology, workflow, base_notebook, settings)
+        refined_notebook, warnings = call_coding_notebook_agent(
+            campaign,
+            methodology,
+            workflow,
+            base_notebook,
+            settings,
+            design=design,
+            interpretation=interpretation,
+        )
         refinement_source = 'deterministic'
         storage_uri = base_storage_uri
         notebook = base_notebook

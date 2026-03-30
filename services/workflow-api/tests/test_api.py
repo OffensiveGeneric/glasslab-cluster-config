@@ -3808,6 +3808,7 @@ def test_autoresearch_notebook_refinement_uses_coding_model_response(tmp_path, m
             'notes': ['Notebook refinement should stay inside the approved template contract.'],
         },
     )
+    interpretation = client.post('/interpretations/from-latest-intake').json()
     design = client.post('/design-drafts/from-latest-intake').json()
     client.post(
         f"/design-drafts/{design['design_id']}/review",
@@ -3840,6 +3841,9 @@ def test_autoresearch_notebook_refinement_uses_coding_model_response(tmp_path, m
     def fake_urlopen(request_obj, timeout):
         request_payload = json.loads(request_obj.data.decode('utf-8'))
         assert request_payload['model'] == 'qwen2.5-coder:14b'
+        user_payload = json.loads(request_payload['messages'][1]['content'])
+        assert user_payload['design_draft']['design_id'] == design['design_id']
+        assert user_payload['interpretation']['interpretation_id'] == interpretation['interpretation_id']
         response_notebook = {
             'cells': [
                 {
