@@ -18,6 +18,7 @@ from .schemas import SourceDocumentRecord
 
 HTML_TAG_RE = re.compile(r'<[^>]+>')
 TITLE_WORD_RE = re.compile(r"[A-Za-z0-9]+")
+TITLE_NORMALIZE_RE = re.compile(r'[^a-z0-9]+')
 COMMON_TITLE_WORDS = {
     'the', 'and', 'for', 'with', 'from', 'using', 'into', 'towards', 'through',
     'over', 'under', 'based', 'study', 'learning', 'vision', 'method', 'methods',
@@ -167,6 +168,12 @@ def _title_terms(value: str | None) -> list[str]:
     return list(dict.fromkeys(terms))
 
 
+def _normalize_title(value: str | None) -> str:
+    if not value:
+        return ''
+    return TITLE_NORMALIZE_RE.sub(' ', value.lower()).strip()
+
+
 def validate_document_identity(
     *,
     expected_title: str | None,
@@ -180,10 +187,18 @@ def validate_document_identity(
     if not expected_terms:
         return 'unknown', ['expected title had no distinctive validation terms']
 
+    normalized_expected = _normalize_title(expected_title)
+    normalized_fetched = _normalize_title(fetched_title)
+    if normalized_expected and normalized_fetched and normalized_expected == normalized_fetched:
+        return 'matched', ['fetched title exactly matched the expected paper title']
+
     haystack = ' '.join(part for part in [fetched_title or '', text_excerpt or '']).lower()
     matched_terms = [term for term in expected_terms if term in haystack]
     if len(matched_terms) >= min(2, len(expected_terms)):
         return 'matched', [f"matched title terms: {', '.join(matched_terms[:4])}"]
+
+    if not text_excerpt and (not fetched_title or re.fullmatch(r'[\w.-]+(?:\.pdf|\.html)?', fetched_title)):
+        return 'mismatch', ['fetched document did not expose a usable title or extracted text for validation']
 
     return 'mismatch', [f"expected title terms not found: {', '.join(expected_terms[:4])}"]
 

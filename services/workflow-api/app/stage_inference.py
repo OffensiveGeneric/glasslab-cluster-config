@@ -11,6 +11,8 @@ from uuid import uuid4
 from .config import Settings
 from .persistence import RunStore
 from .registry import WorkflowRegistry
+from .session_helpers import build_research_session_literature_digest
+from .source_documents import DATASET_KEYWORDS, METRIC_KEYWORDS
 from .schemas import IntakeCreateRequest, IntakeRecord, InterpretationRecord
 
 LOGGER = logging.getLogger(__name__)
@@ -301,6 +303,7 @@ def infer_dataset_hints(intake: IntakeRecord) -> list[str]:
         hints.append('csv-backed dataset')
     if 'tabular' in lowered:
         hints.append('tabular dataset')
+    hints.extend(keyword for keyword in DATASET_KEYWORDS if keyword in lowered)
     return list(dict.fromkeys(hints))
 
 
@@ -315,6 +318,7 @@ def infer_evaluation_targets(intake: IntakeRecord) -> list[str]:
         targets.append('Survived prediction target')
     if not targets and 'paper' in lowered:
         targets.append('paper-claimed evaluation')
+    targets.extend(keyword for keyword in METRIC_KEYWORDS if keyword in lowered)
     return list(dict.fromkeys(targets))
 
 
@@ -376,22 +380,50 @@ def build_document_context(intake: IntakeRecord, store: RunStore) -> str:
         record = store.get_source_document(document_id)
         if record is None:
             continue
-        label = record.title or record.source_url
-        if record.text_excerpt:
-            parts.append(f'{label}: {record.text_excerpt}')
-        else:
-            parts.append(f'{label}: source document fetched without extracted text')
+        if record.validation_status == 'mismatch':
+            continue
+        label = record.title or record.expected_title or record.source_url
+        detail_parts: list[str] = []
+        if record.abstract_excerpt:
+            detail_parts.append(f'abstract {record.abstract_excerpt}')
+        elif record.text_excerpt:
+            detail_parts.append(record.text_excerpt)
+        if record.method_hints:
+            detail_parts.append(f"methods {', '.join(record.method_hints[:3])}")
+        if record.dataset_hints:
+            detail_parts.append(f"datasets {', '.join(record.dataset_hints[:3])}")
+        if record.metric_hints:
+            detail_parts.append(f"metrics {', '.join(record.metric_hints[:3])}")
+        if not detail_parts:
+            detail_parts.append('source document fetched without extracted text')
+        parts.append(f"{label}: {'; '.join(detail_parts)}")
     return ' '.join(parts)
+
+
+def build_literature_digest_context(intake: IntakeRecord, store: RunStore) -> str:
+    if not intake.session_id:
+        return ''
+    session = store.get_research_session(intake.session_id)
+    if session is None:
+        return ''
+    digest = build_research_session_literature_digest(session, store)
+    if not digest.summary_notes:
+        return ''
+    return 'Session literature digest: ' + ' '.join(digest.summary_notes[:4])
 
 
 def build_interpretation_notes(intake: IntakeRecord, store: RunStore | None = None) -> list[str]:
     notes = list(intake.notes)
     if store is None:
         return notes
+    digest_context = build_literature_digest_context(intake, store)
     document_context = build_document_context(intake, store)
+    enriched_notes: list[str] = []
+    if digest_context:
+        enriched_notes.append(digest_context)
     if document_context:
-        return [document_context, *notes]
-    return notes
+        enriched_notes.append(document_context)
+    return [*enriched_notes, *notes]
 
 
 def infer_unresolved_questions(

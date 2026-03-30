@@ -506,8 +506,14 @@ def test_create_interpretation_uses_stored_source_document_context(monkeypatch) 
             content_type='text/html',
             size_bytes=128,
             sha256='def456',
-            title='paper.html',
+            title='MLE-bench: Evaluating Machine Learning Agents on Machine Learning Engineering',
             text_excerpt='This paper evaluates research agents on machine learning engineering tasks using Kaggle-style benchmarks and reports accuracy improvements over a baseline.',
+            abstract_excerpt='Machine learning agents are evaluated on Kaggle-style engineering tasks with accuracy-based scoring.',
+            method_hints=['benchmark'],
+            dataset_hints=['kaggle'],
+            metric_hints=['accuracy'],
+            validation_status='matched',
+            validation_notes=['matched title terms: benchmark'],
             session_id=session_id,
         ),
     )
@@ -532,8 +538,11 @@ def test_create_interpretation_uses_stored_source_document_context(monkeypatch) 
     assert payload['literature_state_summary'].startswith('Current bounded literature view:')
     joined_claims = ' '.join(payload['extracted_claims']).lower()
     assert 'machine learning engineering' in joined_claims
+    assert 'kaggle' in payload['dataset_hints']
+    assert 'accuracy' in payload['evaluation_targets']
+    assert 'kaggle-style engineering tasks' in payload['literature_state_summary'].lower()
     joined_gaps = ' '.join(payload['research_gaps']).lower()
-    assert 'concrete dataset' in joined_gaps
+    assert 'concrete dataset' not in joined_gaps
     assert payload['bounded_experiment_ideas']
 
 
@@ -2455,6 +2464,16 @@ def test_validate_document_identity_marks_title_mismatch() -> None:
     )
     assert status == 'mismatch'
     assert notes
+
+
+def test_validate_document_identity_accepts_exact_title_match() -> None:
+    status, notes = source_documents.validate_document_identity(
+        expected_title='Forgery Detection with Vision Transformers',
+        fetched_title='Forgery Detection with Vision Transformers',
+        text_excerpt=None,
+    )
+    assert status == 'matched'
+    assert any('exactly matched' in note for note in notes)
 
 
 def test_build_intake_request_dedupes_manual_and_validation_notes() -> None:
