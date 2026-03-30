@@ -1966,6 +1966,69 @@ def test_external_literature_search_skill_creates_session_queue(monkeypatch) -> 
     assert latest_context.json()['paper_intake_queue']['queue_id'] == payload['queue_id']
 
 
+def test_external_literature_reranker_prefers_relevant_and_diverse_candidates() -> None:
+    from app.external_literature import _score_candidate, _select_diverse_top_candidates
+    from app.schemas import ResearchProblemPaperCandidate
+
+    terms = ['forged', 'art', 'vision', 'dataset']
+    candidates = [
+        ResearchProblemPaperCandidate(
+            paper_id='paper-a',
+            title='Vision Transformers for Forged Art Detection',
+            year=2025,
+            venue='arXiv',
+            priority='P1',
+            tracks=['external_literature', 'arxiv'],
+            bounded_job_fit=3,
+            replication_complexity=3,
+            official_page='https://arxiv.org/abs/2501.00001',
+            pdf_url='https://arxiv.org/pdf/2501.00001.pdf',
+            why_seed='Matched the external literature query through arXiv search.',
+            first_jobs=['compare methods and dataset choices'],
+            tags=['computer_vision', 'art_authentication'],
+        ),
+        ResearchProblemPaperCandidate(
+            paper_id='paper-b',
+            title='Vision Transformers for Forged Art Attribution',
+            year=2024,
+            venue='arXiv',
+            priority='P1',
+            tracks=['external_literature', 'arxiv'],
+            bounded_job_fit=3,
+            replication_complexity=3,
+            official_page='https://arxiv.org/abs/2501.00002',
+            pdf_url='https://arxiv.org/pdf/2501.00002.pdf',
+            why_seed='Matched the external literature query through arXiv search.',
+            first_jobs=['compare methods and dataset choices'],
+            tags=['computer_vision', 'art_authentication'],
+        ),
+        ResearchProblemPaperCandidate(
+            paper_id='paper-c',
+            title='Open Dataset Benchmarks for Art Authentication',
+            year=2023,
+            venue='OpenReview',
+            priority='P1',
+            tracks=['external_literature', 'openalex'],
+            bounded_job_fit=3,
+            replication_complexity=3,
+            official_page='https://openalex.org/W123',
+            pdf_url=None,
+            why_seed='Matched the external literature query through OpenAlex.',
+            first_jobs=['review open datasets used in prior work'],
+            tags=['open_dataset', 'art_authentication'],
+        ),
+    ]
+
+    scored = [_score_candidate(candidate, terms) for candidate in candidates]
+    selected = _select_diverse_top_candidates(
+        sorted(scored, key=lambda item: (item.match_score, item.year), reverse=True),
+        2,
+    )
+
+    assert selected[0].paper_id == 'paper-a'
+    assert {candidate.paper_id for candidate in selected} == {'paper-a', 'paper-c'}
+
+
 def test_add_manual_paper_to_latest_session_queue() -> None:
     client = build_client()
 

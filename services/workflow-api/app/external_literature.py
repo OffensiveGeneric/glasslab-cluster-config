@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+from datetime import datetime, timezone
 from typing import Any
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
@@ -70,25 +71,98 @@ def _normalize_terms(problem_statement: str, priorities: list[str]) -> list[str]
     return list(dict.fromkeys(tokens))
 
 
+def _candidate_provider(candidate: ResearchProblemPaperCandidate) -> str:
+    for provider in candidate.tracks:
+        if provider in {"openalex", "arxiv", "crossref"}:
+            return provider
+    return "unknown"
+
+
+def _title_tokens(title: str) -> set[str]:
+    tokens: set[str] = set()
+    for token in title.lower().replace("/", " ").replace("-", " ").split():
+        cleaned = "".join(ch for ch in token if ch.isalnum())
+        if len(cleaned) >= 4:
+            tokens.add(cleaned)
+    return tokens
+
+
 def _score_candidate(candidate: ResearchProblemPaperCandidate, terms: list[str]) -> ResearchProblemPaperCandidate:
-    haystack_parts = [
-        candidate.title,
-        candidate.why_seed,
-        " ".join(candidate.tags),
-        " ".join(candidate.tracks),
-        " ".join(candidate.first_jobs),
-    ]
-    haystack = " ".join(part.lower() for part in haystack_parts if part).strip()
+    title_text = candidate.title.lower()
+    tag_text = " ".join(candidate.tags).lower()
+    aux_text = " ".join(
+        part for part in [candidate.why_seed, " ".join(candidate.tracks), " ".join(candidate.first_jobs), candidate.venue] if part
+    ).lower()
     match_reasons: list[str] = []
     score = 0
     for term in terms:
-        if term in haystack:
+        if term in title_text:
+            score += 3
+            match_reasons.append(f"title matched '{term}'")
+        elif term in tag_text:
+            score += 2
+            match_reasons.append(f"tags matched '{term}'")
+        elif term in aux_text:
             score += 1
-            match_reasons.append(f"matched term '{term}'")
+            match_reasons.append(f"context matched '{term}'")
     if candidate.pdf_url:
-        score += 1
+        score += 2
         match_reasons.append("direct PDF available")
+    current_year = datetime.now(timezone.utc).year
+    if candidate.year >= current_year - 2:
+        score += 2
+        match_reasons.append("recent paper")
+    elif candidate.year >= current_year - 5:
+        score += 1
+        match_reasons.append("moderately recent paper")
+    if candidate.priority == "P1":
+        score += 1
+        match_reasons.append("high priority candidate")
     return candidate.model_copy(update={"match_score": score, "match_reasons": match_reasons[:5]})
+
+
+def _select_diverse_top_candidates(
+    candidates: list[ResearchProblemPaperCandidate],
+    max_candidate_papers: int,
+) -> list[ResearchProblemPaperCandidate]:
+    selected: list[ResearchProblemPaperCandidate] = []
+    provider_counts: dict[str, int] = {}
+    remaining = list(candidates)
+
+    while remaining and len(selected) < max_candidate_papers:
+        best_index = 0
+        best_value: tuple[float, int, int] | None = None
+        selected_title_tokens = [_title_tokens(candidate.title) for candidate in selected]
+
+        for index, candidate in enumerate(remaining):
+            provider = _candidate_provider(candidate)
+            provider_penalty = provider_counts.get(provider, 0)
+            title_tokens = _title_tokens(candidate.title)
+            max_overlap = 0.0
+            duplicate_like_penalty = 0.0
+            for existing_tokens in selected_title_tokens:
+                union = title_tokens | existing_tokens
+                if not union:
+                    continue
+                overlap = len(title_tokens & existing_tokens) / len(union)
+                max_overlap = max(max_overlap, overlap)
+            if provider_penalty and max_overlap >= 0.45:
+                duplicate_like_penalty = 4.0
+            ranking_value = (
+                float(candidate.match_score) - provider_penalty * 0.75 - max_overlap * 6.0 - duplicate_like_penalty,
+                candidate.year,
+                1 if candidate.pdf_url else 0,
+            )
+            if best_value is None or ranking_value > best_value:
+                best_value = ranking_value
+                best_index = index
+
+        chosen = remaining.pop(best_index)
+        selected.append(chosen)
+        provider = _candidate_provider(chosen)
+        provider_counts[provider] = provider_counts.get(provider, 0) + 1
+
+    return selected
 
 
 def _provider_tag(url: str | None, venue: str) -> list[str]:
@@ -298,17 +372,19 @@ def search_external_literature(
             continue
         deduped[key] = _score_candidate(candidate, terms)
 
-    selected_papers = sorted(
+    ranked_candidates = sorted(
         deduped.values(),
         key=lambda item: (item.match_score, item.year, item.priority == "P1"),
         reverse=True,
-    )[:max_candidate_papers]
+    )
+    selected_papers = _select_diverse_top_candidates(ranked_candidates, max_candidate_papers)
 
     coverage_summary = {
         "mode": "external_search",
         "query": query,
         "provider_counts": provider_counts,
         "selected_candidate_count": len(selected_papers),
+        "ranking_mode": "heuristic-session-aware",
         "selected_provider_mix": sorted(
             {
                 provider
