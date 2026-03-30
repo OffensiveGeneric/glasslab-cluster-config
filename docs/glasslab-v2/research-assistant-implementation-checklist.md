@@ -39,6 +39,25 @@ Success condition:
 
 - the user-facing research loop is driven by a small set of backend-owned actions instead of OpenClaw chaining tools
 
+## Phase 2.5: Topic-Agnostic Literature Backbone
+
+- widen literature discovery across:
+  - metadata backbones like OpenAlex / Crossref / PubMed / DBLP / DataCite
+  - open-access full-text sources like arXiv / PMC / repositories
+  - discipline-specific indexes where needed
+  - grey literature where it improves breadth
+- normalize identifiers before fetch:
+  - DOI
+  - PMID / PMCID
+  - arXiv ID
+  - title hash fallback
+- use a session-aware paper ranker to choose which candidates enter the queue
+- keep institutional library access as an access-resolution layer, not the first corpus
+
+Success condition:
+
+- a new research session can discover, rank, fetch, and digest papers for arbitrary topics instead of depending on a narrow seed corpus
+
 ## Phase 3: Explicit Progress And Activity Feed
 
 - add a durable session activity feed
@@ -128,6 +147,7 @@ These are not the near-term milestone:
 ## Issue Mapping
 
 - `#60`: deterministic intent router
+- `#62`: general literature ingestion, ranking, and digest breadth
 - `#56`: demote mutating `latest` aliases and keep session-scoped contracts primary
 - `#51`: sessions / skills / execution-templates framing
 - `#49`: `gpu-experiment` as the main GPU/CV execution shape

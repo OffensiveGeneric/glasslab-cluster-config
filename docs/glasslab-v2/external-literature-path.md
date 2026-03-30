@@ -48,26 +48,84 @@ Flow:
 OpenClaw should not browse the web itself for this. The search and fetch path should
  live in backend services.
 
-## Search Sources
+## Source Coverage
 
-Preferred first sources:
+The broadest reasonable literature path should cover multiple source classes.
+
+### Core Metadata And Identifier Sources
+
+These should be the backbone for discovery, deduping, and entity resolution.
 
 - OpenAlex
 - Crossref
-- arXiv
-- Semantic Scholar
+- PubMed
+- DBLP
+- DataCite
 
 Why:
 
-- broad metadata coverage
-- stable APIs
-- citation and venue metadata
-- strong open-access detection potential
+- broad identifier coverage
+- strong DOI / author / venue / institution metadata
+- better deduping and citation-graph linkage than raw publisher scraping
+
+### Open-Access Full-Text Sources
+
+These are the easiest lawful full-text sources to scale.
+
+- arXiv
+- PubMed Central
+- bioRxiv / medRxiv
+- DOAJ-linked journals
+- CORE
+- institutional repositories
+- Zenodo / OSF and similar repositories
+
+These should be the first-choice fetch layer when full text is available.
+
+### Discipline-Specific Indexes
+
+These should plug into the same connector model, even if they are not all used on day one.
+
+- IEEE Xplore
+- ACM Digital Library
+- RePEc / SSRN
+- ERIC
+- PsycINFO
+- ADS / MathSciNet / AGRICOLA and similar field-specific indexes where relevant
+
+### Grey Literature
+
+Breadth depends heavily on this class.
+
+- theses and dissertations
+- technical reports
+- white papers
+- government reports
+- standards
+- patents
+- grant reports
+- workshop papers and posters
+
+### Library / Discovery Layer
+
+This is where institutional access should live.
+
+- library discovery service
+- OpenURL link resolver
+- proxied vendor links
+- licensed vendor databases exposed through approved APIs
+
+Important boundary:
+
+- use the library layer to resolve access
+- do not make it the first bulk-ingestion target
 
 Initial rule:
 
-- search metadata first
-- fetch documents second
+- discover metadata first
+- resolve identifiers second
+- prefer open-access fetch third
+- consult the library layer only when open access is unavailable
 
 Do not start with scraping PDFs blindly.
 
@@ -75,10 +133,10 @@ Do not start with scraping PDFs blindly.
 
 Allowed fetch priority:
 
-1. arXiv PDF / abstract page
+1. open-access full text from arXiv / PMC / repositories / journal mirrors that permit access
 2. publisher or venue page with public PDF
 3. official conference proceedings page
-4. institutional-access publisher URL
+4. institutional-access publisher URL resolved through the library layer
 
 The system should not use Sci-Hub or similar unauthorized sources.
 
@@ -86,7 +144,18 @@ Instead, lawful fetch support should be:
 
 - open-access URL resolution
 - official publisher page fetch
-- institutional-access URL pass-through for user- or environment-backed access
+- institutional-access URL resolution and pass-through for user- or environment-backed access
+
+Safe default storage when license is unclear:
+
+- metadata
+- identifiers
+- abstract
+- citation graph information
+- access status
+- resolver link
+
+Store extracted full text only when the access path and license clearly permit it.
 
 ## Session Integration
 
@@ -158,6 +227,8 @@ First pass ranking inputs:
 - methodological fit
 - benchmark/dataset overlap
 - code/artifact availability
+- citation / graph context where available
+- novelty / diversity against papers already in the session
 
 Keep the result transparent:
 
@@ -176,6 +247,7 @@ Add external literature metadata search without document fetch.
 Deliverables:
 
 - provider client module
+- multi-source connector model
 - session-scoped search endpoint
 - candidate record schema
 - persistence for candidate lists and provenance
@@ -188,6 +260,7 @@ Deliverables:
 
 - fetch resolver
 - open-access-first fetch logic
+- identifier normalization across DOI / PMID / PMCID / arXiv ID / title hash
 - source document creation from fetched candidate
 - operation records for fetch attempts
 
@@ -210,6 +283,17 @@ Deliverables:
 - compare candidate methodologies
 - compare datasets / benchmarks mentioned across papers
 - session-level literature summary over fetched docs
+
+### PR 5
+
+Integrate institutional library resolution.
+
+Deliverables:
+
+- OpenURL or resolver integration if available
+- holdings / access-status lookup
+- licensed-access resolver links
+- clear separation between discovery, access resolution, and fetch
 
 ## User-Facing Goal
 
