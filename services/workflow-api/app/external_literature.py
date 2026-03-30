@@ -21,6 +21,21 @@ class ExternalLiteratureResult:
     warnings: list[str]
 
 
+GENERIC_QUERY_TERMS = {
+    "with",
+    "using",
+    "compare",
+    "comparison",
+    "method",
+    "methods",
+    "methodology",
+    "methodologies",
+    "study",
+    "studies",
+    "open",
+}
+
+
 def build_external_literature_query(problem_statement: str, priorities: list[str]) -> str:
     parts = [problem_statement.strip()]
     parts.extend(priority.strip() for priority in priorities if priority.strip())
@@ -66,9 +81,18 @@ def _normalize_terms(problem_statement: str, priorities: list[str]) -> list[str]
     tokens = []
     for token in raw.replace("/", " ").replace("-", " ").split():
         cleaned = "".join(ch for ch in token if ch.isalnum())
-        if len(cleaned) >= 4:
+        if len(cleaned) >= 4 and cleaned not in GENERIC_QUERY_TERMS:
             tokens.append(cleaned)
     return list(dict.fromkeys(tokens))
+
+
+def _normalize_phrases(problem_statement: str, priorities: list[str]) -> list[str]:
+    phrases: list[str] = []
+    for phrase in priorities:
+        normalized = _truncate(phrase, 120)
+        if normalized and len(normalized.split()) >= 2:
+            phrases.append(normalized.lower())
+    return list(dict.fromkeys(phrases))
 
 
 def _truncate(value: str | None, limit: int = 1200) -> str | None:
@@ -110,7 +134,11 @@ def _title_tokens(title: str) -> set[str]:
     return tokens
 
 
-def _score_candidate(candidate: ResearchProblemPaperCandidate, terms: list[str]) -> ResearchProblemPaperCandidate:
+def _score_candidate(
+    candidate: ResearchProblemPaperCandidate,
+    terms: list[str],
+    phrases: list[str] | None = None,
+) -> ResearchProblemPaperCandidate:
     title_text = candidate.title.lower()
     tag_text = " ".join(candidate.tags).lower()
     abstract_text = (candidate.abstract_excerpt or "").lower()
@@ -126,6 +154,16 @@ def _score_candidate(candidate: ResearchProblemPaperCandidate, terms: list[str])
     ).lower()
     match_reasons: list[str] = []
     score = 0
+    for phrase in phrases or []:
+        if phrase in title_text:
+            score += 6
+            match_reasons.append(f"title matched phrase '{phrase}'")
+        elif phrase in abstract_text:
+            score += 4
+            match_reasons.append(f"abstract matched phrase '{phrase}'")
+        elif phrase in tag_text or phrase in aux_text:
+            score += 2
+            match_reasons.append(f"context matched phrase '{phrase}'")
     for term in terms:
         if term in title_text:
             score += 3
@@ -376,6 +414,7 @@ def search_external_literature(
 ) -> ExternalLiteratureResult:
     query = build_external_literature_query(problem_statement, priorities)
     terms = _normalize_terms(problem_statement, priorities)
+    phrases = _normalize_phrases(problem_statement, priorities)
     selected_tracks = ["external_literature"]
     selected_queries = [query]
     warnings: list[str] = []
@@ -409,7 +448,7 @@ def search_external_literature(
         )
         if not key or key in deduped:
             continue
-        deduped[key] = _score_candidate(candidate, terms)
+        deduped[key] = _score_candidate(candidate, terms, phrases)
 
     ranked_candidates = sorted(
         deduped.values(),
