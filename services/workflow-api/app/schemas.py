@@ -520,6 +520,11 @@ class SourceDocumentRecord(BaseModel):
     abstract_excerpt: str | None = None
     method_hints: list[str] = Field(default_factory=list)
     dataset_hints: list[str] = Field(default_factory=list)
+    loss_hints: list[str] = Field(default_factory=list)
+    architecture_hints: list[str] = Field(default_factory=list)
+    baseline_hints: list[str] = Field(default_factory=list)
+    metric_hints: list[str] = Field(default_factory=list)
+    domain_task_hints: list[str] = Field(default_factory=list)
     expected_title: str | None = None
     validation_status: Literal['unknown', 'matched', 'mismatch'] = 'unknown'
     validation_notes: list[str] = Field(default_factory=list)
@@ -551,6 +556,11 @@ class LiteratureDigestResponse(BaseModel):
     fetch_failed_document_count: int = 0
     top_methods: list[str] = Field(default_factory=list)
     top_datasets: list[str] = Field(default_factory=list)
+    top_losses: list[str] = Field(default_factory=list)
+    top_architectures: list[str] = Field(default_factory=list)
+    top_baselines: list[str] = Field(default_factory=list)
+    top_metrics: list[str] = Field(default_factory=list)
+    top_domain_tasks: list[str] = Field(default_factory=list)
     notable_titles: list[str] = Field(default_factory=list)
     summary_notes: list[str] = Field(default_factory=list)
 

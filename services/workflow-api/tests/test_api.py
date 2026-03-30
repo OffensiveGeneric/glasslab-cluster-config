@@ -2402,7 +2402,8 @@ def test_extract_document_metadata_from_arxiv_abstract_page() -> None:
         'Title: Distributionally Robust Receive Combining '
         'Authors: Shixiong Wang, Wei Dai, Geoffrey Ye Li '
         'View PDF HTML (experimental) '
-        'Abstract: This article investigates signal estimation in wireless transmission. '
+        'Abstract: This article investigates signal estimation in wireless transmission with a transformer baseline, '
+        'cross entropy loss, and accuracy as the main metric on a Kaggle benchmark. '
         'Subjects: Signal Processing'
     )
     metadata = source_documents.extract_document_metadata(
@@ -2413,6 +2414,11 @@ def test_extract_document_metadata_from_arxiv_abstract_page() -> None:
     assert metadata['title'] == 'Distributionally Robust Receive Combining'
     assert metadata['authors'] == ['Shixiong Wang', 'Wei Dai', 'Geoffrey Ye Li']
     assert 'signal estimation' in (metadata['abstract_excerpt'] or '').lower()
+    assert 'cross entropy' in metadata['loss_hints']
+    assert 'transformer' in metadata['architecture_hints']
+    assert 'baseline' in metadata['baseline_hints']
+    assert 'accuracy' in metadata['metric_hints']
+    assert 'kaggle' in metadata['dataset_hints']
 
 
 def test_research_session_can_store_persistent_notes() -> None:
@@ -2615,6 +2621,11 @@ def test_research_session_literature_digest_includes_document_metadata(monkeypat
             abstract_excerpt='We compare a vision transformer and cnn baseline on WikiArt forgery detection.',
             method_hints=['vision transformer', 'cnn'],
             dataset_hints=['wikiart'],
+            loss_hints=['cross entropy', 'focal loss'],
+            architecture_hints=['vision transformer', 'cnn'],
+            baseline_hints=['baseline'],
+            metric_hints=['accuracy', 'f1 score'],
+            domain_task_hints=['forgery detection', 'image classification'],
             expected_title=expected_title,
             validation_status='matched',
             validation_notes=['matched title terms: forgery, detection'],
@@ -2651,6 +2662,11 @@ def test_research_session_literature_digest_includes_document_metadata(monkeypat
     assert digest_payload['matched_document_count'] == 1
     assert digest_payload['top_methods'][:2] == ['cnn', 'vision transformer'] or digest_payload['top_methods'][:2] == ['vision transformer', 'cnn']
     assert digest_payload['top_datasets'] == ['wikiart']
+    assert 'cross entropy' in digest_payload['top_losses']
+    assert 'vision transformer' in digest_payload['top_architectures']
+    assert 'baseline' in digest_payload['top_baselines']
+    assert 'accuracy' in digest_payload['top_metrics']
+    assert 'forgery detection' in digest_payload['top_domain_tasks']
     assert digest_payload['notable_titles'] == ['Forgery Detection with Vision Transformers']
     assert any('validated source document' in note for note in digest_payload['summary_notes'])
 

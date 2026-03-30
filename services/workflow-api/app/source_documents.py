@@ -36,6 +36,59 @@ METHOD_KEYWORDS = [
     'diffusion',
     'gan',
 ]
+LOSS_KEYWORDS = [
+    'cross entropy',
+    'focal loss',
+    'triplet loss',
+    'contrastive loss',
+    'hinge loss',
+    'dice loss',
+    'l1 loss',
+    'l2 loss',
+    'mean squared error',
+    'binary cross entropy',
+]
+ARCHITECTURE_KEYWORDS = [
+    'vision transformer',
+    'transformer',
+    'cnn',
+    'convolutional neural network',
+    'resnet',
+    'unet',
+    'u-net',
+    'efficientnet',
+    'clip',
+    'bert',
+    'lstm',
+    'graph neural network',
+    'gnn',
+    'autoencoder',
+    'gan',
+]
+BASELINE_KEYWORDS = [
+    'baseline',
+    'random forest',
+    'logistic regression',
+    'linear probe',
+    'svm',
+    'xgboost',
+    'catboost',
+    'ablation',
+]
+METRIC_KEYWORDS = [
+    'accuracy',
+    'f1 score',
+    'precision',
+    'recall',
+    'auc',
+    'roc auc',
+    'mean average precision',
+    'mse',
+    'rmse',
+    'bleu',
+    'iou',
+    'intersection over union',
+]
 DATASET_KEYWORDS = [
     'cifar',
     'imagenet',
@@ -47,6 +100,19 @@ DATASET_KEYWORDS = [
     'kaggle',
     'openml',
     'titanic',
+]
+DOMAIN_TASK_KEYWORDS = [
+    'object detection',
+    'image classification',
+    'segmentation',
+    'forgery detection',
+    'anomaly detection',
+    'retrieval',
+    'generation',
+    'captioning',
+    'time series forecasting',
+    'tabular classification',
+    'benchmarking',
 ]
 
 
@@ -175,6 +241,11 @@ def extract_document_metadata(
     haystack = f'{normalized} {(abstract_excerpt or "")}'.lower()
     method_hints = [keyword for keyword in METHOD_KEYWORDS if keyword in haystack]
     dataset_hints = [keyword for keyword in DATASET_KEYWORDS if keyword in haystack]
+    loss_hints = [keyword for keyword in LOSS_KEYWORDS if keyword in haystack]
+    architecture_hints = [keyword for keyword in ARCHITECTURE_KEYWORDS if keyword in haystack]
+    baseline_hints = [keyword for keyword in BASELINE_KEYWORDS if keyword in haystack]
+    metric_hints = [keyword for keyword in METRIC_KEYWORDS if keyword in haystack]
+    domain_task_hints = [keyword for keyword in DOMAIN_TASK_KEYWORDS if keyword in haystack]
 
     return {
         'title': extracted_title,
@@ -182,6 +253,11 @@ def extract_document_metadata(
         'abstract_excerpt': abstract_excerpt,
         'method_hints': list(dict.fromkeys(method_hints)),
         'dataset_hints': list(dict.fromkeys(dataset_hints)),
+        'loss_hints': list(dict.fromkeys(loss_hints)),
+        'architecture_hints': list(dict.fromkeys(architecture_hints)),
+        'baseline_hints': list(dict.fromkeys(baseline_hints)),
+        'metric_hints': list(dict.fromkeys(metric_hints)),
+        'domain_task_hints': list(dict.fromkeys(domain_task_hints)),
     }
 
 
@@ -327,6 +403,11 @@ def ingest_source_document(
             abstract_excerpt=metadata.get('abstract_excerpt'),
             method_hints=list(metadata.get('method_hints') or []),
             dataset_hints=list(metadata.get('dataset_hints') or []),
+            loss_hints=list(metadata.get('loss_hints') or []),
+            architecture_hints=list(metadata.get('architecture_hints') or []),
+            baseline_hints=list(metadata.get('baseline_hints') or []),
+            metric_hints=list(metadata.get('metric_hints') or []),
+            domain_task_hints=list(metadata.get('domain_task_hints') or []),
             expected_title=expected_title,
             validation_status=validation_status,
             validation_notes=validation_notes,

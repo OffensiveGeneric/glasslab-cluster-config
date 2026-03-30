@@ -179,6 +179,11 @@ def build_research_session_literature_digest(
 
     top_methods = top_terms(['method_hints'])
     top_datasets = top_terms(['dataset_hints'])
+    top_losses = top_terms(['loss_hints'])
+    top_architectures = top_terms(['architecture_hints'])
+    top_baselines = top_terms(['baseline_hints'])
+    top_metrics = top_terms(['metric_hints'])
+    top_domain_tasks = top_terms(['domain_task_hints'])
     notable_titles = list(
         dict.fromkeys(
             record.title
@@ -198,6 +203,14 @@ def build_research_session_literature_digest(
         summary_notes.append(f'Method hints seen so far: {", ".join(top_methods[:4])}.')
     if top_datasets:
         summary_notes.append(f'Dataset hints seen so far: {", ".join(top_datasets[:4])}.')
+    if top_losses:
+        summary_notes.append(f'Losses seen so far: {", ".join(top_losses[:4])}.')
+    if top_architectures:
+        summary_notes.append(f'Architectures seen so far: {", ".join(top_architectures[:4])}.')
+    if top_metrics:
+        summary_notes.append(f'Metrics seen so far: {", ".join(top_metrics[:4])}.')
+    if top_domain_tasks:
+        summary_notes.append(f'Domain/task hints seen so far: {", ".join(top_domain_tasks[:4])}.')
 
     return LiteratureDigestResponse(
         session_id=session.session_id,
@@ -207,6 +220,11 @@ def build_research_session_literature_digest(
         fetch_failed_document_count=fetch_failed_document_count,
         top_methods=top_methods,
         top_datasets=top_datasets,
+        top_losses=top_losses,
+        top_architectures=top_architectures,
+        top_baselines=top_baselines,
+        top_metrics=top_metrics,
+        top_domain_tasks=top_domain_tasks,
         notable_titles=notable_titles,
         summary_notes=summary_notes,
     )
