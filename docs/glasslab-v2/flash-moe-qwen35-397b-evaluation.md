@@ -107,7 +107,7 @@ Observed problems:
 - after the added-token `vocab.bin` fix, the runtime no longer emitted `<unk>`
   for the chat-format special tokens, but the completions were still poor
 - after the default model-path fix, the runtime began loading all expert layer
-  files instead of zero, and the output improved from total garbage to at least
+  files instead of zero, and the CLI output improved from total garbage to at least
   a recognizably structured answer start
 
 So the current state is:
@@ -115,6 +115,7 @@ So the current state is:
 - runtime bring-up: succeeded
 - server surface: succeeded
 - output quality / completion behavior: not yet acceptable
+- even after the correct model-path fix, `/v1/chat/completions` still produced an empty completion after about `115s` on a trivial prompt
 - OpenAI-compatible non-stream response semantics: improved enough to test, but not yet trustworthy for Glasslab use
 
 ## Practical Conclusion

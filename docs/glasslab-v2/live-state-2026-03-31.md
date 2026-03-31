@@ -133,6 +133,7 @@ What is still bad:
   - `1`
 - the runtime still generates very short, low-quality completions on trivial prompts
 - request parsing and content quality remain fragile
+- `/v1/chat/completions` still returned an empty completion after about `115s` on a trivial prompt even after the model-path fix
 
 So `.21` is still:
 
