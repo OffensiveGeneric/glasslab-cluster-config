@@ -10,6 +10,12 @@ The focus is narrow:
 
 The goal is to create the first real paper-to-validation path without depending on broad argumented tool reliability.
 
+Current scope narrowing:
+
+- prioritize a dependable manual-source -> interpretation -> design -> run path
+- treat automatic literature search as secondary until the bounded experiment path is reliably useful
+- make interpretation emit tighter workflow-ready outputs instead of broader narrative summaries
+
 ## Scope
 
 This plan assumes the current v2 architecture remains intact:

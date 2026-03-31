@@ -19,6 +19,13 @@ Current product priority:
 - treat the stage agents as backend quality improvements to that loop, not as the main near-term product milestone
 - keep the long-term target aligned with iterative research systems like `autoresearch`: persistent context, bounded experiments, result comparison, and explicit next-step proposals
 
+Current narrowing:
+
+- prioritize the experiment-runner side over broad literature cleverness
+- keep manual paper/source add sufficient for now if that makes interpretation -> design -> run more dependable
+- make interpretation outputs more bounded and directly actionable by approved workflow templates
+- treat broad technique knowledge as input to methodology drafting and autoresearch, not as permission for unconstrained execution
+
 ## Operator Bootstrap
 
 If the operator is missing required state, keep the response narrow:
