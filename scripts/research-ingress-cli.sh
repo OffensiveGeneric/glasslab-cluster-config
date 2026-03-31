@@ -93,6 +93,7 @@ PY
 import json
 import urllib.request
 import urllib.error
+import urllib
 import sys
 
 payload = {
@@ -107,11 +108,14 @@ req = urllib.request.Request(
     method="POST",
 )
 try:
-    with urllib.request.urlopen(req, timeout=60) as response:
+    with urllib.request.urlopen(req, timeout=120) as response:
         body = json.loads(response.read().decode("utf-8"))
 except urllib.error.HTTPError as exc:
     detail = exc.read().decode("utf-8", errors="replace")
     print(detail, file=sys.stderr)
+    raise
+except urllib.error.URLError as exc:
+    print(f"request failed: {exc.reason}", file=sys.stderr)
     raise
 print(json.dumps(body, indent=2))
 PY

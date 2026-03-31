@@ -17,13 +17,13 @@ spec:
         - name: glasslab-ghcr-pull
       containers:
         - name: research-command-router
-          image: ghcr.io/offensivegeneric/glasslab-research-command-router:0.1.0
+          image: ghcr.io/offensivegeneric/glasslab-research-command-router:0.1.2
           imagePullPolicy: IfNotPresent
           env:
             - name: GLASSLAB_RESEARCH_COMMAND_ROUTER_WORKFLOW_API_URL
               value: http://glasslab-workflow-api.glasslab-v2.svc.cluster.local:8080
             - name: GLASSLAB_RESEARCH_COMMAND_ROUTER_TIMEOUT_SECONDS
-              value: "30"
+              value: "120"
           ports:
             - containerPort: 8095
               name: http

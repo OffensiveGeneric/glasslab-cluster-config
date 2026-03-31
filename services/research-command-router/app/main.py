@@ -18,7 +18,7 @@ class Settings:
         "http://glasslab-workflow-api.glasslab-v2.svc.cluster.local:8080",
     )
     timeout_seconds: int = int(
-        os.environ.get("GLASSLAB_RESEARCH_COMMAND_ROUTER_TIMEOUT_SECONDS", "30")
+        os.environ.get("GLASSLAB_RESEARCH_COMMAND_ROUTER_TIMEOUT_SECONDS", "120")
     )
     default_submitted_by: str = os.environ.get(
         "GLASSLAB_RESEARCH_COMMAND_ROUTER_SUBMITTED_BY",
