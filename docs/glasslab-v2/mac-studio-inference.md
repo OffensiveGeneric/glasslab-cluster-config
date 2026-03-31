@@ -56,6 +56,22 @@ This host is now the active primary external inference path for OpenClaw chat in
 
 This host is now the live secondary Apple-silicon service box for ranker work and the first proven native-Ollama tool candidate.
 
+### `192.168.1.21`
+
+- hostname: `CS60138N73111`
+- hardware: `Mac Studio`
+- chip: `Apple M4 Max`
+- memory: `64 GB`
+- current role: experimental large-model host
+- current state:
+  - `flash-moe` bootstrap completed for `mlx-community/Qwen3.5-397B-A17B-4bit`
+  - the Metal runtime now starts and serves on `:8000`
+  - `GET /health` and `GET /v1/models` succeed
+  - `POST /v1/chat/completions` is reachable but currently returns empty completions
+  - direct CLI inference runs, but first-pass output quality is not yet acceptable
+
+This host is now a real experimental backend, but it is not yet ready to take Glasslab traffic.
+
 ## Recommended role
 
 Use the Mac Studio fleet for:

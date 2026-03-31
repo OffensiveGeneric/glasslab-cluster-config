@@ -130,17 +130,37 @@ So the honest state is:
 
 ### `.21`
 
-The large `flash-moe` bootstrap is still alive and protected by `caffeinate`.
+The large `flash-moe` bootstrap on `.21` later completed successfully.
 
-Last checked state:
+Validated follow-on state from `glasslab-44 -> .21`:
 
-- bootstrap process alive
-- downloader process alive
-- `caffeinate` attached
-- Hugging Face cache around `133G`
-- target model cache file count around `38`
+- Hugging Face snapshot completed:
+  - `58/58` files fetched
+- tokenizer export completed
+- non-expert weight extraction completed:
+  - `metal_infer/model_weights.bin`
+  - `metal_infer/model_weights.json`
+- expert repack completed:
+  - `packed_experts` written under the snapshot path
+- bootstrap log ended with:
+  - `flash-moe bootstrap complete`
 
-So `.21` is slow, not stalled.
+The remaining runtime work was smaller but important:
+
+- `infer` initially failed because the runtime still expected `vocab.bin`
+- the bootstrap path had only produced `tokenizer.bin`
+- `vocab.bin` was then generated from the same tokenizer data
+- after that, `./infer` ran successfully on `.21`
+
+Current quality boundary:
+
+- `.21` now serves `flash-moe` over `http://127.0.0.1:8000`
+- `GET /health` and `GET /v1/models` succeed
+- direct `infer` and `POST /v1/chat/completions` do not yet produce useful answers
+- the first substantive prompt degenerated into repetitive text
+- the first server-side chat-completions calls returned zero generated tokens
+
+So `.21` is now a prepared and runnable experimental inference host, but not yet a backend we should rely on for Glasslab traffic.
 
 ## Practical Conclusion
 

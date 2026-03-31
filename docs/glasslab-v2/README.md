@@ -37,6 +37,7 @@ Canonical planning and architecture:
 - `artist-similarity-research-note.md`: Grossberg's concrete research framing for same-artist vs different-artist painting comparison, style-drift robustness, and methodology comparison
 - `implemented-vs-discussed-2026-03-30.md`: short note separating what was really built from what was still discussion during the 2026-03-30 Grossberg conversation
 - `live-state-2026-03-30.md`: latest in-lab validation note for the bounded autoresearch lane, coding-model notebook refinement, interpretation path, and the remaining session-scoped intake gap
+- `flash-moe-qwen35-397b-evaluation.md`: first `.21` bring-up note for the large `flash-moe` runtime, including the bootstrap/runtime mismatch fix and the current quality boundary
 - `research-assistant-infra-proposal.md`: concrete infra and control-surface changes to get closest to the research-assistant vision without making OpenClaw the workflow brain
 - `research-assistant-implementation-checklist.md`: concrete execution order for the deterministic-router, one-shot-action, session-memory, and `gpu-experiment` path
 - `research-assistant-ux-boundary.md`: where deterministic routing should replace model-driven orchestration so the product can actually feel like a usable research assistant
