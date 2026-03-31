@@ -1678,6 +1678,57 @@ def test_create_run_from_reviewed_literature_design_draft() -> None:
     assert payload['manifest']['inputs']['dataset_uri'] == 's3://datasets/paper-derived/train.csv'
 
 
+def test_interpretation_emits_bounded_method_spec() -> None:
+    client = build_client()
+
+    intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Vision-transformer image forgery detection with PyTorch and timm on s3://datasets/forgery/train.csv.',
+            'source_refs': ['https://example.org/forgery-paper'],
+            'notes': ['Prefer GPU execution and explicit package checks.'],
+        },
+    )
+    assert intake.status_code == 201
+
+    interpretation = client.post('/interpretations/from-latest-intake')
+    assert interpretation.status_code == 201
+    payload = interpretation.json()
+    assert payload['method_spec']['workflow_id'] == 'gpu-experiment'
+    assert payload['method_spec']['execution_inputs']['dataset_uri'] == 's3://datasets/forgery/train.csv'
+    assert payload['method_spec']['run_readiness'] == 'ready'
+    assert 'torch' in payload['technique_knowledge']['python_packages']
+
+
+def test_design_from_interpretation_can_be_ready_for_run() -> None:
+    client = build_client()
+
+    intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Turn this paper into a bounded experiment design based on the linked notes and s3://datasets/paper-derived/train.csv.',
+            'source_refs': ['https://example.org/paper-notes'],
+            'notes': ['Focus on the method section and reported metrics.'],
+        },
+    )
+    assert intake.status_code == 201
+
+    interpretation = client.post('/interpretations/from-latest-intake')
+    assert interpretation.status_code == 201
+
+    design = client.post('/design-drafts/from-latest-intake')
+    assert design.status_code == 201
+    design_payload = design.json()
+    assert design_payload['status'] == 'ready_for_run'
+    assert design_payload['method_spec']['run_readiness'] == 'ready'
+    assert design_payload['workflow_id'] == 'generic-tabular-benchmark'
+    assert design_payload['declared_inputs']['train_uri'] == 's3://datasets/paper-derived/train.csv'
+
+    run = client.post('/runs/from-latest-design-draft')
+    assert run.status_code == 201
+    assert run.json()['manifest']['inputs']['train_uri'] == 's3://datasets/paper-derived/train.csv'
+
+
 def test_create_fresh_paper_pipeline_creates_literature_run_without_manual_review() -> None:
     client = build_client()
 
@@ -3923,6 +3974,55 @@ def test_session_autoresearch_transition_chain(tmp_path) -> None:
     summary = client.get(f'/research-sessions/{session_id}/autoresearch-summary')
     assert summary.status_code == 200
     assert summary.json()['campaign']['session_id'] == session_id
+
+
+def test_autoresearch_launch_iteration_uses_method_spec_inputs(tmp_path) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        artifacts_mount_path=str(tmp_path),
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Validate literature-derived launch iteration via bounded method spec.'},
+    )
+    session_id = session.json()['session_id']
+
+    intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Bounded literature-derived experiment using s3://datasets/paper-derived/train.csv for validation.',
+            'source_refs': ['https://example.org/paper-derived-method'],
+            'notes': ['Keep the methodology executable within approved templates.'],
+        },
+    )
+    assert intake.status_code == 201
+
+    interpretation = client.post('/interpretations/from-latest-intake')
+    assert interpretation.status_code == 201
+    design = client.post('/design-drafts/from-latest-intake')
+    assert design.status_code == 201
+    design_payload = design.json()
+    assert design_payload['status'] == 'ready_for_run'
+
+    store.save_research_session(
+        store.get_research_session(session_id).model_copy(update={'latest_design_id': design_payload['design_id']})
+    )
+
+    campaign = client.post(f'/research-sessions/{session_id}/transitions/start-autoresearch-campaign')
+    assert campaign.status_code == 201
+    drafted = client.post(f'/research-sessions/{session_id}/transitions/draft-methodologies')
+    assert drafted.status_code == 201
+
+    launched = client.post(f'/research-sessions/{session_id}/transitions/launch-autoresearch-iteration')
+    assert launched.status_code == 201
+    payload = launched.json()
+    assert payload['run']['workflow_id'] == 'generic-tabular-benchmark'
+    assert payload['run']['manifest']['inputs']['train_uri'] == 's3://datasets/paper-derived/train.csv'
+    assert payload['run']['manifest']['inputs']['validation_strategy'] == 'holdout'
 
 
 def test_autoresearch_notebook_draft_is_written(tmp_path) -> None:

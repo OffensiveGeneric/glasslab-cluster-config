@@ -12,7 +12,7 @@ from services.common.schemas import WorkflowRegistryEntry
 
 from .config import Settings
 from .registry import WorkflowRegistry
-from .schemas import DesignDraftRecord, IntakeRecord, InterpretationRecord, ReplicabilityAssessmentRecord
+from .schemas import DesignDraftRecord, IntakeRecord, InterpretationRecord, MethodSpecRecord, ReplicabilityAssessmentRecord
 from .stage_inference import normalize_unique_strings
 
 LOGGER = logging.getLogger(__name__)
@@ -291,6 +291,7 @@ def build_design_draft(
     intake: IntakeRecord,
     workflow: WorkflowRegistryEntry,
     submitted_by: str,
+    interpretation: InterpretationRecord | None = None,
     source_assessment_id: str | None = None,
 ) -> DesignDraftRecord:
     now = datetime.now(timezone.utc)
@@ -301,14 +302,26 @@ def build_design_draft(
     design_notes.extend(bounded_idea_notes[:1])
     design_notes.extend(literature_state_notes[:1])
     candidate_models = workflow.allowed_models[:2]
+    objective = f'Derived from intake: {intake.normalized_summary}'[:500]
+    method_spec = build_design_method_spec(
+        workflow_id=workflow.workflow_id,
+        objective=objective,
+        declared_inputs=declared_inputs,
+        unresolved_inputs=unresolved_inputs,
+        candidate_models=candidate_models,
+        resource_profile=workflow.resource_profile.profile_name,
+        interpretation=interpretation,
+    )
+    declared_inputs = dict(method_spec.execution_inputs)
+    unresolved_inputs = compute_method_spec_unresolved_inputs(method_spec)
     status_value = 'ready_for_run'
-    if unresolved_inputs:
+    if unresolved_inputs or method_spec.run_readiness != 'ready':
         status_value = 'needs_review'
     if workflow.approval_tier != 'tier-2-approved-execution':
         status_value = 'needs_review'
         design_notes.append(f'Approval tier {workflow.approval_tier} requires operator review before run creation.')
-
-    objective = f'Derived from intake: {intake.normalized_summary}'[:500]
+    if method_spec.blocking_reasons:
+        design_notes.append('Method spec blockers: ' + '; '.join(method_spec.blocking_reasons[:3]))
 
     return DesignDraftRecord(
         design_id=design_id,
@@ -327,6 +340,7 @@ def build_design_draft(
         expected_artifacts=workflow.expected_artifacts.model_dump(mode='json'),
         approval_tier=workflow.approval_tier,
         design_notes=design_notes,
+        method_spec=method_spec,
         submitted_by=submitted_by,
         session_id=intake.session_id,
     )
@@ -385,25 +399,149 @@ def build_design_draft_from_agent_draft(
     source_assessment_id: str | None = None,
 ) -> DesignDraftRecord:
     now = datetime.now(timezone.utc)
+    method_spec = build_design_method_spec(
+        workflow_id=workflow.workflow_id,
+        objective=validated_draft['objective'],
+        declared_inputs=validated_draft['declared_inputs'],
+        unresolved_inputs=list(validated_draft['unresolved_inputs']),
+        candidate_models=list(validated_draft['candidate_models']),
+        resource_profile=validated_draft['resource_profile'],
+        interpretation=None,
+    )
     return DesignDraftRecord(
         design_id=uuid4().hex,
         intake_id=intake.intake_id,
         source_assessment_id=source_assessment_id,
         created_at=now,
         updated_at=now,
-        status='ready_for_run' if not validated_draft['unresolved_inputs'] and workflow.approval_tier == 'tier-2-approved-execution' else 'needs_review',
+        status='ready_for_run' if not compute_method_spec_unresolved_inputs(method_spec) and method_spec.run_readiness == 'ready' and workflow.approval_tier == 'tier-2-approved-execution' else 'needs_review',
         workflow_id=validated_draft['workflow_id'],
         workflow_family=validated_draft['workflow_family'],
         objective=validated_draft['objective'],
-        declared_inputs=validated_draft['declared_inputs'],
-        unresolved_inputs=validated_draft['unresolved_inputs'],
+        declared_inputs=method_spec.execution_inputs,
+        unresolved_inputs=compute_method_spec_unresolved_inputs(method_spec),
         candidate_models=validated_draft['candidate_models'],
         resource_profile=validated_draft['resource_profile'],
         expected_artifacts=validated_draft['expected_artifacts'],
         approval_tier=validated_draft['approval_tier'],
         design_notes=validated_draft['design_notes'],
+        method_spec=method_spec,
         submitted_by=submitted_by,
         session_id=intake.session_id,
+    )
+
+
+def compute_method_spec_unresolved_inputs(method_spec: MethodSpecRecord) -> list[str]:
+    unresolved: list[str] = []
+    for name, value in method_spec.execution_inputs.items():
+        if isinstance(value, str) and value.startswith(UNRESOLVED_PREFIX):
+            unresolved.append(name)
+    if method_spec.dataset_uri is None and 'dataset_uri' in method_spec.execution_inputs:
+        unresolved.append('dataset_uri')
+    return list(dict.fromkeys(unresolved))
+
+
+def build_design_method_spec(
+    *,
+    workflow_id: str,
+    objective: str,
+    declared_inputs: dict[str, Any],
+    unresolved_inputs: list[str],
+    candidate_models: list[str],
+    resource_profile: str,
+    interpretation: InterpretationRecord | None,
+) -> MethodSpecRecord:
+    execution_inputs = dict(declared_inputs)
+    if interpretation is not None and interpretation.method_spec is not None:
+        for key, value in interpretation.method_spec.execution_inputs.items():
+            if key not in execution_inputs or (
+                isinstance(execution_inputs.get(key), str) and str(execution_inputs.get(key)).startswith(UNRESOLVED_PREFIX)
+            ):
+                execution_inputs[key] = value
+    dataset_hints = list(interpretation.recommended_datasets) if interpretation is not None else []
+    metrics = list(interpretation.recommended_metrics) if interpretation is not None else []
+    baseline_models = list(interpretation.recommended_baselines) if interpretation is not None else []
+    required_python_packages = list(interpretation.recommended_python_packages) if interpretation is not None else []
+    mutation_axes = list(interpretation.mutation_axes) if interpretation is not None else []
+    task_type = interpretation.recommended_method_family if interpretation is not None else workflow_id
+    loss_or_distance = None
+    if interpretation is not None and interpretation.technique_knowledge.losses_or_distances:
+        loss_or_distance = interpretation.technique_knowledge.losses_or_distances[0]
+    split_strategy = None
+    if 'validation_strategy' in execution_inputs and str(execution_inputs.get('validation_strategy', '')).strip():
+        split_strategy = str(execution_inputs['validation_strategy']).strip()
+    elif interpretation is not None and interpretation.technique_knowledge.split_strategies:
+        split_strategy = interpretation.technique_knowledge.split_strategies[0]
+        execution_inputs.setdefault('validation_strategy', split_strategy)
+    if 'validation_split' not in execution_inputs and workflow_id in {'generic-tabular-benchmark', 'literature-to-experiment'}:
+        execution_inputs['validation_split'] = '0.2'
+    if 'validation_strategy' not in execution_inputs and workflow_id in {'generic-tabular-benchmark', 'literature-to-experiment'}:
+        execution_inputs['validation_strategy'] = split_strategy or 'holdout'
+        split_strategy = execution_inputs['validation_strategy']
+
+    recomputed_unresolved = [
+        name for name, value in execution_inputs.items() if isinstance(value, str) and value.startswith(UNRESOLVED_PREFIX)
+    ]
+    blocking_reasons = [
+        f'{name} is unresolved' for name in list(dict.fromkeys([*unresolved_inputs, *recomputed_unresolved]))
+    ]
+    if workflow_id == 'gpu-experiment':
+        if not str(execution_inputs.get('dataset_uri', '')).strip():
+            blocking_reasons.append('dataset_uri is unresolved for gpu-experiment')
+        if not str(execution_inputs.get('model_family', '')).strip():
+            blocking_reasons.append('model_family is unresolved for gpu-experiment')
+        if not str(execution_inputs.get('training_notes', '')).strip():
+            execution_inputs['training_notes'] = objective[:500]
+    if workflow_id == 'literature-to-experiment' and not str(execution_inputs.get('source_notes', '')).strip():
+        execution_inputs['source_notes'] = objective[:500]
+    run_readiness = 'ready' if not blocking_reasons else 'needs_review'
+    dataset_uri = str(execution_inputs.get('dataset_uri', '')).strip() or None
+    return MethodSpecRecord(
+        objective=objective[:500],
+        workflow_id=workflow_id,
+        task_type=task_type,
+        candidate_models=list(candidate_models),
+        baseline_models=list(baseline_models),
+        dataset_hints=dataset_hints,
+        dataset_uri=dataset_uri,
+        split_strategy=split_strategy,
+        metrics=metrics,
+        loss_or_distance=loss_or_distance,
+        required_python_packages=required_python_packages,
+        resource_profile=resource_profile,
+        execution_inputs=execution_inputs,
+        mutation_axes=mutation_axes,
+        run_readiness=run_readiness,
+        blocking_reasons=blocking_reasons,
+    )
+
+
+def refresh_design_method_spec(
+    design: DesignDraftRecord,
+    *,
+    interpretation: InterpretationRecord | None = None,
+) -> DesignDraftRecord:
+    method_spec = build_design_method_spec(
+        workflow_id=design.workflow_id,
+        objective=design.objective,
+        declared_inputs=design.declared_inputs,
+        unresolved_inputs=list(design.unresolved_inputs),
+        candidate_models=list(design.candidate_models),
+        resource_profile=design.resource_profile,
+        interpretation=interpretation,
+    )
+    unresolved_inputs = compute_method_spec_unresolved_inputs(method_spec)
+    status_value = 'ready_for_run'
+    if unresolved_inputs or method_spec.run_readiness != 'ready' or design.approval_tier != 'tier-2-approved-execution':
+        status_value = 'needs_review'
+    return design.model_copy(
+        update={
+            'declared_inputs': method_spec.execution_inputs,
+            'unresolved_inputs': unresolved_inputs,
+            'status': status_value,
+            'method_spec': method_spec,
+            'updated_at': datetime.now(timezone.utc),
+        }
     )
 
 

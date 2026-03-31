@@ -105,6 +105,7 @@ def build_seed_methodology_draft(
     now = _now()
     models = _seed_models_for_design(design, workflow)
     objective = campaign.objective or design.objective
+    method_spec = getattr(design, 'method_spec', None)
     return MethodologyDraftRecord(
         methodology_draft_id=uuid4().hex,
         campaign_id=campaign.campaign_id,
@@ -126,10 +127,22 @@ def build_seed_methodology_draft(
         status='seed',
         workflow_id=workflow.workflow_id,
         workflow_family=workflow.workflow_family,
-        declared_inputs=_default_validation_inputs(design.declared_inputs),
+        declared_inputs=_default_validation_inputs(
+            dict(method_spec.execution_inputs) if method_spec is not None else design.declared_inputs
+        ),
         candidate_models=models,
         resource_profile=design.resource_profile,
         approval_tier=design.approval_tier,
+        method_spec=method_spec.model_copy(
+            update={
+                'candidate_models': models,
+                'baseline_models': models[:1],
+                'resource_profile': design.resource_profile,
+                'execution_inputs': _default_validation_inputs(
+                    dict(method_spec.execution_inputs)
+                ),
+            }
+        ) if method_spec is not None else None,
         mutation_diff={},
         notes=['seed draft from approved design'],
     )
@@ -237,6 +250,19 @@ def draft_initial_methodologies(
                 candidate_models=spec['candidate_models'],
                 resource_profile=seed.resource_profile,
                 approval_tier=seed.approval_tier,
+                method_spec=(
+                    seed.method_spec.model_copy(
+                        update={
+                            'candidate_models': spec['candidate_models'],
+                            'baseline_models': spec['baselines'],
+                            'metrics': _dedupe(spec['metrics']),
+                            'execution_inputs': dict(spec.get('declared_inputs', seed.declared_inputs)),
+                            'mutation_axes': list(seed.method_spec.mutation_axes),
+                        }
+                    )
+                    if seed.method_spec is not None
+                    else None
+                ),
                 mutation_diff=spec['mutation_diff'],
                 notes=spec['notes'],
             )
@@ -272,11 +298,17 @@ def build_autoresearch_campaign(
 
 
 def methodology_to_run_request(draft: MethodologyDraftRecord) -> RunCreateRequest:
+    method_spec = draft.method_spec
+    if method_spec is not None and method_spec.run_readiness != 'ready':
+        detail = 'methodology draft is not ready for execution'
+        if method_spec.blocking_reasons:
+            detail += ': ' + '; '.join(method_spec.blocking_reasons[:2])
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
     return RunCreateRequest(
         workflow_id=draft.workflow_id,
         objective=draft.objective,
-        inputs=draft.declared_inputs,
-        models=draft.candidate_models or draft.architectures or draft.baselines,
+        inputs=method_spec.execution_inputs if method_spec is not None else draft.declared_inputs,
+        models=(method_spec.candidate_models if method_spec is not None and method_spec.candidate_models else draft.candidate_models) or draft.architectures or draft.baselines,
         resource_profile=draft.resource_profile,
         run_priority='autonomous',
         submitted_by='glasslab-autoresearch',

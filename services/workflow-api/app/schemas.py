@@ -226,6 +226,41 @@ class IntakeRecord(BaseModel):
     session_id: str | None = None
 
 
+class TechniqueKnowledgeRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    model_families: list[str] = Field(default_factory=list)
+    baseline_families: list[str] = Field(default_factory=list)
+    metrics: list[str] = Field(default_factory=list)
+    losses_or_distances: list[str] = Field(default_factory=list)
+    split_strategies: list[str] = Field(default_factory=list)
+    python_packages: list[str] = Field(default_factory=list)
+    dataset_hints: list[str] = Field(default_factory=list)
+    failure_modes: list[str] = Field(default_factory=list)
+    source_scope: str = 'paper'
+
+
+class MethodSpecRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    objective: str
+    workflow_id: str | None = None
+    task_type: str | None = None
+    candidate_models: list[str] = Field(default_factory=list)
+    baseline_models: list[str] = Field(default_factory=list)
+    dataset_hints: list[str] = Field(default_factory=list)
+    dataset_uri: str | None = None
+    split_strategy: str | None = None
+    metrics: list[str] = Field(default_factory=list)
+    loss_or_distance: str | None = None
+    required_python_packages: list[str] = Field(default_factory=list)
+    resource_profile: str | None = None
+    execution_inputs: dict[str, Any] = Field(default_factory=dict)
+    mutation_axes: list[str] = Field(default_factory=list)
+    run_readiness: Literal['ready', 'needs_review', 'blocked'] = 'needs_review'
+    blocking_reasons: list[str] = Field(default_factory=list)
+
+
 class InterpretationRecord(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -254,6 +289,8 @@ class InterpretationRecord(BaseModel):
     preferred_resource_profile: str | None = None
     gpu_required: bool = False
     mutation_axes: list[str] = Field(default_factory=list)
+    technique_knowledge: TechniqueKnowledgeRecord = Field(default_factory=TechniqueKnowledgeRecord)
+    method_spec: MethodSpecRecord | None = None
     interpretation_source: str = 'deterministic'
     interpretation_backend: dict[str, Any] | None = None
     interpretation_warnings: list[str] = Field(default_factory=list)
@@ -301,6 +338,7 @@ class DesignDraftRecord(BaseModel):
     expected_artifacts: dict[str, list[str]]
     approval_tier: str
     design_notes: list[str] = Field(default_factory=list)
+    method_spec: MethodSpecRecord | None = None
     submitted_by: str
     session_id: str | None = None
 
@@ -332,6 +370,7 @@ class MethodologyDraftRecord(BaseModel):
     candidate_models: list[str] = Field(default_factory=list)
     resource_profile: str
     approval_tier: str
+    method_spec: MethodSpecRecord | None = None
     mutation_diff: dict[str, Any] = Field(default_factory=dict)
     notes: list[str] = Field(default_factory=list)
 

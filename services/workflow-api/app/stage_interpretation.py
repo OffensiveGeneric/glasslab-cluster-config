@@ -12,7 +12,12 @@ from .config import Settings
 from .persistence import RunStore
 from .registry import WorkflowRegistry
 from .schemas import IntakeRecord, InterpretationRecord
-from .stage_inference import build_interpretation_notes, normalize_unique_strings
+from .stage_inference import (
+    build_interpretation_notes,
+    build_method_spec,
+    build_technique_knowledge,
+    normalize_unique_strings,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -79,6 +84,33 @@ def build_interpretation_record_from_agent_draft(
 ) -> InterpretationRecord:
     now = datetime.now(timezone.utc)
     unresolved_questions = list(validated_draft["unresolved_questions"])
+    recommended_losses: list[str] = []
+    technique_knowledge = build_technique_knowledge(
+        intake=intake,
+        dataset_hints=list(validated_draft.get("recommended_datasets", [])) or list(validated_draft["dataset_hints"]),
+        evaluation_targets=list(validated_draft.get("recommended_metrics", [])) or list(validated_draft["evaluation_targets"]),
+        recommended_method_family=validated_draft.get("recommended_method_family"),
+        recommended_baselines=list(validated_draft.get("recommended_baselines", [])),
+        recommended_architectures=list(validated_draft.get("recommended_architectures", [])),
+        recommended_losses=recommended_losses,
+        recommended_python_packages=list(validated_draft.get("recommended_python_packages", [])),
+        mutation_axes=list(validated_draft.get("mutation_axes", [])),
+    )
+    method_spec = build_method_spec(
+        intake=intake,
+        objective=validated_draft["normalized_summary"],
+        candidate_workflows=list(validated_draft["candidate_workflow_families"]),
+        dataset_hints=list(validated_draft.get("recommended_datasets", [])) or list(validated_draft["dataset_hints"]),
+        evaluation_targets=list(validated_draft.get("recommended_metrics", [])) or list(validated_draft["evaluation_targets"]),
+        recommended_method_family=validated_draft.get("recommended_method_family"),
+        recommended_baselines=list(validated_draft.get("recommended_baselines", [])),
+        recommended_architectures=list(validated_draft.get("recommended_architectures", [])),
+        recommended_losses=recommended_losses,
+        recommended_python_packages=list(validated_draft.get("recommended_python_packages", [])),
+        preferred_workflow_id=validated_draft.get("preferred_workflow_id"),
+        preferred_resource_profile=validated_draft.get("preferred_resource_profile"),
+        mutation_axes=list(validated_draft.get("mutation_axes", [])),
+    )
     return InterpretationRecord(
         interpretation_id=uuid4().hex,
         intake_id=intake.intake_id,
@@ -105,6 +137,8 @@ def build_interpretation_record_from_agent_draft(
         preferred_resource_profile=validated_draft.get("preferred_resource_profile"),
         gpu_required=bool(validated_draft.get("gpu_required", False)),
         mutation_axes=list(validated_draft.get("mutation_axes", [])),
+        technique_knowledge=technique_knowledge,
+        method_spec=method_spec,
         interpretation_source=interpretation_source,
         interpretation_backend=interpretation_backend,
         interpretation_warnings=list(interpretation_warnings or []),

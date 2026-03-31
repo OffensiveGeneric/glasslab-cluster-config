@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import logging
+import re
 from typing import Any
 from urllib import error as urllib_error
 from urllib import request as urllib_request
@@ -13,7 +14,7 @@ from .persistence import RunStore
 from .registry import WorkflowRegistry
 from .session_helpers import build_research_session_literature_digest
 from .source_documents import ARCHITECTURE_KEYWORDS, BASELINE_KEYWORDS, DATASET_KEYWORDS, LOSS_KEYWORDS, METRIC_KEYWORDS, PYTHON_LIBRARY_KEYWORDS
-from .schemas import IntakeCreateRequest, IntakeRecord, InterpretationRecord
+from .schemas import IntakeCreateRequest, IntakeRecord, InterpretationRecord, MethodSpecRecord, TechniqueKnowledgeRecord
 
 LOGGER = logging.getLogger(__name__)
 
@@ -443,6 +444,158 @@ def infer_preferred_execution_surface(
     return None, None
 
 
+def infer_split_strategies(
+    intake: IntakeRecord,
+    candidate_workflows: list[str],
+) -> list[str]:
+    lowered = ' '.join([intake.raw_request, intake.normalized_summary, *intake.notes]).lower()
+    strategies: list[str] = []
+    if 'stratified' in lowered:
+        strategies.append('stratified_holdout')
+    if 'k-fold' in lowered or 'cross validation' in lowered or 'cross-validation' in lowered:
+        strategies.append('cross_validation')
+    if 'grouped' in lowered or 'group-aware' in lowered:
+        strategies.append('grouped_split')
+    if 'temporal' in lowered or 'time series' in lowered:
+        strategies.append('temporal_split')
+    if not strategies and (
+        'generic-tabular-benchmark' in candidate_workflows
+        or 'literature-to-experiment' in candidate_workflows
+        or 'gpu-experiment' in candidate_workflows
+    ):
+        strategies.append('holdout')
+    return list(dict.fromkeys(strategies))
+
+
+def infer_dataset_uri_hint(intake: IntakeRecord) -> str | None:
+    text = ' '.join([intake.raw_request, intake.normalized_summary, *intake.notes, *intake.source_refs])
+    match = re.search(r'(s3://\S+|file://\S+|/mnt/\S+)', text)
+    if match:
+        return match.group(1).rstrip('.,);')
+    lowered = text.lower()
+    if 'titanic' in lowered:
+        return 's3://datasets/titanic/train.csv'
+    return None
+
+
+def build_technique_knowledge(
+    *,
+    intake: IntakeRecord,
+    dataset_hints: list[str],
+    evaluation_targets: list[str],
+    recommended_method_family: str | None,
+    recommended_baselines: list[str],
+    recommended_architectures: list[str],
+    recommended_losses: list[str],
+    recommended_python_packages: list[str],
+    mutation_axes: list[str],
+) -> TechniqueKnowledgeRecord:
+    failure_modes = []
+    if not dataset_hints:
+        failure_modes.append('missing_concrete_dataset')
+    if not evaluation_targets:
+        failure_modes.append('missing_canonical_metric')
+    if intake.source_type == 'paper-link' and not intake.document_refs:
+        failure_modes.append('url_only_source_context')
+    source_scope = 'paper' if intake.source_type in {'paper-link', 'paper-note'} else 'general'
+    split_strategies = infer_split_strategies(intake, intake.workflow_family_candidates)
+    model_families = recommended_architectures or ([recommended_method_family] if recommended_method_family else [])
+    return TechniqueKnowledgeRecord(
+        model_families=list(dict.fromkeys(model_families)),
+        baseline_families=list(dict.fromkeys(recommended_baselines)),
+        metrics=list(dict.fromkeys(evaluation_targets)),
+        losses_or_distances=list(dict.fromkeys(recommended_losses)),
+        split_strategies=split_strategies,
+        python_packages=list(dict.fromkeys(recommended_python_packages)),
+        dataset_hints=list(dict.fromkeys(dataset_hints)),
+        failure_modes=failure_modes,
+        source_scope=source_scope,
+    )
+
+
+def build_method_spec(
+    *,
+    intake: IntakeRecord,
+    objective: str,
+    candidate_workflows: list[str],
+    dataset_hints: list[str],
+    evaluation_targets: list[str],
+    recommended_method_family: str | None,
+    recommended_baselines: list[str],
+    recommended_architectures: list[str],
+    recommended_losses: list[str],
+    recommended_python_packages: list[str],
+    preferred_workflow_id: str | None,
+    preferred_resource_profile: str | None,
+    mutation_axes: list[str],
+) -> MethodSpecRecord:
+    split_strategies = infer_split_strategies(intake, candidate_workflows)
+    workflow_id = preferred_workflow_id or (candidate_workflows[0] if candidate_workflows else None)
+    dataset_uri = infer_dataset_uri_hint(intake)
+    execution_inputs: dict[str, Any] = {}
+    if workflow_id == 'generic-tabular-benchmark':
+        dataset_name = 'titanic' if 'titanic' in dataset_hints else (dataset_hints[0] if dataset_hints else None)
+        if dataset_name:
+            execution_inputs['dataset_name'] = dataset_name
+        if dataset_uri:
+            execution_inputs['train_uri'] = dataset_uri
+            if dataset_uri.endswith('/train.csv'):
+                execution_inputs['test_uri'] = dataset_uri.replace('/train.csv', '/test.csv')
+        execution_inputs['validation_strategy'] = split_strategies[0] if split_strategies else 'holdout'
+        execution_inputs['validation_split'] = '0.2'
+        execution_inputs['target_column'] = 'Survived' if 'titanic' in dataset_hints else 'label'
+    elif workflow_id == 'literature-to-experiment':
+        if intake.source_refs:
+            execution_inputs['paper_id'] = intake.source_refs[0]
+        execution_inputs['source_notes'] = objective[:500]
+        if dataset_uri:
+            execution_inputs['dataset_uri'] = dataset_uri
+        execution_inputs['validation_strategy'] = split_strategies[0] if split_strategies else 'holdout'
+        execution_inputs['validation_split'] = '0.2'
+    elif workflow_id == 'gpu-experiment':
+        if dataset_uri:
+            execution_inputs['dataset_uri'] = dataset_uri
+        model_family = (recommended_architectures or [recommended_method_family] or [''])[0]
+        if model_family:
+            execution_inputs['model_family'] = model_family
+        execution_inputs['training_notes'] = objective[:500]
+
+    blocking_reasons: list[str] = []
+    if workflow_id is None:
+        blocking_reasons.append('no approved workflow was selected')
+    if workflow_id in {'literature-to-experiment', 'gpu-experiment'} and not execution_inputs.get('dataset_uri'):
+        blocking_reasons.append('dataset_uri is still unresolved')
+    if workflow_id == 'generic-tabular-benchmark':
+        if not execution_inputs.get('dataset_name'):
+            blocking_reasons.append('dataset_name is still unresolved')
+        if not execution_inputs.get('target_column') or str(execution_inputs.get('target_column')).startswith('UNRESOLVED_'):
+            blocking_reasons.append('target_column is still unresolved')
+    if workflow_id == 'gpu-experiment' and not execution_inputs.get('model_family'):
+        blocking_reasons.append('model_family is still unresolved')
+    run_readiness: str = 'ready' if not blocking_reasons else 'needs_review'
+    candidate_models = list(dict.fromkeys(recommended_architectures))
+    if not candidate_models and recommended_method_family:
+        candidate_models = [recommended_method_family]
+    return MethodSpecRecord(
+        objective=objective[:500],
+        workflow_id=workflow_id,
+        task_type=recommended_method_family,
+        candidate_models=candidate_models,
+        baseline_models=list(dict.fromkeys(recommended_baselines)),
+        dataset_hints=list(dict.fromkeys(dataset_hints)),
+        dataset_uri=dataset_uri,
+        split_strategy=split_strategies[0] if split_strategies else None,
+        metrics=list(dict.fromkeys(evaluation_targets)),
+        loss_or_distance=(recommended_losses[0] if recommended_losses else None),
+        required_python_packages=list(dict.fromkeys(recommended_python_packages)),
+        resource_profile=preferred_resource_profile,
+        execution_inputs=execution_inputs,
+        mutation_axes=list(dict.fromkeys(mutation_axes)),
+        run_readiness=run_readiness,  # type: ignore[arg-type]
+        blocking_reasons=blocking_reasons,
+    )
+
+
 def build_document_context(intake: IntakeRecord, store: RunStore) -> str:
     parts: list[str] = []
     for document_id in intake.document_refs:
@@ -548,6 +701,32 @@ def build_interpretation_record(intake: IntakeRecord, store: RunStore | None = N
         recommended_losses,
     )
     unresolved_questions = infer_unresolved_questions(intake, candidate_workflows, dataset_hints, evaluation_targets)
+    technique_knowledge = build_technique_knowledge(
+        intake=intake,
+        dataset_hints=dataset_hints,
+        evaluation_targets=evaluation_targets,
+        recommended_method_family=recommended_method_family,
+        recommended_baselines=recommended_baselines,
+        recommended_architectures=recommended_architectures,
+        recommended_losses=recommended_losses,
+        recommended_python_packages=recommended_python_packages,
+        mutation_axes=mutation_axes,
+    )
+    method_spec = build_method_spec(
+        intake=intake,
+        objective=intake.normalized_summary,
+        candidate_workflows=candidate_workflows,
+        dataset_hints=dataset_hints,
+        evaluation_targets=evaluation_targets,
+        recommended_method_family=recommended_method_family,
+        recommended_baselines=recommended_baselines,
+        recommended_architectures=recommended_architectures,
+        recommended_losses=recommended_losses,
+        recommended_python_packages=recommended_python_packages,
+        preferred_workflow_id=preferred_workflow_id,
+        preferred_resource_profile=preferred_resource_profile,
+        mutation_axes=mutation_axes,
+    )
     return InterpretationRecord(
         interpretation_id=uuid4().hex,
         intake_id=intake.intake_id,
@@ -578,6 +757,8 @@ def build_interpretation_record(intake: IntakeRecord, store: RunStore | None = N
         preferred_resource_profile=preferred_resource_profile,
         gpu_required=gpu_required,
         mutation_axes=mutation_axes,
+        technique_knowledge=technique_knowledge,
+        method_spec=method_spec,
         interpretation_source='deterministic',
         interpretation_backend=None,
         interpretation_warnings=[],

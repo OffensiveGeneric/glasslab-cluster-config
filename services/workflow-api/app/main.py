@@ -45,6 +45,7 @@ from .stage_design import (
     call_design_agent as call_design_agent_impl,
     choose_workflow_for_intake as choose_workflow_for_intake_impl,
     derive_design_from_intake as derive_design_from_intake_impl,
+    refresh_design_method_spec,
     validate_assessment_agent_draft as validate_assessment_agent_draft_impl,
     validate_design_agent_draft as validate_design_agent_draft_impl,
 )
@@ -567,12 +568,14 @@ def build_design_draft(
     intake: IntakeRecord,
     workflow: WorkflowRegistryEntry,
     submitted_by: str,
+    interpretation: InterpretationRecord | None = None,
     source_assessment_id: str | None = None,
 ) -> DesignDraftRecord:
     return build_design_draft_impl(
         intake,
         workflow,
         submitted_by=submitted_by,
+        interpretation=interpretation,
         source_assessment_id=source_assessment_id,
     )
 
@@ -639,7 +642,7 @@ def review_design_draft(
         if note not in design_notes:
             design_notes.append(note)
 
-    return design.model_copy(
+    refreshed = design.model_copy(
         update={
             'updated_at': now,
             'declared_inputs': declared_inputs,
@@ -648,6 +651,7 @@ def review_design_draft(
             'status': status_value,
         }
     )
+    return refresh_design_method_spec(refreshed)
 
 
 def build_approved_rerun_schedule(
@@ -1208,7 +1212,10 @@ def create_app(
         workflow_id: str | None = None,
     ) -> DesignDraftRecord:
         intake_for_design = enrich_intake_with_interpretation_context(intake, interpretation)
-        workflow = registry.get_workflow(workflow_id) if workflow_id else choose_workflow_for_intake(intake_for_design, registry)
+        preferred_workflow_id = workflow_id or (
+            interpretation.preferred_workflow_id if interpretation is not None and interpretation.preferred_workflow_id else None
+        )
+        workflow = registry.get_workflow(preferred_workflow_id) if preferred_workflow_id else choose_workflow_for_intake(intake_for_design, registry)
         if workflow is None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='no approved workflow mapping found')
         effective_submitted_by = submitted_by or intake.submitted_by
@@ -1226,8 +1233,10 @@ def create_app(
                 intake_for_design,
                 workflow,
                 submitted_by=effective_submitted_by,
+                interpretation=interpretation,
                 source_assessment_id=source_assessment_id,
             )
+        record = refresh_design_method_spec(record, interpretation=interpretation)
         store.save_design_draft(record)
         log_stage_record_source(
             'design',

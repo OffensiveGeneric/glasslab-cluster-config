@@ -105,6 +105,12 @@ def register_execution_routes(
             warnings.append('interpretation dataset hints: ' + ', '.join(interpretation.dataset_hints[:3]))
         if interpretation.evaluation_targets:
             warnings.append('interpretation evaluation targets: ' + ', '.join(interpretation.evaluation_targets[:3]))
+        method_spec = getattr(design, 'method_spec', None)
+        if method_spec is not None:
+            if method_spec.blocking_reasons:
+                warnings.append('method-spec blockers: ' + '; '.join(method_spec.blocking_reasons[:3]))
+            if method_spec.run_readiness != 'ready':
+                blocking_issues.append('design method_spec is not ready for execution')
         return preflight.model_copy(update={'warnings': warnings, 'blocking_issues': blocking_issues})
 
     @app.get('/workflow-families', response_model=list[WorkflowFamilySummary])
@@ -175,6 +181,12 @@ def register_execution_routes(
     @app.post('/research-sessions/{session_id}/runs/from-design', response_model=RunRecord, status_code=status.HTTP_201_CREATED)
     def create_run_from_session_design(session_id: str) -> RunRecord:
         design = get_required_session_design(session_id)
+        method_spec = getattr(design, 'method_spec', None)
+        if method_spec is not None and method_spec.run_readiness != 'ready':
+            detail = 'design method_spec is not ready_for_run'
+            if method_spec.blocking_reasons:
+                detail += ': ' + '; '.join(method_spec.blocking_reasons[:2])
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
         if design.status != 'ready_for_run':
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='design draft is not ready_for_run')
         workflow = registry.get_workflow(design.workflow_id)
@@ -183,8 +195,8 @@ def register_execution_routes(
         request = RunCreateRequest(
             workflow_id=design.workflow_id,
             objective=design.objective,
-            inputs=design.declared_inputs,
-            models=design.candidate_models or workflow.allowed_models[:1],
+            inputs=(method_spec.execution_inputs if method_spec is not None else design.declared_inputs),
+            models=(method_spec.candidate_models if method_spec is not None and method_spec.candidate_models else design.candidate_models) or workflow.allowed_models[:1],
             resource_profile=design.resource_profile,
             submitted_by=design.submitted_by,
         )
@@ -205,6 +217,12 @@ def register_execution_routes(
         design = store.get_latest_design_draft()
         if design is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='design draft not found')
+        method_spec = getattr(design, 'method_spec', None)
+        if method_spec is not None and method_spec.run_readiness != 'ready':
+            detail = 'design method_spec is not ready_for_run'
+            if method_spec.blocking_reasons:
+                detail += ': ' + '; '.join(method_spec.blocking_reasons[:2])
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
         if design.status != 'ready_for_run':
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='design draft is not ready_for_run')
         workflow = registry.get_workflow(design.workflow_id)
@@ -213,8 +231,8 @@ def register_execution_routes(
         request = RunCreateRequest(
             workflow_id=design.workflow_id,
             objective=design.objective,
-            inputs=design.declared_inputs,
-            models=design.candidate_models or workflow.allowed_models[:1],
+            inputs=(method_spec.execution_inputs if method_spec is not None else design.declared_inputs),
+            models=(method_spec.candidate_models if method_spec is not None and method_spec.candidate_models else design.candidate_models) or workflow.allowed_models[:1],
             resource_profile=design.resource_profile,
             submitted_by=design.submitted_by,
         )
