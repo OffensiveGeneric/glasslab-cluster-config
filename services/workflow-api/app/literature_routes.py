@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import re
 from typing import Any, Callable
 from urllib import error as urllib_error
 
@@ -62,6 +63,11 @@ def register_literature_routes(
     record_operation: Callable[..., OperationRecord],
     search_external_literature: Callable[..., ExternalLiteratureResult],
 ) -> None:
+    def _normalize_goal_statement(value: str | None) -> str:
+        if not value:
+            return ''
+        return re.sub(r'\s+', ' ', value).strip().casefold()
+
     @app.post('/paper-pipelines/from-research-problem', response_model=ResearchProblemPipelineResponse, status_code=status.HTTP_201_CREATED)
     def create_pipeline_from_research_problem(request: ResearchProblemPipelineRequest) -> ResearchProblemPipelineResponse:
         try:
@@ -229,8 +235,22 @@ def register_literature_routes(
                     detail='no active research session or staged research problem exists yet',
                 )
         else:
-            problem = store.get_research_problem(session.latest_problem_id or '')
-            action_parts.append('reused-active-session')
+            requested_goal = _normalize_goal_statement(request.goal_statement)
+            active_goal = _normalize_goal_statement(session.goal_statement)
+            if requested_goal and requested_goal != active_goal:
+                session_request = ResearchSessionCreateRequest(
+                    title=None,
+                    goal_statement=request.goal_statement or session.goal_statement,
+                    priorities=request.priorities,
+                    submitted_by=request.submitted_by or 'openclaw-operator',
+                )
+                session = build_research_session_record(session_request, settings)
+                store.save_research_session(session)
+                problem = None
+                action_parts.append('created-session-from-new-goal')
+            else:
+                problem = store.get_research_problem(session.latest_problem_id or '')
+                action_parts.append('reused-active-session')
 
         if problem is None:
             problem_request = build_research_problem_request_from_session(session, settings)

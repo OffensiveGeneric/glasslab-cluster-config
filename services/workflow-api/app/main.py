@@ -969,6 +969,18 @@ def create_app(
     def create_intake(request: IntakeCreateRequest) -> IntakeRecord:
         return stage_intake_from_request(request, settings, registry, store)
 
+    @app.post('/research-sessions/{session_id}/intakes', response_model=IntakeRecord, status_code=status.HTTP_201_CREATED)
+    def create_session_intake(session_id: str, request: IntakeCreateRequest) -> IntakeRecord:
+        get_required_research_session(store, session_id)
+        return stage_intake_from_request(request, settings, registry, store, session_id=session_id)
+
+    @app.post('/research-sessions/latest/intakes', response_model=IntakeRecord, status_code=status.HTTP_201_CREATED)
+    def create_latest_session_intake(request: IntakeCreateRequest) -> IntakeRecord:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return create_session_intake(session.session_id, request)
+
     @app.get('/intakes/latest', response_model=IntakeRecord)
     def get_latest_intake() -> IntakeRecord:
         record = store.get_latest_intake()

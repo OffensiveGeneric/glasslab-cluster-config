@@ -83,6 +83,34 @@ def test_create_and_fetch_latest_intake() -> None:
     assert fetched.json()['normalized_summary'].startswith('Take this paper note set')
 
 
+def test_create_session_scoped_intake_updates_latest_session_intake() -> None:
+    client = build_client()
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Bind a manually created intake to the current research session.'},
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    create = client.post(
+        f'/research-sessions/{session_id}/intakes',
+        json={
+            'raw_request': 'Benchmark a bounded set of approved Titanic baselines and compare one small methodology variant.',
+            'source_refs': ['https://example.org/titanic-method-note'],
+            'notes': ['Session-scoped intake smoke fixture.'],
+        },
+    )
+
+    assert create.status_code == 201
+    payload = create.json()
+    assert payload['session_id'] == session_id
+
+    latest = client.get(f'/research-sessions/{session_id}/intake')
+    assert latest.status_code == 200
+    assert latest.json()['intake_id'] == payload['intake_id']
+
+
 def test_json_store_persists_intake_across_restart(tmp_path) -> None:
     state_path = tmp_path / 'run-store.json'
     settings = Settings(
@@ -1973,6 +2001,81 @@ def test_start_literature_search_creates_session_problem_and_queue(monkeypatch) 
     assert payload['paper_intake_queue']['session_id'] == payload['session']['session_id']
     assert payload['paper_intake_queue']['candidates'][0]['paper_id'] == 'cv_forgery_2025'
     assert payload['operation']['operation_type'] == 'literature-search-start'
+
+
+def test_start_literature_search_creates_new_session_for_new_goal(monkeypatch) -> None:
+    client = build_client()
+
+    class FakeResponse:
+        def __init__(self, payload: dict) -> None:
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            import json
+            return json.dumps(self.payload).encode('utf-8')
+
+    monkeypatch.setattr(
+        main_module.urllib_request,
+        'urlopen',
+        lambda request_obj, timeout: FakeResponse(
+            {
+                'request_id': 'start-literature-search-2',
+                'selected_tracks': [{'track_id': 'metric_learning', 'track': 'metric_learning'}],
+                'selected_queries': [{'queries': ['dreamsim visual similarity metric replication']}],
+                'selected_papers': [
+                    {
+                        'paper_id': 'dreamsim_2024',
+                        'title': 'DreamSim: Perceptual Similarity from Human Feedback',
+                        'year': 2024,
+                        'venue': 'arXiv',
+                        'priority': 'P1',
+                        'tracks': ['metric_learning'],
+                        'bounded_job_fit': 4,
+                        'replication_complexity': 3,
+                        'official_page': 'https://arxiv.org/abs/2405.00001',
+                        'pdf_url': None,
+                        'why_seed': 'matches the requested replication topic',
+                        'first_jobs': ['replicate the visual similarity benchmark on a bounded split'],
+                        'tags': ['vision', 'similarity'],
+                    }
+                ],
+                'warnings': [],
+            }
+        ),
+    )
+
+    first_response = client.post(
+        '/research-sessions/start-literature-search',
+        json={
+            'goal_statement': 'Detect forged art using computer vision methods and open image datasets.',
+            'priorities': ['computer vision'],
+            'submitted_by': 'operator',
+        },
+    )
+    assert first_response.status_code == 201
+    first_session_id = first_response.json()['session']['session_id']
+
+    second_response = client.post(
+        '/research-sessions/start-literature-search',
+        json={
+            'goal_statement': 'Replicate DreamSim visual similarity metric for perceptual comparisons.',
+            'priorities': ['replication'],
+            'submitted_by': 'operator',
+        },
+    )
+
+    assert second_response.status_code == 201
+    payload = second_response.json()
+    assert payload['session']['session_id'] != first_session_id
+    assert payload['session']['goal_statement'].startswith('Replicate DreamSim')
+    assert payload['research_problem']['session_id'] == payload['session']['session_id']
+    assert 'created-session-from-new-goal' in payload['action']
 
 
 def test_external_literature_search_skill_creates_session_queue(monkeypatch) -> None:
