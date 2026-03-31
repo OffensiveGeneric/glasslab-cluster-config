@@ -74,6 +74,60 @@ def test_add_paper_routes_to_manual_queue() -> None:
     assert calls[0][0] == "/research-sessions/latest/paper-intake-queue/manual-paper"
 
 
+def test_run_command_routes_to_session_run_creation() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {"run_id": "run-123", "workflow_id": "gpu-experiment"},
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!run"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["command"] == "run"
+    assert calls[0][0] == "/research-sessions/latest/runs/from-design"
+
+
+def test_interpret_command_routes_to_transition() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {"interpretation_id": "interp-123", "preferred_workflow_id": "gpu-experiment"},
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!interpret"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["command"] == "interpret"
+    assert calls[0][0] == "/research-sessions/latest/transitions/create-interpretation"
+
+
+def test_autoresearch_summary_command_routes_to_summary_endpoint() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {"campaign": {"campaign_id": "camp-123"}, "recommended_model": "vit-base"},
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!autoresearch"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["command"] == "autoresearch"
+    assert calls[0][0] == "/research-sessions/latest/autoresearch-summary"
+
+
 def test_non_command_turns_forward_to_openclaw() -> None:
     client = TestClient(create_app(settings=Settings(), requester=lambda *args, **kwargs: ("", {})))
     response = client.post("/dispatch", json={"message": "what do you think of this paper?"})

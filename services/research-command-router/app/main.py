@@ -107,6 +107,30 @@ def _parse_command(message: str) -> tuple[str, str] | None:
         ("add-paper:", "add-paper"),
         ("!session", "session"),
         ("session:", "session"),
+        ("!interpret", "interpret"),
+        ("interpret:", "interpret"),
+        ("!design", "design"),
+        ("design:", "design"),
+        ("!preflight", "preflight"),
+        ("preflight:", "preflight"),
+        ("!run", "run"),
+        ("run:", "run"),
+        ("!start-autoresearch", "start-autoresearch"),
+        ("start-autoresearch:", "start-autoresearch"),
+        ("!draft-methodologies", "draft-methodologies"),
+        ("draft-methodologies:", "draft-methodologies"),
+        ("!draft-notebook", "draft-notebook"),
+        ("draft-notebook:", "draft-notebook"),
+        ("!refine-notebook", "refine-notebook"),
+        ("refine-notebook:", "refine-notebook"),
+        ("!launch-iteration", "launch-iteration"),
+        ("launch-iteration:", "launch-iteration"),
+        ("!decide-latest", "decide-latest"),
+        ("decide-latest:", "decide-latest"),
+        ("!autoresearch", "autoresearch"),
+        ("autoresearch:", "autoresearch"),
+        ("!model-comparison", "model-comparison"),
+        ("model-comparison:", "model-comparison"),
         ("!note", "note"),
         ("note:", "note"),
         ("!op", "op"),
@@ -133,6 +157,18 @@ def _help_text() -> str:
             "!next-paper",
             "!add-paper <url|title>",
             "!session",
+            "!interpret",
+            "!design",
+            "!preflight",
+            "!run",
+            "!start-autoresearch",
+            "!draft-methodologies",
+            "!draft-notebook",
+            "!refine-notebook",
+            "!launch-iteration",
+            "!decide-latest",
+            "!autoresearch",
+            "!model-comparison",
             "!note <text>",
             "!op",
             "!help",
@@ -286,6 +322,224 @@ def _dispatch(
             f"Current session: '{session.get('title', 'untitled')}'. "
             f"Goal: {session.get('goal_statement', 'n/a')}. "
             f"Queue status: {queue.get('status', 'none')} with {len(queue.get('candidates') or [])} candidate(s)."
+        )
+        return DispatchResponse(
+            matched=True,
+            forward_to_openclaw=False,
+            command=command,
+            response_text=response_text,
+            workflow_api_endpoint=endpoint,
+            payload=payload,
+        )
+
+    if command == "interpret":
+        endpoint, payload = requester(
+            settings,
+            "/research-sessions/latest/transitions/create-interpretation",
+            method="POST",
+        )
+        response_text = (
+            f"Created interpretation '{payload.get('interpretation_id', 'n/a')}'. "
+            f"Preferred workflow: {payload.get('preferred_workflow_id', 'n/a')}."
+        )
+        return DispatchResponse(
+            matched=True,
+            forward_to_openclaw=False,
+            command=command,
+            response_text=response_text,
+            workflow_api_endpoint=endpoint,
+            payload=payload,
+        )
+
+    if command == "design":
+        endpoint, payload = requester(
+            settings,
+            "/research-sessions/latest/skills/design",
+            method="POST",
+        )
+        response_text = (
+            f"Created design draft '{payload.get('design_id', 'n/a')}'. "
+            f"Workflow: {payload.get('workflow_id', 'n/a')} ({payload.get('status', 'unknown')})."
+        )
+        return DispatchResponse(
+            matched=True,
+            forward_to_openclaw=False,
+            command=command,
+            response_text=response_text,
+            workflow_api_endpoint=endpoint,
+            payload=payload,
+        )
+
+    if command == "preflight":
+        endpoint, payload = requester(settings, "/research-sessions/latest/execution-preflight")
+        issues = payload.get("blocking_issues") or []
+        warnings = payload.get("warnings") or []
+        response_text = (
+            f"Execution preflight for workflow '{payload.get('workflow_id', 'n/a')}' "
+            f"has {len(issues)} blocking issue(s) and {len(warnings)} warning(s)."
+        )
+        return DispatchResponse(
+            matched=True,
+            forward_to_openclaw=False,
+            command=command,
+            response_text=response_text,
+            workflow_api_endpoint=endpoint,
+            payload=payload,
+        )
+
+    if command == "run":
+        endpoint, payload = requester(
+            settings,
+            "/research-sessions/latest/runs/from-design",
+            method="POST",
+        )
+        response_text = (
+            f"Created run '{payload.get('run_id', 'n/a')}' for workflow "
+            f"'{payload.get('workflow_id', 'n/a')}'."
+        )
+        return DispatchResponse(
+            matched=True,
+            forward_to_openclaw=False,
+            command=command,
+            response_text=response_text,
+            workflow_api_endpoint=endpoint,
+            payload=payload,
+        )
+
+    if command == "start-autoresearch":
+        endpoint, payload = requester(
+            settings,
+            "/research-sessions/latest/transitions/start-autoresearch-campaign",
+            method="POST",
+        )
+        response_text = (
+            f"Started autoresearch campaign '{payload.get('campaign_id', 'n/a')}' "
+            f"for objective '{payload.get('objective', 'n/a')}'."
+        )
+        return DispatchResponse(
+            matched=True,
+            forward_to_openclaw=False,
+            command=command,
+            response_text=response_text,
+            workflow_api_endpoint=endpoint,
+            payload=payload,
+        )
+
+    if command == "draft-methodologies":
+        endpoint, payload = requester(
+            settings,
+            "/research-sessions/latest/transitions/draft-methodologies",
+            method="POST",
+        )
+        drafts = payload.get("methodology_drafts") or []
+        response_text = f"Drafted {len(drafts)} methodology variant(s) for the active autoresearch campaign."
+        return DispatchResponse(
+            matched=True,
+            forward_to_openclaw=False,
+            command=command,
+            response_text=response_text,
+            workflow_api_endpoint=endpoint,
+            payload=payload,
+        )
+
+    if command == "draft-notebook":
+        endpoint, payload = requester(
+            settings,
+            "/research-sessions/latest/transitions/draft-autoresearch-notebook",
+            method="POST",
+        )
+        response_text = (
+            f"Drafted analysis notebook at {payload.get('storage_uri', 'n/a')}."
+        )
+        return DispatchResponse(
+            matched=True,
+            forward_to_openclaw=False,
+            command=command,
+            response_text=response_text,
+            workflow_api_endpoint=endpoint,
+            payload=payload,
+        )
+
+    if command == "refine-notebook":
+        endpoint, payload = requester(
+            settings,
+            "/research-sessions/latest/transitions/refine-autoresearch-notebook",
+            method="POST",
+        )
+        response_text = (
+            f"Refined analysis notebook via {payload.get('refinement_source', 'unknown')} "
+            f"at {payload.get('storage_uri', 'n/a')}."
+        )
+        return DispatchResponse(
+            matched=True,
+            forward_to_openclaw=False,
+            command=command,
+            response_text=response_text,
+            workflow_api_endpoint=endpoint,
+            payload=payload,
+        )
+
+    if command == "launch-iteration":
+        endpoint, payload = requester(
+            settings,
+            "/research-sessions/latest/transitions/launch-autoresearch-iteration",
+            method="POST",
+        )
+        iteration = payload.get("iteration") or {}
+        response_text = (
+            f"Launched autoresearch iteration '{iteration.get('iteration_id', 'n/a')}' "
+            f"with run '{iteration.get('run_id', 'n/a')}'."
+        )
+        return DispatchResponse(
+            matched=True,
+            forward_to_openclaw=False,
+            command=command,
+            response_text=response_text,
+            workflow_api_endpoint=endpoint,
+            payload=payload,
+        )
+
+    if command == "decide-latest":
+        endpoint, payload = requester(
+            settings,
+            "/research-sessions/latest/transitions/decide-autoresearch-latest",
+            method="POST",
+        )
+        decision = payload.get("decision") or {}
+        response_text = (
+            f"Recorded autoresearch decision '{decision.get('decision_type', 'n/a')}' "
+            f"for iteration '{decision.get('iteration_id', 'n/a')}'."
+        )
+        return DispatchResponse(
+            matched=True,
+            forward_to_openclaw=False,
+            command=command,
+            response_text=response_text,
+            workflow_api_endpoint=endpoint,
+            payload=payload,
+        )
+
+    if command == "autoresearch":
+        endpoint, payload = requester(settings, "/research-sessions/latest/autoresearch-summary")
+        response_text = (
+            f"Autoresearch summary: campaign '{payload.get('campaign', {}).get('campaign_id', 'n/a')}', "
+            f"recommended model '{payload.get('recommended_model', 'n/a')}'."
+        )
+        return DispatchResponse(
+            matched=True,
+            forward_to_openclaw=False,
+            command=command,
+            response_text=response_text,
+            workflow_api_endpoint=endpoint,
+            payload=payload,
+        )
+
+    if command == "model-comparison":
+        endpoint, payload = requester(settings, "/research-sessions/latest/autoresearch-model-comparison")
+        comparison = payload.get("model_comparison") or []
+        response_text = (
+            f"Model comparison is ready with {len(comparison)} compared candidate(s). "
+            f"Recommended model: {payload.get('recommended_model', 'n/a')}."
         )
         return DispatchResponse(
             matched=True,
