@@ -16,6 +16,7 @@ Current live validation reference:
 - `live-state-2026-03-28.md`
 - `live-state-2026-03-29.md`
 - `live-state-2026-03-30.md`
+- `live-state-2026-03-31.md`
 - `../machine-state-2026-03-24.md`
 - `../machine-state-2026-03-25.md`
 
@@ -37,6 +38,7 @@ Canonical planning and architecture:
 - `artist-similarity-research-note.md`: Grossberg's concrete research framing for same-artist vs different-artist painting comparison, style-drift robustness, and methodology comparison
 - `implemented-vs-discussed-2026-03-30.md`: short note separating what was really built from what was still discussion during the 2026-03-30 Grossberg conversation
 - `live-state-2026-03-30.md`: latest in-lab validation note for the bounded autoresearch lane, coding-model notebook refinement, interpretation path, and the remaining session-scoped intake gap
+- `live-state-2026-03-31.md`: follow-on live validation note for the fresh-session `!research` fix, the `!next-paper` timeout fix, the current `!interpret`/`!design` quality boundary, and the latest `.21` `flash-moe` status
 - `flash-moe-qwen35-397b-evaluation.md`: first `.21` bring-up note for the large `flash-moe` runtime, including the bootstrap/runtime mismatch fix and the current quality boundary
 - `research-assistant-infra-proposal.md`: concrete infra and control-surface changes to get closest to the research-assistant vision without making OpenClaw the workflow brain
 - `research-assistant-implementation-checklist.md`: concrete execution order for the deterministic-router, one-shot-action, session-memory, and `gpu-experiment` path

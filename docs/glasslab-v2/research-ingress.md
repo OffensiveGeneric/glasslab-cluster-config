@@ -63,6 +63,29 @@ Important deterministic commands currently covered by the repo-owned ingress pat
 - `!next-paper`
 - `!add-paper <url|title>`
 - `!session`
+- `!interpret`
+- `!design`
+- `!preflight`
+- `!run`
+- `!start-autoresearch`
+- `!draft-methodologies`
+- `!draft-notebook`
+- `!refine-notebook`
+- `!launch-iteration`
+- `!decide-latest`
+- `!autoresearch`
+- `!model-comparison`
 - `!note <text>`
 - `!op`
 - `!help`
+
+Operational note from the 2026-03-31 live validation:
+
+- `!research` now creates a fresh session when the goal changes instead of silently
+  reusing the old active session
+- `!next-paper` now completes cleanly through the deterministic router after the
+  router timeout was raised to match source-fetch latency
+- `!interpret` can create and attach an interpretation record, but the current
+  ingress helper still needs cleaner error handling around long-running or mixed
+  success/error responses
+- `!design` is still not smooth end to end and remains under investigation

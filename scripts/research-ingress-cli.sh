@@ -113,10 +113,10 @@ try:
 except urllib.error.HTTPError as exc:
     detail = exc.read().decode("utf-8", errors="replace")
     print(detail, file=sys.stderr)
-    raise
+    sys.exit(exc.code)
 except urllib.error.URLError as exc:
     print(f"request failed: {exc.reason}", file=sys.stderr)
-    raise
+    sys.exit(1)
 print(json.dumps(body, indent=2))
 PY
     ;;

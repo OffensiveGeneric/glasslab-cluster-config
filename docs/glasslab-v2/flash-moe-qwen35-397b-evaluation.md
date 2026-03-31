@@ -68,15 +68,19 @@ Observed problems:
 
 - the first direct CLI prompt about DreamSim degraded into repetitive text
 - the first `POST /v1/chat/completions` requests returned zero generated tokens
+- later patched runs emitted tokens, but they were still low quality or malformed
+- `stream: false` requests still returned SSE-style chunk output instead of a normal JSON completion payload
 - server logs showed:
   - prompt prefill completed
-  - `generated=0 tokens`
+  - initial runs: `generated=0 tokens`
+  - later runs: very short token streams such as `Yes`, `<unk>user`, or `$$`
 
 So the current state is:
 
 - runtime bring-up: succeeded
 - server surface: succeeded
 - output quality / completion behavior: not yet acceptable
+- OpenAI-compatible response semantics: not yet acceptable
 
 ## Practical Conclusion
 
@@ -93,5 +97,6 @@ and not yet as:
 ## Recommended Next Steps
 
 1. Inspect `flash-moe` server generation logic for why chat-completions stop immediately.
-2. Re-test with a small set of controlled prompts after that fix.
-3. Only consider Glasslab integration if the server can return non-empty, non-repetitive bounded answers.
+2. Fix the non-stream API behavior so `stream: false` returns a proper JSON completion body.
+3. Re-test with a small set of controlled prompts after that fix.
+4. Only consider Glasslab integration if the server can return non-empty, non-repetitive bounded answers with a stable API contract.
