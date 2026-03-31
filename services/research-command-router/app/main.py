@@ -176,6 +176,21 @@ def _help_text() -> str:
     )
 
 
+def _get_latest_session_id(
+    settings: Settings,
+    requester: Callable[..., tuple[str, dict[str, Any]]],
+) -> tuple[str, dict[str, Any], str]:
+    endpoint, payload = requester(settings, "/research-sessions/latest/context")
+    session = payload.get("session") or {}
+    session_id = str(session.get("session_id") or "").strip()
+    if not session_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="research session not found",
+        )
+    return endpoint, payload, session_id
+
+
 def _summarize_queue(payload: dict[str, Any]) -> str:
     candidates = payload.get("candidates") or []
     coverage = payload.get("coverage_summary") or {}
@@ -407,9 +422,12 @@ def _dispatch(
         )
 
     if command == "start-autoresearch":
+        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
+            settings, requester
+        )
         endpoint, payload = requester(
             settings,
-            "/research-sessions/latest/transitions/start-autoresearch-campaign",
+            f"/research-sessions/{session_id}/transitions/start-autoresearch-campaign",
             method="POST",
         )
         response_text = (
@@ -426,9 +444,12 @@ def _dispatch(
         )
 
     if command == "draft-methodologies":
+        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
+            settings, requester
+        )
         endpoint, payload = requester(
             settings,
-            "/research-sessions/latest/transitions/draft-methodologies",
+            f"/research-sessions/{session_id}/transitions/draft-methodologies",
             method="POST",
         )
         drafts = payload.get("methodology_drafts") or []
@@ -443,9 +464,12 @@ def _dispatch(
         )
 
     if command == "draft-notebook":
+        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
+            settings, requester
+        )
         endpoint, payload = requester(
             settings,
-            "/research-sessions/latest/transitions/draft-autoresearch-notebook",
+            f"/research-sessions/{session_id}/transitions/draft-autoresearch-notebook",
             method="POST",
         )
         response_text = (
@@ -461,9 +485,12 @@ def _dispatch(
         )
 
     if command == "refine-notebook":
+        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
+            settings, requester
+        )
         endpoint, payload = requester(
             settings,
-            "/research-sessions/latest/transitions/refine-autoresearch-notebook",
+            f"/research-sessions/{session_id}/transitions/refine-autoresearch-notebook",
             method="POST",
         )
         response_text = (
@@ -480,9 +507,12 @@ def _dispatch(
         )
 
     if command == "launch-iteration":
+        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
+            settings, requester
+        )
         endpoint, payload = requester(
             settings,
-            "/research-sessions/latest/transitions/launch-autoresearch-iteration",
+            f"/research-sessions/{session_id}/transitions/launch-autoresearch-iteration",
             method="POST",
         )
         iteration = payload.get("iteration") or {}
@@ -500,9 +530,12 @@ def _dispatch(
         )
 
     if command == "decide-latest":
+        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
+            settings, requester
+        )
         endpoint, payload = requester(
             settings,
-            "/research-sessions/latest/transitions/decide-autoresearch-latest",
+            f"/research-sessions/{session_id}/transitions/decide-autoresearch-latest",
             method="POST",
         )
         decision = payload.get("decision") or {}
@@ -520,7 +553,13 @@ def _dispatch(
         )
 
     if command == "autoresearch":
-        endpoint, payload = requester(settings, "/research-sessions/latest/autoresearch-summary")
+        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
+            settings, requester
+        )
+        endpoint, payload = requester(
+            settings,
+            f"/research-sessions/{session_id}/autoresearch-summary",
+        )
         response_text = (
             f"Autoresearch summary: campaign '{payload.get('campaign', {}).get('campaign_id', 'n/a')}', "
             f"recommended model '{payload.get('recommended_model', 'n/a')}'."
@@ -535,7 +574,13 @@ def _dispatch(
         )
 
     if command == "model-comparison":
-        endpoint, payload = requester(settings, "/research-sessions/latest/autoresearch-model-comparison")
+        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
+            settings, requester
+        )
+        endpoint, payload = requester(
+            settings,
+            f"/research-sessions/{session_id}/autoresearch-model-comparison",
+        )
         comparison = payload.get("model_comparison") or []
         response_text = (
             f"Model comparison is ready with {len(comparison)} compared candidate(s). "

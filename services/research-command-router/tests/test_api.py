@@ -115,6 +115,11 @@ def test_autoresearch_summary_command_routes_to_summary_endpoint() -> None:
 
     def fake_requester(settings, path, method="GET", body=None):
         calls.append((path, method, body))
+        if path == "/research-sessions/latest/context":
+            return (
+                f"{settings.workflow_api_url}{path}",
+                {"session": {"session_id": "session-123"}},
+            )
         return (
             f"{settings.workflow_api_url}{path}",
             {"campaign": {"campaign_id": "camp-123"}, "recommended_model": "vit-base"},
@@ -125,7 +130,32 @@ def test_autoresearch_summary_command_routes_to_summary_endpoint() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["command"] == "autoresearch"
-    assert calls[0][0] == "/research-sessions/latest/autoresearch-summary"
+    assert calls[0][0] == "/research-sessions/latest/context"
+    assert calls[1][0] == "/research-sessions/session-123/autoresearch-summary"
+
+
+def test_start_autoresearch_resolves_session_before_transition() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        if path == "/research-sessions/latest/context":
+            return (
+                f"{settings.workflow_api_url}{path}",
+                {"session": {"session_id": "session-123"}},
+            )
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {"campaign_id": "camp-123", "objective": "test objective"},
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!start-autoresearch"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["command"] == "start-autoresearch"
+    assert calls[0][0] == "/research-sessions/latest/context"
+    assert calls[1][0] == "/research-sessions/session-123/transitions/start-autoresearch-campaign"
 
 
 def test_non_command_turns_forward_to_openclaw() -> None:
