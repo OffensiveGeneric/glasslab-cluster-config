@@ -85,11 +85,23 @@ The server now returns a proper non-stream JSON body for:
 
 - `stream: false`
 
-That specific API-contract bug is fixed. A representative response now looks like:
+That specific API-contract bug is fixed.
+
+An intermediate representative response looked like:
 
 ```json
 {"id":"chatcmpl-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"</"},"finish_reason":"stop"}]}
 ```
+
+After patching the serve-mode response cleanup and rebuilding `infer`, a fresh
+server on port `8001` returned:
+
+```json
+{"id":"chatcmpl-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"A transformer is a type of deep learning model that relies entirely on a self-attention mechanism to process sequential data, enabling it to learn complex"},"finish_reason":"stop"}]}
+```
+
+That proves the remaining problem is no longer “empty completion” or leaked
+`</think>` in the final JSON body.
 
 ## Current Quality Boundary
 
@@ -103,7 +115,7 @@ Observed problems:
 - server logs showed:
   - prompt prefill completed
   - initial runs: `generated=0 tokens`
-  - later runs: very short token streams such as `Yes`, `$$`, `</`, or `1`
+  - later runs: very short token streams such as `Yes`, `$$`, or `1`
 - after the added-token `vocab.bin` fix, the runtime no longer emitted `<unk>`
   for the chat-format special tokens, but the completions were still poor
 - after the default model-path fix, the runtime began loading all expert layer
@@ -115,7 +127,9 @@ So the current state is:
 - runtime bring-up: succeeded
 - server surface: succeeded
 - output quality / completion behavior: not yet acceptable
-- even after the correct model-path fix, `/v1/chat/completions` still produced an empty completion after about `115s` on a trivial prompt
+- even after the correct model-path fix, quality was still poor until the
+  serve-mode cleanup patch; the current boundary is no longer empty output, but
+  shallow/truncated output quality
 - OpenAI-compatible non-stream response semantics: improved enough to test, but not yet trustworthy for Glasslab use
 
 ## Practical Conclusion

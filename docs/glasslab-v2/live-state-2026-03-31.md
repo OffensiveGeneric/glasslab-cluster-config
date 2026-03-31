@@ -69,6 +69,8 @@ The important operator fact:
 
 - the command completes end to end through the deterministic ingress path
 - direct validation on `.44` showed the full round-trip took about `66.8s`
+- a fresh validation later in the same pass returned cleanly again with:
+  - `Created interpretation '<id>'. Preferred workflow: literature-to-experiment.`
 - that is much slower than `!design` and `!preflight`, which both returned in
   under a second on the same session
 
@@ -124,16 +126,23 @@ What is now fixed:
   `/Users/glasslab/...` instead of the stale upstream author path, so it sees
   `60/60` packed expert layer files instead of `0/60`
 
+What was fixed in a later `.21` debug pass:
+
+- the serve-mode response path now strips leading `<think>` / `</think>` remnants
+  from the final non-stream JSON response
+- a fresh rebuilt server on port `8001` returned a non-empty bounded answer:
+  - `A transformer is a type of deep learning model that relies entirely on a self-attention mechanism to process sequential data, enabling it to learn complex`
+
 What is still bad:
 
 - sample outputs remain unstable or malformed, including:
   - `Yes`
   - `$$`
-  - `</`
   - `1`
 - the runtime still generates very short, low-quality completions on trivial prompts
 - request parsing and content quality remain fragile
-- `/v1/chat/completions` still returned an empty completion after about `115s` on a trivial prompt even after the model-path fix
+- completion quality is better than the earlier empty/`</` responses, but still
+  not good enough to treat `.21` as a Glasslab backend
 
 So `.21` is still:
 
@@ -164,6 +173,13 @@ Current deterministic ingress quality:
   - `!decide-latest`
 - slower but working:
   - `!interpret`
+
+Fresh end-to-end command checks on `.44` also reconfirmed:
+
+- `!run` reaches the backend and fails for the correct state reason:
+  - `design draft is not ready_for_run`
+- `!autoresearch`, `!model-comparison`, `!draft-notebook`, and
+  `!refine-notebook` all return cleanly through `deterministic-router`
 
 As of the latest 2026-03-31 validation:
 
