@@ -571,8 +571,8 @@ function resolveStatePath(name: string): string {
   );
 }
 
-function resolveOperatorSessionsDir(): string {
-  return join(process.env.OPENCLAW_STATE_DIR || DEFAULT_STATE_DIR, "agents", "operator", "sessions");
+function resolveAgentSessionDirsRoot(): string {
+  return join(process.env.OPENCLAW_STATE_DIR || DEFAULT_STATE_DIR, "agents");
 }
 
 function extractTextContent(content: unknown): string {
@@ -613,23 +613,45 @@ function cleanLatestUserIdea(raw: string): string {
 }
 
 async function loadLatestUserIdeaText(): Promise<string> {
-  const sessionsDir = resolveOperatorSessionsDir();
-  const entries = await readdir(sessionsDir, { withFileTypes: true });
+  const agentsDir = resolveAgentSessionDirsRoot();
+  const agentEntries = await readdir(agentsDir, { withFileTypes: true });
   const sessionFiles = await Promise.all(
-    entries
-      .filter((entry) => entry.isFile())
-      .map(async (entry) => {
-        const name = entry.name;
-        if (!name.endsWith(".jsonl") || name.includes(".reset.") || name.endsWith(".lock")) {
-          return null;
-        }
-        const path = join(sessionsDir, name);
-        const meta = await stat(path);
-        return { path, mtimeMs: meta.mtimeMs };
+    agentEntries
+      .filter((entry) => entry.isDirectory())
+      .flatMap((entry) => {
+        const sessionsDir = join(agentsDir, entry.name, "sessions");
+        return [
+          (async () => {
+            try {
+              const entries = await readdir(sessionsDir, { withFileTypes: true });
+              const files = await Promise.all(
+                entries
+                  .filter((sessionEntry) => sessionEntry.isFile())
+                  .map(async (sessionEntry) => {
+                    const name = sessionEntry.name;
+                    if (
+                      !name.endsWith(".jsonl") ||
+                      name.includes(".reset.") ||
+                      name.endsWith(".lock")
+                    ) {
+                      return null;
+                    }
+                    const path = join(sessionsDir, name);
+                    const meta = await stat(path);
+                    return { path, mtimeMs: meta.mtimeMs };
+                  })
+              );
+              return files.filter(
+                (item): item is { path: string; mtimeMs: number } => item !== null
+              );
+            } catch {
+              return [];
+            }
+          })()
+        ];
       })
-  );
+  ).then((groups) => groups.flat());
   const ordered = sessionFiles
-    .filter((item): item is { path: string; mtimeMs: number } => item !== null)
     .sort((left, right) => right.mtimeMs - left.mtimeMs);
   for (const sessionFile of ordered) {
     const raw = await readFile(sessionFile.path, "utf8");
@@ -657,7 +679,7 @@ async function loadLatestUserIdeaText(): Promise<string> {
       }
     }
   }
-  throw new Error("no recent user idea was found in the operator session history");
+  throw new Error("no recent user idea was found in the agent session history");
 }
 
 async function requestJson(

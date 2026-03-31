@@ -36,6 +36,7 @@ spec:
               test -f /runtime/openclaw.json
               test -f /runtime/RUNTIME-CONTRACT.md
               test -f /runtime/workspaces/operator/IDENTITY.md
+              test -f /runtime/workspaces/router/IDENTITY.md
               test -f /runtime/workspaces/literature/IDENTITY.md
               test -f /runtime/workspaces/designer/IDENTITY.md
               test -f /runtime/workspaces/reporter/IDENTITY.md

@@ -1,7 +1,7 @@
 name: whatsapp
 channel: whatsapp
 account_id: default
-agent_id: operator
+agent_id: router
 dm_policy: allowlist
 self_chat_requires_owner: false
 owner_env: OPENCLAW_WHATSAPP_OWNER

@@ -121,6 +121,8 @@ build_source_label = os.environ.get("GLASSLAB_BUILD_SOURCE", "unspecified").stri
 required_files = [
     "agents/operator/agent.yaml",
     "agents/operator/prompt.md",
+    "agents/router/agent.yaml",
+    "agents/router/prompt.md",
     "agents/literature/agent.yaml",
     "agents/literature/prompt.md",
     "agents/designer/agent.yaml",
@@ -151,7 +153,7 @@ def load_yaml(rel_path: str):
 
 
 agents = {}
-for agent_name in ("operator", "literature", "designer", "reporter"):
+for agent_name in ("operator", "router", "literature", "designer", "reporter"):
     agents[agent_name] = load_yaml(f"agents/{agent_name}/agent.yaml")
 
 prompts = {
@@ -315,8 +317,8 @@ if max_output_tokens < 1:
 if whatsapp_channel.get("channel") != "whatsapp":
     raise SystemExit("channels/whatsapp.yaml must declare channel: whatsapp")
 
-if whatsapp_channel.get("agent_id") != "operator":
-    raise SystemExit("channels/whatsapp.yaml must route the first chat channel to operator")
+if whatsapp_channel.get("agent_id") not in {"operator", "router"}:
+    raise SystemExit("channels/whatsapp.yaml must route the first chat channel to operator or router")
 
 if whatsapp_channel.get("dm_policy") != "allowlist":
     raise SystemExit("channels/whatsapp.yaml must keep dm_policy set to allowlist")
