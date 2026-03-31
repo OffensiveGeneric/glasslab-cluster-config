@@ -154,8 +154,29 @@ Current deterministic ingress quality:
   - `!next-paper`
   - `!design`
   - `!preflight`
+  - `!start-autoresearch`
+  - `!draft-methodologies`
+  - `!autoresearch`
+  - `!model-comparison`
+  - `!draft-notebook`
+  - `!refine-notebook`
 - slower but working:
   - `!interpret`
+- working, but now failing for explicit backend reasons rather than routing bugs:
+  - `!launch-iteration`
+    - currently fails because the `literature-to-experiment` workflow input
+      contract does not declare `validation_split` and `validation_strategy`
+  - `!decide-latest`
+    - currently fails cleanly when no iteration has been launched yet
+
+The key stabilization for the expanded autoresearch command set was:
+
+- `research-command-router` now resolves the active session id from
+  `/research-sessions/latest/context`
+- it then calls the session-scoped autoresearch endpoints directly instead of
+  relying on the more brittle backend `latest` aliases
+- this keeps the command path deterministic without expanding OpenClaw
+  discretion
 
 ## Next Concrete Fixes
 
