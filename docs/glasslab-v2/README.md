@@ -35,6 +35,7 @@ Canonical planning and architecture:
 - `research-pipeline-target.md`: the intended end-state product shape for Glasslab research workflows
 - `autoresearch-lane.md`: first bounded methodology-exploration loop for session-backed, registry-approved autoresearch campaigns
 - `artist-similarity-research-note.md`: Grossberg's concrete research framing for same-artist vs different-artist painting comparison, style-drift robustness, and methodology comparison
+- `implemented-vs-discussed-2026-03-30.md`: short note separating what was really built from what was still discussion during the 2026-03-30 Grossberg conversation
 - `live-state-2026-03-30.md`: latest in-lab validation note for the bounded autoresearch lane, coding-model notebook refinement, interpretation path, and the remaining session-scoped intake gap
 - `research-assistant-infra-proposal.md`: concrete infra and control-surface changes to get closest to the research-assistant vision without making OpenClaw the workflow brain
 - `research-assistant-implementation-checklist.md`: concrete execution order for the deterministic-router, one-shot-action, session-memory, and `gpu-experiment` path
