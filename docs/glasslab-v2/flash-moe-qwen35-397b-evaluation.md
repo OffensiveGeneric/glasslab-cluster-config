@@ -39,6 +39,21 @@ The second mismatch was subtler:
 That produced `<unk>` output for special tokens. Regenerating `vocab.bin` with the
 added-token ids included fixed that specific decode failure.
 
+The third mismatch was the most important for actual model quality:
+
+- the compiled `MODEL_PATH_DEFAULT` still pointed at the original upstream
+  author path under `/Users/danielwoods/...`
+- on `.21`, the real completed snapshot and `packed_experts/` live under
+  `/Users/glasslab/...`
+
+That meant the runtime could start, but it saw:
+
+- `[experts] 0/60 packed layer files available`
+
+After correcting the model path to the real local snapshot, the same runtime saw:
+
+- `[experts] 60/60 packed layer files available`
+
 ## What Was Validated
 
 ### Direct CLI inference
@@ -91,6 +106,9 @@ Observed problems:
   - later runs: very short token streams such as `Yes`, `$$`, `</`, or `1`
 - after the added-token `vocab.bin` fix, the runtime no longer emitted `<unk>`
   for the chat-format special tokens, but the completions were still poor
+- after the default model-path fix, the runtime began loading all expert layer
+  files instead of zero, and the output improved from total garbage to at least
+  a recognizably structured answer start
 
 So the current state is:
 

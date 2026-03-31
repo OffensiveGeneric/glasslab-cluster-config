@@ -120,6 +120,9 @@ What is now fixed:
   SSE chunks
 - `vocab.bin` now includes the added-token range used by Qwen chat formatting,
   so the runtime no longer collapses those generated ids into `<unk>`
+- the `.21` `flash-moe` binary now points at the real local snapshot under
+  `/Users/glasslab/...` instead of the stale upstream author path, so it sees
+  `60/60` packed expert layer files instead of `0/60`
 
 What is still bad:
 
