@@ -160,14 +160,22 @@ Current deterministic ingress quality:
   - `!model-comparison`
   - `!draft-notebook`
   - `!refine-notebook`
+  - `!launch-iteration`
+  - `!decide-latest`
 - slower but working:
   - `!interpret`
-- working, but now failing for explicit backend reasons rather than routing bugs:
-  - `!launch-iteration`
-    - currently fails because the `literature-to-experiment` workflow input
-      contract does not declare `validation_split` and `validation_strategy`
-  - `!decide-latest`
-    - currently fails cleanly when no iteration has been launched yet
+
+As of the latest 2026-03-31 validation:
+
+- `literature-to-experiment` now explicitly declares the optional
+  `validation_strategy` and `validation_split` inputs expected by the bounded
+  autoresearch lane
+- `!launch-iteration` now reaches the backend, creates a validation run, and
+  submits the Kubernetes Job successfully
+- `!decide-latest` now records a durable decision after launch; in the latest
+  smoke pass it stored `escalate_for_review`
+- `!model-comparison` now surfaces a real compared candidate and recommends the
+  current best model for the campaign
 
 The key stabilization for the expanded autoresearch command set was:
 

@@ -21,6 +21,18 @@
       "input_type": "dataset",
       "required": true,
       "description": "Resolved dataset location for the derived experiment."
+    },
+    {
+      "name": "validation_strategy",
+      "input_type": "parameter_set",
+      "required": false,
+      "description": "Declared split or validation policy used to guard against overfitting during bounded literature-derived validation runs."
+    },
+    {
+      "name": "validation_split",
+      "input_type": "parameter_set",
+      "required": false,
+      "description": "Declared validation split fraction when the workflow uses an internal validation partition."
     }
   ],
   "allowed_models": [
