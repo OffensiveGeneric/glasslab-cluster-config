@@ -965,12 +965,21 @@ def create_app(
             'store_backend': settings.store_backend,
         }
 
+    def resolve_latest_session_id(session_id: str) -> str:
+        if session_id != 'latest':
+            return session_id
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return session.session_id
+
     @app.post('/intakes', response_model=IntakeRecord, status_code=status.HTTP_201_CREATED)
     def create_intake(request: IntakeCreateRequest) -> IntakeRecord:
         return stage_intake_from_request(request, settings, registry, store)
 
     @app.post('/research-sessions/{session_id}/intakes', response_model=IntakeRecord, status_code=status.HTTP_201_CREATED)
     def create_session_intake(session_id: str, request: IntakeCreateRequest) -> IntakeRecord:
+        session_id = resolve_latest_session_id(session_id)
         get_required_research_session(store, session_id)
         return stage_intake_from_request(request, settings, registry, store, session_id=session_id)
 
@@ -1004,6 +1013,7 @@ def create_app(
 
     @app.get('/research-sessions/{session_id}/intake', response_model=IntakeRecord)
     def get_session_intake(session_id: str) -> IntakeRecord:
+        session_id = resolve_latest_session_id(session_id)
         return get_required_session_latest_intake(store, session_id)
 
     @app.post('/interpretations/from-latest-intake', response_model=InterpretationRecord, status_code=status.HTTP_201_CREATED)
@@ -1037,11 +1047,7 @@ def create_app(
 
     @app.post('/research-sessions/{session_id}/skills/interpretation', response_model=InterpretationRecord, status_code=status.HTTP_201_CREATED)
     def apply_session_interpretation_skill(session_id: str) -> InterpretationRecord:
-        if session_id == 'latest':
-            session = store.get_latest_research_session()
-            if session is None:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
-            session_id = session.session_id
+        session_id = resolve_latest_session_id(session_id)
         intake = get_required_session_latest_intake(store, session_id)
         return create_interpretation_for_intake(intake)
 
@@ -1091,6 +1097,7 @@ def create_app(
 
     @app.get('/research-sessions/{session_id}/interpretation', response_model=InterpretationRecord)
     def get_session_interpretation(session_id: str) -> InterpretationRecord:
+        session_id = resolve_latest_session_id(session_id)
         return get_required_session_latest_interpretation(store, session_id)
 
     @app.post(
@@ -1142,6 +1149,7 @@ def create_app(
         status_code=status.HTTP_201_CREATED,
     )
     def apply_session_assessment_skill(session_id: str) -> ReplicabilityAssessmentRecord:
+        session_id = resolve_latest_session_id(session_id)
         interpretation = get_required_session_latest_interpretation(store, session_id)
         return create_replicability_assessment_for_interpretation(interpretation)
 
@@ -1179,6 +1187,7 @@ def create_app(
 
     @app.get('/research-sessions/{session_id}/assessment', response_model=ReplicabilityAssessmentRecord)
     def get_session_assessment(session_id: str) -> ReplicabilityAssessmentRecord:
+        session_id = resolve_latest_session_id(session_id)
         return get_required_session_latest_assessment(store, session_id)
 
     @app.post('/design-drafts/from-latest-intake', response_model=DesignDraftRecord, status_code=status.HTTP_201_CREATED)
@@ -1253,8 +1262,16 @@ def create_app(
             workflow_id=assessment.recommended_workflow_id,
         )
 
+    @app.post('/research-sessions/latest/skills/design', response_model=DesignDraftRecord, status_code=status.HTTP_201_CREATED)
+    def apply_latest_session_design_skill() -> DesignDraftRecord:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return apply_session_design_skill(session.session_id)
+
     @app.post('/research-sessions/{session_id}/skills/design', response_model=DesignDraftRecord, status_code=status.HTTP_201_CREATED)
     def apply_session_design_skill(session_id: str) -> DesignDraftRecord:
+        session_id = resolve_latest_session_id(session_id)
         session = get_required_research_session(store, session_id)
         assessment = store.get_replicability_assessment(session.latest_assessment_id or '')
         if assessment is not None:
@@ -1277,13 +1294,6 @@ def create_app(
         if interpretation is not None and interpretation.intake_id != intake.intake_id:
             interpretation = None
         return create_design_draft_for_intake(intake, interpretation=interpretation)
-
-    @app.post('/research-sessions/latest/skills/design', response_model=DesignDraftRecord, status_code=status.HTTP_201_CREATED)
-    def apply_latest_session_design_skill() -> DesignDraftRecord:
-        session = store.get_latest_research_session()
-        if session is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
-        return apply_session_design_skill(session.session_id)
 
     @app.get('/design-drafts/latest', response_model=DesignDraftRecord)
     def get_latest_design_draft() -> DesignDraftRecord:
@@ -1308,6 +1318,7 @@ def create_app(
 
     @app.get('/research-sessions/{session_id}/design', response_model=DesignDraftRecord)
     def get_session_design(session_id: str) -> DesignDraftRecord:
+        session_id = resolve_latest_session_id(session_id)
         return get_required_session_latest_design(store, session_id)
 
     @app.post('/design-drafts/latest/review', response_model=DesignDraftRecord)

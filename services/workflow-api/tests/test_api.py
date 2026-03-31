@@ -1389,6 +1389,34 @@ def test_create_run_from_latest_ready_design_draft() -> None:
     assert payload['manifest']['inputs']['dataset_name'] == 'titanic'
 
 
+def test_apply_latest_session_design_skill_is_not_shadowed_by_session_route() -> None:
+    client = build_client()
+
+    session = client.post(
+        '/research-sessions',
+        json={
+            'goal_statement': 'Benchmark approved Titanic models and create a validation run.',
+            'priorities': ['titanic', 'benchmark'],
+        },
+    )
+    assert session.status_code == 201
+
+    intake = client.post(
+        '/research-sessions/latest/intakes',
+        json={
+            'raw_request': 'Benchmark the approved models on Titanic and create a validation run.',
+            'notes': ['Use the standard Titanic train/test splits.'],
+        },
+    )
+    assert intake.status_code == 201
+
+    design = client.post('/research-sessions/latest/skills/design')
+    assert design.status_code == 201
+    payload = design.json()
+    assert payload['workflow_id'] == 'generic-tabular-benchmark'
+    assert payload['intake_id'] == intake.json()['intake_id']
+
+
 def test_get_latest_session_execution_preflight_uses_latest_session_design(monkeypatch) -> None:
     client = build_client()
 
