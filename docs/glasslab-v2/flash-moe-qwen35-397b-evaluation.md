@@ -121,12 +121,22 @@ Observed problems:
 - after the default model-path fix, the runtime began loading all expert layer
   files instead of zero, and the CLI output improved from total garbage to at least
   a recognizably structured answer start
+- after the first-token hidden-think suppression fix, the non-stream server path
+  improved further on simple prompts. A three-prompt probe on `8001` produced:
+  - good:
+    - `What is a transformer in one sentence?`
+    - `What is PyTorch in one sentence?`
+  - still poor / noisy:
+    - `What is DreamSim in one sentence?`
+- a more aggressive “always suppress special tokens” patch and a stronger
+  plain-text system prompt both made overall quality worse, so the best current
+  state is the earlier lighter-touch sampler plus the short default system prompt
 
 So the current state is:
 
 - runtime bring-up: succeeded
 - server surface: succeeded
-- output quality / completion behavior: not yet acceptable
+- output quality / completion behavior: improved but not yet acceptable
 - even after the correct model-path fix, quality was still poor until the
   serve-mode cleanup patch; the current boundary is no longer empty output, but
   shallow/truncated output quality
@@ -146,7 +156,7 @@ and not yet as:
 
 ## Recommended Next Steps
 
-1. Inspect `flash-moe` server generation logic for why chat-completions stop immediately.
-2. Improve output quality so short prompts do not collapse into trivial junk completions.
-3. Re-test with a small set of controlled prompts after that quality work.
-4. Only consider Glasslab integration if the server can return non-empty, non-repetitive bounded answers with a stable API contract.
+1. Keep the current lighter-touch sampler and short default system prompt as the known-good baseline.
+2. Build a small fixed prompt set for `.21` quality evaluation instead of continuing ad hoc tweaks.
+3. Investigate why topic-specific prompts like `DreamSim` still drift into noisy output while generic prompts are now coherent.
+4. Only consider Glasslab integration if the server can return consistently coherent bounded answers across that prompt set with a stable API contract.

@@ -65,10 +65,14 @@ This host is now the live secondary Apple-silicon service box for ranker work an
 - current role: experimental large-model host
 - current state:
   - `flash-moe` bootstrap completed for `mlx-community/Qwen3.5-397B-A17B-4bit`
-  - the Metal runtime now starts and serves on `:8000`
+  - the Metal runtime now starts and serves on `:8000` and `:8001`
   - `GET /health` and `GET /v1/models` succeed
-  - `POST /v1/chat/completions` is reachable but currently returns empty completions
-  - direct CLI inference runs, but first-pass output quality is not yet acceptable
+  - `POST /v1/chat/completions` now returns real non-empty completions on the
+    cleaned `:8001` path
+  - simple prompts like `transformer` and `PyTorch` are now coherent
+  - topic-specific prompts like `DreamSim` are still noisy
+  - direct CLI inference runs, but output quality is not yet acceptable enough
+    for Glasslab traffic
 
 This host is now a real experimental backend, but it is not yet ready to take Glasslab traffic.
 

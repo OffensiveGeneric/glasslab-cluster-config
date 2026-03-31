@@ -132,6 +132,13 @@ What was fixed in a later `.21` debug pass:
   from the final non-stream JSON response
 - a fresh rebuilt server on port `8001` returned a non-empty bounded answer:
   - `A transformer is a type of deep learning model that relies entirely on a self-attention mechanism to process sequential data, enabling it to learn complex`
+- a later sampler fix improved first-token behavior further, and a three-prompt
+  probe on `8001` showed:
+  - coherent:
+    - transformer
+    - PyTorch
+  - still noisy:
+    - DreamSim
 
 What is still bad:
 
@@ -143,6 +150,9 @@ What is still bad:
 - request parsing and content quality remain fragile
 - completion quality is better than the earlier empty/`</` responses, but still
   not good enough to treat `.21` as a Glasslab backend
+- a stronger plain-text system prompt and a more aggressive special-token
+  suppression patch both made quality worse, so the current best state is the
+  lighter-touch sampler and the shorter default system prompt
 
 So `.21` is still:
 
