@@ -118,14 +118,16 @@ What is now fixed:
 
 - `stream: false` requests return a single JSON completion response instead of
   SSE chunks
+- `vocab.bin` now includes the added-token range used by Qwen chat formatting,
+  so the runtime no longer collapses those generated ids into `<unk>`
 
 What is still bad:
 
 - sample outputs remain unstable or malformed, including:
   - `Yes`
-  - `<unk>user`
   - `$$`
   - `</`
+  - `1`
 - the runtime still generates very short, low-quality completions on trivial prompts
 - request parsing and content quality remain fragile
 

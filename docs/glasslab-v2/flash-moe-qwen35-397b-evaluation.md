@@ -24,12 +24,20 @@ The prepared runtime artifacts now include:
 
 The first runtime failure after bootstrap was not a download problem.
 
-The mismatch was:
+The first mismatch was:
 
 - the bootstrap path generated `tokenizer.bin`
 - the Metal runtime still expected a separate `vocab.bin`
 
 So the setup and runtime paths had drifted apart. The immediate fix was to generate `vocab.bin` from the same tokenizer data so the runtime could decode generated token ids into output text.
+
+The second mismatch was subtler:
+
+- the first generated `vocab.bin` only covered the base vocab range
+- Qwen's added chat-format tokens live above that range
+
+That produced `<unk>` output for special tokens. Regenerating `vocab.bin` with the
+added-token ids included fixed that specific decode failure.
 
 ## What Was Validated
 
@@ -80,7 +88,9 @@ Observed problems:
 - server logs showed:
   - prompt prefill completed
   - initial runs: `generated=0 tokens`
-  - later runs: very short token streams such as `Yes`, `<unk>user`, `$$`, or `</`
+  - later runs: very short token streams such as `Yes`, `$$`, `</`, or `1`
+- after the added-token `vocab.bin` fix, the runtime no longer emitted `<unk>`
+  for the chat-format special tokens, but the completions were still poor
 
 So the current state is:
 
