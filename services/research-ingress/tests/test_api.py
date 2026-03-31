@@ -154,3 +154,28 @@ def test_inbound_handles_run_command() -> None:
     assert payload["forward_to_openclaw"] is False
     assert payload["route"] == "deterministic-router"
     assert payload["router_payload"]["command"] == "run"
+
+
+def test_inbound_surfaces_router_timeout_as_gateway_timeout() -> None:
+    import app.main as main_module
+
+    def fake_router(settings, message, submitted_by):
+        raise main_module.HTTPException(status_code=504, detail="research-command-router timed out")
+
+    original = main_module._request_router
+    main_module._request_router = fake_router
+    try:
+        client = TestClient(create_app(settings=Settings()))
+        response = client.post(
+            "/inbound",
+            json={
+                "message": "!interpret",
+                "sender": "+15555550123",
+                "channel": "whatsapp",
+            },
+        )
+    finally:
+        main_module._request_router = original
+
+    assert response.status_code == 504
+    assert response.json()["detail"] == "research-command-router timed out"

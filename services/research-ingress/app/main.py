@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 from dataclasses import dataclass
 from typing import Any
 from urllib import error as urllib_error
@@ -18,7 +19,7 @@ class Settings:
         "http://glasslab-research-command-router.glasslab-v2.svc.cluster.local:8095",
     )
     timeout_seconds: int = int(
-        os.environ.get("GLASSLAB_RESEARCH_INGRESS_TIMEOUT_SECONDS", "30")
+        os.environ.get("GLASSLAB_RESEARCH_INGRESS_TIMEOUT_SECONDS", "120")
     )
     default_channel: str = os.environ.get(
         "GLASSLAB_RESEARCH_INGRESS_DEFAULT_CHANNEL",
@@ -94,6 +95,11 @@ def _request_router(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"research-command-router unreachable: {exc.reason}",
+        )
+    except (TimeoutError, socket.timeout):
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="research-command-router timed out",
         )
 
 
