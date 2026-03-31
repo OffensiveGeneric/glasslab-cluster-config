@@ -59,7 +59,7 @@ Live `!session` after `!next-paper` showed:
 
 The attached source document and interpretation were visible in session context.
 
-### `!interpret` is working, but materially slower than the other commands
+### `!interpret` is now clean through the helper, but materially slower than the other commands
 
 The important backend fact:
 
@@ -80,8 +80,7 @@ The created interpretation showed:
 - `preferred_resource_profile: "cpu-medium"`
 - interpretation provenance and warnings from the `.23` / `.12` fallback chain
 
-So the backend lane is real. The remaining work is mostly operator UX and
-latency, not correctness of the routed backend action.
+So the backend lane is real, and the helper now returns a clean success response. The remaining work is mostly latency, not correctness of the routed backend action.
 
 ### `!design` now completes through the deterministic router
 
