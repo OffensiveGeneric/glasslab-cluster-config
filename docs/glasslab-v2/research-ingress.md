@@ -88,4 +88,7 @@ Operational note from the 2026-03-31 live validation:
 - `!interpret` can create and attach an interpretation record, but the current
   ingress helper still needs cleaner error handling around long-running or mixed
   success/error responses
-- `!design` is still not smooth end to end and remains under investigation
+- `!design` now completes cleanly through the deterministic router after the
+  `latest` session-alias hardening in `workflow-api`
+- `!preflight` is now also clean through the deterministic router and surfaces
+  interpretation-aware warnings as intended

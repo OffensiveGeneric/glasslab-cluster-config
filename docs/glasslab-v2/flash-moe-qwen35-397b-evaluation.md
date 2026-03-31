@@ -58,7 +58,15 @@ Validated endpoints:
 - `GET /v1/models`
 - `POST /v1/chat/completions`
 
-So `.21` now exposes a real OpenAI-compatible server surface for this model.
+The server now returns a proper non-stream JSON body for:
+
+- `stream: false`
+
+That specific API-contract bug is fixed. A representative response now looks like:
+
+```json
+{"id":"chatcmpl-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"</"},"finish_reason":"stop"}]}
+```
 
 ## Current Quality Boundary
 
@@ -69,18 +77,17 @@ Observed problems:
 - the first direct CLI prompt about DreamSim degraded into repetitive text
 - the first `POST /v1/chat/completions` requests returned zero generated tokens
 - later patched runs emitted tokens, but they were still low quality or malformed
-- `stream: false` requests still returned SSE-style chunk output instead of a normal JSON completion payload
 - server logs showed:
   - prompt prefill completed
   - initial runs: `generated=0 tokens`
-  - later runs: very short token streams such as `Yes`, `<unk>user`, or `$$`
+  - later runs: very short token streams such as `Yes`, `<unk>user`, `$$`, or `</`
 
 So the current state is:
 
 - runtime bring-up: succeeded
 - server surface: succeeded
 - output quality / completion behavior: not yet acceptable
-- OpenAI-compatible response semantics: not yet acceptable
+- OpenAI-compatible non-stream response semantics: improved enough to test, but not yet trustworthy for Glasslab use
 
 ## Practical Conclusion
 
@@ -97,6 +104,6 @@ and not yet as:
 ## Recommended Next Steps
 
 1. Inspect `flash-moe` server generation logic for why chat-completions stop immediately.
-2. Fix the non-stream API behavior so `stream: false` returns a proper JSON completion body.
-3. Re-test with a small set of controlled prompts after that fix.
+2. Improve output quality so short prompts do not collapse into trivial junk completions.
+3. Re-test with a small set of controlled prompts after that quality work.
 4. Only consider Glasslab integration if the server can return non-empty, non-repetitive bounded answers with a stable API contract.

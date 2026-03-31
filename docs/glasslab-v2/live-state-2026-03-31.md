@@ -6,6 +6,8 @@ This note captures the additional in-lab validation completed on 2026-03-31.
 
 - `workflow-api` was rolled with the session-bootstrap fix from:
   - `f38719a` `Harden research session bootstrap flow`
+- `workflow-api` was rolled again with session-alias hardening from:
+  - `7605955` `Harden latest session workflow-api aliases`
 - `research-command-router` was rolled with the timeout increase from:
   - `7bff91a` `Raise research command router timeouts`
 
@@ -78,17 +80,25 @@ The created interpretation showed:
 
 So the backend lane is real, but the ingress/tooling polish is not done yet.
 
-### `!design` is still not smooth
+### `!design` now completes through the deterministic router
 
-Live `!design` still returned `404`.
+The earlier `404` was a real backend alias bug:
 
-Important nuance:
+- `POST /research-sessions/latest/skills/design` was being shadowed by the
+  dynamic `/{session_id}` route
 
-- the route exists in both local and `.44` source
-- but the live service still answered `404 Not Found` for
-  `POST /research-sessions/latest/skills/design`
+After hardening the session-scoped handlers to explicitly resolve
+`session_id == "latest"`, live `!design` now returns a real design draft.
 
-So this remains an active discrepancy between intended route surface and live behavior.
+Validated live through the deterministic ingress helper:
+
+- `!design`
+
+returned:
+
+- `Created design draft '<id>'. Workflow: literature-to-experiment (needs_review).`
+
+and populated `latest_design_id` in session context.
 
 ## `.21` Flash-MoE Status
 
@@ -100,13 +110,22 @@ Additional direct validation on `.21` from the lab:
   - `GET /health`
   - `GET /v1/models`
 
-But the HTTP completion contract is still not usable:
+The HTTP completion contract is improved but the runtime is still not usable.
 
-- `stream: false` responses still come back as SSE chunks
+What is now fixed:
+
+- `stream: false` requests return a single JSON completion response instead of
+  SSE chunks
+
+What is still bad:
+
 - sample outputs remain unstable or malformed, including:
   - `Yes`
   - `<unk>user`
   - `$$`
+  - `</`
+- the runtime still generates very short, low-quality completions on trivial prompts
+- request parsing and content quality remain fragile
 
 So `.21` is still:
 
@@ -125,13 +144,13 @@ Current deterministic ingress quality:
   - `!research`
   - `!session`
   - `!next-paper`
+  - `!design`
+  - `!preflight`
 - mixed:
   - `!interpret`
-- still broken or inconsistent:
-  - `!design`
 
 ## Next Concrete Fixes
 
-1. fix the live `!design` discrepancy so the existing source route is actually usable through the running service
-2. clean up ingress/admin helper handling so long-running or mixed-result calls do not look like raw Python failures
-3. keep `.21` off the Glasslab critical path until the HTTP server returns proper non-SSE JSON for non-stream requests and substantially better content quality
+1. clean up `!interpret` so the command surface returns a clean success instead of a helper-visible `500` on mixed/fallback cases
+2. keep `.21` off the Glasslab critical path until content quality is substantially better, even though the non-stream API contract is now fixed
+3. tighten the end-to-end research flow around better paper relevance for real replication topics like DreamSim
