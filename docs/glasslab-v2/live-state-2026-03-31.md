@@ -59,7 +59,7 @@ Live `!session` after `!next-paper` showed:
 
 The attached source document and interpretation were visible in session context.
 
-### `!interpret` is partly working but still rough at the command surface
+### `!interpret` is working, but materially slower than the other commands
 
 The important backend fact:
 
@@ -67,8 +67,10 @@ The important backend fact:
 
 The important operator fact:
 
-- the current admin helper still surfaced this as an `Internal Server Error`
-  instead of a clean success path
+- the command completes end to end through the deterministic ingress path
+- direct validation on `.44` showed the full round-trip took about `66.8s`
+- that is much slower than `!design` and `!preflight`, which both returned in
+  under a second on the same session
 
 The created interpretation showed:
 
@@ -78,7 +80,8 @@ The created interpretation showed:
 - `preferred_resource_profile: "cpu-medium"`
 - interpretation provenance and warnings from the `.23` / `.12` fallback chain
 
-So the backend lane is real, but the ingress/tooling polish is not done yet.
+So the backend lane is real. The remaining work is mostly operator UX and
+latency, not correctness of the routed backend action.
 
 ### `!design` now completes through the deterministic router
 
@@ -146,11 +149,11 @@ Current deterministic ingress quality:
   - `!next-paper`
   - `!design`
   - `!preflight`
-- mixed:
+- slower but working:
   - `!interpret`
 
 ## Next Concrete Fixes
 
-1. clean up `!interpret` so the command surface returns a clean success instead of a helper-visible `500` on mixed/fallback cases
+1. reduce `!interpret` latency or move it onto an inspectable operation record so the chat/admin path is not waiting synchronously for ~67s
 2. keep `.21` off the Glasslab critical path until content quality is substantially better, even though the non-stream API contract is now fixed
 3. tighten the end-to-end research flow around better paper relevance for real replication topics like DreamSim

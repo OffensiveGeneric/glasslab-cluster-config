@@ -46,6 +46,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
+is_slow_command() {
+  case "$1" in
+    '!interpret'|'interpret:'|'!run'|'run:'|'!launch-iteration'|'launch-iteration:'|'!refine-notebook'|'refine-notebook:')
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 start_port_forward() {
   kubectl -n "$NAMESPACE" port-forward "svc/$SERVICE" "${LOCAL_PORT}:8096" >/tmp/research-ingress-port-forward.log 2>&1 &
   PORT_FORWARD_PID=$!
@@ -89,6 +100,9 @@ PY
     message="$1"
     sender="${2:-$SENDER}"
     channel="${3:-$CHANNEL}"
+    if is_slow_command "$message"; then
+      printf '[research-ingress-cli] waiting for %s; this command can take around 60-90s\n' "$message" >&2
+    fi
     python3 - <<PY
 import json
 import urllib.request
@@ -108,7 +122,7 @@ req = urllib.request.Request(
     method="POST",
 )
 try:
-    with urllib.request.urlopen(req, timeout=120) as response:
+    with urllib.request.urlopen(req, timeout=180) as response:
         body = json.loads(response.read().decode("utf-8"))
 except urllib.error.HTTPError as exc:
     detail = exc.read().decode("utf-8", errors="replace")

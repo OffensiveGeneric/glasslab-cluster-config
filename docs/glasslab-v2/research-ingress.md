@@ -85,9 +85,10 @@ Operational note from the 2026-03-31 live validation:
   reusing the old active session
 - `!next-paper` now completes cleanly through the deterministic router after the
   router timeout was raised to match source-fetch latency
-- `!interpret` can create and attach an interpretation record, but the current
-  ingress helper still needs cleaner error handling around long-running or mixed
-  success/error responses
+- `!interpret` completes through the deterministic router, but it is materially
+  slower than the other commands; the measured direct round-trip was about `67s`
+- the `.44` helper now prints a waiting note for slow commands so the path feels
+  less like a hang while interpretation is still running
 - `!design` now completes cleanly through the deterministic router after the
   `latest` session-alias hardening in `workflow-api`
 - `!preflight` is now also clean through the deterministic router and surfaces
