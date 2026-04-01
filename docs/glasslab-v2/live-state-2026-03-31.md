@@ -8,6 +8,8 @@ This note captures the additional in-lab validation completed on 2026-03-31.
   - `f38719a` `Harden research session bootstrap flow`
 - `workflow-api` was rolled again with session-alias hardening from:
   - `7605955` `Harden latest session workflow-api aliases`
+- `workflow-api` was rolled again with the bounded runner bridge from:
+  - `d6b7d17` `Add bounded method spec for runs`
 - `research-command-router` was rolled with the timeout increase from:
   - `7bff91a` `Raise research command router timeouts`
 
@@ -212,8 +214,69 @@ The key stabilization for the expanded autoresearch command set was:
 - this keeps the command path deterministic without expanding OpenClaw
   discretion
 
+### The bounded runner bridge is live
+
+The important live change from the latest pass is that `workflow-api` now
+converts interpretation output into a bounded `MethodSpec`, and the run-launch
+path consumes that contract instead of relying on loose design prose.
+
+Validated directly against the live `workflow-api` on `.44`:
+
+- `POST /intakes`
+- `POST /interpretations/from-latest-intake`
+- `POST /design-drafts/from-latest-intake`
+- `POST /runs/from-latest-design-draft`
+
+On the same live pass:
+
+- interpretation returned `method_spec.workflow_id: "generic-tabular-benchmark"`
+- interpretation returned `method_spec.run_readiness: "ready"`
+- interpretation returned bounded execution inputs including:
+  - `train_uri: s3://datasets/paper-derived/train.csv`
+  - `test_uri: s3://datasets/paper-derived/test.csv`
+  - `validation_strategy: holdout`
+  - `validation_split: 0.2`
+- design draft returned:
+  - `status: ready_for_run`
+  - `workflow_id: generic-tabular-benchmark`
+  - a carried-forward `method_spec`
+- run creation succeeded and produced an accepted run manifest using those
+  bounded inputs
+
+The same live validation also proved the bounded autoresearch launch path:
+
+- `POST /research-sessions/{session_id}/transitions/start-autoresearch-campaign`
+- `POST /research-sessions/{session_id}/transitions/draft-methodologies`
+- `POST /research-sessions/{session_id}/transitions/launch-autoresearch-iteration`
+
+That path now:
+
+- drafts methodology variants that each carry a bounded `method_spec`
+- launches a validation run from the selected methodology draft
+- submits the Kubernetes Job successfully
+
+Important nuance:
+
+- the session-scoped autoresearch transition path works cleanly
+- the raw backend `latest` aliases for those transitions are still weaker than
+  the router path
+- this is acceptable for the current operator surface because
+  `research-command-router` already resolves the active `session_id` first and
+  calls the session-scoped endpoints directly
+
+### Provenance caveat
+
+The live rollout is real, but `/healthz` still reports:
+
+- `build_source_revision: 41cf6b6`
+
+even after the `0.1.58-local` rollout. That means the build provenance stamp on
+`.44` is stale again even though the live behavior matches the newly rolled
+bounded runner code.
+
 ## Next Concrete Fixes
 
 1. reduce `!interpret` latency or move it onto an inspectable operation record so the chat/admin path is not waiting synchronously for ~67s
-2. keep `.21` off the Glasslab critical path until content quality is substantially better, even though the non-stream API contract is now fixed
-3. tighten the end-to-end research flow around better paper relevance for real replication topics like DreamSim
+2. make the raw backend `latest` aliases for autoresearch transitions as dependable as the session-scoped path, even though the router already works around that seam
+3. keep `.21` off the Glasslab critical path until content quality is substantially better, even though the non-stream API contract is now fixed
+4. tighten the end-to-end research flow around better paper relevance for real replication topics like DreamSim

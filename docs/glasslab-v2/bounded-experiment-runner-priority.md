@@ -75,6 +75,17 @@ Interpretation should produce:
 - explicit risks
 - bounded mutation axes for autoresearch
 
+The practical bridge from source knowledge into execution should now be treated
+as:
+
+- `SourceDocument`
+- `TechniqueKnowledge`
+- `MethodSpec`
+- approved workflow run
+
+`TechniqueKnowledge` is where papers or textbooks should contribute reusable
+method knowledge. `MethodSpec` is the only shape the runner should consume.
+
 Interpretation should **not** be treated as:
 
 - a free-form research essay
@@ -133,6 +144,15 @@ not:
 3. Make `!run` and `!launch-iteration` dependable once prerequisites are satisfied.
 4. Make campaign summaries read as "best current method" reports.
 5. Keep manual source intake enough to support those steps.
+
+As of the latest 2026-03-31 pass, the first half of this now exists:
+
+- interpretation emits a bounded `MethodSpec`
+- design carries `MethodSpec`
+- run creation and autoresearch launch can consume `MethodSpec`
+
+The remaining work is to make the operator-facing path consistently hit those
+working backend transitions.
 
 ## De-prioritized For Now
 
