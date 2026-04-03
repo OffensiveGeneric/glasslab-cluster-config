@@ -13,6 +13,7 @@ from app.config import Settings
 import app.autoresearch as autoresearch_module
 import app.main as main_module
 import app.source_documents as source_documents
+from app.stage_interpretation import build_interpretation_record_from_agent_draft
 from app.main import create_app
 from app.persistence import InMemoryRunStore
 from app.registry import WorkflowRegistry
@@ -232,6 +233,85 @@ def test_interpretation_is_enriched_from_technique_catalog() -> None:
     assert payload['preferred_workflow_id'] == 'gpu-experiment'
     assert payload['preferred_resource_profile'] == 'gpu-small'
     assert payload['gpu_required'] is True
+
+
+def test_agent_interpretation_catalog_match_overrides_weaker_workflow_hint(monkeypatch) -> None:
+    client = build_client()
+
+    imported = client.post(
+        '/technique-catalog/import',
+        json={
+            'cards': [
+                {
+                    'name': 'DreamSim Transformer Similarity',
+                    'aliases': ['dreamsim', 'visual similarity metric'],
+                    'algorithm_family': 'transformers',
+                    'specific_algorithms': ['vision_transformer'],
+                    'loss_functions': ['contrastive_loss'],
+                    'validation_strategies': ['stratified_holdout'],
+                    'primary_metrics': ['accuracy', 'roc_auc'],
+                    'python_packages': ['torch', 'timm'],
+                    'gpu_required': True,
+                    'resource_profile': 'gpu-small',
+                    'workflow_ids': ['gpu-experiment'],
+                }
+            ]
+        },
+    )
+    assert imported.status_code == 201
+
+    intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Replicate DreamSim visual similarity metric with PyTorch and timm.',
+            'source_refs': ['manual:dreamsim'],
+            'technique_tags': ['dreamsim', 'visual_similarity', 'transformers', 'contrastive_loss'],
+        },
+    )
+    assert intake.status_code == 201
+
+    def fake_call_interpretation_agent(intake, settings, registry, store):
+        draft = {
+            'source_type': intake.source_type,
+            'normalized_summary': intake.normalized_summary,
+            'extracted_method_summary': 'Agent weakly suggested replication-lite.',
+            'literature_state_summary': intake.normalized_summary,
+            'candidate_workflow_families': ['replication-lite', 'literature-to-experiment'],
+            'dataset_hints': [],
+            'evaluation_targets': ['reported metrics'],
+            'extracted_claims': [intake.normalized_summary],
+            'research_gaps': ['dataset unresolved'],
+            'bounded_experiment_ideas': ['keep bounded'],
+            'recommended_method_family': 'lightweight replication',
+            'recommended_datasets': [],
+            'recommended_metrics': ['reported metrics'],
+            'recommended_baselines': [],
+            'recommended_architectures': [],
+            'recommended_python_packages': [],
+            'preferred_workflow_id': 'replication-lite',
+            'preferred_resource_profile': 'cpu-medium',
+            'gpu_required': False,
+            'mutation_axes': ['metric emphasis'],
+            'unresolved_questions': ['Which concrete dataset should the backend use?'],
+        }
+        return build_interpretation_record_from_agent_draft(
+            intake,
+            draft,
+            store=store,
+            interpretation_source='agent-fallback',
+            interpretation_backend={'provider': 'ollama', 'model': 'qwen3:14b'},
+            interpretation_warnings=['used fallback interpretation backend'],
+        )
+
+    monkeypatch.setattr(main_module, 'call_interpretation_agent', fake_call_interpretation_agent)
+
+    interpretation = client.post('/interpretations/from-latest-intake')
+    assert interpretation.status_code == 201
+    payload = interpretation.json()
+    assert payload['preferred_workflow_id'] == 'gpu-experiment'
+    assert payload['preferred_resource_profile'] == 'gpu-small'
+    assert payload['gpu_required'] is True
+    assert 'gpu-experiment' in payload['candidate_workflow_families']
 
 
 def test_intake_preserves_explicit_technique_tags() -> None:

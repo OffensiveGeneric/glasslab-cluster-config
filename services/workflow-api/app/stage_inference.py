@@ -543,6 +543,12 @@ def build_technique_knowledge(
     )
 
 
+def catalog_workflow_ids(matched_catalog_records: list[Any]) -> list[str]:
+    return normalize_unique_strings(
+        [workflow_id for record in matched_catalog_records for workflow_id in getattr(record, 'workflow_ids', [])]
+    )
+
+
 def build_method_spec(
     *,
     intake: IntakeRecord,
@@ -716,6 +722,8 @@ def build_interpretation_record(intake: IntakeRecord, store: RunStore | None = N
     recommended_architectures = infer_keyword_hints(enriched_intake, ARCHITECTURE_KEYWORDS)
     recommended_losses = infer_keyword_hints(enriched_intake, LOSS_KEYWORDS)
     recommended_python_packages = infer_keyword_hints(enriched_intake, PYTHON_LIBRARY_KEYWORDS)
+    matched_catalog_records = match_catalog_records_for_intake(intake, store) if store is not None else []
+    candidate_workflows = normalize_unique_strings([*catalog_workflow_ids(matched_catalog_records), *candidate_workflows])
     gpu_required = infer_gpu_required(recommended_architectures, recommended_python_packages, candidate_workflows)
     preferred_workflow_id, preferred_resource_profile = infer_preferred_execution_surface(
         candidate_workflows,
@@ -742,19 +750,25 @@ def build_interpretation_record(intake: IntakeRecord, store: RunStore | None = N
         recommended_python_packages=recommended_python_packages,
         mutation_axes=mutation_axes,
     )
-    matched_catalog_records = match_catalog_records_for_intake(intake, store) if store is not None else []
     technique_knowledge = enrich_technique_knowledge_from_catalog(technique_knowledge, matched_catalog_records)
     recommended_python_packages = normalize_unique_strings([*recommended_python_packages, *technique_knowledge.python_packages])
     recommended_losses = normalize_unique_strings([*recommended_losses, *technique_knowledge.losses_or_distances])
     evaluation_targets = normalize_unique_strings([*evaluation_targets, *technique_knowledge.metrics])
     if not recommended_architectures and technique_knowledge.model_families:
         recommended_architectures = list(technique_knowledge.model_families)
-    if preferred_workflow_id is None:
+    if matched_catalog_records and catalog_workflow_ids(matched_catalog_records):
+        preferred_workflow_id = catalog_workflow_ids(matched_catalog_records)[0]
+    elif preferred_workflow_id is None:
         for record in matched_catalog_records:
             if record.workflow_ids:
                 preferred_workflow_id = record.workflow_ids[0]
                 break
-    if preferred_resource_profile is None:
+    if matched_catalog_records:
+        for record in matched_catalog_records:
+            if record.resource_profile:
+                preferred_resource_profile = record.resource_profile
+                break
+    elif preferred_resource_profile is None:
         for record in matched_catalog_records:
             if record.resource_profile:
                 preferred_resource_profile = record.resource_profile

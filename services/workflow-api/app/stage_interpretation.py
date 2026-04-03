@@ -16,6 +16,7 @@ from .stage_inference import (
     build_interpretation_notes,
     build_method_spec,
     build_technique_knowledge,
+    catalog_workflow_ids,
     normalize_unique_strings,
 )
 from .technique_catalog import enrich_technique_knowledge_from_catalog, match_catalog_records_for_intake
@@ -99,6 +100,9 @@ def build_interpretation_record_from_agent_draft(
         mutation_axes=list(validated_draft.get("mutation_axes", [])),
     )
     matched_catalog_records = match_catalog_records_for_intake(intake, store) if store is not None else []
+    candidate_workflow_families = normalize_unique_strings(
+        [*catalog_workflow_ids(matched_catalog_records), *list(validated_draft["candidate_workflow_families"])]
+    )
     technique_knowledge = enrich_technique_knowledge_from_catalog(technique_knowledge, matched_catalog_records)
     recommended_python_packages = normalize_unique_strings(
         [*list(validated_draft.get("recommended_python_packages", [])), *technique_knowledge.python_packages]
@@ -116,13 +120,20 @@ def build_interpretation_record_from_agent_draft(
         [*list(validated_draft.get("recommended_architectures", [])), *technique_knowledge.model_families]
     )
     preferred_workflow_id = validated_draft.get("preferred_workflow_id")
-    if preferred_workflow_id is None:
+    if matched_catalog_records and catalog_workflow_ids(matched_catalog_records):
+        preferred_workflow_id = catalog_workflow_ids(matched_catalog_records)[0]
+    elif preferred_workflow_id is None:
         for record in matched_catalog_records:
             if record.workflow_ids:
                 preferred_workflow_id = record.workflow_ids[0]
                 break
     preferred_resource_profile = validated_draft.get("preferred_resource_profile")
-    if preferred_resource_profile is None:
+    if matched_catalog_records:
+        for record in matched_catalog_records:
+            if record.resource_profile:
+                preferred_resource_profile = record.resource_profile
+                break
+    elif preferred_resource_profile is None:
         for record in matched_catalog_records:
             if record.resource_profile:
                 preferred_resource_profile = record.resource_profile
@@ -131,7 +142,7 @@ def build_interpretation_record_from_agent_draft(
     method_spec = build_method_spec(
         intake=intake,
         objective=validated_draft["normalized_summary"],
-        candidate_workflows=list(validated_draft["candidate_workflow_families"]),
+        candidate_workflows=candidate_workflow_families,
         dataset_hints=recommended_datasets or list(validated_draft["dataset_hints"]),
         evaluation_targets=recommended_metrics or list(validated_draft["evaluation_targets"]),
         recommended_method_family=validated_draft.get("recommended_method_family"),
@@ -153,7 +164,7 @@ def build_interpretation_record_from_agent_draft(
         normalized_summary=validated_draft["normalized_summary"],
         extracted_method_summary=validated_draft["extracted_method_summary"],
         literature_state_summary=validated_draft["literature_state_summary"],
-        candidate_workflow_families=validated_draft["candidate_workflow_families"],
+        candidate_workflow_families=candidate_workflow_families,
         dataset_hints=validated_draft["dataset_hints"],
         evaluation_targets=validated_draft["evaluation_targets"],
         extracted_claims=validated_draft["extracted_claims"],
