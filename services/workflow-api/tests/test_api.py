@@ -227,6 +227,36 @@ def test_technique_catalog_import_upserts_by_name() -> None:
     assert listed_payload[0]['default_dataset_uri'] == 's3://datasets/dreamsim/train.csv'
 
 
+def test_technique_catalog_search_prefers_newest_most_complete_duplicate() -> None:
+    client = build_client()
+
+    client.post(
+        '/technique-catalog/import',
+        json={'cards': [{'name': 'DreamSim Transformer Similarity', 'aliases': ['dreamsim'], 'python_packages': ['torch']}]},
+    )
+    client.post(
+        '/technique-catalog/import',
+        json={
+            'cards': [
+                {
+                    'name': 'DreamSim Transformer Similarity',
+                    'aliases': ['dreamsim', 'visual similarity metric'],
+                    'python_packages': ['torch', 'timm'],
+                    'workflow_ids': ['gpu-experiment'],
+                    'default_dataset_uri': 's3://datasets/dreamsim/train.csv',
+                }
+            ]
+        },
+    )
+
+    results = client.get('/technique-catalog', params={'query': 'dreamsim'})
+    assert results.status_code == 200
+    payload = results.json()
+    assert len(payload) == 1
+    assert payload[0]['default_dataset_uri'] == 's3://datasets/dreamsim/train.csv'
+    assert payload[0]['workflow_ids'] == ['gpu-experiment']
+
+
 def test_interpretation_is_enriched_from_technique_catalog() -> None:
     client = build_client()
 

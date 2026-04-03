@@ -21,6 +21,32 @@ def normalize_unique_strings(items: Iterable[str]) -> list[str]:
     return list(dict.fromkeys(cleaned))
 
 
+def _record_completeness_score(record: TechniqueCatalogRecord) -> tuple[int, str]:
+    score = 0
+    score += len(record.aliases)
+    score += len(record.problem_types)
+    score += len(record.specific_algorithms)
+    score += len(record.validation_strategies)
+    score += len(record.primary_metrics)
+    score += len(record.python_packages)
+    score += len(record.workflow_ids)
+    score += len(record.dataset_hints)
+    score += 2 if record.default_dataset_uri else 0
+    score += 2 if record.default_evaluation_target else 0
+    score += 2 if record.default_training_notes else 0
+    return score, record.updated_at.isoformat()
+
+
+def collapse_catalog_records(records: list[TechniqueCatalogRecord]) -> list[TechniqueCatalogRecord]:
+    best_by_name: dict[str, TechniqueCatalogRecord] = {}
+    for record in records:
+        key = record.name.strip().lower()
+        existing = best_by_name.get(key)
+        if existing is None or _record_completeness_score(record) > _record_completeness_score(existing):
+            best_by_name[key] = record
+    return sorted(best_by_name.values(), key=lambda item: item.name.lower())
+
+
 def build_technique_catalog_record(
     card: TechniqueCatalogImportCard,
     *,
@@ -70,7 +96,7 @@ def import_technique_catalog(
 ) -> list[TechniqueCatalogRecord]:
     existing_by_name = {
         record.name.lower(): record
-        for record in store.list_technique_catalog_records()
+        for record in collapse_catalog_records(store.list_technique_catalog_records())
     }
     imported: list[TechniqueCatalogRecord] = []
     for card in request.cards:
@@ -83,7 +109,7 @@ def import_technique_catalog(
 
 
 def search_technique_catalog(store: RunStore, query: str | None = None) -> list[TechniqueCatalogRecord]:
-    records = store.list_technique_catalog_records()
+    records = collapse_catalog_records(store.list_technique_catalog_records())
     if not query:
         return records
     lowered = query.lower()
@@ -106,7 +132,7 @@ def search_technique_catalog(store: RunStore, query: str | None = None) -> list[
 def match_catalog_records_for_intake(intake: IntakeRecord, store: RunStore) -> list[TechniqueCatalogRecord]:
     text = ' '.join([intake.raw_request, intake.normalized_summary, *intake.notes, *intake.source_refs, *intake.technique_tags]).lower()
     matches: list[tuple[int, TechniqueCatalogRecord]] = []
-    for record in store.list_technique_catalog_records():
+    for record in collapse_catalog_records(store.list_technique_catalog_records()):
         score = 0
         phrases = [
             record.name,
