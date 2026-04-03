@@ -111,6 +111,21 @@ methodology variants. In practice that means:
 This keeps the mutation surface bounded while making methodology drafting less
 dependent on ad hoc text hints.
 
+## Live Validation
+
+This path has now been validated live on `.44` with a DreamSim-style technique
+card plus explicit intake tags.
+
+That live run confirmed:
+
+- explicit `technique_tags` persist on the intake record
+- a matched catalog card can now override weaker workflow hints from the
+  interpretation model path
+- the interpreted preferred workflow can move to `gpu-experiment`
+- the resulting design inherits that workflow choice
+- autoresearch can start and draft catalog-driven methodology variants from the
+  matched card
+
 ## Scope
 
 This is intentionally the fast path, not the final design.
