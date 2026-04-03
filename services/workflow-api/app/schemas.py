@@ -35,12 +35,13 @@ class IntakeCreateRequest(BaseModel):
     raw_request: str = Field(min_length=10)
     source_refs: list[str] = Field(default_factory=list)
     document_refs: list[str] = Field(default_factory=list)
+    technique_tags: list[str] = Field(default_factory=list)
     source_type: str | None = None
     notes: list[str] = Field(default_factory=list)
     submitted_by: str | None = None
     trace_id: str | None = None
 
-    @field_validator('source_refs', 'document_refs', 'notes')
+    @field_validator('source_refs', 'document_refs', 'technique_tags', 'notes')
     @classmethod
     def validate_non_empty_unique_strings(cls, value: list[str]) -> list[str]:
         cleaned = [item.strip() for item in value if item.strip()]
@@ -218,6 +219,7 @@ class IntakeRecord(BaseModel):
     source_type: str
     source_refs: list[str] = Field(default_factory=list)
     document_refs: list[str] = Field(default_factory=list)
+    technique_tags: list[str] = Field(default_factory=list)
     raw_request: str
     normalized_summary: str
     workflow_family_candidates: list[str] = Field(default_factory=list)

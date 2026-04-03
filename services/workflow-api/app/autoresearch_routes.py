@@ -115,7 +115,7 @@ def register_autoresearch_routes(
         workflow = registry.get_workflow(seed.workflow_id)
         if workflow is None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='workflow registry entry not found')
-        drafts = draft_initial_methodologies(campaign, seed, workflow)
+        drafts = draft_initial_methodologies(store, campaign, seed, workflow)
         for draft in drafts:
             store.save_methodology_draft(draft)
         campaign = campaign.model_copy(

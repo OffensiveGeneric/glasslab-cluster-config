@@ -20,6 +20,7 @@ from .registry import WorkflowRegistry
 from .run_artifacts import artifact_run_dir, resolve_run_status
 from .schemas import AutoresearchCampaignCreateRequest, AutoresearchCampaignRecord, AutoresearchCampaignSummaryResponse, AutoresearchDecisionRecord, AutoresearchIterationRecord, DesignDraftRecord, InterpretationRecord, MethodologyDraftRecord, RunCreateRequest, RunRecord
 from .session_helpers import get_required_research_session, touch_research_session
+from .technique_catalog import match_catalog_records_for_intake
 
 
 def _dedupe(values: list[str]) -> list[str]:
@@ -216,13 +217,69 @@ def _build_variant_specs(seed: MethodologyDraftRecord, workflow: WorkflowRegistr
     return specs[:4]
 
 
+def _build_catalog_variant_specs(
+    store: RunStore,
+    seed: MethodologyDraftRecord,
+) -> list[dict[str, Any]]:
+    if not seed.source_intake_id:
+        return []
+    intake = store.get_intake(seed.source_intake_id)
+    if intake is None:
+        return []
+    records = match_catalog_records_for_intake(intake, store)
+    specs: list[dict[str, Any]] = []
+    default_baseline = seed.baselines[:1] or seed.candidate_models[:1] or seed.architectures[:1]
+    for record in records[:3]:
+        candidate_models = _dedupe(record.specific_algorithms or ([record.algorithm_family] if record.algorithm_family else []))
+        if not candidate_models:
+            continue
+        declared_inputs = dict(seed.declared_inputs)
+        if record.validation_strategies:
+            declared_inputs['validation_strategy'] = record.validation_strategies[0]
+            if record.validation_strategies[0] == 'stratified_holdout':
+                declared_inputs.setdefault('validation_split', '0.25')
+        specs.append(
+            {
+                'candidate_models': candidate_models[:2],
+                'architectures': candidate_models[:2],
+                'baselines': default_baseline,
+                'metrics': _dedupe(record.primary_metrics or seed.metrics),
+                'hypothesis': f"{record.name} should improve the bounded method search using the imported technique knowledge.",
+                'mutation_diff': {
+                    'technique_card': {'name': record.name, 'technique_id': record.technique_id},
+                    'model_family': {'from': seed.candidate_models, 'to': candidate_models[:2]},
+                },
+                'declared_inputs': declared_inputs,
+                'notes': [
+                    f'technique-catalog variant from {record.name}',
+                    *([f"packages: {', '.join(record.python_packages)}"] if record.python_packages else []),
+                ],
+                'required_python_packages': list(record.python_packages),
+                'loss_or_distance': record.loss_functions[0] if record.loss_functions else None,
+                'resource_profile': record.resource_profile or seed.resource_profile,
+            }
+        )
+    return specs
+
+
 def draft_initial_methodologies(
+    store: RunStore,
     campaign: AutoresearchCampaignRecord,
     seed: MethodologyDraftRecord,
     workflow: WorkflowRegistryEntry,
 ) -> list[MethodologyDraftRecord]:
     drafts: list[MethodologyDraftRecord] = []
-    for spec in _build_variant_specs(seed, workflow):
+    technique_specs = _build_catalog_variant_specs(store, seed)
+    baseline_specs = _build_variant_specs(seed, workflow)
+    ordered_specs = []
+    seen_signatures: set[tuple[str, ...]] = set()
+    for spec in [*technique_specs, *baseline_specs]:
+        signature = tuple(spec.get('candidate_models', []))
+        if signature in seen_signatures:
+            continue
+        seen_signatures.add(signature)
+        ordered_specs.append(spec)
+    for spec in ordered_specs[:4]:
         now = _now()
         drafts.append(
             MethodologyDraftRecord(
@@ -248,7 +305,7 @@ def draft_initial_methodologies(
                 workflow_family=seed.workflow_family,
                 declared_inputs=dict(spec.get('declared_inputs', seed.declared_inputs)),
                 candidate_models=spec['candidate_models'],
-                resource_profile=seed.resource_profile,
+                resource_profile=spec.get('resource_profile', seed.resource_profile),
                 approval_tier=seed.approval_tier,
                 method_spec=(
                     seed.method_spec.model_copy(
@@ -256,6 +313,9 @@ def draft_initial_methodologies(
                             'candidate_models': spec['candidate_models'],
                             'baseline_models': spec['baselines'],
                             'metrics': _dedupe(spec['metrics']),
+                            'loss_or_distance': spec.get('loss_or_distance', seed.method_spec.loss_or_distance),
+                            'required_python_packages': _dedupe(spec.get('required_python_packages', seed.method_spec.required_python_packages)),
+                            'resource_profile': spec.get('resource_profile', seed.method_spec.resource_profile),
                             'execution_inputs': dict(spec.get('declared_inputs', seed.declared_inputs)),
                             'mutation_axes': list(seed.method_spec.mutation_axes),
                         }

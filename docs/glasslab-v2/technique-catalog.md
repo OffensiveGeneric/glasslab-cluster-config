@@ -76,9 +76,40 @@ The first pass is deliberately simple:
 - match by specific algorithms
 - match by Python package names
 - match by problem-type strings
+- match by explicit intake `technique_tags`
 
 This is enough to start enriching bounded runner state without depending on a
 larger semantic retrieval layer yet.
+
+## Explicit Tags
+
+Intakes can now carry explicit `technique_tags`.
+
+This is the current low-friction way to reduce dependence on lucky natural
+language phrasing. Tags let the operator or upstream chat layer say things like:
+
+- `dreamsim`
+- `metric_learning`
+- `vision_transformer`
+- `artist_aware_split`
+
+Those tags are stored on the intake record and participate in catalog matching
+alongside the raw request text.
+
+## Autoresearch Use
+
+The catalog no longer only affects interpretation.
+
+Autoresearch now also consumes matched technique cards when it drafts bounded
+methodology variants. In practice that means:
+
+- imported technique cards can introduce candidate models
+- imported cards can contribute package requirements
+- imported cards can suggest loss/distance objectives
+- imported cards can steer validation strategy variants
+
+This keeps the mutation surface bounded while making methodology drafting less
+dependent on ad hoc text hints.
 
 ## Scope
 

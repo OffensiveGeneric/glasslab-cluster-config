@@ -60,6 +60,33 @@ def normalize_unique_strings(values: list[str]) -> list[str]:
     return list(dict.fromkeys(cleaned))
 
 
+def infer_technique_tags(request_text: str, source_refs: list[str], notes: list[str]) -> list[str]:
+    lowered = ' '.join([request_text, *source_refs, *notes]).lower()
+    tags: list[str] = []
+    for keyword in [
+        'dreamsim',
+        'visual similarity',
+        'transformer',
+        'vision transformer',
+        'resnet',
+        'xgboost',
+        'lightgbm',
+        'catboost',
+        'random forest',
+        'logistic regression',
+        'pytorch',
+        'torch',
+        'timm',
+        'contrastive',
+        'metric learning',
+        'artist-aware split',
+        'stratified',
+    ]:
+        if keyword in lowered:
+            tags.append(keyword.replace(' ', '_'))
+    return normalize_unique_strings(tags)
+
+
 def validate_intake_agent_draft(
     draft: dict[str, Any],
     registry: WorkflowRegistry,
@@ -77,6 +104,7 @@ def validate_intake_agent_draft(
         'raw_request': draft['raw_request'].strip(),
         'normalized_summary': ' '.join(draft['normalized_summary'].split())[:500],
         'workflow_family_candidates': normalize_unique_strings(list(draft.get('workflow_family_candidates', []))),
+        'technique_tags': normalize_unique_strings(list(draft.get('technique_tags', []))),
         'notes': normalize_unique_strings(list(draft.get('notes', []))),
         'submitted_by': draft['submitted_by'].strip(),
     }
@@ -103,6 +131,7 @@ def build_intake_record_from_agent_draft(
         source_type=validated_draft['source_type'],
         source_refs=validated_draft['source_refs'],
         document_refs=validated_draft.get('document_refs', []),
+        technique_tags=validated_draft.get('technique_tags', []),
         raw_request=validated_draft['raw_request'],
         normalized_summary=validated_draft['normalized_summary'],
         workflow_family_candidates=validated_draft['workflow_family_candidates'],

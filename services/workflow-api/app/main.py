@@ -61,6 +61,7 @@ from .stage_inference import (
     infer_evaluation_targets,
     infer_extracted_claims,
     infer_intake_source_type,
+    infer_technique_tags,
     infer_literature_state_summary,
     infer_research_gaps,
     infer_unresolved_questions,
@@ -530,6 +531,7 @@ def stage_intake_from_request(
             source_type=infer_intake_source_type(request),
             source_refs=request.source_refs,
             document_refs=request.document_refs,
+            technique_tags=request.technique_tags or infer_technique_tags(request.raw_request, request.source_refs, request.notes),
             raw_request=request.raw_request.strip(),
             normalized_summary=summarize_intake(request.raw_request, request.notes),
             workflow_family_candidates=candidates,
@@ -541,6 +543,15 @@ def stage_intake_from_request(
         record = record.model_copy(
             update={
                 'document_refs': normalize_unique_strings(list(record.document_refs) + list(request.document_refs)),
+                'technique_tags': normalize_unique_strings(list(record.technique_tags) + list(request.technique_tags)),
+                'updated_at': datetime.now(timezone.utc),
+                'session_id': session_id or record.session_id,
+            }
+        )
+    elif request.technique_tags:
+        record = record.model_copy(
+            update={
+                'technique_tags': normalize_unique_strings(list(record.technique_tags) + list(request.technique_tags)),
                 'updated_at': datetime.now(timezone.utc),
                 'session_id': session_id or record.session_id,
             }

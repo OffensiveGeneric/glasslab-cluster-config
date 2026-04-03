@@ -234,6 +234,89 @@ def test_interpretation_is_enriched_from_technique_catalog() -> None:
     assert payload['gpu_required'] is True
 
 
+def test_intake_preserves_explicit_technique_tags() -> None:
+    client = build_client()
+
+    intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Evaluate similarity-learning methods for same-artist versus different-artist comparison.',
+            'source_refs': ['https://example.org/artist-problem'],
+            'technique_tags': ['dreamsim', 'metric_learning', 'artist_aware_split'],
+            'notes': ['Keep this bounded and GPU-aware.'],
+        },
+    )
+    assert intake.status_code == 201
+    payload = intake.json()
+    assert payload['technique_tags'] == ['dreamsim', 'metric_learning', 'artist_aware_split']
+
+
+def test_autoresearch_drafts_technique_catalog_variant(tmp_path) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        artifacts_mount_path=str(tmp_path),
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    imported = client.post(
+        '/technique-catalog/import',
+        json={
+            'cards': [
+                {
+                    'name': 'DreamSim Transformer Similarity',
+                    'aliases': ['dreamsim', 'visual similarity metric'],
+                    'algorithm_family': 'transformers',
+                    'specific_algorithms': ['vision_transformer'],
+                    'loss_functions': ['contrastive_loss'],
+                    'validation_strategies': ['stratified_holdout'],
+                    'primary_metrics': ['roc_auc'],
+                    'python_packages': ['torch', 'timm'],
+                    'gpu_required': True,
+                    'resource_profile': 'gpu-small',
+                    'workflow_ids': ['gpu-experiment'],
+                }
+            ]
+        },
+    )
+    assert imported.status_code == 201
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Validate technique-catalog-driven DreamSim methodology variants.'},
+    )
+    session_id = session.json()['session_id']
+
+    intake = client.post(
+        f'/research-sessions/{session_id}/intakes',
+        json={
+            'raw_request': 'Replicate DreamSim visual similarity metric using s3://datasets/dreamsim/train.csv.',
+            'source_refs': ['https://dreamsim-nights.github.io/'],
+            'technique_tags': ['dreamsim', 'vision_transformer', 'metric_learning'],
+            'notes': ['Prefer PyTorch and timm.'],
+        },
+    )
+    assert intake.status_code == 201
+
+    interpretation = client.post('/interpretations/from-latest-intake')
+    assert interpretation.status_code == 201
+    design = client.post('/design-drafts/from-latest-intake')
+    assert design.status_code == 201
+
+    store.save_research_session(
+        store.get_research_session(session_id).model_copy(update={'latest_design_id': design.json()['design_id']})
+    )
+
+    campaign = client.post(f'/research-sessions/{session_id}/transitions/start-autoresearch-campaign')
+    assert campaign.status_code == 201
+    drafted = client.post(f'/research-sessions/{session_id}/transitions/draft-methodologies')
+    assert drafted.status_code == 201
+    drafts = drafted.json()['methodology_drafts']
+    assert any('technique-catalog variant' in ' '.join(draft['notes']) for draft in drafts)
+    assert any('torch' in draft['method_spec']['required_python_packages'] for draft in drafts if draft['method_spec'] is not None)
+
+
 def test_create_app_rejects_implicit_memory_store_when_disallowed() -> None:
     settings = Settings(
         registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),

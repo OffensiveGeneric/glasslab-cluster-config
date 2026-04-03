@@ -99,7 +99,7 @@ def search_technique_catalog(store: RunStore, query: str | None = None) -> list[
 
 
 def match_catalog_records_for_intake(intake: IntakeRecord, store: RunStore) -> list[TechniqueCatalogRecord]:
-    text = ' '.join([intake.raw_request, intake.normalized_summary, *intake.notes, *intake.source_refs]).lower()
+    text = ' '.join([intake.raw_request, intake.normalized_summary, *intake.notes, *intake.source_refs, *intake.technique_tags]).lower()
     matches: list[tuple[int, TechniqueCatalogRecord]] = []
     for record in store.list_technique_catalog_records():
         score = 0
@@ -109,6 +109,8 @@ def match_catalog_records_for_intake(intake: IntakeRecord, store: RunStore) -> l
             *record.specific_algorithms,
             *record.python_packages,
             *record.problem_types,
+            *record.validation_strategies,
+            *record.loss_functions,
         ]
         if record.algorithm_family:
             phrases.append(record.algorithm_family)
@@ -116,7 +118,8 @@ def match_catalog_records_for_intake(intake: IntakeRecord, store: RunStore) -> l
             phrase = phrase.strip()
             if len(phrase) < 3:
                 continue
-            if phrase.lower() in text:
+            normalized_phrase = phrase.lower().replace(' ', '_')
+            if phrase.lower() in text or normalized_phrase in text:
                 score += 3 if phrase.lower() == record.name.lower() else 1
         if score:
             matches.append((score, record))
