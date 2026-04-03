@@ -186,6 +186,47 @@ def test_import_and_query_technique_catalog() -> None:
     assert fetched.json()['python_packages'] == ['torch', 'timm']
 
 
+def test_technique_catalog_import_upserts_by_name() -> None:
+    client = build_client()
+
+    first = client.post(
+        '/technique-catalog/import',
+        json={
+            'cards': [
+                {
+                    'name': 'DreamSim Transformer Similarity',
+                    'python_packages': ['torch'],
+                }
+            ]
+        },
+    )
+    assert first.status_code == 201
+    first_payload = first.json()[0]
+
+    second = client.post(
+        '/technique-catalog/import',
+        json={
+            'cards': [
+                {
+                    'name': 'DreamSim Transformer Similarity',
+                    'python_packages': ['torch', 'timm'],
+                    'default_dataset_uri': 's3://datasets/dreamsim/train.csv',
+                }
+            ]
+        },
+    )
+    assert second.status_code == 201
+    second_payload = second.json()[0]
+
+    assert second_payload['technique_id'] == first_payload['technique_id']
+    listed = client.get('/technique-catalog', params={'query': 'DreamSim Transformer Similarity'})
+    assert listed.status_code == 200
+    listed_payload = listed.json()
+    assert len(listed_payload) == 1
+    assert listed_payload[0]['python_packages'] == ['torch', 'timm']
+    assert listed_payload[0]['default_dataset_uri'] == 's3://datasets/dreamsim/train.csv'
+
+
 def test_interpretation_is_enriched_from_technique_catalog() -> None:
     client = build_client()
 

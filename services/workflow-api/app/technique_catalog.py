@@ -74,9 +74,10 @@ def import_technique_catalog(
     }
     imported: list[TechniqueCatalogRecord] = []
     for card in request.cards:
-        existing = existing_by_name.get(card.name.lower()) if request.replace_existing else None
+        existing = existing_by_name.get(card.name.lower())
         record = build_technique_catalog_record(card, import_source=request.import_source, existing=existing)
         store.save_technique_catalog_record(record)
+        existing_by_name[card.name.lower()] = record
         imported.append(record)
     return imported
 
