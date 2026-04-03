@@ -18,6 +18,7 @@ from .stage_inference import (
     build_technique_knowledge,
     normalize_unique_strings,
 )
+from .technique_catalog import enrich_technique_knowledge_from_catalog, match_catalog_records_for_intake
 
 LOGGER = logging.getLogger(__name__)
 
@@ -78,6 +79,7 @@ def build_interpretation_record_from_agent_draft(
     intake: IntakeRecord,
     validated_draft: dict[str, Any],
     *,
+    store: RunStore | None = None,
     interpretation_source: str = 'agent-primary',
     interpretation_backend: dict[str, Any] | None = None,
     interpretation_warnings: list[str] | None = None,
@@ -96,19 +98,49 @@ def build_interpretation_record_from_agent_draft(
         recommended_python_packages=list(validated_draft.get("recommended_python_packages", [])),
         mutation_axes=list(validated_draft.get("mutation_axes", [])),
     )
+    matched_catalog_records = match_catalog_records_for_intake(intake, store) if store is not None else []
+    technique_knowledge = enrich_technique_knowledge_from_catalog(technique_knowledge, matched_catalog_records)
+    recommended_python_packages = normalize_unique_strings(
+        [*list(validated_draft.get("recommended_python_packages", [])), *technique_knowledge.python_packages]
+    )
+    recommended_losses = normalize_unique_strings(
+        [*recommended_losses, *technique_knowledge.losses_or_distances]
+    )
+    recommended_datasets = normalize_unique_strings(
+        [*list(validated_draft.get("recommended_datasets", [])), *list(validated_draft["dataset_hints"])]
+    )
+    recommended_metrics = normalize_unique_strings(
+        [*list(validated_draft.get("recommended_metrics", [])), *list(validated_draft["evaluation_targets"]), *technique_knowledge.metrics]
+    )
+    recommended_architectures = normalize_unique_strings(
+        [*list(validated_draft.get("recommended_architectures", [])), *technique_knowledge.model_families]
+    )
+    preferred_workflow_id = validated_draft.get("preferred_workflow_id")
+    if preferred_workflow_id is None:
+        for record in matched_catalog_records:
+            if record.workflow_ids:
+                preferred_workflow_id = record.workflow_ids[0]
+                break
+    preferred_resource_profile = validated_draft.get("preferred_resource_profile")
+    if preferred_resource_profile is None:
+        for record in matched_catalog_records:
+            if record.resource_profile:
+                preferred_resource_profile = record.resource_profile
+                break
+    gpu_required = bool(validated_draft.get("gpu_required", False)) or any(record.gpu_required for record in matched_catalog_records)
     method_spec = build_method_spec(
         intake=intake,
         objective=validated_draft["normalized_summary"],
         candidate_workflows=list(validated_draft["candidate_workflow_families"]),
-        dataset_hints=list(validated_draft.get("recommended_datasets", [])) or list(validated_draft["dataset_hints"]),
-        evaluation_targets=list(validated_draft.get("recommended_metrics", [])) or list(validated_draft["evaluation_targets"]),
+        dataset_hints=recommended_datasets or list(validated_draft["dataset_hints"]),
+        evaluation_targets=recommended_metrics or list(validated_draft["evaluation_targets"]),
         recommended_method_family=validated_draft.get("recommended_method_family"),
         recommended_baselines=list(validated_draft.get("recommended_baselines", [])),
-        recommended_architectures=list(validated_draft.get("recommended_architectures", [])),
+        recommended_architectures=recommended_architectures,
         recommended_losses=recommended_losses,
-        recommended_python_packages=list(validated_draft.get("recommended_python_packages", [])),
-        preferred_workflow_id=validated_draft.get("preferred_workflow_id"),
-        preferred_resource_profile=validated_draft.get("preferred_resource_profile"),
+        recommended_python_packages=recommended_python_packages,
+        preferred_workflow_id=preferred_workflow_id,
+        preferred_resource_profile=preferred_resource_profile,
         mutation_axes=list(validated_draft.get("mutation_axes", [])),
     )
     return InterpretationRecord(
@@ -128,14 +160,14 @@ def build_interpretation_record_from_agent_draft(
         research_gaps=validated_draft["research_gaps"],
         bounded_experiment_ideas=validated_draft["bounded_experiment_ideas"],
         recommended_method_family=validated_draft.get("recommended_method_family"),
-        recommended_datasets=list(validated_draft.get("recommended_datasets", [])),
-        recommended_metrics=list(validated_draft.get("recommended_metrics", [])),
+        recommended_datasets=recommended_datasets,
+        recommended_metrics=recommended_metrics,
         recommended_baselines=list(validated_draft.get("recommended_baselines", [])),
-        recommended_architectures=list(validated_draft.get("recommended_architectures", [])),
-        recommended_python_packages=list(validated_draft.get("recommended_python_packages", [])),
-        preferred_workflow_id=validated_draft.get("preferred_workflow_id"),
-        preferred_resource_profile=validated_draft.get("preferred_resource_profile"),
-        gpu_required=bool(validated_draft.get("gpu_required", False)),
+        recommended_architectures=recommended_architectures,
+        recommended_python_packages=recommended_python_packages,
+        preferred_workflow_id=preferred_workflow_id,
+        preferred_resource_profile=preferred_resource_profile,
+        gpu_required=gpu_required,
         mutation_axes=list(validated_draft.get("mutation_axes", [])),
         technique_knowledge=technique_knowledge,
         method_spec=method_spec,
@@ -196,6 +228,7 @@ def call_interpretation_agent(
         return build_interpretation_record_from_agent_draft(
             intake,
             validated_draft,
+            store=store,
             interpretation_source=interpretation_source,
             interpretation_backend=normalized_backend,
             interpretation_warnings=warnings,

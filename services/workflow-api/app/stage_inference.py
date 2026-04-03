@@ -15,6 +15,7 @@ from .registry import WorkflowRegistry
 from .session_helpers import build_research_session_literature_digest
 from .source_documents import ARCHITECTURE_KEYWORDS, BASELINE_KEYWORDS, DATASET_KEYWORDS, LOSS_KEYWORDS, METRIC_KEYWORDS, PYTHON_LIBRARY_KEYWORDS
 from .schemas import IntakeCreateRequest, IntakeRecord, InterpretationRecord, MethodSpecRecord, TechniqueKnowledgeRecord
+from .technique_catalog import enrich_technique_knowledge_from_catalog, match_catalog_records_for_intake
 
 LOGGER = logging.getLogger(__name__)
 
@@ -712,6 +713,24 @@ def build_interpretation_record(intake: IntakeRecord, store: RunStore | None = N
         recommended_python_packages=recommended_python_packages,
         mutation_axes=mutation_axes,
     )
+    matched_catalog_records = match_catalog_records_for_intake(intake, store) if store is not None else []
+    technique_knowledge = enrich_technique_knowledge_from_catalog(technique_knowledge, matched_catalog_records)
+    recommended_python_packages = normalize_unique_strings([*recommended_python_packages, *technique_knowledge.python_packages])
+    recommended_losses = normalize_unique_strings([*recommended_losses, *technique_knowledge.losses_or_distances])
+    evaluation_targets = normalize_unique_strings([*evaluation_targets, *technique_knowledge.metrics])
+    if not recommended_architectures and technique_knowledge.model_families:
+        recommended_architectures = list(technique_knowledge.model_families)
+    if preferred_workflow_id is None:
+        for record in matched_catalog_records:
+            if record.workflow_ids:
+                preferred_workflow_id = record.workflow_ids[0]
+                break
+    if preferred_resource_profile is None:
+        for record in matched_catalog_records:
+            if record.resource_profile:
+                preferred_resource_profile = record.resource_profile
+                break
+    gpu_required = gpu_required or any(record.gpu_required for record in matched_catalog_records)
     method_spec = build_method_spec(
         intake=intake,
         objective=intake.normalized_summary,

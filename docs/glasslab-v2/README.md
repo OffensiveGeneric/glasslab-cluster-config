@@ -37,6 +37,7 @@ Canonical planning and architecture:
 - `autoresearch-lane.md`: first bounded methodology-exploration loop for session-backed, registry-approved autoresearch campaigns
 - `bounded-experiment-runner-priority.md`: current narrowing of scope toward manual-source intake, bounded interpretation, dependable run creation, and unattended methodology iteration
 - `runner-first-technique-knowledge-plan.md`: fastest path for turning NotebookLM-curated methodology knowledge into Glasslab-owned structured technique knowledge that the bounded runner can consume
+- `technique-catalog.md`: current import-and-match path for turning NotebookLM technique cards into Glasslab-owned structured methodology knowledge
 - `artist-similarity-research-note.md`: Grossberg's concrete research framing for same-artist vs different-artist painting comparison, style-drift robustness, and methodology comparison
 - `implemented-vs-discussed-2026-03-30.md`: short note separating what was really built from what was still discussion during the 2026-03-30 Grossberg conversation
 - `live-state-2026-03-30.md`: latest in-lab validation note for the bounded autoresearch lane, coding-model notebook refinement, interpretation path, and the remaining session-scoped intake gap

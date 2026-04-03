@@ -226,6 +226,104 @@ class IntakeRecord(BaseModel):
     session_id: str | None = None
 
 
+class TechniqueCatalogImportCard(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    name: str = Field(min_length=3)
+    aliases: list[str] = Field(default_factory=list)
+    summary: str | None = None
+    problem_types: list[str] = Field(default_factory=list)
+    algorithm_family: str | None = None
+    specific_algorithms: list[str] = Field(default_factory=list)
+    automl_frameworks: list[str] = Field(default_factory=list)
+    preprocessing_steps: list[str] = Field(default_factory=list)
+    loss_functions: list[str] = Field(default_factory=list)
+    optimizers: list[str] = Field(default_factory=list)
+    hyperparameter_optimization: list[str] = Field(default_factory=list)
+    validation_strategies: list[str] = Field(default_factory=list)
+    primary_metrics: list[str] = Field(default_factory=list)
+    uncertainty_quantification: list[str] = Field(default_factory=list)
+    python_packages: list[str] = Field(default_factory=list)
+    gpu_required: bool = False
+    resource_profile: str | None = None
+    workflow_ids: list[str] = Field(default_factory=list)
+    template_compatibility: list[str] = Field(default_factory=list)
+    common_failure_modes: list[str] = Field(default_factory=list)
+    source_refs: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+    @field_validator(
+        'aliases',
+        'problem_types',
+        'specific_algorithms',
+        'automl_frameworks',
+        'preprocessing_steps',
+        'loss_functions',
+        'optimizers',
+        'hyperparameter_optimization',
+        'validation_strategies',
+        'primary_metrics',
+        'uncertainty_quantification',
+        'python_packages',
+        'workflow_ids',
+        'template_compatibility',
+        'common_failure_modes',
+        'source_refs',
+        'notes',
+    )
+    @classmethod
+    def validate_unique_card_lists(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value if item.strip()]
+        return list(dict.fromkeys(cleaned))
+
+    @field_validator('summary')
+    @classmethod
+    def validate_summary(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = ' '.join(value.split()).strip()
+        return cleaned or None
+
+
+class TechniqueCatalogImportRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    cards: list[TechniqueCatalogImportCard] = Field(min_length=1)
+    import_source: str = 'notebooklm-manual-export'
+    replace_existing: bool = False
+
+
+class TechniqueCatalogRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    technique_id: str
+    created_at: datetime
+    updated_at: datetime
+    name: str
+    aliases: list[str] = Field(default_factory=list)
+    summary: str | None = None
+    problem_types: list[str] = Field(default_factory=list)
+    algorithm_family: str | None = None
+    specific_algorithms: list[str] = Field(default_factory=list)
+    automl_frameworks: list[str] = Field(default_factory=list)
+    preprocessing_steps: list[str] = Field(default_factory=list)
+    loss_functions: list[str] = Field(default_factory=list)
+    optimizers: list[str] = Field(default_factory=list)
+    hyperparameter_optimization: list[str] = Field(default_factory=list)
+    validation_strategies: list[str] = Field(default_factory=list)
+    primary_metrics: list[str] = Field(default_factory=list)
+    uncertainty_quantification: list[str] = Field(default_factory=list)
+    python_packages: list[str] = Field(default_factory=list)
+    gpu_required: bool = False
+    resource_profile: str | None = None
+    workflow_ids: list[str] = Field(default_factory=list)
+    template_compatibility: list[str] = Field(default_factory=list)
+    common_failure_modes: list[str] = Field(default_factory=list)
+    source_refs: list[str] = Field(default_factory=list)
+    import_source: str = 'notebooklm-manual-export'
+    notes: list[str] = Field(default_factory=list)
+
+
 class TechniqueKnowledgeRecord(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -237,6 +335,7 @@ class TechniqueKnowledgeRecord(BaseModel):
     python_packages: list[str] = Field(default_factory=list)
     dataset_hints: list[str] = Field(default_factory=list)
     failure_modes: list[str] = Field(default_factory=list)
+    catalog_technique_ids: list[str] = Field(default_factory=list)
     source_scope: str = 'paper'
 
 

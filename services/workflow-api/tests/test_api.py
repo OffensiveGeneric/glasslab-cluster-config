@@ -140,6 +140,100 @@ def test_json_store_persists_intake_across_restart(tmp_path) -> None:
     assert latest.json()['intake_id'] == intake_id
 
 
+def test_import_and_query_technique_catalog() -> None:
+    client = build_client()
+
+    imported = client.post(
+        '/technique-catalog/import',
+        json={
+            'cards': [
+                {
+                    'name': 'PyTorch Vision Transformer',
+                    'aliases': ['vit', 'vision transformer'],
+                    'problem_types': ['multiclass_classification'],
+                    'algorithm_family': 'transformers',
+                    'specific_algorithms': ['vit_b16'],
+                    'validation_strategies': ['holdout', 'k_fold_cv'],
+                    'primary_metrics': ['accuracy', 'f1_score'],
+                    'python_packages': ['torch', 'timm'],
+                    'gpu_required': True,
+                    'resource_profile': 'gpu-small',
+                    'workflow_ids': ['gpu-experiment'],
+                    'common_failure_modes': ['overfitting_without_stratified_split'],
+                    'source_refs': ['notebooklm://vision-transformer-card'],
+                }
+            ],
+            'import_source': 'notebooklm-manual-export',
+        },
+    )
+    assert imported.status_code == 201
+    payload = imported.json()
+    assert len(payload) == 1
+    technique_id = payload[0]['technique_id']
+    assert payload[0]['workflow_ids'] == ['gpu-experiment']
+
+    listed = client.get('/technique-catalog')
+    assert listed.status_code == 200
+    assert listed.json()[0]['technique_id'] == technique_id
+
+    queried = client.get('/technique-catalog', params={'query': 'transformer'})
+    assert queried.status_code == 200
+    assert queried.json()[0]['technique_id'] == technique_id
+
+    fetched = client.get(f'/technique-catalog/{technique_id}')
+    assert fetched.status_code == 200
+    assert fetched.json()['python_packages'] == ['torch', 'timm']
+
+
+def test_interpretation_is_enriched_from_technique_catalog() -> None:
+    client = build_client()
+
+    imported = client.post(
+        '/technique-catalog/import',
+        json={
+            'cards': [
+                {
+                    'name': 'DreamSim Transformer Similarity',
+                    'aliases': ['dreamsim', 'visual similarity metric'],
+                    'problem_types': ['multiclass_classification'],
+                    'algorithm_family': 'transformers',
+                    'specific_algorithms': ['vision_transformer'],
+                    'loss_functions': ['contrastive_loss'],
+                    'validation_strategies': ['stratified_holdout'],
+                    'primary_metrics': ['accuracy', 'roc_auc'],
+                    'python_packages': ['torch', 'timm'],
+                    'gpu_required': True,
+                    'resource_profile': 'gpu-small',
+                    'workflow_ids': ['gpu-experiment'],
+                    'common_failure_modes': ['overfitting_without_artist_aware_split'],
+                    'source_refs': ['notebooklm://dreamsim-technique-card'],
+                }
+            ]
+        },
+    )
+    assert imported.status_code == 201
+
+    intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Replicate DreamSim visual similarity metric with a vision transformer using s3://datasets/dreamsim/train.csv.',
+            'source_refs': ['https://dreamsim-nights.github.io/'],
+            'notes': ['Prefer PyTorch and timm for the implementation.'],
+        },
+    )
+    assert intake.status_code == 201
+
+    interpretation = client.post('/interpretations/from-latest-intake')
+    assert interpretation.status_code == 201
+    payload = interpretation.json()
+    assert 'torch' in payload['technique_knowledge']['python_packages']
+    assert 'timm' in payload['technique_knowledge']['python_packages']
+    assert payload['technique_knowledge']['catalog_technique_ids']
+    assert payload['preferred_workflow_id'] == 'gpu-experiment'
+    assert payload['preferred_resource_profile'] == 'gpu-small'
+    assert payload['gpu_required'] is True
+
+
 def test_create_app_rejects_implicit_memory_store_when_disallowed() -> None:
     settings = Settings(
         registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),

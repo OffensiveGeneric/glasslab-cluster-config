@@ -31,6 +31,7 @@ from .registry import WorkflowRegistry
 from .source_documents import build_source_fetch_candidates
 from .schedule_routes import register_schedule_routes
 from .source_documents import ingest_source_document, register_source_document_routes
+from .technique_catalog import register_technique_catalog_routes
 from .stage_interpretation import (
     build_interpretation_record_from_agent_draft,
     call_interpretation_agent,
@@ -1549,6 +1550,7 @@ def create_app(
     )
 
     register_source_document_routes(app, store=store)
+    register_technique_catalog_routes(app, store=store)
 
     @app.get('/operations', response_model=list[OperationRecord])
     def list_operations(operation_type: str | None = None) -> list[OperationRecord]:
