@@ -250,6 +250,10 @@ class TechniqueCatalogImportCard(BaseModel):
     resource_profile: str | None = None
     workflow_ids: list[str] = Field(default_factory=list)
     template_compatibility: list[str] = Field(default_factory=list)
+    dataset_hints: list[str] = Field(default_factory=list)
+    default_dataset_uri: str | None = None
+    default_evaluation_target: str | None = None
+    default_training_notes: str | None = None
     common_failure_modes: list[str] = Field(default_factory=list)
     source_refs: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
@@ -269,6 +273,7 @@ class TechniqueCatalogImportCard(BaseModel):
         'python_packages',
         'workflow_ids',
         'template_compatibility',
+        'dataset_hints',
         'common_failure_modes',
         'source_refs',
         'notes',
@@ -281,6 +286,14 @@ class TechniqueCatalogImportCard(BaseModel):
     @field_validator('summary')
     @classmethod
     def validate_summary(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = ' '.join(value.split()).strip()
+        return cleaned or None
+
+    @field_validator('default_dataset_uri', 'default_evaluation_target', 'default_training_notes')
+    @classmethod
+    def validate_optional_card_strings(cls, value: str | None) -> str | None:
         if value is None:
             return None
         cleaned = ' '.join(value.split()).strip()
@@ -320,6 +333,10 @@ class TechniqueCatalogRecord(BaseModel):
     resource_profile: str | None = None
     workflow_ids: list[str] = Field(default_factory=list)
     template_compatibility: list[str] = Field(default_factory=list)
+    dataset_hints: list[str] = Field(default_factory=list)
+    default_dataset_uri: str | None = None
+    default_evaluation_target: str | None = None
+    default_training_notes: str | None = None
     common_failure_modes: list[str] = Field(default_factory=list)
     source_refs: list[str] = Field(default_factory=list)
     import_source: str = 'notebooklm-manual-export'

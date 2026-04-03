@@ -397,6 +397,63 @@ def test_autoresearch_drafts_technique_catalog_variant(tmp_path) -> None:
     assert any('torch' in draft['method_spec']['required_python_packages'] for draft in drafts if draft['method_spec'] is not None)
 
 
+def test_gpu_technique_card_can_fill_executable_contract() -> None:
+    client = build_client()
+
+    imported = client.post(
+        '/technique-catalog/import',
+        json={
+            'cards': [
+                {
+                    'name': 'DreamSim Transformer Similarity',
+                    'aliases': ['dreamsim', 'visual similarity metric'],
+                    'algorithm_family': 'transformers',
+                    'specific_algorithms': ['vision_transformer'],
+                    'loss_functions': ['contrastive_loss'],
+                    'validation_strategies': ['stratified_holdout'],
+                    'primary_metrics': ['roc_auc'],
+                    'python_packages': ['torch', 'timm'],
+                    'gpu_required': True,
+                    'resource_profile': 'gpu-small',
+                    'workflow_ids': ['gpu-experiment'],
+                    'dataset_hints': ['dreamsim'],
+                    'default_dataset_uri': 's3://datasets/dreamsim/train.csv',
+                    'default_evaluation_target': 'embedding retrieval auc',
+                    'default_training_notes': 'Train a bounded DreamSim-style embedding model on the approved dataset.',
+                }
+            ]
+        },
+    )
+    assert imported.status_code == 201
+
+    intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Replicate DreamSim visual similarity metric with PyTorch and timm.',
+            'source_refs': ['manual:dreamsim'],
+            'technique_tags': ['dreamsim', 'visual_similarity', 'transformers', 'contrastive_loss'],
+        },
+    )
+    assert intake.status_code == 201
+
+    interpretation = client.post('/interpretations/from-latest-intake')
+    assert interpretation.status_code == 201
+    interpretation_payload = interpretation.json()
+    assert interpretation_payload['preferred_workflow_id'] == 'gpu-experiment'
+    assert interpretation_payload['method_spec']['execution_inputs']['dataset_uri'] == 's3://datasets/dreamsim/train.csv'
+    assert interpretation_payload['method_spec']['execution_inputs']['evaluation_target'] == 'embedding retrieval auc'
+    assert interpretation_payload['method_spec']['execution_inputs']['training_notes'].startswith('Train a bounded DreamSim-style embedding model')
+
+    design = client.post('/design-drafts/from-latest-intake')
+    assert design.status_code == 201
+    design_payload = design.json()
+    assert design_payload['workflow_id'] == 'gpu-experiment'
+    assert design_payload['status'] == 'ready_for_run'
+    assert design_payload['method_spec']['run_readiness'] == 'ready'
+    assert design_payload['declared_inputs']['dataset_uri'] == 's3://datasets/dreamsim/train.csv'
+    assert design_payload['declared_inputs']['evaluation_target'] == 'embedding retrieval auc'
+
+
 def test_create_app_rejects_implicit_memory_store_when_disallowed() -> None:
     settings = Settings(
         registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),

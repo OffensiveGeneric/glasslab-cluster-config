@@ -271,6 +271,13 @@ def derive_design_from_intake(intake: IntakeRecord, workflow: WorkflowRegistryEn
         if intake.document_refs:
             design_notes.append(f'Stored source documents are available: {", ".join(intake.document_refs[:2])}.')
         design_notes.append('Dataset selection remains unresolved for literature-derived experiments.')
+    elif workflow.workflow_id == 'gpu-experiment':
+        declared_inputs = {
+            'dataset_uri': 'UNRESOLVED_DATASET_URI',
+            'model_family': 'UNRESOLVED_MODEL_FAMILY',
+            'training_notes': intake.normalized_summary[:500],
+        }
+        design_notes.append('GPU experiment targets require explicit dataset and model-family inputs.')
     else:
         paper_id = intake.source_refs[0] if intake.source_refs else 'UNRESOLVED_PAPER_ID'
         declared_inputs = {

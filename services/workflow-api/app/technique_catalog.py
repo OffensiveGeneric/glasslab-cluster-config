@@ -53,6 +53,10 @@ def build_technique_catalog_record(
         resource_profile=card.resource_profile.strip() if isinstance(card.resource_profile, str) and card.resource_profile.strip() else None,
         workflow_ids=normalize_unique_strings(card.workflow_ids),
         template_compatibility=normalize_unique_strings(card.template_compatibility),
+        dataset_hints=normalize_unique_strings(card.dataset_hints),
+        default_dataset_uri=card.default_dataset_uri,
+        default_evaluation_target=card.default_evaluation_target,
+        default_training_notes=card.default_training_notes,
         common_failure_modes=normalize_unique_strings(card.common_failure_modes),
         source_refs=normalize_unique_strings(card.source_refs),
         import_source=import_source.strip() or 'notebooklm-manual-export',
@@ -149,6 +153,9 @@ def enrich_technique_knowledge_from_catalog(
     split_strategies = normalize_unique_strings(
         [*technique_knowledge.split_strategies, *[split for record in matched_records for split in record.validation_strategies]]
     )
+    dataset_hints = normalize_unique_strings(
+        [*technique_knowledge.dataset_hints, *[hint for record in matched_records for hint in record.dataset_hints]]
+    )
     python_packages = normalize_unique_strings(
         [*technique_knowledge.python_packages, *[pkg for record in matched_records for pkg in record.python_packages]]
     )
@@ -164,6 +171,7 @@ def enrich_technique_knowledge_from_catalog(
             'metrics': metrics,
             'losses_or_distances': losses,
             'split_strategies': split_strategies,
+            'dataset_hints': dataset_hints,
             'python_packages': python_packages,
             'failure_modes': failure_modes,
             'catalog_technique_ids': catalog_ids,

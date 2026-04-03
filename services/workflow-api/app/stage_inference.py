@@ -564,10 +564,13 @@ def build_method_spec(
     preferred_workflow_id: str | None,
     preferred_resource_profile: str | None,
     mutation_axes: list[str],
+    default_dataset_uri: str | None = None,
+    default_evaluation_target: str | None = None,
+    default_training_notes: str | None = None,
 ) -> MethodSpecRecord:
     split_strategies = infer_split_strategies(intake, candidate_workflows)
     workflow_id = preferred_workflow_id or (candidate_workflows[0] if candidate_workflows else None)
-    dataset_uri = infer_dataset_uri_hint(intake)
+    dataset_uri = default_dataset_uri or infer_dataset_uri_hint(intake)
     execution_inputs: dict[str, Any] = {}
     if workflow_id == 'generic-tabular-benchmark':
         dataset_name = 'titanic' if 'titanic' in dataset_hints else (dataset_hints[0] if dataset_hints else None)
@@ -586,6 +589,8 @@ def build_method_spec(
         execution_inputs['source_notes'] = objective[:500]
         if dataset_uri:
             execution_inputs['dataset_uri'] = dataset_uri
+        if default_evaluation_target:
+            execution_inputs['evaluation_target'] = default_evaluation_target
         execution_inputs['validation_strategy'] = split_strategies[0] if split_strategies else 'holdout'
         execution_inputs['validation_split'] = '0.2'
     elif workflow_id == 'gpu-experiment':
@@ -594,7 +599,9 @@ def build_method_spec(
         model_family = (recommended_architectures or [recommended_method_family] or [''])[0]
         if model_family:
             execution_inputs['model_family'] = model_family
-        execution_inputs['training_notes'] = objective[:500]
+        execution_inputs['training_notes'] = (default_training_notes or objective[:500])[:500]
+        if default_evaluation_target:
+            execution_inputs['evaluation_target'] = default_evaluation_target
 
     blocking_reasons: list[str] = []
     if workflow_id is None:
@@ -751,9 +758,13 @@ def build_interpretation_record(intake: IntakeRecord, store: RunStore | None = N
         mutation_axes=mutation_axes,
     )
     technique_knowledge = enrich_technique_knowledge_from_catalog(technique_knowledge, matched_catalog_records)
+    default_dataset_uri = next((record.default_dataset_uri for record in matched_catalog_records if record.default_dataset_uri), None)
+    default_evaluation_target = next((record.default_evaluation_target for record in matched_catalog_records if record.default_evaluation_target), None)
+    default_training_notes = next((record.default_training_notes for record in matched_catalog_records if record.default_training_notes), None)
     recommended_python_packages = normalize_unique_strings([*recommended_python_packages, *technique_knowledge.python_packages])
     recommended_losses = normalize_unique_strings([*recommended_losses, *technique_knowledge.losses_or_distances])
     evaluation_targets = normalize_unique_strings([*evaluation_targets, *technique_knowledge.metrics])
+    dataset_hints = normalize_unique_strings([*dataset_hints, *technique_knowledge.dataset_hints])
     if not recommended_architectures and technique_knowledge.model_families:
         recommended_architectures = list(technique_knowledge.model_families)
     if matched_catalog_records and catalog_workflow_ids(matched_catalog_records):
@@ -788,6 +799,9 @@ def build_interpretation_record(intake: IntakeRecord, store: RunStore | None = N
         preferred_workflow_id=preferred_workflow_id,
         preferred_resource_profile=preferred_resource_profile,
         mutation_axes=mutation_axes,
+        default_dataset_uri=default_dataset_uri,
+        default_evaluation_target=default_evaluation_target,
+        default_training_notes=default_training_notes,
     )
     return InterpretationRecord(
         interpretation_id=uuid4().hex,
