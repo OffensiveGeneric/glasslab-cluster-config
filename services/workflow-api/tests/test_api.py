@@ -2756,6 +2756,120 @@ def test_start_literature_search_creates_new_session_for_new_goal(monkeypatch) -
     assert 'created-session-from-new-goal' in payload['action']
 
 
+def test_start_literature_search_replaces_stale_queue_for_same_goal(monkeypatch) -> None:
+    settings = Settings(registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'))
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    responses = iter(
+        [
+            {
+                'request_id': 'start-literature-search-stale-1',
+                'selected_tracks': [{'track_id': 'tabular_baselines', 'track': 'tabular_baselines'}],
+                'selected_queries': [{'queries': ['xgboost tabular benchmark']}],
+                'selected_papers': [
+                    {
+                        'paper_id': 'xgboost_kdd_2016',
+                        'title': 'XGBoost: A Scalable Tree Boosting System',
+                        'year': 2016,
+                        'venue': 'KDD',
+                        'priority': 'P1',
+                        'tracks': ['tabular_baselines'],
+                        'bounded_job_fit': 4,
+                        'replication_complexity': 2,
+                        'official_page': 'https://example.org/xgboost',
+                        'pdf_url': None,
+                        'why_seed': 'stale tabular baseline queue',
+                        'first_jobs': ['bounded tabular baseline'],
+                        'tags': ['tabular'],
+                    }
+                ],
+                'warnings': [],
+            },
+            {
+                'request_id': 'start-literature-search-stale-2',
+                'selected_tracks': [{'track_id': 'metric_learning', 'track': 'metric_learning'}],
+                'selected_queries': [{'queries': ['dreamsim visual similarity metric replication']}],
+                'selected_papers': [
+                    {
+                        'paper_id': 'dreamsim_2024',
+                        'title': 'DreamSim: Perceptual Similarity from Human Feedback',
+                        'year': 2024,
+                        'venue': 'arXiv',
+                        'priority': 'P1',
+                        'tracks': ['metric_learning'],
+                        'bounded_job_fit': 4,
+                        'replication_complexity': 3,
+                        'official_page': 'https://example.org/dreamsim',
+                        'pdf_url': None,
+                        'why_seed': 'fresh metric-learning queue',
+                        'first_jobs': ['bounded similarity replication'],
+                        'tags': ['vision', 'similarity'],
+                    }
+                ],
+                'warnings': [],
+            },
+        ]
+    )
+
+    class FakeResponse:
+        def __init__(self, payload: dict) -> None:
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            import json
+            return json.dumps(self.payload).encode('utf-8')
+
+    monkeypatch.setattr(
+        main_module.urllib_request,
+        'urlopen',
+        lambda request_obj, timeout: FakeResponse(next(responses)),
+    )
+
+    first_response = client.post(
+        '/research-sessions/start-literature-search',
+        json={
+            'goal_statement': 'Replicate DreamSim visual similarity metric for perceptual comparisons.',
+            'priorities': ['replication'],
+            'submitted_by': 'operator',
+        },
+    )
+    assert first_response.status_code == 201
+    first_queue_id = first_response.json()['paper_intake_queue']['queue_id']
+    assert first_response.json()['paper_intake_queue']['candidates'][0]['paper_id'] == 'xgboost_kdd_2016'
+    stale_queue = store.get_paper_intake_queue(first_queue_id)
+    assert stale_queue is not None
+    store.save_paper_intake_queue(
+        stale_queue.model_copy(
+            update={
+                'problem_statement': 'stale queue from an unrelated tabular benchmark',
+                'updated_at': datetime.now(timezone.utc),
+            }
+        )
+    )
+
+    second_response = client.post(
+        '/research-sessions/start-literature-search',
+        json={
+            'goal_statement': 'Replicate DreamSim visual similarity metric for perceptual comparisons.',
+            'priorities': ['replication'],
+            'submitted_by': 'operator',
+        },
+    )
+    assert second_response.status_code == 201
+    payload = second_response.json()
+    assert payload['paper_intake_queue']['queue_id'] != first_queue_id
+    assert payload['paper_intake_queue']['candidates'][0]['paper_id'] == 'dreamsim_2024'
+    assert 'replaced-stale-queue' in payload['action']
+
+
 def test_external_literature_search_skill_creates_session_queue(monkeypatch) -> None:
     from app.external_literature import ExternalLiteratureResult
     from app.schemas import ResearchProblemPaperCandidate

@@ -260,7 +260,14 @@ def register_literature_routes(
             action_parts.append('staged-research-problem')
 
         queue = store.get_paper_intake_queue(session.latest_queue_id or '')
-        if queue is None:
+        queue_matches_problem = False
+        if queue is not None:
+            queue_matches_problem = (
+                queue.session_id == session.session_id
+                and _normalize_goal_statement(queue.problem_statement) == _normalize_goal_statement(problem.problem_statement)
+            )
+
+        if queue is None or not queue_matches_problem:
             queue_request = PaperIntakeQueueCreateRequest(
                 problem_statement=problem.problem_statement,
                 max_candidate_papers=min(problem.max_candidate_papers, 25),
@@ -273,6 +280,8 @@ def register_literature_routes(
                 store.save_paper_intake_queue(queue)
             session = touch_research_session(store, session.session_id, latest_queue_id=queue.queue_id) or session
             action_parts.append('started-literature-harvest')
+            if queue is not None and not queue_matches_problem:
+                action_parts.append('replaced-stale-queue')
         else:
             action_parts.append('reused-existing-queue')
 
