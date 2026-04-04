@@ -278,3 +278,19 @@ Meaning:
 - autoresearch summaries now derive `proposed_next_variants` from the weakest scored technique/readiness component instead of generic canned suggestions.
 - on the validated DreamSim-style campaign, the kept row remained `vision_transformer`, and the next suggested bounded variant became:
   - `Run the kept method on a stronger resource profile or GPU-capable node class.`
+
+
+## 2026-04-04 follow-on: structured next mutations live
+
+- `workflow-api` rolled live on `.44` as `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.86-local`.
+- the live pod after rollout is `glasslab-workflow-api-6f6c66c999-mh6vj` on `node05`.
+- `/healthz` now reports:
+  - `build_source_revision: b89ca1c`
+  - `build_source_label: git:b89ca1c`
+- `autoresearch-summary` now returns both:
+  - `proposed_next_variants`
+  - `proposed_next_mutations`
+- on the validated DreamSim-style campaign, the first structured next mutation is:
+  - `source_component: runtime_stack`
+  - `mutation_axis: resource_profile`
+  - `suggested_updates: {resource_profile: gpu-small, node_selector: gpu-candidate}`
