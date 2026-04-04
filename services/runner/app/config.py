@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -37,4 +38,29 @@ class Settings(BaseSettings):
 
     @property
     def parsed_spec(self) -> dict:
-        return json.loads(self.spec_json)
+        spec = json.loads(self.spec_json)
+        manifest = self.parsed_manifest
+
+        # Prefer the explicit runner spec, but backfill bounded technique context
+        # from manifest inputs so scoring survives spec/manifest drift.
+        if spec.get('pipeline') == 'gpu_experiment' and isinstance(manifest, dict):
+            inputs = manifest.get('inputs', {})
+            if isinstance(inputs, dict):
+                merged = deepcopy(spec)
+                for key in (
+                    'technique_candidate_models',
+                    'technique_baseline_models',
+                    'technique_loss_or_distance',
+                    'technique_task_type',
+                    'technique_metrics',
+                ):
+                    if key in inputs and inputs.get(key) not in (None, '', []):
+                        merged[key] = inputs[key]
+                return merged
+        return spec
+
+    @property
+    def parsed_manifest(self) -> dict:
+        if not self.manifest_json:
+            return {}
+        return json.loads(self.manifest_json)

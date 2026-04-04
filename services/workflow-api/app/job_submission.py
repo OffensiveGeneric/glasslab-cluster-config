@@ -125,6 +125,11 @@ def _build_runner_spec(manifest: RunManifest) -> dict:
         evaluation_target = str(manifest.inputs.get('evaluation_target', '')).strip()
         validation_strategy = str(manifest.inputs.get('validation_strategy', '')).strip()
         validation_split = str(manifest.inputs.get('validation_split', '')).strip()
+        technique_candidate_models = manifest.inputs.get('technique_candidate_models', [])
+        technique_baseline_models = manifest.inputs.get('technique_baseline_models', [])
+        technique_loss_or_distance = str(manifest.inputs.get('technique_loss_or_distance', '')).strip()
+        technique_task_type = str(manifest.inputs.get('technique_task_type', '')).strip()
+        technique_metrics = manifest.inputs.get('technique_metrics', [])
         if not dataset_uri:
             raise ValueError('gpu-experiment requires dataset_uri for runner submission')
         if not model_family:
@@ -141,6 +146,11 @@ def _build_runner_spec(manifest: RunManifest) -> dict:
             'evaluation_target': evaluation_target,
             'validation_strategy': validation_strategy,
             'validation_split': validation_split,
+            'technique_candidate_models': technique_candidate_models,
+            'technique_baseline_models': technique_baseline_models,
+            'technique_loss_or_distance': technique_loss_or_distance,
+            'technique_task_type': technique_task_type,
+            'technique_metrics': technique_metrics,
             'models': manifest.requested_models,
             'feature_profile': 'gpu_ml',
             'resource_profile': manifest.resource_profile,
