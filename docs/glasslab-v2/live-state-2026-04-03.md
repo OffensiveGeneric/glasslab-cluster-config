@@ -266,3 +266,15 @@ Meaning:
   real DreamSim replication score
 
 - autoresearch summaries now derive `proposed_next_variants` from the weakest scored technique/readiness component instead of generic canned suggestions.
+
+
+## 2026-04-04 follow-on: score-aware next variants live
+
+- `workflow-api` rolled live on `.44` as `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.85-local`.
+- the live pod after rollout is `glasslab-workflow-api-6d88858868-ln28j` on `node02`.
+- `/healthz` now reports truthful provenance again:
+  - `build_source_revision: 079078a`
+  - `build_source_label: git:079078a`
+- autoresearch summaries now derive `proposed_next_variants` from the weakest scored technique/readiness component instead of generic canned suggestions.
+- on the validated DreamSim-style campaign, the kept row remained `vision_transformer`, and the next suggested bounded variant became:
+  - `Run the kept method on a stronger resource profile or GPU-capable node class.`
