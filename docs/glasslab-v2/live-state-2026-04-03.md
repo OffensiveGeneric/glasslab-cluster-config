@@ -264,3 +264,5 @@ Meaning:
 - it is the quality of the experiment metric itself, since
   `execution_readiness` is still a bounded execution metric rather than a
   real DreamSim replication score
+
+- autoresearch summaries now derive `proposed_next_variants` from the weakest scored technique/readiness component instead of generic canned suggestions.
