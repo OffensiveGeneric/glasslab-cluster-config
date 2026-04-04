@@ -5117,7 +5117,10 @@ def test_autoresearch_summary_refreshes_completed_iteration_without_decide(tmp_p
         '{"run_id":"%s","status":"succeeded","updated_at":"2026-04-04T01:00:00Z","detail":"autoresearch iteration complete"}'
         % run_id
     )
-    (run_dir / 'metrics.json').write_text('{"accuracy": 0.91, "loss": 0.22, "best_model": "logistic_regression"}')
+    (run_dir / 'metrics.json').write_text(
+        '{"accuracy": 0.91, "loss": 0.22, "best_model": "logistic_regression",'
+        ' "technique_components": {"objective_contract": 0.5, "metric_contract": 1.0}}'
+    )
 
     summary = client.get(f'/autoresearch/campaigns/{campaign_id}/summary')
     assert summary.status_code == 200
@@ -5127,6 +5130,7 @@ def test_autoresearch_summary_refreshes_completed_iteration_without_decide(tmp_p
     assert payload['iterations'][0]['score_summary']['run_status'] == 'succeeded'
     assert payload['iterations'][0]['score_summary']['primary_metric_name'] == 'accuracy'
     assert payload['iterations'][0]['score_summary']['primary_metric_value'] == 0.91
+    assert payload['proposed_next_variants'][0] == 'Run an explicit objective/loss variant and compare it against the current winner.'
 
     comparison = client.get(f'/autoresearch/campaigns/{campaign_id}/model-comparison')
     assert comparison.status_code == 200
@@ -5135,6 +5139,7 @@ def test_autoresearch_summary_refreshes_completed_iteration_without_decide(tmp_p
     assert comparison_payload['model_comparison'][0]['best_model'] == 'logistic_regression'
     assert comparison_payload['model_comparison'][0]['primary_metric_name'] == 'accuracy'
     assert comparison_payload['model_comparison'][0]['primary_metric_value'] == 0.91
+    assert comparison_payload['model_comparison'][0]['technique_components']['objective_contract'] == 0.5
     assert comparison_payload['recommended_model'] == 'logistic_regression'
 
 

@@ -570,6 +570,8 @@ def build_model_comparison_rows(
         metric_value = iteration.score_summary.get('primary_metric_value')
         metrics_payload = iteration.score_summary.get('metrics', {})
         best_model = metrics_payload.get('best_model') if isinstance(metrics_payload, dict) else None
+        technique_components = metrics_payload.get('technique_components') if isinstance(metrics_payload, dict) else None
+        readiness_components = metrics_payload.get('readiness_components') if isinstance(metrics_payload, dict) else None
         decision = decision_by_iteration.get(iteration.iteration_id)
         rows.append(
             {
@@ -579,6 +581,8 @@ def build_model_comparison_rows(
                 'best_model': best_model,
                 'primary_metric_name': metric_name,
                 'primary_metric_value': metric_value,
+                'technique_components': technique_components if isinstance(technique_components, dict) else {},
+                'readiness_components': readiness_components if isinstance(readiness_components, dict) else {},
                 'decision': decision.decision_type if decision is not None else iteration.decision,
                 'comparison_delta': iteration.comparison_summary.get('delta'),
                 'run_id': iteration.run_id,
@@ -668,6 +672,51 @@ def select_recommended_model(
     return None
 
 
+def build_next_variant_suggestions(
+    rows: list[dict[str, Any]],
+    best_draft: MethodologyDraftRecord | None,
+) -> list[str]:
+    suggestions: list[str] = []
+    focus_row = next((row for row in rows if row.get('decision') == 'keep'), None)
+    if focus_row is None and rows:
+        focus_row = rows[0]
+    if focus_row is not None:
+        weakest_name = ''
+        weakest_value = 2.0
+        merged_components: dict[str, float] = {}
+        for component_map in (focus_row.get('technique_components') or {}, focus_row.get('readiness_components') or {}):
+            if not isinstance(component_map, dict):
+                continue
+            for key, value in component_map.items():
+                if isinstance(value, (int, float)):
+                    merged_components[str(key)] = float(value)
+        for key, value in merged_components.items():
+            if value < weakest_value:
+                weakest_name = key
+                weakest_value = value
+        suggestion_by_component = {
+            'objective_contract': 'Run an explicit objective/loss variant and compare it against the current winner.',
+            'metric_contract': 'Run a metric-emphasis variant aligned to the primary evaluation target.',
+            'candidate_contract': 'Run the next candidate-model comparison against the current kept method.',
+            'task_contract': 'Run a task-framing variant that tightens the declared methodology scope.',
+            'package_stack': 'Run a package-stack validation variant on the same method to confirm runtime coverage.',
+            'runtime_stack': 'Run the kept method on a stronger resource profile or GPU-capable node class.',
+            'split_contract': 'Run a stricter validation-split variant to probe overfitting risk.',
+            'target_alignment': 'Run a variant with a more explicit evaluation target and score contract.',
+        }
+        if weakest_name:
+            suggestion = suggestion_by_component.get(weakest_name)
+            if suggestion:
+                suggestions.append(suggestion)
+
+    if best_draft is not None:
+        if len(best_draft.candidate_models) == 1:
+            suggestions.append('Compare the current kept model against the next approved baseline.')
+        suggestions.append('Run a bounded baseline-inclusion ablation on the same approved dataset split.')
+
+    return _dedupe(suggestions)
+
+
 def summarize_campaign(
     store: RunStore,
     campaign: AutoresearchCampaignRecord,
@@ -694,12 +743,7 @@ def summarize_campaign(
             latest_run = store.get_run(latest_iteration.run_id)
     model_comparison = build_model_comparison_rows(drafts, iterations, decisions)
     recommended_model = select_recommended_model(model_comparison, best_draft)
-    proposed_next_variants: list[str] = []
-    if best_draft is not None:
-        if len(best_draft.candidate_models) == 1:
-            proposed_next_variants.append('Compare the current kept model against the next approved baseline.')
-        proposed_next_variants.append('Run a metric-emphasis variant focused on the primary evaluation target.')
-        proposed_next_variants.append('Run a bounded baseline-inclusion ablation on the same approved dataset split.')
+    proposed_next_variants = build_next_variant_suggestions(model_comparison, best_draft)
     return AutoresearchCampaignSummaryResponse(
         campaign=campaign,
         methodology_drafts=drafts,
