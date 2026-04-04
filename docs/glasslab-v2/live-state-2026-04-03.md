@@ -8,7 +8,7 @@ can launch real runs without staging papers first.
 ## Live rollouts
 
 - `workflow-api` rolled live on `.44` as
-  `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.81-local`
+  `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.82-local`
 - `research-command-router` rolled live on `.44` as
   `ghcr.io/offensivegeneric/glasslab-research-command-router:0.1.6-local`
   and pinned to `node05` for the local-image path
@@ -16,6 +16,9 @@ can launch real runs without staging papers first.
   - `ec2b9e8` `Replace stale literature queues for active sessions`
   - `3b55b83` `Preserve technique context in GPU runner spec`
   - `16280fc` `Bump runner and workflow-api image tags`
+  - local follow-on:
+    - generic runner-side technique-contract scoring, reducing DreamSim-specific
+      coupling in `bounded_method_score`
   - `e080db0` `Prioritize technique cards over weak workflow hints`
   - `061ce19` `Let technique cards fill bounded run inputs`
   - `cc452e0` `Upsert technique cards by name`
@@ -138,6 +141,19 @@ the GPU runner and decision surface:
   - `recommended_model: vision_transformer`
   - `current_best_methodology_draft_id` pointing at the
     `DreamSim Transformer Similarity` variant
+
+The next runner image for that same path is now intended to use a more generic
+technique-contract score:
+
+- runner image target:
+  `ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.7-local`
+- it preserves the same bounded execution/readiness checks
+- but replaces the narrower DreamSim-shaped alignment heuristic with a generic
+  score over:
+  - candidate model contract
+  - task contract
+  - metric contract
+  - objective/loss contract
 
 ## Meaning
 

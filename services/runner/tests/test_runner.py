@@ -147,6 +147,12 @@ def test_gpu_experiment_runner_generates_expected_artifacts(tmp_path) -> None:
     assert metrics['evaluation_target'] == 'embedding retrieval auc'
     assert metrics['execution_readiness'] >= 0.0
     assert metrics['technique_alignment_score'] >= 0.0
+    assert set(metrics['technique_components']) == {
+        'candidate_contract',
+        'task_contract',
+        'metric_contract',
+        'objective_contract',
+    }
     assert metrics['validation_strategy'] == 'stratified_holdout'
     assert 'readiness_components' in metrics
     assert set(metrics['readiness_components']) == {

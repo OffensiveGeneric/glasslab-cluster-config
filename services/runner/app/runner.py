@@ -3,18 +3,12 @@ from __future__ import annotations
 import importlib.util
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from pathlib import Path
-
-import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score
-from sklearn.model_selection import train_test_split
-from sklearn.pipeline import Pipeline
+from typing import Any
 
 from .config import Settings
-from .features import build_preprocessor, engineer_features
 from .mlflow_client import MlflowRunLogger
 
 
@@ -37,6 +31,27 @@ REQUIRED_ARTIFACTS = {
     'logs/',
     'logs/runner.log',
 }
+
+
+def _load_tabular_runtime() -> tuple[Any, Any, Any, Any, Any, Any, Any, Any]:
+    import pandas as pd
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.metrics import accuracy_score
+    from sklearn.model_selection import train_test_split
+    from sklearn.pipeline import Pipeline
+    from .features import build_preprocessor, engineer_features
+
+    return (
+        pd,
+        RandomForestClassifier,
+        LogisticRegression,
+        accuracy_score,
+        train_test_split,
+        Pipeline,
+        build_preprocessor,
+        engineer_features,
+    )
 
 
 def run_literature_to_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> dict:
@@ -138,28 +153,59 @@ def infer_gpu_required_packages(model_family: str, training_notes: str, requeste
     return list(dict.fromkeys(packages))
 
 
+def _tokenize_contract_text(*values: str) -> set[str]:
+    tokens: set[str] = set()
+    for value in values:
+        for token in re.split(r'[^a-zA-Z0-9_]+', value.lower()):
+            cleaned = token.strip('_')
+            if len(cleaned) >= 3:
+                tokens.add(cleaned)
+    return tokens
+
+
+def _normalized_overlap_score(reference_values: list[str], corpus_tokens: set[str], *, fallback: float) -> float:
+    reference_tokens = _tokenize_contract_text(*reference_values)
+    if not reference_tokens:
+        return fallback
+    overlap = len(reference_tokens & corpus_tokens)
+    coverage = overlap / float(len(reference_tokens))
+    return round(min(1.0, 0.45 + (0.55 * coverage)), 4)
+
+
 def infer_gpu_technique_alignment(
     *,
     evaluation_target: str,
     model_family: str,
     training_notes: str,
     technique_candidate_models: list[str],
+    technique_task_type: str,
+    technique_metrics: list[str],
     technique_loss_or_distance: str,
-) -> tuple[str, float]:
+) -> tuple[str, float, dict[str, float]]:
     candidates = [str(item).strip() for item in technique_candidate_models if str(item).strip()]
     selected = candidates[0] if candidates else ''
-    corpus = ' '.join([evaluation_target, model_family, training_notes, technique_loss_or_distance, *candidates]).lower()
+    corpus_tokens = _tokenize_contract_text(
+        evaluation_target,
+        model_family,
+        training_notes,
+        technique_loss_or_distance,
+        technique_task_type,
+        *candidates,
+        *technique_metrics,
+    )
 
-    score = 0.5
-    if evaluation_target:
-        score += 0.1
-    if any(token in corpus for token in ('retrieval', 'similarity', 'embedding', 'contrastive')):
-        score += 0.15
-    if any(token in corpus for token in ('vision_transformer', 'vision transformer', 'vit', 'clip')):
-        score += 0.15
-    if technique_loss_or_distance and any(token in technique_loss_or_distance.lower() for token in ('contrastive', 'triplet', 'cosine')):
-        score += 0.1
-    return (selected or 'template-only', round(min(score, 1.0), 4))
+    candidate_contract = _normalized_overlap_score(candidates, corpus_tokens, fallback=0.35)
+    task_contract = _normalized_overlap_score([technique_task_type], corpus_tokens, fallback=0.55)
+    metric_contract = _normalized_overlap_score([evaluation_target, *technique_metrics], corpus_tokens, fallback=0.4)
+    objective_contract = _normalized_overlap_score([technique_loss_or_distance], corpus_tokens, fallback=0.5)
+    components = {
+        'candidate_contract': candidate_contract,
+        'task_contract': task_contract,
+        'metric_contract': metric_contract,
+        'objective_contract': objective_contract,
+    }
+    score = round(sum(components.values()) / float(len(components)), 4)
+    return (selected or 'template-only', score, components)
 
 
 def package_availability(packages: list[str]) -> dict[str, bool]:
@@ -241,11 +287,13 @@ def run_gpu_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> di
     selected_model = requested_models[0]
     required_packages = infer_gpu_required_packages(model_family, training_notes, requested_models)
     available_packages = package_availability(required_packages)
-    technique_best_model, technique_alignment_score = infer_gpu_technique_alignment(
+    technique_best_model, technique_alignment_score, technique_components = infer_gpu_technique_alignment(
         evaluation_target=evaluation_target,
         model_family=model_family,
         training_notes=training_notes,
         technique_candidate_models=technique_candidate_models,
+        technique_task_type=technique_task_type,
+        technique_metrics=technique_metrics,
         technique_loss_or_distance=technique_loss_or_distance,
     )
     readiness_score, readiness_components = bounded_gpu_execution_score(
@@ -294,6 +342,7 @@ def run_gpu_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> di
         'best_metric': round((readiness_score + technique_alignment_score) / 2.0, 4),
         'execution_readiness': readiness_score,
         'technique_alignment_score': technique_alignment_score,
+        'technique_components': technique_components,
         'readiness_components': readiness_components,
         'models': {
             technique_best_model: {
@@ -306,6 +355,7 @@ def run_gpu_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> di
                 'available_python_packages': available_packages,
                 'readiness_components': readiness_components,
                 'technique_alignment_score': technique_alignment_score,
+                'technique_components': technique_components,
                 'runner_template_model': selected_model,
             }
         },
@@ -336,6 +386,7 @@ def run_gpu_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> di
         'torch_available': torch_available,
         'cuda_available': cuda_available,
         'cuda_device_count': cuda_device_count,
+        'technique_alignment_score': technique_alignment_score,
         'evaluation_target': evaluation_target,
         'validation_strategy': validation_strategy,
         'validation_split': validation_split,
@@ -416,6 +467,16 @@ def run_experiment(settings: Settings | None = None) -> dict:
     if not train_path.exists():
         raise FileNotFoundError(f'missing training data at {train_path}')
 
+    (
+        pd,
+        _random_forest_cls,
+        _logistic_regression_cls,
+        accuracy_score,
+        train_test_split,
+        _pipeline_cls,
+        _build_preprocessor,
+        engineer_features,
+    ) = _load_tabular_runtime()
     train_df = pd.read_csv(train_path)
     test_df = pd.read_csv(test_path) if test_path.exists() else None
     if 'Survived' not in train_df.columns:
@@ -735,7 +796,8 @@ def build_analysis_notebook(settings: Settings, result_payload: dict, status: st
     }
 
 
-def build_model_pipeline(model_name: str, feature_profile: str, random_state: int) -> tuple[Pipeline, dict]:
+def build_model_pipeline(model_name: str, feature_profile: str, random_state: int) -> tuple[Any, dict]:
+    _, RandomForestClassifier, LogisticRegression, _, _, Pipeline, build_preprocessor, _engineer_features = _load_tabular_runtime()
     preprocessor, feature_summary = build_preprocessor(feature_profile)
 
     if model_name == 'logistic_regression':
