@@ -39,6 +39,8 @@ Canonical planning and architecture:
 - `runner-first-technique-knowledge-plan.md`: fastest path for turning NotebookLM-curated methodology knowledge into Glasslab-owned structured technique knowledge that the bounded runner can consume
 - `technique-catalog.md`: current import-and-match path for turning NotebookLM technique cards into Glasslab-owned structured methodology knowledge
 - `artist-similarity-research-note.md`: Grossberg's concrete research framing for same-artist vs different-artist painting comparison, style-drift robustness, and methodology comparison
+- `artist-similarity-v1.md`: first bounded runner target for same-artist versus different-artist painting similarity, including dataset contract and initial metric-learning families
+- `examples/artist-similarity-technique-cards.json`: first importable technique-card seeds for contrastive, triplet, and angular-margin artist-similarity experiments
 - `implemented-vs-discussed-2026-03-30.md`: short note separating what was really built from what was still discussion during the 2026-03-30 Grossberg conversation
 - `live-state-2026-03-30.md`: latest in-lab validation note for the bounded autoresearch lane, coding-model notebook refinement, interpretation path, and the remaining session-scoped intake gap
 - `live-state-2026-03-31.md`: follow-on live validation note for the fresh-session `!research` fix, the `!next-paper` timeout fix, the current `!interpret`/`!design` quality boundary, and the latest `.21` `flash-moe` status

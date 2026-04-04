@@ -1,0 +1,239 @@
+{
+  "import_source": "grossberg-gemini-metric-learning-brief",
+  "replace_existing": false,
+  "cards": [
+    {
+      "name": "Artist Similarity Contrastive Embedding",
+      "aliases": [
+        "artist_similarity",
+        "metric_learning",
+        "contrastive_learning",
+        "siamese_embedding"
+      ],
+      "summary": "Pair-based image embedding for same-artist versus different-artist verification.",
+      "problem_types": [
+        "binary_classification",
+        "retrieval"
+      ],
+      "algorithm_family": "transformers",
+      "specific_algorithms": [
+        "vision_transformer",
+        "clip"
+      ],
+      "preprocessing_steps": [
+        "image_resize",
+        "image_normalization"
+      ],
+      "loss_functions": [
+        "contrastive_loss"
+      ],
+      "optimizers": [
+        "adamw"
+      ],
+      "hyperparameter_optimization": [
+        "random_search"
+      ],
+      "validation_strategies": [
+        "artist_holdout",
+        "period_aware_holdout",
+        "hard_negative_eval"
+      ],
+      "primary_metrics": [
+        "pairwise_roc_auc",
+        "pairwise_pr_auc",
+        "retrieval_precision_at_k"
+      ],
+      "uncertainty_quantification": [
+        "embedding_drift_monitoring"
+      ],
+      "python_packages": [
+        "torch",
+        "torchvision",
+        "timm"
+      ],
+      "gpu_required": true,
+      "resource_profile": "gpu-small",
+      "workflow_ids": [
+        "gpu-experiment"
+      ],
+      "template_compatibility": [
+        "pytorch-template-v1",
+        "lightning-template-v1"
+      ],
+      "dataset_hints": [
+        "painting_pairs",
+        "wikiart",
+        "metmuseum",
+        "artist_similarity",
+        "style_drift"
+      ],
+      "default_evaluation_target": "same-artist verification and retrieval",
+      "default_training_notes": "Train a bounded image embedding that brings same-artist works closer and pushes different-artist works apart while guarding against style drift and split leakage.",
+      "common_failure_modes": [
+        "style_drift_within_artist",
+        "hubness_in_embedding_space",
+        "hard_negative_collapse",
+        "split_leakage_across_related_works"
+      ],
+      "source_refs": [
+        "grossberg-gemini-metric-learning-brief"
+      ],
+      "notes": [
+        "Use pair-based training first.",
+        "Treat pairwise ROC-AUC and retrieval quality as primary metrics."
+      ]
+    },
+    {
+      "name": "Artist Similarity Triplet Embedding",
+      "aliases": [
+        "triplet_loss",
+        "hard_negative_mining",
+        "metric_learning"
+      ],
+      "summary": "Triplet-based embedding with anchor, positive, and negative paintings for discriminative artist similarity.",
+      "problem_types": [
+        "binary_classification",
+        "retrieval"
+      ],
+      "algorithm_family": "transformers",
+      "specific_algorithms": [
+        "vision_transformer",
+        "clip"
+      ],
+      "preprocessing_steps": [
+        "image_resize",
+        "image_normalization"
+      ],
+      "loss_functions": [
+        "triplet_loss"
+      ],
+      "optimizers": [
+        "adamw"
+      ],
+      "hyperparameter_optimization": [
+        "random_search",
+        "successive_halving"
+      ],
+      "validation_strategies": [
+        "artist_holdout",
+        "period_aware_holdout",
+        "hard_negative_eval"
+      ],
+      "primary_metrics": [
+        "pairwise_roc_auc",
+        "retrieval_precision_at_k",
+        "retrieval_recall_at_k"
+      ],
+      "python_packages": [
+        "torch",
+        "torchvision",
+        "timm"
+      ],
+      "gpu_required": true,
+      "resource_profile": "gpu-small",
+      "workflow_ids": [
+        "gpu-experiment"
+      ],
+      "template_compatibility": [
+        "pytorch-template-v1",
+        "lightning-template-v1"
+      ],
+      "dataset_hints": [
+        "painting_triplets",
+        "wikiart",
+        "metmuseum",
+        "artist_similarity",
+        "style_drift"
+      ],
+      "default_evaluation_target": "triplet-trained artist similarity retrieval",
+      "default_training_notes": "Train a bounded triplet-loss embedding with explicit hard negatives and evaluate robustness to style drift across an artist's career.",
+      "common_failure_modes": [
+        "uninformative_triplets",
+        "hard_negative_instability",
+        "overfitting_without_period_aware_split",
+        "embedding_hubness"
+      ],
+      "source_refs": [
+        "grossberg-gemini-metric-learning-brief"
+      ],
+      "notes": [
+        "Requires disciplined hard-negative mining.",
+        "Prefer retrieval metrics and pairwise verification metrics together."
+      ]
+    },
+    {
+      "name": "Artist Similarity Angular Margin Baseline",
+      "aliases": [
+        "arcface",
+        "cosface",
+        "angular_margin",
+        "closed_set_embedding_baseline"
+      ],
+      "summary": "Closed-set classification-style baseline that uses angular-margin supervision to produce discriminative embeddings.",
+      "problem_types": [
+        "multiclass_classification",
+        "retrieval"
+      ],
+      "algorithm_family": "transformers",
+      "specific_algorithms": [
+        "vision_transformer"
+      ],
+      "preprocessing_steps": [
+        "image_resize",
+        "image_normalization"
+      ],
+      "loss_functions": [
+        "arcface_loss",
+        "cosface_loss"
+      ],
+      "optimizers": [
+        "adamw"
+      ],
+      "hyperparameter_optimization": [
+        "random_search"
+      ],
+      "validation_strategies": [
+        "artist_holdout",
+        "period_aware_holdout"
+      ],
+      "primary_metrics": [
+        "pairwise_roc_auc",
+        "retrieval_precision_at_k",
+        "classification_accuracy"
+      ],
+      "python_packages": [
+        "torch",
+        "torchvision",
+        "timm"
+      ],
+      "gpu_required": true,
+      "resource_profile": "gpu-small",
+      "workflow_ids": [
+        "gpu-experiment"
+      ],
+      "template_compatibility": [
+        "pytorch-template-v1"
+      ],
+      "dataset_hints": [
+        "painting_classification",
+        "wikiart",
+        "metmuseum",
+        "artist_similarity"
+      ],
+      "default_evaluation_target": "classification-trained embedding baseline for artist similarity",
+      "default_training_notes": "Train an angular-margin artist classifier and reuse its embedding space as a same-artist versus different-artist similarity baseline.",
+      "common_failure_modes": [
+        "margin_collapse",
+        "classification_overfit_without_similarity_generalization",
+        "style_drift_across_artist_career"
+      ],
+      "source_refs": [
+        "grossberg-gemini-metric-learning-brief"
+      ],
+      "notes": [
+        "Useful strong baseline even if pairwise metric learning is the primary target.",
+        "Monitor angular-margin stability and embedding separation."
+      ]
+    }
+  ]
+}
