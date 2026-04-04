@@ -99,6 +99,15 @@ command seam:
 
 That path records decisions for all ready completed iterations in one pass,
 using the same bounded decision policy as `!decide-latest`.
+The first live validation returned:
+
+- `route: deterministic-router`
+- `command: decide-batch`
+- `response_text: Recorded 1 autoresearch decision(s) for ready completed iterations.`
+- `workflow_api_endpoint: /research-sessions/{session_id}/transitions/decide-autoresearch-batch`
+- the recorded decision was `keep`
+- the resulting model comparison remained available immediately through
+  `!model-comparison`
 
 ## Meaning
 
