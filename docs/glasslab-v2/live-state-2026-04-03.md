@@ -175,7 +175,13 @@ The runner-first path is now materially real:
 - the broader comparison path will not become genuinely useful until multiple
   technique-card-backed variants complete with meaningful metrics
 - before `ec2b9e8`, `!research` could keep a stale literature queue attached to
-  the active session; `0.1.81-local` is intended to close that gap live
+  the active session; `0.1.81-local` now closes that gap live
+- direct validation on `.44` showed a new goal:
+  - `replicate CLIP image-text retrieval baseline with PyTorch`
+  returned:
+  - `action: created-session-from-new-goal; staged-research-problem;`
+    `started-literature-harvest; replaced-stale-queue`
+  - with a fresh `session_id` and fresh `queue_id`
 
 ## GPU Runner Follow-on
 
