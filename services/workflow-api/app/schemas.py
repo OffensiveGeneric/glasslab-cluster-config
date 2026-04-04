@@ -957,6 +957,15 @@ class AutoresearchDecisionBatchResponse(BaseModel):
     operation: OperationRecord
 
 
+class AutoresearchSuggestedMutation(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    source_component: str
+    mutation_axis: str
+    summary: str
+    suggested_updates: dict[str, Any] = Field(default_factory=dict)
+
+
 class AutoresearchCampaignSummaryResponse(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -969,6 +978,7 @@ class AutoresearchCampaignSummaryResponse(BaseModel):
     recommended_model: str | None = None
     model_comparison: list[dict[str, Any]] = Field(default_factory=list)
     proposed_next_variants: list[str] = Field(default_factory=list)
+    proposed_next_mutations: list[AutoresearchSuggestedMutation] = Field(default_factory=list)
 
 
 class AutoresearchNotebookDraftResponse(BaseModel):

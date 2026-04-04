@@ -5131,6 +5131,9 @@ def test_autoresearch_summary_refreshes_completed_iteration_without_decide(tmp_p
     assert payload['iterations'][0]['score_summary']['primary_metric_name'] == 'accuracy'
     assert payload['iterations'][0]['score_summary']['primary_metric_value'] == 0.91
     assert payload['proposed_next_variants'][0] == 'Run an explicit objective/loss variant and compare it against the current winner.'
+    assert payload['proposed_next_mutations'][0]['source_component'] == 'objective_contract'
+    assert payload['proposed_next_mutations'][0]['mutation_axis'] == 'loss_or_distance'
+    assert payload['proposed_next_mutations'][0]['suggested_updates']['loss_or_distance'] == 'alternate-approved-objective'
 
     comparison = client.get(f'/autoresearch/campaigns/{campaign_id}/model-comparison')
     assert comparison.status_code == 200

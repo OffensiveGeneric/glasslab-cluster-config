@@ -18,7 +18,7 @@ from .job_submission import JobSubmitter
 from .persistence import RunStore
 from .registry import WorkflowRegistry
 from .run_artifacts import artifact_run_dir, resolve_run_status
-from .schemas import AutoresearchCampaignCreateRequest, AutoresearchCampaignRecord, AutoresearchCampaignSummaryResponse, AutoresearchDecisionRecord, AutoresearchIterationRecord, DesignDraftRecord, InterpretationRecord, MethodologyDraftRecord, RunCreateRequest, RunRecord
+from .schemas import AutoresearchCampaignCreateRequest, AutoresearchCampaignRecord, AutoresearchCampaignSummaryResponse, AutoresearchDecisionRecord, AutoresearchIterationRecord, AutoresearchSuggestedMutation, DesignDraftRecord, InterpretationRecord, MethodologyDraftRecord, RunCreateRequest, RunRecord
 from .session_helpers import get_required_research_session, touch_research_session
 from .technique_catalog import match_catalog_records_for_intake
 
@@ -676,7 +676,16 @@ def build_next_variant_suggestions(
     rows: list[dict[str, Any]],
     best_draft: MethodologyDraftRecord | None,
 ) -> list[str]:
+    suggestions, _ = build_next_variant_guidance(rows, best_draft)
+    return suggestions
+
+
+def build_next_variant_guidance(
+    rows: list[dict[str, Any]],
+    best_draft: MethodologyDraftRecord | None,
+) -> tuple[list[str], list[AutoresearchSuggestedMutation]]:
     suggestions: list[str] = []
+    mutations: list[AutoresearchSuggestedMutation] = []
     focus_row = next((row for row in rows if row.get('decision') == 'keep'), None)
     if focus_row is None and rows:
         focus_row = rows[0]
@@ -694,27 +703,141 @@ def build_next_variant_suggestions(
             if value < weakest_value:
                 weakest_name = key
                 weakest_value = value
-        suggestion_by_component = {
-            'objective_contract': 'Run an explicit objective/loss variant and compare it against the current winner.',
-            'metric_contract': 'Run a metric-emphasis variant aligned to the primary evaluation target.',
-            'candidate_contract': 'Run the next candidate-model comparison against the current kept method.',
-            'task_contract': 'Run a task-framing variant that tightens the declared methodology scope.',
-            'package_stack': 'Run a package-stack validation variant on the same method to confirm runtime coverage.',
-            'runtime_stack': 'Run the kept method on a stronger resource profile or GPU-capable node class.',
-            'split_contract': 'Run a stricter validation-split variant to probe overfitting risk.',
-            'target_alignment': 'Run a variant with a more explicit evaluation target and score contract.',
+        if best_draft is not None:
+            execution_inputs = dict(best_draft.declared_inputs)
+            method_spec = best_draft.method_spec
+        else:
+            execution_inputs = {}
+            method_spec = None
+        guidance_by_component: dict[str, tuple[str, AutoresearchSuggestedMutation]] = {
+            'objective_contract': (
+                'Run an explicit objective/loss variant and compare it against the current winner.',
+                AutoresearchSuggestedMutation(
+                    source_component='objective_contract',
+                    mutation_axis='loss_or_distance',
+                    summary='Try an alternate bounded objective or loss variant.',
+                    suggested_updates={
+                        'loss_or_distance': (method_spec.loss_or_distance if method_spec is not None and method_spec.loss_or_distance else 'alternate-approved-objective'),
+                        'candidate_models': list(best_draft.candidate_models) if best_draft is not None else [],
+                    },
+                ),
+            ),
+            'metric_contract': (
+                'Run a metric-emphasis variant aligned to the primary evaluation target.',
+                AutoresearchSuggestedMutation(
+                    source_component='metric_contract',
+                    mutation_axis='metrics',
+                    summary='Tighten the metric set around the primary evaluation target.',
+                    suggested_updates={
+                        'metrics': list(method_spec.metrics) if method_spec is not None else [],
+                        'evaluation_target': execution_inputs.get('evaluation_target'),
+                    },
+                ),
+            ),
+            'candidate_contract': (
+                'Run the next candidate-model comparison against the current kept method.',
+                AutoresearchSuggestedMutation(
+                    source_component='candidate_contract',
+                    mutation_axis='candidate_models',
+                    summary='Expand or rotate the bounded candidate model set.',
+                    suggested_updates={
+                        'candidate_models': list(best_draft.candidate_models) if best_draft is not None else [],
+                        'baseline_models': list(best_draft.baselines) if best_draft is not None else [],
+                    },
+                ),
+            ),
+            'task_contract': (
+                'Run a task-framing variant that tightens the declared methodology scope.',
+                AutoresearchSuggestedMutation(
+                    source_component='task_contract',
+                    mutation_axis='task_type',
+                    summary='Tighten the bounded task framing for the next iteration.',
+                    suggested_updates={
+                        'task_type': method_spec.task_type if method_spec is not None else None,
+                        'model_family': execution_inputs.get('model_family'),
+                    },
+                ),
+            ),
+            'package_stack': (
+                'Run a package-stack validation variant on the same method to confirm runtime coverage.',
+                AutoresearchSuggestedMutation(
+                    source_component='package_stack',
+                    mutation_axis='runtime_validation',
+                    summary='Validate the same method on an explicitly package-complete runner stack.',
+                    suggested_updates={
+                        'required_python_packages': list(method_spec.required_python_packages) if method_spec is not None else [],
+                    },
+                ),
+            ),
+            'runtime_stack': (
+                'Run the kept method on a stronger resource profile or GPU-capable node class.',
+                AutoresearchSuggestedMutation(
+                    source_component='runtime_stack',
+                    mutation_axis='resource_profile',
+                    summary='Repeat the kept method with stronger runtime backing.',
+                    suggested_updates={
+                        'resource_profile': best_draft.resource_profile if best_draft is not None else None,
+                        'node_selector': 'gpu-candidate',
+                    },
+                ),
+            ),
+            'split_contract': (
+                'Run a stricter validation-split variant to probe overfitting risk.',
+                AutoresearchSuggestedMutation(
+                    source_component='split_contract',
+                    mutation_axis='validation_strategy',
+                    summary='Tighten the validation split policy on the same method.',
+                    suggested_updates={
+                        'validation_strategy': 'stratified_holdout',
+                        'validation_split': '0.25',
+                    },
+                ),
+            ),
+            'target_alignment': (
+                'Run a variant with a more explicit evaluation target and score contract.',
+                AutoresearchSuggestedMutation(
+                    source_component='target_alignment',
+                    mutation_axis='evaluation_target',
+                    summary='Make the evaluation target more explicit for the next run.',
+                    suggested_updates={
+                        'evaluation_target': execution_inputs.get('evaluation_target'),
+                    },
+                ),
+            ),
         }
         if weakest_name:
-            suggestion = suggestion_by_component.get(weakest_name)
-            if suggestion:
+            guidance = guidance_by_component.get(weakest_name)
+            if guidance:
+                suggestion, mutation = guidance
                 suggestions.append(suggestion)
+                mutations.append(mutation)
 
     if best_draft is not None:
         if len(best_draft.candidate_models) == 1:
             suggestions.append('Compare the current kept model against the next approved baseline.')
         suggestions.append('Run a bounded baseline-inclusion ablation on the same approved dataset split.')
+        mutations.append(
+            AutoresearchSuggestedMutation(
+                source_component='baseline_inclusion',
+                mutation_axis='baseline_models',
+                summary='Add or preserve a bounded baseline comparison alongside the kept method.',
+                suggested_updates={
+                    'candidate_models': list(best_draft.candidate_models),
+                    'baseline_models': list(best_draft.baselines),
+                },
+            )
+        )
 
-    return _dedupe(suggestions)
+    deduped_mutations: list[AutoresearchSuggestedMutation] = []
+    seen_mutations: set[tuple[str, str, str]] = set()
+    for mutation in mutations:
+        signature = (mutation.source_component, mutation.mutation_axis, json.dumps(mutation.suggested_updates, sort_keys=True))
+        if signature in seen_mutations:
+            continue
+        seen_mutations.add(signature)
+        deduped_mutations.append(mutation)
+
+    return _dedupe(suggestions), deduped_mutations
 
 
 def summarize_campaign(
@@ -743,7 +866,7 @@ def summarize_campaign(
             latest_run = store.get_run(latest_iteration.run_id)
     model_comparison = build_model_comparison_rows(drafts, iterations, decisions)
     recommended_model = select_recommended_model(model_comparison, best_draft)
-    proposed_next_variants = build_next_variant_suggestions(model_comparison, best_draft)
+    proposed_next_variants, proposed_next_mutations = build_next_variant_guidance(model_comparison, best_draft)
     return AutoresearchCampaignSummaryResponse(
         campaign=campaign,
         methodology_drafts=drafts,
@@ -754,6 +877,7 @@ def summarize_campaign(
         recommended_model=recommended_model,
         model_comparison=model_comparison,
         proposed_next_variants=proposed_next_variants,
+        proposed_next_mutations=proposed_next_mutations,
     )
 
 
