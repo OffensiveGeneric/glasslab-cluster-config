@@ -21,6 +21,24 @@
       "input_type": "notes",
       "required": true,
       "description": "Bounded notes describing the experimental goal, modality, and training constraints."
+    },
+    {
+      "name": "evaluation_target",
+      "input_type": "text",
+      "required": false,
+      "description": "Primary evaluation target or retrieval objective for the bounded GPU experiment."
+    },
+    {
+      "name": "validation_strategy",
+      "input_type": "parameter_set",
+      "required": false,
+      "description": "Declared split or validation policy used to guard against overfitting."
+    },
+    {
+      "name": "validation_split",
+      "input_type": "parameter_set",
+      "required": false,
+      "description": "Declared validation split fraction when the GPU workflow uses an internal validation partition."
     }
   ],
   "allowed_models": [
@@ -69,8 +87,8 @@
   "execution_blockers": [],
   "runtime_requirements": {
     "gpu": true,
-    "training_stack": ["pytorch", "torchvision"],
-    "required_python_packages": ["torch", "torchvision"],
+    "training_stack": ["pytorch", "torchvision", "timm"],
+    "required_python_packages": ["torch", "torchvision", "timm"],
     "modalities": ["computer_vision", "tabular"],
     "dataset_layouts": ["imagefolder", "manifest", "artifact-bundle"],
     "purpose": "bounded GPU experiment for computer-vision, neural-net, or adjacent ML workloads"

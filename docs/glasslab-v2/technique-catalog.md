@@ -125,6 +125,12 @@ That live run confirmed:
 - the resulting design inherits that workflow choice
 - autoresearch can start and draft catalog-driven methodology variants from the
   matched card
+- the design can become `ready_for_run` when the card also supplies bounded
+  execution defaults
+- `!run` can launch a real `gpu-experiment` Job from those defaults
+- `!launch-iteration` can launch an autoresearch GPU run using the approved
+  runner model template while still preserving technique-specific hints like
+  `vision_transformer` in the methodology draft
 
 ## Scope
 

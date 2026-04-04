@@ -22,6 +22,16 @@ def register_execution_routes(
     submitter: JobSubmitter,
     create_run_record: Callable[..., RunRecord],
 ) -> None:
+    def resolve_requested_models(requested_models: list[str], workflow) -> list[str]:
+        allowed = list(workflow.allowed_models or [])
+        requested = [str(model).strip() for model in requested_models if str(model).strip()]
+        compatible = [model for model in requested if model in allowed]
+        if compatible:
+            return compatible
+        if allowed:
+            return allowed[:1]
+        return requested[:1]
+
     def get_required_session_design(session_id: str):
         session = store.get_research_session(session_id)
         if session is None:
@@ -196,7 +206,11 @@ def register_execution_routes(
             workflow_id=design.workflow_id,
             objective=design.objective,
             inputs=(method_spec.execution_inputs if method_spec is not None else design.declared_inputs),
-            models=(method_spec.candidate_models if method_spec is not None and method_spec.candidate_models else design.candidate_models) or workflow.allowed_models[:1],
+            models=resolve_requested_models(
+                (method_spec.candidate_models if method_spec is not None and method_spec.candidate_models else design.candidate_models)
+                or workflow.allowed_models[:1],
+                workflow,
+            ),
             resource_profile=design.resource_profile,
             submitted_by=design.submitted_by,
         )
@@ -232,7 +246,11 @@ def register_execution_routes(
             workflow_id=design.workflow_id,
             objective=design.objective,
             inputs=(method_spec.execution_inputs if method_spec is not None else design.declared_inputs),
-            models=(method_spec.candidate_models if method_spec is not None and method_spec.candidate_models else design.candidate_models) or workflow.allowed_models[:1],
+            models=resolve_requested_models(
+                (method_spec.candidate_models if method_spec is not None and method_spec.candidate_models else design.candidate_models)
+                or workflow.allowed_models[:1],
+                workflow,
+            ),
             resource_profile=design.resource_profile,
             submitted_by=design.submitted_by,
         )

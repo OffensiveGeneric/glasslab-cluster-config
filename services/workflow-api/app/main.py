@@ -576,6 +576,32 @@ def stage_intake_from_request(
     return record
 
 
+def ensure_session_latest_intake(
+    store: RunStore,
+    settings: Settings,
+    registry: WorkflowRegistry,
+    session_id: str,
+) -> IntakeRecord:
+    session = get_required_research_session(store, session_id)
+    intake = store.get_intake(session.latest_intake_id or '')
+    if intake is not None:
+        return intake
+    raw_request = (session.goal_statement or session.title or '').strip()
+    if len(raw_request) < 10:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail='research session goal is too sparse to bootstrap an intake',
+        )
+    notes = [item.strip() for item in session.working_notes[-3:] if item.strip()]
+    request = IntakeCreateRequest(
+        raw_request=raw_request,
+        technique_tags=infer_technique_tags(raw_request, [], notes),
+        notes=notes,
+        submitted_by=session.submitted_by,
+    )
+    return stage_intake_from_request(request, settings, registry, store, session_id=session_id)
+
+
 def build_design_draft(
     intake: IntakeRecord,
     workflow: WorkflowRegistryEntry,
@@ -1064,7 +1090,7 @@ def create_app(
     @app.post('/research-sessions/{session_id}/skills/interpretation', response_model=InterpretationRecord, status_code=status.HTTP_201_CREATED)
     def apply_session_interpretation_skill(session_id: str) -> InterpretationRecord:
         session_id = resolve_latest_session_id(session_id)
-        intake = get_required_session_latest_intake(store, session_id)
+        intake = ensure_session_latest_intake(store, settings, registry, session_id)
         return create_interpretation_for_intake(intake)
 
     @app.post('/research-sessions/latest/skills/interpretation', response_model=InterpretationRecord, status_code=status.HTTP_201_CREATED)
@@ -1310,10 +1336,10 @@ def create_app(
                     submitted_by=assessment.submitted_by,
                     workflow_id=assessment.recommended_workflow_id,
                 )
-        intake = get_required_session_latest_intake(store, session_id)
+        intake = ensure_session_latest_intake(store, settings, registry, session_id)
         interpretation = store.get_interpretation(session.latest_interpretation_id or '')
-        if interpretation is not None and interpretation.intake_id != intake.intake_id:
-            interpretation = None
+        if interpretation is None or interpretation.intake_id != intake.intake_id:
+            interpretation = create_interpretation_for_intake(intake)
         return create_design_draft_for_intake(intake, interpretation=interpretation)
 
     @app.get('/design-drafts/latest', response_model=DesignDraftRecord)

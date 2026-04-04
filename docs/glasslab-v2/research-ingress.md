@@ -93,3 +93,30 @@ Operational note from the 2026-03-31 live validation:
   `latest` session-alias hardening in `workflow-api`
 - `!preflight` is now also clean through the deterministic router and surfaces
   interpretation-aware warnings as intended
+
+Operational note from the 2026-04-03 live validation:
+
+- `!design` is now runner-first usable even without `!next-paper`
+  because the backend can bootstrap an intake and interpretation directly from
+  the current session goal
+- `!run` now works for a technique-card-backed GPU design and submits a real
+  Kubernetes Job through the approved workflow path
+- `!launch-iteration` now works for the same DreamSim-style GPU path because the
+  router/workflow path resolves to an allowed runner model template instead of
+  trying to submit raw technique names as workflow models
+- `!decide-latest` now records a durable decision after the launched run
+  completes and metrics are available
+
+Current runner-first sequence:
+
+```text
+!research replicate DreamSim visual similarity metric with PyTorch and timm
+!design
+!preflight
+!run
+!start-autoresearch
+!draft-methodologies
+!launch-iteration
+!decide-latest
+!model-comparison
+```

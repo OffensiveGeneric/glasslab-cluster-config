@@ -79,6 +79,11 @@ def test_run_command_routes_to_session_run_creation() -> None:
 
     def fake_requester(settings, path, method="GET", body=None):
         calls.append((path, method, body))
+        if path == "/research-sessions/latest/context":
+            return (
+                f"{settings.workflow_api_url}{path}",
+                {"session": {"session_id": "session-123"}},
+            )
         return (
             f"{settings.workflow_api_url}{path}",
             {"run_id": "run-123", "workflow_id": "gpu-experiment"},
@@ -89,7 +94,36 @@ def test_run_command_routes_to_session_run_creation() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["command"] == "run"
-    assert calls[0][0] == "/research-sessions/latest/runs/from-design"
+    assert calls[0][0] == "/research-sessions/latest/context"
+    assert calls[1][0] == "/research-sessions/session-123/skills/design"
+    assert calls[2][0] == "/research-sessions/session-123/runs/from-design"
+
+
+def test_preflight_command_bootstraps_design_before_fetching_preflight() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        if path == "/research-sessions/latest/context":
+            return (
+                f"{settings.workflow_api_url}{path}",
+                {"session": {"session_id": "session-123"}},
+            )
+        if path.endswith("/execution-preflight"):
+            return (
+                f"{settings.workflow_api_url}{path}",
+                {"workflow_id": "gpu-experiment", "blocking_issues": [], "warnings": ["ok"]},
+            )
+        return (f"{settings.workflow_api_url}{path}", {"design_id": "design-123"})
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!preflight"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["command"] == "preflight"
+    assert calls[0][0] == "/research-sessions/latest/context"
+    assert calls[1][0] == "/research-sessions/session-123/skills/design"
+    assert calls[2][0] == "/research-sessions/session-123/execution-preflight"
 
 
 def test_interpret_command_routes_to_transition() -> None:

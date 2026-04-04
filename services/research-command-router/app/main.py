@@ -386,7 +386,18 @@ def _dispatch(
         )
 
     if command == "preflight":
-        endpoint, payload = requester(settings, "/research-sessions/latest/execution-preflight")
+        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
+            settings, requester
+        )
+        requester(
+            settings,
+            f"/research-sessions/{session_id}/skills/design",
+            method="POST",
+        )
+        endpoint, payload = requester(
+            settings,
+            f"/research-sessions/{session_id}/execution-preflight",
+        )
         issues = payload.get("blocking_issues") or []
         warnings = payload.get("warnings") or []
         response_text = (
@@ -403,9 +414,17 @@ def _dispatch(
         )
 
     if command == "run":
+        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
+            settings, requester
+        )
+        requester(
+            settings,
+            f"/research-sessions/{session_id}/skills/design",
+            method="POST",
+        )
         endpoint, payload = requester(
             settings,
-            "/research-sessions/latest/runs/from-design",
+            f"/research-sessions/{session_id}/runs/from-design",
             method="POST",
         )
         response_text = (

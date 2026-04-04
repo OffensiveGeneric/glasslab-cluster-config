@@ -402,6 +402,97 @@ def test_intake_preserves_explicit_technique_tags() -> None:
     assert payload['technique_tags'] == ['dreamsim', 'metric_learning', 'artist_aware_split']
 
 
+def test_session_interpretation_bootstraps_intake_from_goal_and_tags() -> None:
+    client = build_client()
+
+    imported = client.post(
+        '/technique-catalog/import',
+        json={
+            'cards': [
+                {
+                    'name': 'DreamSim Transformer Similarity',
+                    'aliases': ['dreamsim', 'visual similarity metric'],
+                    'algorithm_family': 'transformers',
+                    'specific_algorithms': ['vision_transformer'],
+                    'loss_functions': ['contrastive_loss'],
+                    'validation_strategies': ['stratified_holdout'],
+                    'primary_metrics': ['roc_auc'],
+                    'python_packages': ['torch', 'timm'],
+                    'gpu_required': True,
+                    'resource_profile': 'gpu-small',
+                    'workflow_ids': ['gpu-experiment'],
+                    'default_dataset_uri': 's3://datasets/dreamsim/train.csv',
+                    'default_evaluation_target': 'embedding retrieval auc',
+                }
+            ]
+        },
+    )
+    assert imported.status_code == 201
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Replicate DreamSim visual similarity metric with PyTorch and timm.'},
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    interpretation = client.post(f'/research-sessions/{session_id}/skills/interpretation')
+    assert interpretation.status_code == 201
+    payload = interpretation.json()
+    assert payload['preferred_workflow_id'] == 'gpu-experiment'
+    assert payload['method_spec']['execution_inputs']['dataset_uri'] == 's3://datasets/dreamsim/train.csv'
+
+    intake = client.get(f'/research-sessions/{session_id}/intake')
+    assert intake.status_code == 200
+    assert 'dreamsim' in intake.json()['technique_tags']
+
+
+def test_session_design_bootstraps_interpretation_from_goal_backed_intake() -> None:
+    client = build_client()
+
+    imported = client.post(
+        '/technique-catalog/import',
+        json={
+            'cards': [
+                {
+                    'name': 'DreamSim Transformer Similarity',
+                    'aliases': ['dreamsim', 'visual similarity metric'],
+                    'algorithm_family': 'transformers',
+                    'specific_algorithms': ['vision_transformer'],
+                    'loss_functions': ['contrastive_loss'],
+                    'validation_strategies': ['stratified_holdout'],
+                    'primary_metrics': ['roc_auc'],
+                    'python_packages': ['torch', 'timm'],
+                    'gpu_required': True,
+                    'resource_profile': 'gpu-small',
+                    'workflow_ids': ['gpu-experiment'],
+                    'default_dataset_uri': 's3://datasets/dreamsim/train.csv',
+                    'default_evaluation_target': 'embedding retrieval auc',
+                }
+            ]
+        },
+    )
+    assert imported.status_code == 201
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Replicate DreamSim visual similarity metric with PyTorch and timm.'},
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    design = client.post(f'/research-sessions/{session_id}/skills/design')
+    assert design.status_code == 201
+    payload = design.json()
+    assert payload['workflow_id'] == 'gpu-experiment'
+    assert payload['status'] == 'ready_for_run'
+    assert payload['method_spec']['run_readiness'] == 'ready'
+
+    interpretation = client.get(f'/research-sessions/{session_id}/interpretation')
+    assert interpretation.status_code == 200
+    assert interpretation.json()['preferred_workflow_id'] == 'gpu-experiment'
+
+
 def test_autoresearch_drafts_technique_catalog_variant(tmp_path) -> None:
     settings = Settings(
         registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
@@ -466,6 +557,62 @@ def test_autoresearch_drafts_technique_catalog_variant(tmp_path) -> None:
     drafts = drafted.json()['methodology_drafts']
     assert any('technique-catalog variant' in ' '.join(draft['notes']) for draft in drafts)
     assert any('torch' in draft['method_spec']['required_python_packages'] for draft in drafts if draft['method_spec'] is not None)
+
+
+def test_gpu_autoresearch_launch_iteration_uses_allowed_runner_model(tmp_path) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        artifacts_mount_path=str(tmp_path),
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    imported = client.post(
+        '/technique-catalog/import',
+        json={
+            'cards': [
+                {
+                    'name': 'DreamSim Transformer Similarity',
+                    'aliases': ['dreamsim', 'visual similarity metric'],
+                    'algorithm_family': 'transformers',
+                    'specific_algorithms': ['vision_transformer'],
+                    'loss_functions': ['contrastive_loss'],
+                    'validation_strategies': ['stratified_holdout'],
+                    'primary_metrics': ['roc_auc'],
+                    'python_packages': ['torch', 'timm'],
+                    'gpu_required': True,
+                    'resource_profile': 'gpu-small',
+                    'workflow_ids': ['gpu-experiment'],
+                    'default_dataset_uri': 's3://datasets/dreamsim/train.csv',
+                    'default_evaluation_target': 'embedding retrieval auc',
+                }
+            ]
+        },
+    )
+    assert imported.status_code == 201
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Replicate DreamSim visual similarity metric with PyTorch and timm.'},
+    )
+    session_id = session.json()['session_id']
+
+    design = client.post(f'/research-sessions/{session_id}/skills/design')
+    assert design.status_code == 201
+
+    campaign = client.post(f'/research-sessions/{session_id}/transitions/start-autoresearch-campaign')
+    assert campaign.status_code == 201
+    drafted = client.post(f'/research-sessions/{session_id}/transitions/draft-methodologies')
+    assert drafted.status_code == 201
+
+    launched = client.post(f'/research-sessions/{session_id}/transitions/launch-autoresearch-iteration')
+    assert launched.status_code == 201
+    payload = launched.json()
+    assert payload['run']['workflow_id'] == 'gpu-experiment'
+    assert payload['run']['manifest']['requested_models'] == ['pytorch-template-v1']
+    assert payload['run']['manifest']['inputs']['evaluation_target'] == 'embedding retrieval auc'
+    assert payload['run']['manifest']['inputs']['validation_strategy'] == 'stratified_holdout'
 
 
 def test_gpu_technique_card_can_fill_executable_contract() -> None:
@@ -2112,6 +2259,55 @@ def test_design_from_interpretation_can_be_ready_for_run() -> None:
     run = client.post('/runs/from-latest-design-draft')
     assert run.status_code == 201
     assert run.json()['manifest']['inputs']['train_uri'] == 's3://datasets/paper-derived/train.csv'
+
+
+def test_gpu_technique_card_design_can_launch_run() -> None:
+    client = build_client()
+
+    imported = client.post(
+        '/technique-catalog/import',
+        json={
+            'cards': [
+                {
+                    'name': 'DreamSim Transformer Similarity',
+                    'aliases': ['dreamsim', 'visual similarity metric'],
+                    'algorithm_family': 'transformers',
+                    'specific_algorithms': ['vision_transformer'],
+                    'loss_functions': ['contrastive_loss'],
+                    'validation_strategies': ['stratified_holdout'],
+                    'primary_metrics': ['roc_auc'],
+                    'python_packages': ['torch', 'timm'],
+                    'gpu_required': True,
+                    'resource_profile': 'gpu-small',
+                    'workflow_ids': ['gpu-experiment'],
+                    'default_dataset_uri': 's3://datasets/dreamsim/train.csv',
+                    'default_evaluation_target': 'embedding retrieval auc',
+                }
+            ]
+        },
+    )
+    assert imported.status_code == 201
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Replicate DreamSim visual similarity metric with PyTorch and timm.'},
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    design = client.post(f'/research-sessions/{session_id}/skills/design')
+    assert design.status_code == 201
+    payload = design.json()
+    assert payload['workflow_id'] == 'gpu-experiment'
+    assert payload['status'] == 'ready_for_run'
+
+    run = client.post(f'/research-sessions/{session_id}/runs/from-design')
+    assert run.status_code == 201
+    run_payload = run.json()
+    assert run_payload['workflow_id'] == 'gpu-experiment'
+    assert run_payload['manifest']['inputs']['dataset_uri'] == 's3://datasets/dreamsim/train.csv'
+    assert run_payload['manifest']['inputs']['evaluation_target'] == 'embedding retrieval auc'
+    assert run_payload['manifest']['inputs']['validation_strategy'] == 'stratified_holdout'
 
 
 def test_create_fresh_paper_pipeline_creates_literature_run_without_manual_review() -> None:

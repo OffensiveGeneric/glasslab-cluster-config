@@ -156,7 +156,7 @@ def register_autoresearch_routes(
         workflow = registry.get_workflow(draft.workflow_id)
         if workflow is None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='workflow registry entry not found')
-        run_request = methodology_to_run_request(draft)
+        run_request = methodology_to_run_request(draft, workflow)
         run = create_run_record(
             run_request,
             workflow,

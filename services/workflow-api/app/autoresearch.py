@@ -357,7 +357,10 @@ def build_autoresearch_campaign(
     )
 
 
-def methodology_to_run_request(draft: MethodologyDraftRecord) -> RunCreateRequest:
+def methodology_to_run_request(
+    draft: MethodologyDraftRecord,
+    workflow: WorkflowRegistryEntry,
+) -> RunCreateRequest:
     method_spec = draft.method_spec
     if method_spec is not None and method_spec.run_readiness != 'ready':
         detail = 'methodology draft is not ready for execution'
@@ -368,11 +371,30 @@ def methodology_to_run_request(draft: MethodologyDraftRecord) -> RunCreateReques
         workflow_id=draft.workflow_id,
         objective=draft.objective,
         inputs=method_spec.execution_inputs if method_spec is not None else draft.declared_inputs,
-        models=(method_spec.candidate_models if method_spec is not None and method_spec.candidate_models else draft.candidate_models) or draft.architectures or draft.baselines,
+        models=resolve_requested_models_for_workflow(
+            (method_spec.candidate_models if method_spec is not None and method_spec.candidate_models else draft.candidate_models)
+            or draft.architectures
+            or draft.baselines,
+            workflow,
+        ),
         resource_profile=draft.resource_profile,
         run_priority='autonomous',
         submitted_by='glasslab-autoresearch',
     )
+
+
+def resolve_requested_models_for_workflow(
+    requested_models: list[str],
+    workflow: WorkflowRegistryEntry,
+) -> list[str]:
+    allowed = list(workflow.allowed_models or [])
+    requested = [str(model).strip() for model in requested_models if str(model).strip()]
+    compatible = [model for model in requested if model in allowed]
+    if compatible:
+        return compatible
+    if allowed:
+        return allowed[:1]
+    return requested[:1]
 
 
 def get_required_campaign(store: RunStore, campaign_id: str) -> AutoresearchCampaignRecord:
