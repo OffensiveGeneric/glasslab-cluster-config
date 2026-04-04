@@ -458,6 +458,199 @@ def get_next_launchable_methodology_drafts(
     return drafts[: max(1, min(limit, remaining))]
 
 
+def _draft_signature(draft: MethodologyDraftRecord) -> tuple[str, ...]:
+    method_spec = draft.method_spec
+    return (
+        draft.workflow_id,
+        draft.resource_profile,
+        '|'.join(sorted(draft.candidate_models)),
+        '|'.join(sorted(draft.baselines)),
+        '|'.join(sorted(draft.metrics)),
+        str(draft.declared_inputs.get('validation_strategy', '')),
+        str(draft.declared_inputs.get('validation_split', '')),
+        str(method_spec.loss_or_distance if method_spec is not None and method_spec.loss_or_distance else ''),
+    )
+
+
+def build_mutated_methodology_draft(
+    campaign: AutoresearchCampaignRecord,
+    best_draft: MethodologyDraftRecord,
+    mutation: AutoresearchSuggestedMutation,
+    *,
+    workflow: WorkflowRegistryEntry,
+) -> MethodologyDraftRecord | None:
+    method_spec = best_draft.method_spec
+    if method_spec is None:
+        return None
+
+    candidate_models = list(best_draft.candidate_models)
+    baselines = list(best_draft.baselines)
+    metrics = list(best_draft.metrics)
+    declared_inputs = dict(best_draft.declared_inputs)
+    resource_profile = best_draft.resource_profile
+    loss_or_distance = method_spec.loss_or_distance
+    task_type = method_spec.task_type
+    mutation_updates = dict(mutation.suggested_updates)
+    axis = mutation.mutation_axis
+
+    if axis == 'resource_profile':
+        suggested_profile = str(mutation_updates.get('resource_profile') or '').strip()
+        if suggested_profile and suggested_profile != resource_profile:
+            resource_profile = suggested_profile
+        else:
+            return None
+    elif axis == 'validation_strategy':
+        changed = False
+        for key in ('validation_strategy', 'validation_split'):
+            value = mutation_updates.get(key)
+            if value is not None and declared_inputs.get(key) != value:
+                declared_inputs[key] = value
+                changed = True
+        if not changed:
+            return None
+    elif axis == 'loss_or_distance':
+        suggested_loss = str(mutation_updates.get('loss_or_distance') or '').strip()
+        if not suggested_loss:
+            return None
+        if suggested_loss == (loss_or_distance or ''):
+            suggested_loss = f'{suggested_loss}-variant'
+        loss_or_distance = suggested_loss
+    elif axis == 'metrics':
+        suggested_metrics = _dedupe([str(item) for item in mutation_updates.get('metrics', [])])
+        if not suggested_metrics or suggested_metrics == _dedupe(metrics):
+            return None
+        metrics = suggested_metrics
+    elif axis == 'candidate_models':
+        suggested_models = _dedupe([str(item) for item in mutation_updates.get('candidate_models', [])])
+        if not suggested_models or suggested_models == _dedupe(candidate_models):
+            return None
+        candidate_models = suggested_models
+    elif axis == 'baseline_models':
+        suggested_baselines = _dedupe([str(item) for item in mutation_updates.get('baseline_models', [])])
+        expanded_candidates = _dedupe(candidate_models + suggested_baselines)
+        if expanded_candidates == _dedupe(candidate_models):
+            return None
+        baselines = suggested_baselines or baselines
+        candidate_models = expanded_candidates
+    elif axis == 'task_type':
+        suggested_task_type = str(mutation_updates.get('task_type') or '').strip()
+        suggested_model_family = str(mutation_updates.get('model_family') or '').strip()
+        changed = False
+        if suggested_task_type and suggested_task_type != (task_type or ''):
+            task_type = suggested_task_type
+            changed = True
+        if suggested_model_family and declared_inputs.get('model_family') != suggested_model_family:
+            declared_inputs['model_family'] = suggested_model_family
+            changed = True
+        if not changed:
+            return None
+    elif axis == 'evaluation_target':
+        suggested_target = str(mutation_updates.get('evaluation_target') or '').strip()
+        if not suggested_target or declared_inputs.get('evaluation_target') == suggested_target:
+            return None
+        declared_inputs['evaluation_target'] = suggested_target
+    elif axis == 'runtime_validation':
+        if declared_inputs.get('runtime_validation') == 'package-complete':
+            return None
+        declared_inputs['runtime_validation'] = 'package-complete'
+    else:
+        return None
+
+    now = _now()
+    next_method_spec = method_spec.model_copy(
+        update={
+            'candidate_models': candidate_models,
+            'baseline_models': baselines,
+            'metrics': metrics,
+            'loss_or_distance': loss_or_distance,
+            'resource_profile': resource_profile,
+            'task_type': task_type,
+            'execution_inputs': declared_inputs,
+            'mutation_axes': _dedupe(list(method_spec.mutation_axes) + [axis]),
+        }
+    )
+    return MethodologyDraftRecord(
+        methodology_draft_id=uuid4().hex,
+        campaign_id=campaign.campaign_id,
+        session_id=campaign.session_id,
+        source_intake_id=best_draft.source_intake_id,
+        source_design_id=best_draft.source_design_id,
+        parent_methodology_draft_id=best_draft.methodology_draft_id,
+        created_at=now,
+        updated_at=now,
+        objective=best_draft.objective,
+        hypothesis=mutation.summary,
+        method_family=best_draft.method_family,
+        datasets=list(best_draft.datasets),
+        architectures=list(candidate_models),
+        baselines=list(baselines),
+        metrics=list(metrics),
+        risks=list(best_draft.risks),
+        bounded_experimentability=best_draft.bounded_experimentability,
+        status='ready_for_execution',
+        workflow_id=best_draft.workflow_id,
+        workflow_family=best_draft.workflow_family,
+        declared_inputs=declared_inputs,
+        candidate_models=candidate_models,
+        resource_profile=resource_profile,
+        approval_tier=best_draft.approval_tier,
+        method_spec=next_method_spec,
+        mutation_diff={
+            'auto_follow_on': {
+                'source_component': mutation.source_component,
+                'mutation_axis': mutation.mutation_axis,
+                'suggested_updates': mutation_updates,
+            }
+        },
+        notes=[*best_draft.notes, f'auto-follow-on mutation: {mutation.summary}'],
+    )
+
+
+def ensure_follow_on_methodology_drafts(
+    store: RunStore,
+    campaign: AutoresearchCampaignRecord,
+    *,
+    registry: WorkflowRegistry,
+    settings: Settings,
+    submitter: JobSubmitter,
+    limit: int,
+) -> list[MethodologyDraftRecord]:
+    remaining = campaign.max_iterations - len(store.list_autoresearch_iterations(campaign.campaign_id))
+    if remaining <= 0:
+        return []
+    summary = summarize_campaign(store, campaign, settings=settings, submitter=submitter)
+    best_draft = summary.best_methodology_draft
+    if best_draft is None:
+        return []
+    workflow = registry.get_workflow(best_draft.workflow_id)
+    if workflow is None or workflow.execution_status != 'ready':
+        return []
+    existing_signatures = {_draft_signature(draft) for draft in store.list_methodology_drafts(campaign.campaign_id)}
+    created: list[MethodologyDraftRecord] = []
+    for mutation in summary.proposed_next_mutations:
+        draft = build_mutated_methodology_draft(campaign, best_draft, mutation, workflow=workflow)
+        if draft is None:
+            continue
+        signature = _draft_signature(draft)
+        if signature in existing_signatures:
+            continue
+        store.save_methodology_draft(draft)
+        created.append(draft)
+        existing_signatures.add(signature)
+        if len(created) >= min(limit, remaining):
+            break
+    if created:
+        updated_campaign = campaign.model_copy(update={'updated_at': _now(), 'status': 'drafted'})
+        store.save_autoresearch_campaign(updated_campaign)
+        touch_research_session(
+            store,
+            campaign.session_id,
+            latest_methodology_draft_id=created[-1].methodology_draft_id,
+            decision_log=[f'auto-follow-on methodology drafted: {created[-1].methodology_draft_id}'],
+        )
+    return created
+
+
 def _load_metrics_payload(settings: Settings, run_id: str) -> dict[str, Any]:
     path = artifact_run_dir(settings, run_id) / 'metrics.json'
     if not path.exists():

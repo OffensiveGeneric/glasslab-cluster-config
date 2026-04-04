@@ -13,6 +13,7 @@ from .autoresearch import (
     build_iteration_comparison,
     build_autoresearch_notebook,
     draft_initial_methodologies,
+    ensure_follow_on_methodology_drafts,
     get_campaign_iterations,
     get_next_launchable_methodology_drafts,
     get_next_launchable_methodology_draft,
@@ -255,7 +256,23 @@ def register_autoresearch_routes(
     def campaign_launch_next_iteration(campaign_id: str) -> AutoresearchLaunchIterationResponse:
         started_at = datetime.now(timezone.utc)
         campaign = get_required_campaign(store, campaign_id)
-        draft = get_next_launchable_methodology_draft(store, campaign)
+        try:
+            draft = get_next_launchable_methodology_draft(store, campaign)
+        except HTTPException as exc:
+            if exc.status_code != status.HTTP_409_CONFLICT or 'no pending methodology drafts remain' not in str(exc.detail):
+                raise
+            created = ensure_follow_on_methodology_drafts(
+                store,
+                campaign,
+                registry=registry,
+                settings=settings,
+                submitter=submitter,
+                limit=1,
+            )
+            if not created:
+                raise
+            campaign = get_required_campaign(store, campaign_id)
+            draft = created[0]
         workflow = registry.get_workflow(draft.workflow_id)
         if workflow is None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='workflow registry entry not found')
@@ -327,7 +344,22 @@ def register_autoresearch_routes(
     def campaign_launch_next_batch(campaign_id: str) -> AutoresearchLaunchBatchResponse:
         started_at = datetime.now(timezone.utc)
         campaign = get_required_campaign(store, campaign_id)
-        drafts = get_next_launchable_methodology_drafts(store, campaign, limit=2)
+        try:
+            drafts = get_next_launchable_methodology_drafts(store, campaign, limit=2)
+        except HTTPException as exc:
+            if exc.status_code != status.HTTP_409_CONFLICT or 'no pending methodology drafts remain' not in str(exc.detail):
+                raise
+            drafts = ensure_follow_on_methodology_drafts(
+                store,
+                campaign,
+                registry=registry,
+                settings=settings,
+                submitter=submitter,
+                limit=2,
+            )
+            if not drafts:
+                raise
+            campaign = get_required_campaign(store, campaign_id)
         launches: list[AutoresearchLaunchBatchItem] = []
         latest_iteration_id = campaign.latest_iteration_id
         latest_methodology_draft_id = None

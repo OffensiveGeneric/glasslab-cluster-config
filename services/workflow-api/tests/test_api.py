@@ -13,6 +13,7 @@ from app.config import Settings
 import app.autoresearch as autoresearch_module
 import app.main as main_module
 import app.source_documents as source_documents
+from app.schemas import AutoresearchDecisionRecord, AutoresearchIterationRecord
 from app.stage_interpretation import build_interpretation_record_from_agent_draft
 from app.main import create_app
 from app.persistence import InMemoryRunStore
@@ -4789,6 +4790,212 @@ def test_autoresearch_decision_recomputes_stale_escalation(tmp_path) -> None:
     second_payload = second_decision.json()
     assert second_payload['decision']['decision_type'] == 'keep'
     assert second_payload['campaign']['status'] == 'completed'
+
+
+def test_autoresearch_launch_next_iteration_synthesizes_follow_on_from_guidance(tmp_path) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        artifacts_mount_path=str(tmp_path),
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    imported = client.post(
+        '/technique-catalog/import',
+        json={
+            'cards': [
+                {
+                    'name': 'DreamSim Transformer Similarity',
+                    'aliases': ['dreamsim', 'visual similarity metric'],
+                    'problem_types': ['multiclass_classification'],
+                    'algorithm_family': 'transformers',
+                    'specific_algorithms': ['vision_transformer', 'clip'],
+                    'validation_strategies': ['holdout'],
+                    'primary_metrics': ['embedding_retrieval_auc'],
+                    'loss_functions': ['contrastive_loss'],
+                    'python_packages': ['torch', 'timm'],
+                    'gpu_required': True,
+                    'resource_profile': 'gpu-small',
+                    'workflow_ids': ['gpu-experiment'],
+                }
+            ]
+        },
+    )
+    assert imported.status_code == 201
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Explore bounded GPU methodology variants and auto-launch follow-ons.'},
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Replicate DreamSim visual similarity metric with PyTorch and timm.',
+            'source_refs': ['https://dreamsim-nights.github.io/'],
+            'notes': ['Focus on approved GPU templates only.'],
+            'technique_tags': ['dreamsim', 'pytorch', 'timm'],
+        },
+    )
+    assert intake.status_code == 201
+    assert client.post('/interpretations/from-latest-intake').status_code == 201
+
+    design = client.post('/design-drafts/from-latest-intake')
+    assert design.status_code == 201
+    design_payload = design.json()
+    reviewed = client.post(
+        f"/design-drafts/{design_payload['design_id']}/review",
+        json={
+            'resolved_inputs': {
+                'dataset_uri': 's3://datasets/dreamsim/train.csv',
+                'model_family': 'lightweight replication',
+                'training_notes': 'Replicate DreamSim visual similarity metric with PyTorch and timm.',
+                'evaluation_target': 'embedding retrieval auc',
+                'validation_strategy': 'holdout',
+                'validation_split': '0.2',
+            },
+            'review_notes': ['Resolved GPU execution inputs for synthesized follow-on launch test.'],
+        },
+    )
+    assert reviewed.status_code == 200
+
+    campaign = client.post(
+        '/autoresearch/campaigns',
+        json={
+            'session_id': session_id,
+            'source_design_id': design_payload['design_id'],
+            'objective': 'Compare approved GPU methodology variants.',
+            'max_iterations': 4,
+        },
+    )
+    assert campaign.status_code == 201
+    campaign_id = campaign.json()['campaign_id']
+
+    drafted = client.post(f'/autoresearch/campaigns/{campaign_id}/draft-initial-methodologies')
+    assert drafted.status_code == 201
+
+    all_drafts = store.list_methodology_drafts(campaign_id)
+    kept_draft = next(record for record in all_drafts if record.candidate_models == ['vision_transformer', 'clip'])
+    discarded_draft = next(record for record in all_drafts if record.candidate_models == ['pytorch-template-v1'])
+
+    for draft in all_drafts:
+        if draft.methodology_draft_id == kept_draft.methodology_draft_id:
+            store.save_methodology_draft(draft.model_copy(update={'status': 'kept'}))
+        elif draft.status == 'ready_for_execution':
+            store.save_methodology_draft(draft.model_copy(update={'status': 'discarded'}))
+
+    kept_iteration = AutoresearchIterationRecord(
+        iteration_id='iter-keep',
+        campaign_id=campaign_id,
+        parent_methodology_draft_id=kept_draft.parent_methodology_draft_id,
+        child_methodology_draft_id=kept_draft.methodology_draft_id,
+        run_id='run-keep',
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        status='decided',
+        score_summary={
+            'run_status': 'succeeded',
+            'run_detail': 'completed',
+            'primary_metric_name': 'bounded_method_score',
+            'primary_metric_value': 0.9688,
+            'metrics': {
+                'best_model': 'vision_transformer',
+                'technique_components': {
+                    'candidate_contract': 1.0,
+                    'metric_contract': 1.0,
+                    'objective_contract': 1.0,
+                    'task_contract': 1.0,
+                },
+                'readiness_components': {
+                    'package_stack': 1.0,
+                    'runtime_stack': 0.75,
+                    'split_contract': 1.0,
+                    'target_alignment': 1.0,
+                },
+            },
+        },
+        comparison_summary={'baseline_available': False, 'metric_name': 'bounded_method_score'},
+        decision='keep',
+    )
+    discarded_iteration = AutoresearchIterationRecord(
+        iteration_id='iter-discard',
+        campaign_id=campaign_id,
+        parent_methodology_draft_id=discarded_draft.parent_methodology_draft_id,
+        child_methodology_draft_id=discarded_draft.methodology_draft_id,
+        run_id='run-discard',
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        status='decided',
+        score_summary={
+            'run_status': 'succeeded',
+            'run_detail': 'completed',
+            'primary_metric_name': 'bounded_method_score',
+            'primary_metric_value': 0.9062,
+            'metrics': {
+                'best_model': 'pytorch-template-v1',
+                'technique_components': {
+                    'candidate_contract': 1.0,
+                    'metric_contract': 1.0,
+                    'objective_contract': 0.5,
+                    'task_contract': 1.0,
+                },
+                'readiness_components': {
+                    'package_stack': 1.0,
+                    'runtime_stack': 0.75,
+                    'split_contract': 1.0,
+                    'target_alignment': 1.0,
+                },
+            },
+        },
+        comparison_summary={'baseline_available': True, 'metric_name': 'bounded_method_score', 'delta': -0.0626},
+        decision='discard',
+    )
+    store.save_autoresearch_iteration(kept_iteration)
+    store.save_autoresearch_iteration(discarded_iteration)
+    store.save_autoresearch_decision(
+        AutoresearchDecisionRecord(
+            decision_id='decision-keep',
+            campaign_id=campaign_id,
+            iteration_id=kept_iteration.iteration_id,
+            created_at=datetime.now(timezone.utc),
+            decision_type='keep',
+            rationale='Kept for higher bounded_method_score.',
+            evidence_refs=['run:run-keep'],
+        )
+    )
+    store.save_autoresearch_decision(
+        AutoresearchDecisionRecord(
+            decision_id='decision-discard',
+            campaign_id=campaign_id,
+            iteration_id=discarded_iteration.iteration_id,
+            created_at=datetime.now(timezone.utc),
+            decision_type='discard',
+            rationale='Discarded for lower bounded_method_score.',
+            evidence_refs=['run:run-discard'],
+        )
+    )
+    store.save_autoresearch_campaign(
+        store.get_autoresearch_campaign(campaign_id).model_copy(
+            update={
+                'current_best_methodology_draft_id': kept_draft.methodology_draft_id,
+                'latest_iteration_id': discarded_iteration.iteration_id,
+                'latest_decision_id': 'decision-discard',
+                'status': 'completed',
+            }
+        )
+    )
+
+    launched = client.post(f'/autoresearch/campaigns/{campaign_id}/launch-next-iteration')
+    assert launched.status_code == 201
+    payload = launched.json()
+    launched_draft = payload['methodology_draft']
+    assert launched_draft['parent_methodology_draft_id'] == kept_draft.methodology_draft_id
+    assert launched_draft['mutation_diff']['auto_follow_on']['mutation_axis'] == 'baseline_models'
+    assert launched_draft['candidate_models'] == ['vision_transformer', 'clip', 'pytorch-template-v1']
+    assert payload['iteration']['run_id']
 
 
 def test_session_autoresearch_transition_chain(tmp_path) -> None:
