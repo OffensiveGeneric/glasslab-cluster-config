@@ -480,7 +480,7 @@ def build_design_method_spec(
     elif interpretation is not None and interpretation.technique_knowledge.split_strategies:
         split_strategy = interpretation.technique_knowledge.split_strategies[0]
         execution_inputs.setdefault('validation_strategy', split_strategy)
-    if 'validation_split' not in execution_inputs and workflow_id in {'generic-tabular-benchmark', 'literature-to-experiment'}:
+    if 'validation_split' not in execution_inputs and workflow_id in {'generic-tabular-benchmark', 'literature-to-experiment', 'gpu-experiment'}:
         execution_inputs['validation_split'] = '0.2'
     if 'validation_strategy' not in execution_inputs and workflow_id in {'generic-tabular-benchmark', 'literature-to-experiment'}:
         execution_inputs['validation_strategy'] = split_strategy or 'holdout'

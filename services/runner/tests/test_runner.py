@@ -120,6 +120,9 @@ def test_gpu_experiment_runner_generates_expected_artifacts(tmp_path) -> None:
                 'dataset_uri': 's3://datasets/vision/train',
                 'model_family': 'resnet18-cv-template',
                 'training_notes': 'Use a bounded computer vision training plan with one GPU and short epochs.',
+                'evaluation_target': 'embedding retrieval auc',
+                'validation_strategy': 'stratified_holdout',
+                'validation_split': '0.2',
                 'models': ['pytorch-template-v1'],
                 'feature_profile': 'gpu_ml',
                 'resource_profile': 'gpu-small',
@@ -134,12 +137,28 @@ def test_gpu_experiment_runner_generates_expected_artifacts(tmp_path) -> None:
     artifact_dir = tmp_path / 'gpu-test'
 
     assert result['modality'] == 'computer_vision'
+    assert result['metric_name'] == 'execution_readiness'
+    assert result['evaluation_target'] == 'embedding retrieval auc'
     assert (artifact_dir / 'training_contract.json').exists()
     assert (artifact_dir / 'design_notes.md').exists()
     assert (artifact_dir / 'analysis_notebook.ipynb').exists()
+    metrics = json.loads((artifact_dir / 'metrics.json').read_text())
+    assert metrics['metric_name'] == 'execution_readiness'
+    assert metrics['evaluation_target'] == 'embedding retrieval auc'
+    assert metrics['validation_strategy'] == 'stratified_holdout'
+    assert 'readiness_components' in metrics
+    assert set(metrics['readiness_components']) == {
+        'target_alignment',
+        'split_contract',
+        'package_stack',
+        'runtime_stack',
+    }
 
     training_contract = json.loads((artifact_dir / 'training_contract.json').read_text())
     assert training_contract['model_family'] == 'resnet18-cv-template'
     assert training_contract['modality'] == 'computer_vision'
+    assert training_contract['evaluation_target'] == 'embedding retrieval auc'
+    assert training_contract['validation_strategy'] == 'stratified_holdout'
+    assert 'required_python_packages' in training_contract
     notebook = json.loads((artifact_dir / 'analysis_notebook.ipynb').read_text())
     assert any('training_contract.json' in ''.join(cell.get('source', [])) for cell in notebook['cells'])

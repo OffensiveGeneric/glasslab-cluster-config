@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import logging
 from datetime import datetime, timezone
@@ -127,10 +128,64 @@ def infer_gpu_modality(model_family: str, training_notes: str, dataset_uri: str)
     return 'generic_gpu_ml'
 
 
+def infer_gpu_required_packages(model_family: str, training_notes: str, requested_models: list[str]) -> list[str]:
+    corpus = ' '.join([model_family, training_notes, *requested_models]).lower()
+    packages = ['torch']
+    if any(token in corpus for token in ('vit', 'vision transformer', 'timm', 'resnet', 'convnext')):
+        packages.append('timm')
+    if any(token in corpus for token in ('huggingface', 'transformers', 'clip', 'bert')):
+        packages.append('transformers')
+    return list(dict.fromkeys(packages))
+
+
+def package_availability(packages: list[str]) -> dict[str, bool]:
+    return {
+        package: (importlib.util.find_spec(package) is not None)
+        for package in packages
+    }
+
+
+def bounded_gpu_execution_score(
+    *,
+    evaluation_target: str,
+    validation_strategy: str,
+    validation_split: str,
+    required_packages: list[str],
+    available_packages: dict[str, bool],
+    torch_available: bool,
+    cuda_available: bool,
+) -> tuple[float, dict[str, float]]:
+    target_score = 1.0 if evaluation_target else 0.4
+    split_score = 1.0 if validation_strategy else 0.4
+    if validation_strategy and validation_split:
+        split_score = 1.0
+    elif validation_strategy:
+        split_score = 0.8
+    package_score = 1.0
+    if required_packages:
+        package_score = sum(1.0 for package in required_packages if available_packages.get(package, False)) / float(len(required_packages))
+    runtime_score = 1.0 if torch_available else 0.4
+    if torch_available and cuda_available:
+        runtime_score = 1.0
+    elif torch_available:
+        runtime_score = 0.75
+    components = {
+        'target_alignment': round(target_score, 4),
+        'split_contract': round(split_score, 4),
+        'package_stack': round(package_score, 4),
+        'runtime_stack': round(runtime_score, 4),
+    }
+    composite = round(sum(components.values()) / float(len(components)), 4)
+    return composite, components
+
+
 def run_gpu_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> dict:
     dataset_uri = str(spec.get('dataset_uri', '')).strip()
     model_family = str(spec.get('model_family', '')).strip()
     training_notes = str(spec.get('training_notes', '')).strip()
+    evaluation_target = str(spec.get('evaluation_target', '')).strip()
+    validation_strategy = str(spec.get('validation_strategy', '')).strip()
+    validation_split = str(spec.get('validation_split', '')).strip()
     requested_models = [str(item).strip() for item in spec.get('models', []) if str(item).strip()]
     if not dataset_uri:
         raise ValueError('gpu_experiment requires dataset_uri')
@@ -155,6 +210,17 @@ def run_gpu_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> di
         torch_available = False
 
     selected_model = requested_models[0]
+    required_packages = infer_gpu_required_packages(model_family, training_notes, requested_models)
+    available_packages = package_availability(required_packages)
+    readiness_score, readiness_components = bounded_gpu_execution_score(
+        evaluation_target=evaluation_target,
+        validation_strategy=validation_strategy,
+        validation_split=validation_split,
+        required_packages=required_packages,
+        available_packages=available_packages,
+        torch_available=torch_available,
+        cuda_available=cuda_available,
+    )
     training_contract = {
         'dataset_uri': dataset_uri,
         'model_family': model_family,
@@ -164,6 +230,11 @@ def run_gpu_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> di
         'pipeline': spec.get('pipeline'),
         'modality': modality,
         'training_notes': training_notes,
+        'evaluation_target': evaluation_target,
+        'validation_strategy': validation_strategy,
+        'validation_split': validation_split,
+        'required_python_packages': required_packages,
+        'available_python_packages': available_packages,
         'runtime_probe': {
             'torch_available': torch_available,
             'cuda_available': cuda_available,
@@ -177,21 +248,28 @@ def run_gpu_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> di
         ],
     }
     metrics_payload = {
-        'metric_name': 'contract_readiness',
+        'metric_name': 'execution_readiness',
         'best_model': selected_model,
-        'best_metric': 1.0 if torch_available else 0.8,
+        'best_metric': readiness_score,
+        'readiness_components': readiness_components,
         'models': {
             selected_model: {
-                'score': 1.0 if torch_available else 0.8,
-                'score_name': 'contract_readiness',
+                'score': readiness_score,
+                'score_name': 'execution_readiness',
                 'cuda_available': cuda_available,
                 'cuda_device_count': cuda_device_count,
                 'modality': modality,
+                'required_python_packages': required_packages,
+                'available_python_packages': available_packages,
+                'readiness_components': readiness_components,
             }
         },
         'dataset_uri': dataset_uri,
         'model_family': model_family,
         'modality': modality,
+        'evaluation_target': evaluation_target,
+        'validation_strategy': validation_strategy,
+        'validation_split': validation_split,
     }
     result_payload = {
         'experiment_id': settings.experiment_id,
@@ -201,12 +279,17 @@ def run_gpu_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> di
         'dataset_uri': dataset_uri,
         'model_family': model_family,
         'selected_model': selected_model,
-        'metric_name': 'contract_readiness',
+        'metric_name': 'execution_readiness',
         'best_metric': metrics_payload['best_metric'],
         'modality': modality,
         'torch_available': torch_available,
         'cuda_available': cuda_available,
         'cuda_device_count': cuda_device_count,
+        'evaluation_target': evaluation_target,
+        'validation_strategy': validation_strategy,
+        'validation_split': validation_split,
+        'required_python_packages': required_packages,
+        'available_python_packages': available_packages,
         'artifact_dir': str(artifact_dir),
     }
     design_notes = [
@@ -216,6 +299,10 @@ def run_gpu_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> di
         f'- model_family: `{model_family}`',
         f'- selected_model: `{selected_model}`',
         f'- modality: `{modality}`',
+        f'- evaluation_target: `{evaluation_target or "unspecified"}`',
+        f'- validation_strategy: `{validation_strategy or "unspecified"}`',
+        f'- validation_split: `{validation_split or "unspecified"}`',
+        f'- required_python_packages: `{", ".join(required_packages)}`',
         f'- torch_available: `{torch_available}`',
         f'- cuda_available: `{cuda_available}`',
         f'- cuda_device_count: `{cuda_device_count}`',

@@ -46,7 +46,7 @@
     "lightning-template-v1",
     "deterministic-template"
   ],
-  "runner_image": "ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.1",
+  "runner_image": "ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.4-local",
   "evaluator_type": "gpu-training-metrics",
   "expected_artifacts": {
     "required": [

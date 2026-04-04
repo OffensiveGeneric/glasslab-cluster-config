@@ -447,6 +447,10 @@ def _load_metrics_payload(settings: Settings, run_id: str) -> dict[str, Any]:
 
 
 def _extract_primary_metric(metrics: dict[str, Any]) -> tuple[str | None, float | None]:
+    metric_name = metrics.get('metric_name')
+    best_metric = metrics.get('best_metric')
+    if isinstance(metric_name, str) and isinstance(best_metric, (int, float)):
+        return metric_name, float(best_metric)
     preferred = ['accuracy', 'f1', 'roc_auc', 'precision', 'recall']
     for key in preferred:
         value = metrics.get(key)

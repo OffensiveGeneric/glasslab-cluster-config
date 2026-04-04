@@ -2251,6 +2251,22 @@ def test_design_from_interpretation_can_be_ready_for_run() -> None:
     design = client.post('/design-drafts/from-latest-intake')
     assert design.status_code == 201
     design_payload = design.json()
+    reviewed = client.post(
+        f"/design-drafts/{design_payload['design_id']}/review",
+        json={
+            'resolved_inputs': {
+                'dataset_uri': 's3://datasets/dreamsim/train.csv',
+                'model_family': 'lightweight replication',
+                'training_notes': 'Replicate DreamSim visual similarity metric with PyTorch and timm.',
+                'evaluation_target': 'embedding retrieval auc',
+                'validation_strategy': 'stratified_holdout',
+                'validation_split': '0.2',
+            },
+            'review_notes': ['Resolved GPU execution inputs for bounded autoresearch decision test.'],
+        },
+    )
+    assert reviewed.status_code == 200
+    design_payload = reviewed.json()
     assert design_payload['status'] == 'ready_for_run'
     assert design_payload['method_spec']['run_readiness'] == 'ready'
     assert design_payload['workflow_id'] == 'generic-tabular-benchmark'
@@ -2300,6 +2316,7 @@ def test_gpu_technique_card_design_can_launch_run() -> None:
     payload = design.json()
     assert payload['workflow_id'] == 'gpu-experiment'
     assert payload['status'] == 'ready_for_run'
+    assert payload['declared_inputs']['validation_split'] == '0.2'
 
     run = client.post(f'/research-sessions/{session_id}/runs/from-design')
     assert run.status_code == 201
@@ -2308,6 +2325,7 @@ def test_gpu_technique_card_design_can_launch_run() -> None:
     assert run_payload['manifest']['inputs']['dataset_uri'] == 's3://datasets/dreamsim/train.csv'
     assert run_payload['manifest']['inputs']['evaluation_target'] == 'embedding retrieval auc'
     assert run_payload['manifest']['inputs']['validation_strategy'] == 'stratified_holdout'
+    assert run_payload['manifest']['inputs']['validation_split'] == '0.2'
 
 
 def test_create_fresh_paper_pipeline_creates_literature_run_without_manual_review() -> None:
@@ -4300,7 +4318,7 @@ def test_gpu_workflow_execution_preflight_reports_gpu_contract() -> None:
     payload = response.json()
     assert payload['workflow_id'] == 'gpu-experiment'
     assert payload['resource_profile'] == 'gpu-small'
-    assert payload['runner_image'] == 'ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.1'
+    assert payload['runner_image'] == 'ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.4-local'
     assert payload['resource_requests'] == {'cpu': '2', 'memory': '4Gi', 'nvidia.com/gpu': '1'}
     assert payload['resource_limits'] == {'cpu': '4', 'memory': '8Gi', 'nvidia.com/gpu': '1'}
     assert payload['node_selector'] == {
@@ -4483,6 +4501,180 @@ def test_autoresearch_campaign_happy_path(tmp_path) -> None:
     comparison_payload = comparison.json()
     assert comparison_payload['recommended_model'] == 'logistic_regression'
     assert comparison_payload['model_comparison'][0]['decision'] == 'keep'
+
+
+def test_autoresearch_decision_uses_best_metric_payload(tmp_path) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        artifacts_mount_path=str(tmp_path),
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Explore bounded methodology variants for a GPU session.'},
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Replicate DreamSim visual similarity metric with PyTorch and timm.',
+            'source_refs': ['https://dreamsim-nights.github.io/'],
+            'notes': ['Focus on approved GPU templates only.'],
+            'technique_tags': ['dreamsim', 'pytorch', 'timm'],
+        },
+    )
+    assert intake.status_code == 201
+
+    interpretation = client.post('/interpretations/from-latest-intake')
+    assert interpretation.status_code == 201
+
+    design = client.post('/design-drafts/from-latest-intake')
+    assert design.status_code == 201
+    design_payload = design.json()
+    reviewed = client.post(
+        f"/design-drafts/{design_payload['design_id']}/review",
+        json={
+            'resolved_inputs': {
+                'dataset_uri': 's3://datasets/dreamsim/train.csv',
+                'model_family': 'lightweight replication',
+                'training_notes': 'Replicate DreamSim visual similarity metric with PyTorch and timm.',
+                'evaluation_target': 'embedding retrieval auc',
+                'validation_strategy': 'stratified_holdout',
+                'validation_split': '0.2',
+            },
+            'review_notes': ['Resolved GPU execution inputs for bounded autoresearch decision test.'],
+        },
+    )
+    assert reviewed.status_code == 200
+    design_payload = reviewed.json()
+    assert design_payload['status'] == 'ready_for_run'
+
+    campaign = client.post(
+        '/autoresearch/campaigns',
+        json={
+            'session_id': session_id,
+            'source_design_id': design_payload['design_id'],
+            'objective': 'Compare approved GPU methodology variants.',
+            'max_iterations': 2,
+        },
+    )
+    assert campaign.status_code == 201
+    campaign_id = campaign.json()['campaign_id']
+
+    drafted = client.post(f'/autoresearch/campaigns/{campaign_id}/draft-initial-methodologies')
+    assert drafted.status_code == 201
+
+    launched = client.post(f'/autoresearch/campaigns/{campaign_id}/launch-next-iteration')
+    assert launched.status_code == 201
+    run_id = launched.json()['run']['run_id']
+
+    run_dir = tmp_path / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / 'status.json').write_text(
+        '{"run_id":"%s","status":"succeeded","updated_at":"2026-04-04T01:00:00Z","detail":"gpu iteration complete"}'
+        % run_id
+    )
+    (run_dir / 'metrics.json').write_text(
+        '{"metric_name":"execution_readiness","best_metric":0.9375,"required_python_packages":["torch","timm"]}'
+    )
+
+    decision = client.post(f'/autoresearch/campaigns/{campaign_id}/decide-latest')
+    assert decision.status_code == 201
+    decision_payload = decision.json()
+    assert decision_payload['decision']['decision_type'] == 'keep'
+    assert decision_payload['iteration']['score_summary']['primary_metric_name'] == 'execution_readiness'
+    assert decision_payload['iteration']['score_summary']['primary_metric_value'] == 0.9375
+
+
+def test_autoresearch_decision_recomputes_stale_escalation(tmp_path) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        artifacts_mount_path=str(tmp_path),
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Explore bounded methodology variants for a GPU session.'},
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Replicate DreamSim visual similarity metric with PyTorch and timm.',
+            'source_refs': ['https://dreamsim-nights.github.io/'],
+            'notes': ['Focus on approved GPU templates only.'],
+            'technique_tags': ['dreamsim', 'pytorch', 'timm'],
+        },
+    )
+    assert intake.status_code == 201
+    assert client.post('/interpretations/from-latest-intake').status_code == 201
+
+    design = client.post('/design-drafts/from-latest-intake')
+    assert design.status_code == 201
+    design_payload = design.json()
+    reviewed = client.post(
+        f"/design-drafts/{design_payload['design_id']}/review",
+        json={
+            'resolved_inputs': {
+                'dataset_uri': 's3://datasets/dreamsim/train.csv',
+                'model_family': 'lightweight replication',
+                'training_notes': 'Replicate DreamSim visual similarity metric with PyTorch and timm.',
+                'evaluation_target': 'embedding retrieval auc',
+                'validation_strategy': 'stratified_holdout',
+                'validation_split': '0.2',
+            },
+            'review_notes': ['Resolved GPU execution inputs for stale escalation test.'],
+        },
+    )
+    assert reviewed.status_code == 200
+
+    campaign = client.post(
+        '/autoresearch/campaigns',
+        json={
+            'session_id': session_id,
+            'source_design_id': design_payload['design_id'],
+            'objective': 'Compare approved GPU methodology variants.',
+            'max_iterations': 2,
+        },
+    )
+    assert campaign.status_code == 201
+    campaign_id = campaign.json()['campaign_id']
+
+    drafted = client.post(f'/autoresearch/campaigns/{campaign_id}/draft-initial-methodologies')
+    assert drafted.status_code == 201
+    launched = client.post(f'/autoresearch/campaigns/{campaign_id}/launch-next-iteration')
+    assert launched.status_code == 201
+    run_id = launched.json()['run']['run_id']
+
+    first_decision = client.post(f'/autoresearch/campaigns/{campaign_id}/decide-latest')
+    assert first_decision.status_code == 201
+    assert first_decision.json()['decision']['decision_type'] == 'escalate_for_review'
+
+    run_dir = tmp_path / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / 'status.json').write_text(
+        '{"run_id":"%s","status":"succeeded","updated_at":"2026-04-04T01:00:00Z","detail":"gpu iteration complete"}'
+        % run_id
+    )
+    (run_dir / 'metrics.json').write_text(
+        '{"metric_name":"execution_readiness","best_metric":0.9375}'
+    )
+
+    second_decision = client.post(f'/autoresearch/campaigns/{campaign_id}/decide-latest')
+    assert second_decision.status_code == 201
+    second_payload = second_decision.json()
+    assert second_payload['decision']['decision_type'] == 'keep'
+    assert second_payload['campaign']['status'] == 'completed'
 
 
 def test_session_autoresearch_transition_chain(tmp_path) -> None:

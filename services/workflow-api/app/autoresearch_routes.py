@@ -234,24 +234,41 @@ def register_autoresearch_routes(
         iteration = store.get_autoresearch_iteration(campaign.latest_iteration_id)
         if iteration is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='autoresearch iteration not found')
+        child_run = store.get_run(iteration.run_id)
+        if child_run is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='run not found for latest iteration')
+        child_summary = summarize_iteration_run(child_run, settings=settings, submitter=submitter)
         if iteration.decision is not None:
             existing = store.get_autoresearch_decision(campaign.latest_decision_id or '')
             if existing is None:
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='campaign latest decision is missing')
+            existing_is_stale_escalation = (
+                existing.decision_type == 'escalate_for_review'
+                and str(child_summary.get('run_status')) == 'succeeded'
+                and isinstance(child_summary.get('primary_metric_value'), (int, float))
+            )
+            if not existing_is_stale_escalation:
+                operation = record_operation(
+                    store,
+                    operation_type='autoresearch-decide-latest',
+                    started_at=started_at,
+                    status='completed',
+                    session_id=campaign.session_id,
+                    result_detail='Latest autoresearch iteration was already decided.',
+                )
+                return AutoresearchDecisionResponse(campaign=campaign, iteration=iteration, decision=existing, operation=operation)
+            store.save_autoresearch_iteration(
+                iteration.model_copy(update={'decision': None, 'status': 'completed', 'updated_at': datetime.now(timezone.utc)})
+            )
+            iteration = store.get_autoresearch_iteration(campaign.latest_iteration_id) or iteration
             operation = record_operation(
                 store,
                 operation_type='autoresearch-decide-latest',
                 started_at=started_at,
                 status='completed',
                 session_id=campaign.session_id,
-                result_detail='Latest autoresearch iteration was already decided.',
+                result_detail='Recomputing stale autoresearch escalation from completed run artifacts.',
             )
-            return AutoresearchDecisionResponse(campaign=campaign, iteration=iteration, decision=existing, operation=operation)
-
-        child_run = store.get_run(iteration.run_id)
-        if child_run is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='run not found for latest iteration')
-        child_summary = summarize_iteration_run(child_run, settings=settings, submitter=submitter)
 
         parent_summary = None
         baseline_iteration = None

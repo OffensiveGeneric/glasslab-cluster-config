@@ -122,6 +122,9 @@ def _build_runner_spec(manifest: RunManifest) -> dict:
         dataset_uri = str(manifest.inputs.get('dataset_uri', '')).strip()
         model_family = str(manifest.inputs.get('model_family', '')).strip()
         training_notes = str(manifest.inputs.get('training_notes', '')).strip()
+        evaluation_target = str(manifest.inputs.get('evaluation_target', '')).strip()
+        validation_strategy = str(manifest.inputs.get('validation_strategy', '')).strip()
+        validation_split = str(manifest.inputs.get('validation_split', '')).strip()
         if not dataset_uri:
             raise ValueError('gpu-experiment requires dataset_uri for runner submission')
         if not model_family:
@@ -135,6 +138,9 @@ def _build_runner_spec(manifest: RunManifest) -> dict:
             'dataset_uri': dataset_uri,
             'model_family': model_family,
             'training_notes': training_notes,
+            'evaluation_target': evaluation_target,
+            'validation_strategy': validation_strategy,
+            'validation_split': validation_split,
             'models': manifest.requested_models,
             'feature_profile': 'gpu_ml',
             'resource_profile': manifest.resource_profile,

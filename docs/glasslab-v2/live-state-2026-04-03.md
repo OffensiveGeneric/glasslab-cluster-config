@@ -105,3 +105,57 @@ The runner-first path is now materially real:
   (`contract_readiness`) rather than a real DreamSim evaluation result
 - the broader comparison path will not become genuinely useful until multiple
   technique-card-backed variants complete with meaningful metrics
+
+## GPU Runner Follow-on
+
+The bounded GPU runner is now live in a more useful state than the earlier
+placeholder-only path.
+
+Current live behavior on `.44`:
+
+- `gpu-experiment` uses
+  `ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.4-local`
+- `workflow-api` is rolled to `0.1.73-local`
+- the runner emits `execution_readiness` instead of the old placeholder
+- readiness is broken into explicit components:
+  - `target_alignment`
+  - `split_contract`
+  - `package_stack`
+  - `runtime_stack`
+
+Fresh DreamSim-style bounded runs produced:
+
+- direct `!run`
+  - `metric_name: execution_readiness`
+  - `best_metric: 0.9375`
+  - `validation_strategy: stratified_holdout`
+  - `validation_split: 0.2`
+  - `required_python_packages: ["torch", "timm"]`
+  - `available_python_packages: {"torch": true, "timm": true}`
+  - `readiness_components`
+    - `target_alignment: 1.0`
+    - `split_contract: 1.0`
+    - `package_stack: 1.0`
+    - `runtime_stack: 0.75`
+- autoresearch `!launch-iteration`
+  - completed on the same runner image
+  - `!decide-latest` now upgrades a stale early `escalate_for_review`
+    into `keep` once the run has actually completed and scored metrics are
+    present
+  - `!model-comparison` now shows:
+    - `primary_metric_name: execution_readiness`
+    - `primary_metric_value: 0.9375`
+    - `decision: keep`
+    - `recommended_model: vision_transformer`
+
+Meaning:
+
+- the bounded run contract is now genuinely useful for runner-side work
+- the image carries the expected Python stack for DreamSim-style technique
+  cards
+- the autoresearch loop can launch, score, and keep a bounded GPU variant
+  without manual repair after the fact
+- the next obvious bottleneck is no longer package presence
+- it is the quality of the experiment metric itself, since
+  `execution_readiness` is still a bounded execution metric rather than a
+  real DreamSim replication score
