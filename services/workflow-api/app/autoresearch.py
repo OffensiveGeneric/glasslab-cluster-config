@@ -565,6 +565,56 @@ def build_model_comparison_rows(
     return rows
 
 
+def refresh_campaign_iterations(
+    store: RunStore,
+    campaign: AutoresearchCampaignRecord,
+    *,
+    settings: Settings,
+    submitter: JobSubmitter,
+) -> list[AutoresearchIterationRecord]:
+    refreshed: list[AutoresearchIterationRecord] = []
+    changed = False
+    for iteration in store.list_autoresearch_iterations(campaign.campaign_id):
+        run = store.get_run(iteration.run_id)
+        if run is None:
+            refreshed.append(iteration)
+            continue
+        score_summary = summarize_iteration_run(run, settings=settings, submitter=submitter)
+        run_status = str(score_summary.get('run_status', 'unknown'))
+        next_status = iteration.status
+        if iteration.decision is None:
+            if run_status == 'succeeded':
+                next_status = 'completed'
+            elif run_status in {'failed', 'rejected'}:
+                next_status = 'failed'
+            elif run_status in {'running', 'accepted', 'queued'}:
+                next_status = 'launched'
+        updated_iteration = iteration.model_copy(
+            update={
+                'updated_at': _now(),
+                'status': next_status,
+                'score_summary': score_summary,
+            }
+        )
+        if updated_iteration != iteration:
+            store.save_autoresearch_iteration(updated_iteration)
+            changed = True
+        refreshed.append(updated_iteration)
+    if changed and campaign.latest_iteration_id:
+        latest_iteration = store.get_autoresearch_iteration(campaign.latest_iteration_id)
+        if latest_iteration is not None:
+            next_campaign_status = campaign.status
+            if campaign.latest_decision_id is None:
+                if latest_iteration.status == 'completed':
+                    next_campaign_status = 'active'
+                elif latest_iteration.status == 'failed':
+                    next_campaign_status = 'needs_review'
+            if next_campaign_status != campaign.status:
+                campaign = campaign.model_copy(update={'updated_at': _now(), 'status': next_campaign_status})
+                store.save_autoresearch_campaign(campaign)
+    return refreshed
+
+
 def select_recommended_model(
     rows: list[dict[str, Any]],
     best_draft: MethodologyDraftRecord | None,
@@ -587,9 +637,20 @@ def select_recommended_model(
 def summarize_campaign(
     store: RunStore,
     campaign: AutoresearchCampaignRecord,
+    *,
+    settings: Settings | None = None,
+    submitter: JobSubmitter | None = None,
 ) -> AutoresearchCampaignSummaryResponse:
     drafts = store.list_methodology_drafts(campaign.campaign_id)
     iterations = store.list_autoresearch_iterations(campaign.campaign_id)
+    if settings is not None and submitter is not None:
+        iterations = refresh_campaign_iterations(
+            store,
+            campaign,
+            settings=settings,
+            submitter=submitter,
+        )
+        campaign = store.get_autoresearch_campaign(campaign.campaign_id) or campaign
     decisions = store.list_autoresearch_decisions(campaign.campaign_id)
     best_draft = store.get_methodology_draft(campaign.current_best_methodology_draft_id or '')
     latest_run = None

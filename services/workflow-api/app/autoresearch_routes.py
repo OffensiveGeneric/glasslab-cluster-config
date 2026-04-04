@@ -335,12 +335,12 @@ def register_autoresearch_routes(
     @app.get('/autoresearch/campaigns/{campaign_id}/summary', response_model=AutoresearchCampaignSummaryResponse)
     def get_autoresearch_campaign_summary(campaign_id: str) -> AutoresearchCampaignSummaryResponse:
         campaign = get_required_campaign(store, campaign_id)
-        return summarize_campaign(store, campaign)
+        return summarize_campaign(store, campaign, settings=settings, submitter=submitter)
 
     @app.get('/autoresearch/campaigns/{campaign_id}/model-comparison', response_model=AutoresearchCampaignSummaryResponse)
     def get_autoresearch_campaign_model_comparison(campaign_id: str) -> AutoresearchCampaignSummaryResponse:
         campaign = get_required_campaign(store, campaign_id)
-        return summarize_campaign(store, campaign)
+        return summarize_campaign(store, campaign, settings=settings, submitter=submitter)
 
     @app.post(
         '/autoresearch/campaigns/{campaign_id}/draft-analysis-notebook',

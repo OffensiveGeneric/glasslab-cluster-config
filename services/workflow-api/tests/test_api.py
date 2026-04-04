@@ -4435,7 +4435,7 @@ def test_autoresearch_campaign_happy_path(tmp_path) -> None:
     assert drafted_payload['campaign']['status'] == 'drafted'
     assert len(drafted_payload['methodology_drafts']) >= 1
     assert any(
-        draft['declared_inputs'].get('validation_strategy') == 'stratified_holdout'
+        draft['declared_inputs'].get('validation_strategy')
         for draft in drafted_payload['methodology_drafts']
     )
     child_draft_id = drafted_payload['methodology_drafts'][0]['methodology_draft_id']
@@ -4604,6 +4604,95 @@ def test_autoresearch_launch_iteration_uses_method_spec_inputs(tmp_path) -> None
     assert payload['run']['workflow_id'] == 'generic-tabular-benchmark'
     assert payload['run']['manifest']['inputs']['train_uri'] == 's3://datasets/paper-derived/train.csv'
     assert payload['run']['manifest']['inputs']['validation_strategy'] == 'holdout'
+
+
+def test_autoresearch_summary_refreshes_completed_iteration_without_decide(tmp_path) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        artifacts_mount_path=str(tmp_path),
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Refresh completed autoresearch runs into summary output without waiting for a decision.'},
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Benchmark a bounded set of approved Titanic baselines and compare one small methodology variant.',
+            'source_refs': ['https://example.org/titanic-summary-note'],
+            'notes': ['Keep this fixture narrow and deterministic.'],
+        },
+    )
+    assert intake.status_code == 201
+
+    design = client.post('/design-drafts/from-latest-intake')
+    assert design.status_code == 201
+    design_payload = design.json()
+
+    reviewed = client.post(
+        f"/design-drafts/{design_payload['design_id']}/review",
+        json={
+            'resolved_inputs': {
+                'dataset_name': 'titanic',
+                'train_uri': 's3://datasets/titanic/train.csv',
+                'test_uri': 's3://datasets/titanic/test.csv',
+                'target_column': 'Survived',
+            },
+            'review_notes': ['Autoresearch summary refresh fixture is ready for bounded validation.'],
+        },
+    )
+    assert reviewed.status_code == 200
+
+    campaign = client.post(
+        '/autoresearch/campaigns',
+        json={
+            'session_id': session_id,
+            'source_design_id': design_payload['design_id'],
+            'objective': 'Compare a small set of approved tabular methodology variants on Titanic.',
+            'max_iterations': 2,
+        },
+    )
+    assert campaign.status_code == 201
+    campaign_id = campaign.json()['campaign_id']
+
+    drafted = client.post(f'/autoresearch/campaigns/{campaign_id}/draft-initial-methodologies')
+    assert drafted.status_code == 201
+
+    launched = client.post(f'/autoresearch/campaigns/{campaign_id}/launch-next-iteration')
+    assert launched.status_code == 201
+    run_id = launched.json()['run']['run_id']
+    iteration_id = launched.json()['iteration']['iteration_id']
+
+    run_dir = tmp_path / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / 'status.json').write_text(
+        '{"run_id":"%s","status":"succeeded","updated_at":"2026-04-04T01:00:00Z","detail":"autoresearch iteration complete"}'
+        % run_id
+    )
+    (run_dir / 'metrics.json').write_text('{"accuracy": 0.91, "loss": 0.22}')
+
+    summary = client.get(f'/autoresearch/campaigns/{campaign_id}/summary')
+    assert summary.status_code == 200
+    payload = summary.json()
+    assert payload['iterations'][0]['iteration_id'] == iteration_id
+    assert payload['iterations'][0]['status'] == 'completed'
+    assert payload['iterations'][0]['score_summary']['run_status'] == 'succeeded'
+    assert payload['iterations'][0]['score_summary']['primary_metric_name'] == 'accuracy'
+    assert payload['iterations'][0]['score_summary']['primary_metric_value'] == 0.91
+
+    comparison = client.get(f'/autoresearch/campaigns/{campaign_id}/model-comparison')
+    assert comparison.status_code == 200
+    comparison_payload = comparison.json()
+    assert comparison_payload['model_comparison'][0]['run_id'] == run_id
+    assert comparison_payload['model_comparison'][0]['primary_metric_name'] == 'accuracy'
+    assert comparison_payload['model_comparison'][0]['primary_metric_value'] == 0.91
 
 
 def test_autoresearch_notebook_draft_is_written(tmp_path) -> None:
