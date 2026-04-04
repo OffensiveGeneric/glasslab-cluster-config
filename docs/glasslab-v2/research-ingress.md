@@ -72,6 +72,8 @@ Important deterministic commands currently covered by the repo-owned ingress pat
 - `!draft-notebook`
 - `!refine-notebook`
 - `!launch-iteration`
+- `!launch-batch`
+- `!decide-batch`
 - `!decide-latest`
 - `!autoresearch`
 - `!model-comparison`
@@ -104,6 +106,10 @@ Operational note from the 2026-04-03 live validation:
 - `!launch-iteration` now works for the same DreamSim-style GPU path because the
   router/workflow path resolves to an allowed runner model template instead of
   trying to submit raw technique names as workflow models
+- `!launch-batch` can now launch multiple bounded methodology variants in
+  parallel through the same deterministic command seam
+- `!decide-batch` can now record decisions for all ready completed iterations in
+  one pass instead of requiring repeated `!decide-latest` calls
 - `!decide-latest` now records a durable decision after the launched run
   completes and metrics are available
 
@@ -116,7 +122,7 @@ Current runner-first sequence:
 !run
 !start-autoresearch
 !draft-methodologies
-!launch-iteration
-!decide-latest
+!launch-batch
+!decide-batch
 !model-comparison
 ```

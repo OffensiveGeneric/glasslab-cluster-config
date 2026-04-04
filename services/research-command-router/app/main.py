@@ -127,6 +127,8 @@ def _parse_command(message: str) -> tuple[str, str] | None:
         ("launch-iteration:", "launch-iteration"),
         ("!launch-batch", "launch-batch"),
         ("launch-batch:", "launch-batch"),
+        ("!decide-batch", "decide-batch"),
+        ("decide-batch:", "decide-batch"),
         ("!decide-latest", "decide-latest"),
         ("decide-latest:", "decide-latest"),
         ("!autoresearch", "autoresearch"),
@@ -169,6 +171,7 @@ def _help_text() -> str:
             "!refine-notebook",
             "!launch-iteration",
             "!launch-batch",
+            "!decide-batch",
             "!decide-latest",
             "!autoresearch",
             "!model-comparison",
@@ -585,6 +588,26 @@ def _dispatch(
             f"Recorded autoresearch decision '{decision.get('decision_type', 'n/a')}' "
             f"for iteration '{decision.get('iteration_id', 'n/a')}'."
         )
+        return DispatchResponse(
+            matched=True,
+            forward_to_openclaw=False,
+            command=command,
+            response_text=response_text,
+            workflow_api_endpoint=endpoint,
+            payload=payload,
+        )
+
+    if command == "decide-batch":
+        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
+            settings, requester
+        )
+        endpoint, payload = requester(
+            settings,
+            f"/research-sessions/{session_id}/transitions/decide-autoresearch-batch",
+            method="POST",
+        )
+        decisions = payload.get("decisions") or []
+        response_text = f"Recorded {len(decisions)} autoresearch decision(s) for ready completed iterations."
         return DispatchResponse(
             matched=True,
             forward_to_openclaw=False,

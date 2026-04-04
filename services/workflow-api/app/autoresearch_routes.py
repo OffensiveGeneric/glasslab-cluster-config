@@ -30,6 +30,7 @@ from .schemas import (
     AutoresearchCampaignCreateRequest,
     AutoresearchCampaignRecord,
     AutoresearchCampaignSummaryResponse,
+    AutoresearchDecisionBatchResponse,
     AutoresearchDecisionRecord,
     AutoresearchDecisionResponse,
     AutoresearchDraftMethodologiesResponse,
@@ -63,6 +64,105 @@ def register_autoresearch_routes(
         if campaign is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session has no autoresearch campaign yet')
         return campaign
+
+    def decide_campaign_iteration(
+        campaign: AutoresearchCampaignRecord,
+        iteration_id: str,
+    ) -> tuple[AutoresearchCampaignRecord, AutoresearchIterationRecord, AutoresearchDecisionRecord]:
+        iteration = store.get_autoresearch_iteration(iteration_id)
+        if iteration is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='autoresearch iteration not found')
+        child_run = store.get_run(iteration.run_id)
+        if child_run is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='run not found for iteration')
+        child_summary = summarize_iteration_run(child_run, settings=settings, submitter=submitter)
+        if iteration.decision is not None:
+            existing = next(
+                (
+                    record
+                    for record in store.list_autoresearch_decisions(campaign.campaign_id)
+                    if record.iteration_id == iteration.iteration_id
+                ),
+                None,
+            )
+            existing_is_stale_escalation = (
+                existing is not None
+                and existing.decision_type == 'escalate_for_review'
+                and str(child_summary.get('run_status')) == 'succeeded'
+                and isinstance(child_summary.get('primary_metric_value'), (int, float))
+            )
+            if existing is not None and not existing_is_stale_escalation:
+                return campaign, iteration, existing
+            store.save_autoresearch_iteration(
+                iteration.model_copy(update={'decision': None, 'status': 'completed', 'updated_at': datetime.now(timezone.utc)})
+            )
+            iteration = store.get_autoresearch_iteration(iteration_id) or iteration
+
+        parent_summary = None
+        baseline_iteration = None
+        for prior in reversed([record for record in get_campaign_iterations(store, campaign.campaign_id) if record.iteration_id != iteration.iteration_id]):
+            if prior.decision == 'keep':
+                baseline_iteration = prior
+                break
+        if baseline_iteration is not None:
+            baseline_run = store.get_run(baseline_iteration.run_id)
+            if baseline_run is not None:
+                parent_summary = summarize_iteration_run(baseline_run, settings=settings, submitter=submitter)
+        comparison_summary = build_iteration_comparison(child_summary, parent_summary)
+        decision_type, rationale = build_decision(iteration, child_summary, comparison_summary)
+        decision = AutoresearchDecisionRecord(
+            decision_id=uuid4().hex,
+            campaign_id=campaign.campaign_id,
+            iteration_id=iteration.iteration_id,
+            created_at=datetime.now(timezone.utc),
+            decision_type=decision_type,
+            rationale=rationale,
+            evidence_refs=[
+                f'run:{iteration.run_id}',
+                f'methodology:{iteration.child_methodology_draft_id}',
+            ],
+        )
+        store.save_autoresearch_decision(decision)
+
+        updated_iteration = iteration.model_copy(
+            update={
+                'updated_at': datetime.now(timezone.utc),
+                'status': 'decided',
+                'score_summary': child_summary,
+                'comparison_summary': comparison_summary,
+                'decision': decision_type,
+            }
+        )
+        store.save_autoresearch_iteration(updated_iteration)
+
+        child_draft = store.get_methodology_draft(iteration.child_methodology_draft_id)
+        if child_draft is not None:
+            child_draft = child_draft.model_copy(
+                update={
+                    'updated_at': datetime.now(timezone.utc),
+                    'status': 'kept' if decision_type == 'keep' else 'discarded' if decision_type == 'discard' else 'needs_review',
+                }
+            )
+            store.save_methodology_draft(child_draft)
+
+        campaign_updates = {
+            'updated_at': datetime.now(timezone.utc),
+            'latest_decision_id': decision.decision_id,
+            'latest_iteration_id': updated_iteration.iteration_id,
+            'status': 'completed' if decision_type in {'keep', 'discard'} else 'needs_review',
+        }
+        if decision_type == 'keep':
+            campaign_updates['current_best_methodology_draft_id'] = updated_iteration.child_methodology_draft_id
+        updated_campaign = campaign.model_copy(update=campaign_updates)
+        store.save_autoresearch_campaign(updated_campaign)
+        touch_research_session(
+            store,
+            campaign.session_id,
+            latest_autoresearch_decision_id=decision.decision_id,
+            latest_autoresearch_iteration_id=updated_iteration.iteration_id,
+            decision_log=[f'autoresearch decision: {decision_type}'],
+        )
+        return updated_campaign, updated_iteration, decision
 
     @app.post('/autoresearch/campaigns', response_model=AutoresearchCampaignRecord, status_code=status.HTTP_201_CREATED)
     def create_autoresearch_campaign(request: AutoresearchCampaignCreateRequest) -> AutoresearchCampaignRecord:
@@ -319,116 +419,14 @@ def register_autoresearch_routes(
         campaign = get_required_campaign(store, campaign_id)
         if not campaign.latest_iteration_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='campaign has no iterations yet')
-        iteration = store.get_autoresearch_iteration(campaign.latest_iteration_id)
-        if iteration is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='autoresearch iteration not found')
-        child_run = store.get_run(iteration.run_id)
-        if child_run is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='run not found for latest iteration')
-        child_summary = summarize_iteration_run(child_run, settings=settings, submitter=submitter)
-        if iteration.decision is not None:
-            existing = store.get_autoresearch_decision(campaign.latest_decision_id or '')
-            if existing is None:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='campaign latest decision is missing')
-            existing_is_stale_escalation = (
-                existing.decision_type == 'escalate_for_review'
-                and str(child_summary.get('run_status')) == 'succeeded'
-                and isinstance(child_summary.get('primary_metric_value'), (int, float))
-            )
-            if not existing_is_stale_escalation:
-                operation = record_operation(
-                    store,
-                    operation_type='autoresearch-decide-latest',
-                    started_at=started_at,
-                    status='completed',
-                    session_id=campaign.session_id,
-                    result_detail='Latest autoresearch iteration was already decided.',
-                )
-                return AutoresearchDecisionResponse(campaign=campaign, iteration=iteration, decision=existing, operation=operation)
-            store.save_autoresearch_iteration(
-                iteration.model_copy(update={'decision': None, 'status': 'completed', 'updated_at': datetime.now(timezone.utc)})
-            )
-            iteration = store.get_autoresearch_iteration(campaign.latest_iteration_id) or iteration
-            operation = record_operation(
-                store,
-                operation_type='autoresearch-decide-latest',
-                started_at=started_at,
-                status='completed',
-                session_id=campaign.session_id,
-                result_detail='Recomputing stale autoresearch escalation from completed run artifacts.',
-            )
-
-        parent_summary = None
-        baseline_iteration = None
-        for prior in reversed(get_campaign_iterations(store, campaign_id)[:-1]):
-            if prior.decision == 'keep':
-                baseline_iteration = prior
-                break
-        if baseline_iteration is not None:
-            baseline_run = store.get_run(baseline_iteration.run_id)
-            if baseline_run is not None:
-                parent_summary = summarize_iteration_run(baseline_run, settings=settings, submitter=submitter)
-        comparison_summary = build_iteration_comparison(child_summary, parent_summary)
-        decision_type, rationale = build_decision(iteration, child_summary, comparison_summary)
-        decision = AutoresearchDecisionRecord(
-            decision_id=uuid4().hex,
-            campaign_id=campaign.campaign_id,
-            iteration_id=iteration.iteration_id,
-            created_at=datetime.now(timezone.utc),
-            decision_type=decision_type,
-            rationale=rationale,
-            evidence_refs=[
-                f'run:{iteration.run_id}',
-                f'methodology:{iteration.child_methodology_draft_id}',
-            ],
-        )
-        store.save_autoresearch_decision(decision)
-
-        updated_iteration = iteration.model_copy(
-            update={
-                'updated_at': datetime.now(timezone.utc),
-                'status': 'decided',
-                'score_summary': child_summary,
-                'comparison_summary': comparison_summary,
-                'decision': decision_type,
-            }
-        )
-        store.save_autoresearch_iteration(updated_iteration)
-
-        child_draft = store.get_methodology_draft(iteration.child_methodology_draft_id)
-        if child_draft is not None:
-            child_draft = child_draft.model_copy(
-                update={
-                    'updated_at': datetime.now(timezone.utc),
-                    'status': 'kept' if decision_type == 'keep' else 'discarded' if decision_type == 'discard' else 'needs_review',
-                }
-            )
-            store.save_methodology_draft(child_draft)
-
-        campaign_updates = {
-            'updated_at': datetime.now(timezone.utc),
-            'latest_decision_id': decision.decision_id,
-            'latest_iteration_id': updated_iteration.iteration_id,
-            'status': 'completed' if decision_type in {'keep', 'discard'} else 'needs_review',
-        }
-        if decision_type == 'keep':
-            campaign_updates['current_best_methodology_draft_id'] = updated_iteration.child_methodology_draft_id
-        updated_campaign = campaign.model_copy(update=campaign_updates)
-        store.save_autoresearch_campaign(updated_campaign)
-        touch_research_session(
-            store,
-            campaign.session_id,
-            latest_autoresearch_decision_id=decision.decision_id,
-            latest_autoresearch_iteration_id=updated_iteration.iteration_id,
-            decision_log=[f'autoresearch decision: {decision_type}'],
-        )
+        updated_campaign, updated_iteration, decision = decide_campaign_iteration(campaign, campaign.latest_iteration_id)
         operation = record_operation(
             store,
             operation_type='autoresearch-decide-latest',
             started_at=started_at,
             status='completed',
             session_id=campaign.session_id,
-            result_detail=f'Latest autoresearch iteration was marked {decision_type}.',
+            result_detail=f"Latest autoresearch iteration was marked {decision.decision_type}.",
         )
         return AutoresearchDecisionResponse(
             campaign=updated_campaign,
@@ -436,6 +434,73 @@ def register_autoresearch_routes(
             decision=decision,
             operation=operation,
         )
+
+    @app.post(
+        '/autoresearch/campaigns/{campaign_id}/decide-ready-batch',
+        response_model=AutoresearchDecisionBatchResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def decide_ready_autoresearch_batch(campaign_id: str) -> AutoresearchDecisionBatchResponse:
+        started_at = datetime.now(timezone.utc)
+        campaign = get_required_campaign(store, campaign_id)
+        ready_iterations: list[AutoresearchIterationRecord] = []
+        for iteration in get_campaign_iterations(store, campaign_id):
+            run = store.get_run(iteration.run_id)
+            if run is None:
+                continue
+            summary = summarize_iteration_run(run, settings=settings, submitter=submitter)
+            if str(summary.get('run_status')) == 'succeeded' and (
+                iteration.decision is None or (
+                    iteration.decision == 'escalate_for_review'
+                    and isinstance(summary.get('primary_metric_value'), (int, float))
+                )
+            ):
+                ready_iterations.append(iteration)
+        if not ready_iterations:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='no completed undecided autoresearch iterations are ready')
+
+        decisions: list[AutoresearchDecisionRecord] = []
+        updated_iterations: list[AutoresearchIterationRecord] = []
+        updated_campaign = campaign
+        for iteration in ready_iterations:
+            updated_campaign, updated_iteration, decision = decide_campaign_iteration(updated_campaign, iteration.iteration_id)
+            decisions.append(decision)
+            updated_iterations.append(updated_iteration)
+
+        operation = record_operation(
+            store,
+            operation_type='autoresearch-decide-ready-batch',
+            started_at=started_at,
+            status='completed',
+            session_id=campaign.session_id,
+            result_detail=f"Recorded {len(decisions)} autoresearch decision(s) for campaign {campaign_id}.",
+        )
+        return AutoresearchDecisionBatchResponse(
+            campaign=updated_campaign,
+            decisions=decisions,
+            iterations=updated_iterations,
+            operation=operation,
+        )
+
+    @app.post(
+        '/research-sessions/{session_id}/transitions/decide-autoresearch-batch',
+        response_model=AutoresearchDecisionBatchResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def session_decide_autoresearch_batch(session_id: str) -> AutoresearchDecisionBatchResponse:
+        campaign = get_required_session_campaign(session_id)
+        return decide_ready_autoresearch_batch(campaign.campaign_id)
+
+    @app.post(
+        '/research-sessions/latest/transitions/decide-autoresearch-batch',
+        response_model=AutoresearchDecisionBatchResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def latest_session_decide_autoresearch_batch() -> AutoresearchDecisionBatchResponse:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session not found')
+        return session_decide_autoresearch_batch(session.session_id)
 
     @app.get('/autoresearch/campaigns/{campaign_id}/summary', response_model=AutoresearchCampaignSummaryResponse)
     def get_autoresearch_campaign_summary(campaign_id: str) -> AutoresearchCampaignSummaryResponse:

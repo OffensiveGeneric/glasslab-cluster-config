@@ -8,9 +8,9 @@ can launch real runs without staging papers first.
 ## Live rollouts
 
 - `workflow-api` rolled live on `.44` as
-  `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.77-local`
+  `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.78-local`
 - `research-command-router` rolled live on `.44` as
-  `ghcr.io/offensivegeneric/glasslab-research-command-router:0.1.5-local`
+  `ghcr.io/offensivegeneric/glasslab-research-command-router:0.1.6-local`
   and pinned to `node05` for the local-image path
 - local commits behind these rollouts:
   - `e080db0` `Prioritize technique cards over weak workflow hints`
@@ -69,6 +69,7 @@ is:
 - `!draft-methodologies`
 - `!launch-iteration`
 - `!launch-batch`
+- `!decide-batch`
 - `!decide-latest`
 - `!model-comparison`
 
@@ -80,6 +81,7 @@ chat command seam:
 - `!start-autoresearch`
 - `!draft-methodologies`
 - `!launch-batch`
+- `!decide-batch`
 
 That path returned:
 
@@ -89,6 +91,14 @@ That path returned:
 - two accepted GPU run ids:
   - `a452a9c9d4cb433388f6f9395eaac329`
   - `b61663daf9124881b6fba7d4ca01ea7b`
+
+The batch-decision follow-on is now also live through the same deterministic
+command seam:
+
+- `!decide-batch`
+
+That path records decisions for all ready completed iterations in one pass,
+using the same bounded decision policy as `!decide-latest`.
 
 ## Meaning
 
@@ -135,7 +145,7 @@ Current live behavior on `.44`:
 
 - `gpu-experiment` uses
   `ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.4-local`
-- `workflow-api` is rolled to `0.1.77-local`
+- `workflow-api` is rolled to `0.1.78-local`
 - the runner emits `execution_readiness` instead of the old placeholder
 - readiness is broken into explicit components:
   - `target_alignment`

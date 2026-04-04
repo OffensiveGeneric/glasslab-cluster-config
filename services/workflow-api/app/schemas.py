@@ -948,6 +948,15 @@ class AutoresearchDecisionResponse(BaseModel):
     operation: OperationRecord
 
 
+class AutoresearchDecisionBatchResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    campaign: AutoresearchCampaignRecord
+    decisions: list[AutoresearchDecisionRecord] = Field(default_factory=list)
+    iterations: list[AutoresearchIterationRecord] = Field(default_factory=list)
+    operation: OperationRecord
+
+
 class AutoresearchCampaignSummaryResponse(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
