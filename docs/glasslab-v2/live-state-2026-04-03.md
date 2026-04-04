@@ -8,11 +8,14 @@ can launch real runs without staging papers first.
 ## Live rollouts
 
 - `workflow-api` rolled live on `.44` as
-  `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.78-local`
+  `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.81-local`
 - `research-command-router` rolled live on `.44` as
   `ghcr.io/offensivegeneric/glasslab-research-command-router:0.1.6-local`
   and pinned to `node05` for the local-image path
 - local commits behind these rollouts:
+  - `ec2b9e8` `Replace stale literature queues for active sessions`
+  - `3b55b83` `Preserve technique context in GPU runner spec`
+  - `16280fc` `Bump runner and workflow-api image tags`
   - `e080db0` `Prioritize technique cards over weak workflow hints`
   - `061ce19` `Let technique cards fill bounded run inputs`
   - `cc452e0` `Upsert technique cards by name`
@@ -109,6 +112,33 @@ The first live validation returned:
 - the resulting model comparison remained available immediately through
   `!model-comparison`
 
+The latest direct `.44` validation against the same session also confirmed that
+fresh autoresearch batch launches preserve technique context all the way into
+the GPU runner and decision surface:
+
+- fresh run manifests now use
+  `ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.6-local`
+- fresh runner specs now include:
+  - `technique_candidate_models`
+  - `technique_baseline_models`
+  - `technique_loss_or_distance`
+  - `technique_task_type`
+  - `technique_metrics`
+- the kept DreamSim-style variant scored:
+  - `metric_name: bounded_method_score`
+  - `best_metric: 0.9688`
+  - `best_model: vision_transformer`
+  - `technique_alignment_score: 1.0`
+- the baseline-style comparison variant scored:
+  - `metric_name: bounded_method_score`
+  - `best_metric: 0.8438`
+  - `best_model: pytorch-template-v1`
+- the resulting campaign state became:
+  - `status: completed`
+  - `recommended_model: vision_transformer`
+  - `current_best_methodology_draft_id` pointing at the
+    `DreamSim Transformer Similarity` variant
+
 ## Meaning
 
 The technique catalog is no longer just a passive enrichment layer.
@@ -144,6 +174,8 @@ The runner-first path is now materially real:
   (`contract_readiness`) rather than a real DreamSim evaluation result
 - the broader comparison path will not become genuinely useful until multiple
   technique-card-backed variants complete with meaningful metrics
+- before `ec2b9e8`, `!research` could keep a stale literature queue attached to
+  the active session; `0.1.81-local` is intended to close that gap live
 
 ## GPU Runner Follow-on
 
