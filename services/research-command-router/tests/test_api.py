@@ -192,6 +192,31 @@ def test_start_autoresearch_resolves_session_before_transition() -> None:
     assert calls[1][0] == "/research-sessions/session-123/transitions/start-autoresearch-campaign"
 
 
+def test_launch_batch_resolves_session_before_transition() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        if path == "/research-sessions/latest/context":
+            return (
+                f"{settings.workflow_api_url}{path}",
+                {"session": {"session_id": "session-123"}},
+            )
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {"launches": [{"iteration": {"iteration_id": "iter-1"}}, {"iteration": {"iteration_id": "iter-2"}}]},
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!launch-batch"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["command"] == "launch-batch"
+    assert calls[0][0] == "/research-sessions/latest/context"
+    assert calls[1][0] == "/research-sessions/session-123/transitions/launch-autoresearch-batch"
+    assert "Launched 2 autoresearch iteration(s)" in payload["response_text"]
+
+
 def test_non_command_turns_forward_to_openclaw() -> None:
     client = TestClient(create_app(settings=Settings(), requester=lambda *args, **kwargs: ("", {})))
     response = client.post("/dispatch", json={"message": "what do you think of this paper?"})

@@ -923,6 +923,22 @@ class AutoresearchLaunchIterationResponse(BaseModel):
     operation: OperationRecord
 
 
+class AutoresearchLaunchBatchItem(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    methodology_draft: MethodologyDraftRecord
+    iteration: AutoresearchIterationRecord
+    run: RunRecord
+
+
+class AutoresearchLaunchBatchResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    campaign: AutoresearchCampaignRecord
+    launches: list[AutoresearchLaunchBatchItem] = Field(default_factory=list)
+    operation: OperationRecord
+
+
 class AutoresearchDecisionResponse(BaseModel):
     model_config = ConfigDict(extra='forbid')
 

@@ -125,6 +125,8 @@ def _parse_command(message: str) -> tuple[str, str] | None:
         ("refine-notebook:", "refine-notebook"),
         ("!launch-iteration", "launch-iteration"),
         ("launch-iteration:", "launch-iteration"),
+        ("!launch-batch", "launch-batch"),
+        ("launch-batch:", "launch-batch"),
         ("!decide-latest", "decide-latest"),
         ("decide-latest:", "decide-latest"),
         ("!autoresearch", "autoresearch"),
@@ -166,6 +168,7 @@ def _help_text() -> str:
             "!draft-notebook",
             "!refine-notebook",
             "!launch-iteration",
+            "!launch-batch",
             "!decide-latest",
             "!autoresearch",
             "!model-comparison",
@@ -539,6 +542,26 @@ def _dispatch(
             f"Launched autoresearch iteration '{iteration.get('iteration_id', 'n/a')}' "
             f"with run '{iteration.get('run_id', 'n/a')}'."
         )
+        return DispatchResponse(
+            matched=True,
+            forward_to_openclaw=False,
+            command=command,
+            response_text=response_text,
+            workflow_api_endpoint=endpoint,
+            payload=payload,
+        )
+
+    if command == "launch-batch":
+        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
+            settings, requester
+        )
+        endpoint, payload = requester(
+            settings,
+            f"/research-sessions/{session_id}/transitions/launch-autoresearch-batch",
+            method="POST",
+        )
+        launches = payload.get("launches") or []
+        response_text = f"Launched {len(launches)} autoresearch iteration(s) for the active campaign."
         return DispatchResponse(
             matched=True,
             forward_to_openclaw=False,

@@ -420,6 +420,16 @@ def get_next_launchable_methodology_draft(
     store: RunStore,
     campaign: AutoresearchCampaignRecord,
 ) -> MethodologyDraftRecord:
+    drafts = get_next_launchable_methodology_drafts(store, campaign, limit=1)
+    return drafts[0]
+
+
+def get_next_launchable_methodology_drafts(
+    store: RunStore,
+    campaign: AutoresearchCampaignRecord,
+    *,
+    limit: int,
+) -> list[MethodologyDraftRecord]:
     iterations = store.list_autoresearch_iterations(campaign.campaign_id)
     launched_ids = {record.child_methodology_draft_id for record in iterations}
     drafts = [
@@ -430,9 +440,10 @@ def get_next_launchable_methodology_draft(
     drafts.sort(key=lambda record: record.created_at)
     if not drafts:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='no pending methodology drafts remain')
-    if len(iterations) >= campaign.max_iterations:
+    remaining = campaign.max_iterations - len(iterations)
+    if remaining <= 0:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='campaign has reached max_iterations')
-    return drafts[0]
+    return drafts[: max(1, min(limit, remaining))]
 
 
 def _load_metrics_payload(settings: Settings, run_id: str) -> dict[str, Any]:

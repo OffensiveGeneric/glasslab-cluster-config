@@ -4798,6 +4798,65 @@ def test_autoresearch_launch_iteration_uses_method_spec_inputs(tmp_path) -> None
     assert payload['run']['manifest']['inputs']['validation_strategy'] == 'holdout'
 
 
+def test_autoresearch_launch_batch_returns_multiple_runs(tmp_path) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        artifacts_mount_path=str(tmp_path),
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Launch a bounded batch of methodology variants in parallel.'},
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Benchmark a bounded set of approved Titanic baselines and compare several small methodology variants.',
+            'source_refs': ['https://example.org/titanic-batch-note'],
+            'notes': ['Keep the batch launch deterministic and reviewable.'],
+        },
+    )
+    assert intake.status_code == 201
+
+    design = client.post('/design-drafts/from-latest-intake')
+    assert design.status_code == 201
+    design_payload = design.json()
+
+    reviewed = client.post(
+        f"/design-drafts/{design_payload['design_id']}/review",
+        json={
+            'resolved_inputs': {
+                'dataset_name': 'titanic',
+                'train_uri': 's3://datasets/titanic/train.csv',
+                'test_uri': 's3://datasets/titanic/test.csv',
+                'target_column': 'Survived',
+            },
+            'review_notes': ['Autoresearch batch launch fixture is ready for bounded validation.'],
+        },
+    )
+    assert reviewed.status_code == 200
+
+    campaign = client.post(f'/research-sessions/{session_id}/transitions/start-autoresearch-campaign')
+    assert campaign.status_code == 201
+    drafted = client.post(f'/research-sessions/{session_id}/transitions/draft-methodologies')
+    assert drafted.status_code == 201
+
+    launched = client.post(f'/research-sessions/{session_id}/transitions/launch-autoresearch-batch')
+    assert launched.status_code == 201
+    payload = launched.json()
+    launches = payload['launches']
+    assert len(launches) == 2
+    assert payload['campaign']['status'] == 'active'
+    assert all(item['run']['workflow_id'] == 'generic-tabular-benchmark' for item in launches)
+    assert all(item['iteration']['status'] == 'launched' for item in launches)
+
+
 def test_autoresearch_summary_refreshes_completed_iteration_without_decide(tmp_path) -> None:
     settings = Settings(
         registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),

@@ -14,6 +14,7 @@ from .autoresearch import (
     build_autoresearch_notebook,
     draft_initial_methodologies,
     get_campaign_iterations,
+    get_next_launchable_methodology_drafts,
     get_next_launchable_methodology_draft,
     get_required_campaign,
     methodology_to_run_request,
@@ -32,6 +33,8 @@ from .schemas import (
     AutoresearchDecisionRecord,
     AutoresearchDecisionResponse,
     AutoresearchDraftMethodologiesResponse,
+    AutoresearchLaunchBatchItem,
+    AutoresearchLaunchBatchResponse,
     AutoresearchIterationRecord,
     AutoresearchLaunchIterationResponse,
     AutoresearchNotebookDraftResponse,
@@ -213,6 +216,91 @@ def register_autoresearch_routes(
             methodology_draft=draft,
             iteration=iteration,
             run=run,
+            operation=operation,
+        )
+
+    @app.post(
+        '/autoresearch/campaigns/{campaign_id}/launch-next-batch',
+        response_model=AutoresearchLaunchBatchResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def campaign_launch_next_batch(campaign_id: str) -> AutoresearchLaunchBatchResponse:
+        started_at = datetime.now(timezone.utc)
+        campaign = get_required_campaign(store, campaign_id)
+        drafts = get_next_launchable_methodology_drafts(store, campaign, limit=2)
+        launches: list[AutoresearchLaunchBatchItem] = []
+        latest_iteration_id = campaign.latest_iteration_id
+        latest_methodology_draft_id = None
+        latest_run_id = None
+        for draft in drafts:
+            workflow = registry.get_workflow(draft.workflow_id)
+            if workflow is None:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='workflow registry entry not found')
+            run_request = methodology_to_run_request(draft, workflow)
+            run = create_run_record(
+                run_request,
+                workflow,
+                settings,
+                submitter,
+                store,
+                source_design_id=draft.source_design_id,
+                source_intake_id=draft.source_intake_id,
+                run_purpose='autoresearch-validation',
+                session_id=campaign.session_id,
+            )
+            score_summary = summarize_iteration_run(run, settings=settings, submitter=submitter)
+            iteration = AutoresearchIterationRecord(
+                iteration_id=uuid4().hex,
+                campaign_id=campaign.campaign_id,
+                parent_methodology_draft_id=draft.parent_methodology_draft_id,
+                child_methodology_draft_id=draft.methodology_draft_id,
+                run_id=run.run_id,
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+                status='launched',
+                score_summary=score_summary,
+                comparison_summary={},
+                decision=None,
+            )
+            store.save_autoresearch_iteration(iteration)
+            draft = draft.model_copy(update={'status': 'launched', 'updated_at': datetime.now(timezone.utc)})
+            store.save_methodology_draft(draft)
+            launches.append(
+                AutoresearchLaunchBatchItem(
+                    methodology_draft=draft,
+                    iteration=iteration,
+                    run=run,
+                )
+            )
+            latest_iteration_id = iteration.iteration_id
+            latest_methodology_draft_id = draft.methodology_draft_id
+            latest_run_id = run.run_id
+        campaign = campaign.model_copy(
+            update={
+                'status': 'active',
+                'updated_at': datetime.now(timezone.utc),
+                'latest_iteration_id': latest_iteration_id,
+            }
+        )
+        store.save_autoresearch_campaign(campaign)
+        touch_research_session(
+            store,
+            campaign.session_id,
+            latest_methodology_draft_id=latest_methodology_draft_id,
+            latest_autoresearch_iteration_id=latest_iteration_id,
+            latest_run_id=latest_run_id,
+        )
+        operation = record_operation(
+            store,
+            operation_type='autoresearch-launch-next-batch',
+            started_at=started_at,
+            status='completed',
+            session_id=campaign.session_id,
+            result_detail=f'Launched {len(launches)} autoresearch iteration(s) for campaign {campaign_id}.',
+        )
+        return AutoresearchLaunchBatchResponse(
+            campaign=campaign,
+            launches=launches,
             operation=operation,
         )
 
@@ -509,6 +597,26 @@ def register_autoresearch_routes(
         if session is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
         return transition_launch_session_autoresearch_iteration(session.session_id)
+
+    @app.post(
+        '/research-sessions/{session_id}/transitions/launch-autoresearch-batch',
+        response_model=AutoresearchLaunchBatchResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def transition_launch_session_autoresearch_batch(session_id: str) -> AutoresearchLaunchBatchResponse:
+        campaign = get_required_session_campaign(session_id)
+        return campaign_launch_next_batch(campaign.campaign_id)
+
+    @app.post(
+        '/research-sessions/latest/transitions/launch-autoresearch-batch',
+        response_model=AutoresearchLaunchBatchResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def transition_launch_latest_session_autoresearch_batch() -> AutoresearchLaunchBatchResponse:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return transition_launch_session_autoresearch_batch(session.session_id)
 
     @app.post(
         '/research-sessions/{session_id}/transitions/decide-autoresearch-latest',

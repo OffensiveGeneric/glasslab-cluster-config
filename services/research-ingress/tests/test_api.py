@@ -156,6 +156,43 @@ def test_inbound_handles_run_command() -> None:
     assert payload["router_payload"]["command"] == "run"
 
 
+def test_inbound_handles_launch_batch_command() -> None:
+    def fake_router(settings, message, submitted_by):
+        assert message == "!launch-batch"
+        assert submitted_by == "whatsapp:+15555550123"
+        return {
+            "matched": True,
+            "response_text": "Launched 2 autoresearch iteration(s) for the active campaign.",
+            "command": "launch-batch",
+            "workflow_api_endpoint": "http://workflow-api/research-sessions/latest/transitions/launch-autoresearch-batch",
+            "payload": {"launches": [{}, {}]},
+        }
+
+    import app.main as main_module
+
+    original = main_module._request_router
+    main_module._request_router = fake_router
+    try:
+        client = TestClient(create_app(settings=Settings()))
+        response = client.post(
+            "/inbound",
+            json={
+                "message": "!launch-batch",
+                "sender": "+15555550123",
+                "channel": "whatsapp",
+            },
+        )
+    finally:
+        main_module._request_router = original
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["handled"] is True
+    assert payload["forward_to_openclaw"] is False
+    assert payload["route"] == "deterministic-router"
+    assert payload["router_payload"]["command"] == "launch-batch"
+
+
 def test_inbound_surfaces_router_timeout_as_gateway_timeout() -> None:
     import app.main as main_module
 
