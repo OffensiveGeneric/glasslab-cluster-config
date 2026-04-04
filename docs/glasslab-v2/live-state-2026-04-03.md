@@ -8,9 +8,10 @@ can launch real runs without staging papers first.
 ## Live rollouts
 
 - `workflow-api` rolled live on `.44` as
-  `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.67-local`
+  `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.77-local`
 - `research-command-router` rolled live on `.44` as
-  `ghcr.io/offensivegeneric/glasslab-research-command-router:0.1.4`
+  `ghcr.io/offensivegeneric/glasslab-research-command-router:0.1.5-local`
+  and pinned to `node05` for the local-image path
 - local commits behind these rollouts:
   - `e080db0` `Prioritize technique cards over weak workflow hints`
   - `061ce19` `Let technique cards fill bounded run inputs`
@@ -67,8 +68,27 @@ is:
 - `!start-autoresearch`
 - `!draft-methodologies`
 - `!launch-iteration`
+- `!launch-batch`
 - `!decide-latest`
 - `!model-comparison`
+
+The new bounded parallel-launch path was also validated live through the actual
+chat command seam:
+
+- `!research replicate DreamSim visual similarity metric with PyTorch and timm`
+- `!design`
+- `!start-autoresearch`
+- `!draft-methodologies`
+- `!launch-batch`
+
+That path returned:
+
+- `route: deterministic-router`
+- `command: launch-batch`
+- `response_text: Launched 2 autoresearch iteration(s) for the active campaign.`
+- two accepted GPU run ids:
+  - `a452a9c9d4cb433388f6f9395eaac329`
+  - `b61663daf9124881b6fba7d4ca01ea7b`
 
 ## Meaning
 
@@ -115,7 +135,7 @@ Current live behavior on `.44`:
 
 - `gpu-experiment` uses
   `ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.4-local`
-- `workflow-api` is rolled to `0.1.73-local`
+- `workflow-api` is rolled to `0.1.77-local`
 - the runner emits `execution_readiness` instead of the old placeholder
 - readiness is broken into explicit components:
   - `target_alignment`
