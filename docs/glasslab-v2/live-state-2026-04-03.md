@@ -8,7 +8,7 @@ can launch real runs without staging papers first.
 ## Live rollouts
 
 - `workflow-api` rolled live on `.44` as
-  `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.82-local`
+  `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.83-local`
 - `research-command-router` rolled live on `.44` as
   `ghcr.io/offensivegeneric/glasslab-research-command-router:0.1.6-local`
   and pinned to `node05` for the local-image path
@@ -154,6 +154,9 @@ technique-contract score:
   - task contract
   - metric contract
   - objective/loss contract
+- the live workflow-api follow-on also needs to prefer the scored `best_model`
+  from a kept batch row when reporting `recommended_model`, instead of falling
+  back to the first single-template candidate
 
 ## Meaning
 

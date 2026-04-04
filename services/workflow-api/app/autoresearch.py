@@ -568,12 +568,15 @@ def build_model_comparison_rows(
         models = draft.candidate_models or draft.architectures or draft.baselines
         metric_name = iteration.score_summary.get('primary_metric_name')
         metric_value = iteration.score_summary.get('primary_metric_value')
+        metrics_payload = iteration.score_summary.get('metrics', {})
+        best_model = metrics_payload.get('best_model') if isinstance(metrics_payload, dict) else None
         decision = decision_by_iteration.get(iteration.iteration_id)
         rows.append(
             {
                 'iteration_id': iteration.iteration_id,
                 'methodology_draft_id': draft.methodology_draft_id,
                 'candidate_models': list(models),
+                'best_model': best_model,
                 'primary_metric_name': metric_name,
                 'primary_metric_value': metric_value,
                 'decision': decision.decision_type if decision is not None else iteration.decision,
@@ -646,6 +649,10 @@ def select_recommended_model(
     rows: list[dict[str, Any]],
     best_draft: MethodologyDraftRecord | None,
 ) -> str | None:
+    for row in rows:
+        best_model = str(row.get('best_model') or '').strip()
+        if row.get('decision') == 'keep' and best_model:
+            return best_model
     if best_draft is not None:
         models = best_draft.candidate_models or best_draft.architectures or best_draft.baselines
         if len(models) == 1:
