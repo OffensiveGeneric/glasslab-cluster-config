@@ -8,7 +8,7 @@ can launch real runs without staging papers first.
 ## Live rollouts
 
 - `workflow-api` rolled live on `.44` as
-  `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.83-local`
+  `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.84-local`
 - `research-command-router` rolled live on `.44` as
   `ghcr.io/offensivegeneric/glasslab-research-command-router:0.1.6-local`
   and pinned to `node05` for the local-image path
@@ -157,6 +157,15 @@ technique-contract score:
 - the live workflow-api follow-on also needs to prefer the scored `best_model`
   from a kept batch row when reporting `recommended_model`, instead of falling
   back to the first single-template candidate
+
+That follow-on is now validated live on `.44`:
+
+- `autoresearch-model-comparison` now returns:
+  - `recommended_model: vision_transformer`
+  - row `best_model: vision_transformer`
+  - row `primary_metric_name: bounded_method_score`
+  - row `primary_metric_value: 0.9688`
+- the previously incorrect fallback to `pytorch-template-v1` is no longer present
 
 ## Meaning
 
