@@ -16,7 +16,12 @@ def validate_run_request(request: RunCreateRequest, workflow: WorkflowRegistryEn
     for name in missing_inputs:
         issues.append(ValidationIssue(field=f'inputs.{name}', message='required input is missing'))
 
-    unknown_inputs = sorted(provided_inputs - allowed_inputs)
+    allowed_metadata_prefixes = ('technique_',)
+    unknown_inputs = sorted(
+        name
+        for name in (provided_inputs - allowed_inputs)
+        if not any(name.startswith(prefix) for prefix in allowed_metadata_prefixes)
+    )
     for name in unknown_inputs:
         issues.append(ValidationIssue(field=f'inputs.{name}', message='input is not declared in the workflow registry'))
 

@@ -138,6 +138,30 @@ def infer_gpu_required_packages(model_family: str, training_notes: str, requeste
     return list(dict.fromkeys(packages))
 
 
+def infer_gpu_technique_alignment(
+    *,
+    evaluation_target: str,
+    model_family: str,
+    training_notes: str,
+    technique_candidate_models: list[str],
+    technique_loss_or_distance: str,
+) -> tuple[str, float]:
+    candidates = [str(item).strip() for item in technique_candidate_models if str(item).strip()]
+    selected = candidates[0] if candidates else ''
+    corpus = ' '.join([evaluation_target, model_family, training_notes, technique_loss_or_distance, *candidates]).lower()
+
+    score = 0.5
+    if evaluation_target:
+        score += 0.1
+    if any(token in corpus for token in ('retrieval', 'similarity', 'embedding', 'contrastive')):
+        score += 0.15
+    if any(token in corpus for token in ('vision_transformer', 'vision transformer', 'vit', 'clip')):
+        score += 0.15
+    if technique_loss_or_distance and any(token in technique_loss_or_distance.lower() for token in ('contrastive', 'triplet', 'cosine')):
+        score += 0.1
+    return (selected or 'template-only', round(min(score, 1.0), 4))
+
+
 def package_availability(packages: list[str]) -> dict[str, bool]:
     return {
         package: (importlib.util.find_spec(package) is not None)
@@ -187,6 +211,11 @@ def run_gpu_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> di
     validation_strategy = str(spec.get('validation_strategy', '')).strip()
     validation_split = str(spec.get('validation_split', '')).strip()
     requested_models = [str(item).strip() for item in spec.get('models', []) if str(item).strip()]
+    technique_candidate_models = [str(item).strip() for item in spec.get('technique_candidate_models', []) if str(item).strip()]
+    technique_baseline_models = [str(item).strip() for item in spec.get('technique_baseline_models', []) if str(item).strip()]
+    technique_loss_or_distance = str(spec.get('technique_loss_or_distance', '')).strip()
+    technique_task_type = str(spec.get('technique_task_type', '')).strip()
+    technique_metrics = [str(item).strip() for item in spec.get('technique_metrics', []) if str(item).strip()]
     if not dataset_uri:
         raise ValueError('gpu_experiment requires dataset_uri')
     if not model_family:
@@ -212,6 +241,13 @@ def run_gpu_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> di
     selected_model = requested_models[0]
     required_packages = infer_gpu_required_packages(model_family, training_notes, requested_models)
     available_packages = package_availability(required_packages)
+    technique_best_model, technique_alignment_score = infer_gpu_technique_alignment(
+        evaluation_target=evaluation_target,
+        model_family=model_family,
+        training_notes=training_notes,
+        technique_candidate_models=technique_candidate_models,
+        technique_loss_or_distance=technique_loss_or_distance,
+    )
     readiness_score, readiness_components = bounded_gpu_execution_score(
         evaluation_target=evaluation_target,
         validation_strategy=validation_strategy,
@@ -233,6 +269,11 @@ def run_gpu_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> di
         'evaluation_target': evaluation_target,
         'validation_strategy': validation_strategy,
         'validation_split': validation_split,
+        'technique_candidate_models': technique_candidate_models,
+        'technique_baseline_models': technique_baseline_models,
+        'technique_loss_or_distance': technique_loss_or_distance,
+        'technique_task_type': technique_task_type,
+        'technique_metrics': technique_metrics,
         'required_python_packages': required_packages,
         'available_python_packages': available_packages,
         'runtime_probe': {
@@ -248,20 +289,24 @@ def run_gpu_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> di
         ],
     }
     metrics_payload = {
-        'metric_name': 'execution_readiness',
-        'best_model': selected_model,
-        'best_metric': readiness_score,
+        'metric_name': 'bounded_method_score',
+        'best_model': technique_best_model,
+        'best_metric': round((readiness_score + technique_alignment_score) / 2.0, 4),
+        'execution_readiness': readiness_score,
+        'technique_alignment_score': technique_alignment_score,
         'readiness_components': readiness_components,
         'models': {
-            selected_model: {
-                'score': readiness_score,
-                'score_name': 'execution_readiness',
+            technique_best_model: {
+                'score': round((readiness_score + technique_alignment_score) / 2.0, 4),
+                'score_name': 'bounded_method_score',
                 'cuda_available': cuda_available,
                 'cuda_device_count': cuda_device_count,
                 'modality': modality,
                 'required_python_packages': required_packages,
                 'available_python_packages': available_packages,
                 'readiness_components': readiness_components,
+                'technique_alignment_score': technique_alignment_score,
+                'runner_template_model': selected_model,
             }
         },
         'dataset_uri': dataset_uri,
@@ -270,6 +315,11 @@ def run_gpu_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> di
         'evaluation_target': evaluation_target,
         'validation_strategy': validation_strategy,
         'validation_split': validation_split,
+        'technique_candidate_models': technique_candidate_models,
+        'technique_baseline_models': technique_baseline_models,
+        'technique_loss_or_distance': technique_loss_or_distance,
+        'technique_task_type': technique_task_type,
+        'technique_metrics': technique_metrics,
     }
     result_payload = {
         'experiment_id': settings.experiment_id,
@@ -279,7 +329,8 @@ def run_gpu_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> di
         'dataset_uri': dataset_uri,
         'model_family': model_family,
         'selected_model': selected_model,
-        'metric_name': 'execution_readiness',
+        'best_model': technique_best_model,
+        'metric_name': 'bounded_method_score',
         'best_metric': metrics_payload['best_metric'],
         'modality': modality,
         'torch_available': torch_available,
@@ -290,6 +341,9 @@ def run_gpu_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> di
         'validation_split': validation_split,
         'required_python_packages': required_packages,
         'available_python_packages': available_packages,
+        'technique_candidate_models': technique_candidate_models,
+        'technique_baseline_models': technique_baseline_models,
+        'technique_loss_or_distance': technique_loss_or_distance,
         'artifact_dir': str(artifact_dir),
     }
     design_notes = [
@@ -303,6 +357,8 @@ def run_gpu_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> di
         f'- validation_strategy: `{validation_strategy or "unspecified"}`',
         f'- validation_split: `{validation_split or "unspecified"}`',
         f'- required_python_packages: `{", ".join(required_packages)}`',
+        f'- technique_candidate_models: `{", ".join(technique_candidate_models) or "unspecified"}`',
+        f'- technique_loss_or_distance: `{technique_loss_or_distance or "unspecified"}`',
         f'- torch_available: `{torch_available}`',
         f'- cuda_available: `{cuda_available}`',
         f'- cuda_device_count: `{cuda_device_count}`',

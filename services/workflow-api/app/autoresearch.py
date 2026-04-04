@@ -367,10 +367,22 @@ def methodology_to_run_request(
         if method_spec.blocking_reasons:
             detail += ': ' + '; '.join(method_spec.blocking_reasons[:2])
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
+    inputs = dict(method_spec.execution_inputs) if method_spec is not None else dict(draft.declared_inputs)
+    if method_spec is not None:
+        if method_spec.candidate_models:
+            inputs['technique_candidate_models'] = list(method_spec.candidate_models)
+        if method_spec.baseline_models:
+            inputs['technique_baseline_models'] = list(method_spec.baseline_models)
+        if method_spec.loss_or_distance:
+            inputs['technique_loss_or_distance'] = method_spec.loss_or_distance
+        if method_spec.task_type:
+            inputs['technique_task_type'] = method_spec.task_type
+        if method_spec.metrics:
+            inputs['technique_metrics'] = list(method_spec.metrics)
     return RunCreateRequest(
         workflow_id=draft.workflow_id,
         objective=draft.objective,
-        inputs=method_spec.execution_inputs if method_spec is not None else draft.declared_inputs,
+        inputs=inputs,
         models=resolve_requested_models_for_workflow(
             (method_spec.candidate_models if method_spec is not None and method_spec.candidate_models else draft.candidate_models)
             or draft.architectures

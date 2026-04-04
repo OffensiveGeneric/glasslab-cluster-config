@@ -4580,14 +4580,14 @@ def test_autoresearch_decision_uses_best_metric_payload(tmp_path) -> None:
         % run_id
     )
     (run_dir / 'metrics.json').write_text(
-        '{"metric_name":"execution_readiness","best_metric":0.9375,"required_python_packages":["torch","timm"]}'
+        '{"metric_name":"bounded_method_score","best_metric":0.9375,"required_python_packages":["torch","timm"]}'
     )
 
     decision = client.post(f'/autoresearch/campaigns/{campaign_id}/decide-latest')
     assert decision.status_code == 201
     decision_payload = decision.json()
     assert decision_payload['decision']['decision_type'] == 'keep'
-    assert decision_payload['iteration']['score_summary']['primary_metric_name'] == 'execution_readiness'
+    assert decision_payload['iteration']['score_summary']['primary_metric_name'] == 'bounded_method_score'
     assert decision_payload['iteration']['score_summary']['primary_metric_value'] == 0.9375
 
 
@@ -4667,7 +4667,7 @@ def test_autoresearch_decision_recomputes_stale_escalation(tmp_path) -> None:
         % run_id
     )
     (run_dir / 'metrics.json').write_text(
-        '{"metric_name":"execution_readiness","best_metric":0.9375}'
+        '{"metric_name":"bounded_method_score","best_metric":0.9375}'
     )
 
     second_decision = client.post(f'/autoresearch/campaigns/{campaign_id}/decide-latest')
@@ -4921,7 +4921,7 @@ def test_autoresearch_decide_ready_batch_records_multiple_decisions(tmp_path) ->
             % run_id
         )
         (run_dir / 'metrics.json').write_text(
-            '{"metric_name":"execution_readiness","best_metric":%s}' % score
+            '{"metric_name":"bounded_method_score","best_metric":%s}' % score
         )
 
     decided = client.post(f'/research-sessions/{session_id}/transitions/decide-autoresearch-batch')

@@ -137,14 +137,16 @@ def test_gpu_experiment_runner_generates_expected_artifacts(tmp_path) -> None:
     artifact_dir = tmp_path / 'gpu-test'
 
     assert result['modality'] == 'computer_vision'
-    assert result['metric_name'] == 'execution_readiness'
+    assert result['metric_name'] == 'bounded_method_score'
     assert result['evaluation_target'] == 'embedding retrieval auc'
     assert (artifact_dir / 'training_contract.json').exists()
     assert (artifact_dir / 'design_notes.md').exists()
     assert (artifact_dir / 'analysis_notebook.ipynb').exists()
     metrics = json.loads((artifact_dir / 'metrics.json').read_text())
-    assert metrics['metric_name'] == 'execution_readiness'
+    assert metrics['metric_name'] == 'bounded_method_score'
     assert metrics['evaluation_target'] == 'embedding retrieval auc'
+    assert metrics['execution_readiness'] >= 0.0
+    assert metrics['technique_alignment_score'] >= 0.0
     assert metrics['validation_strategy'] == 'stratified_holdout'
     assert 'readiness_components' in metrics
     assert set(metrics['readiness_components']) == {
