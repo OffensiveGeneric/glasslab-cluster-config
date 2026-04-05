@@ -82,7 +82,7 @@ build_import() {
   printf '[build-import-control-shell-images] copying %s to %s\n' "$image_ref" "$node_host"
   scp -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "$tar_path" "${NODE_USER}@${node_host}:${tar_path}" >/dev/null
   ssh -i "$NODE_SSH_KEY" -o StrictHostKeyChecking=accept-new "${NODE_USER}@${node_host}" \
-    "sudo -n ctr -n k8s.io images import '$tar_path' >/dev/null && rm -f '$tar_path'"
+    "sudo -n /usr/local/sbin/glasslab-import-k8s-image '$tar_path' >/dev/null && rm -f '$tar_path'"
 
   rm -f "$tar_path"
 }
