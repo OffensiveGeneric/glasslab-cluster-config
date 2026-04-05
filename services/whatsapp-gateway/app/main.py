@@ -59,6 +59,7 @@ class WhatsAppInboundRequest(BaseModel):
     sender: str = Field(min_length=1)
     channel: str | None = None
     message: str = ""
+    provider_message_id: str | None = None
     attachments: list[AttachmentRecord] = Field(default_factory=list)
 
     @field_validator("sender")
@@ -102,6 +103,7 @@ class SessionMessage(BaseModel):
     role: str
     message: str
     forwarded_message: str | None = None
+    provider_message_id: str | None = None
     attachments: list[AttachmentRecord] = Field(default_factory=list)
     route: str | None = None
     handled: bool | None = None
@@ -112,6 +114,30 @@ class SessionTranscriptResponse(BaseModel):
 
     session_key: str
     messages: list[SessionMessage]
+
+
+class ProviderWebhookRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str = Field(min_length=1)
+    provider_message_id: str = Field(min_length=1)
+    sender: str = Field(min_length=1)
+    text: str = ""
+    attachments: list[AttachmentRecord] = Field(default_factory=list)
+    channel: str | None = None
+
+    @field_validator("provider", "provider_message_id", "sender")
+    @classmethod
+    def validate_required_text(cls, value: str) -> str:
+        cleaned = " ".join(value.split()).strip()
+        if not cleaned:
+            raise ValueError("field must not be empty")
+        return cleaned
+
+    @field_validator("text")
+    @classmethod
+    def normalize_text(cls, value: str) -> str:
+        return " ".join(value.split()).strip()
 
 
 def _session_key(channel: str, sender: str) -> str:
@@ -132,6 +158,7 @@ def _append_message(
     role: str,
     message: str,
     forwarded_message: str | None = None,
+    provider_message_id: str | None = None,
     attachments: list[AttachmentRecord],
     route: str | None = None,
     handled: bool | None = None,
@@ -141,6 +168,7 @@ def _append_message(
         role=role,
         message=message,
         forwarded_message=forwarded_message,
+        provider_message_id=provider_message_id,
         attachments=attachments,
         route=route,
         handled=handled,
@@ -227,6 +255,24 @@ def _find_duplicate_response(
     return last_assistant
 
 
+def _find_response_for_provider_message_id(
+    messages: list[SessionMessage],
+    provider_message_id: str,
+) -> SessionMessage | None:
+    if not provider_message_id:
+        return None
+    for index in range(len(messages) - 1):
+        current = messages[index]
+        nxt = messages[index + 1]
+        if (
+            current.role == "user"
+            and current.provider_message_id == provider_message_id
+            and nxt.role == "assistant"
+        ):
+            return nxt
+    return None
+
+
 def _request_research_ingress(
     settings: Settings,
     *,
@@ -297,6 +343,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
 
         prior_messages = _load_messages(active_settings, session_key)
+        provider_message_id = (request.provider_message_id or "").strip() or None
+        if provider_message_id is not None:
+            provider_dedupe = _find_response_for_provider_message_id(
+                prior_messages,
+                provider_message_id,
+            )
+            if provider_dedupe is not None:
+                return InboundForwardResponse(
+                    handled=bool(provider_dedupe.handled),
+                    route=str(provider_dedupe.route or "provider-duplicate-suppressed"),
+                    response_text=provider_dedupe.message,
+                    forwarded_message=forwarded_message,
+                    session_key=session_key,
+                    router_payload={
+                        "duplicate_suppressed": True,
+                        "duplicate_scope": "provider_message_id",
+                        "provider_message_id": provider_message_id,
+                    },
+                )
         duplicate_response = _find_duplicate_response(
             prior_messages,
             raw_message=request.message,
@@ -319,6 +384,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             role="user",
             message=request.message,
             forwarded_message=forwarded_message,
+            provider_message_id=provider_message_id,
             attachments=request.attachments,
         )
         ingress_payload = _request_research_ingress(
@@ -345,6 +411,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             role="assistant",
             message=response_text,
             forwarded_message=None,
+            provider_message_id=None,
             attachments=[],
             route=str(ingress_payload.get("route") or ""),
             handled=bool(ingress_payload.get("handled")),
@@ -356,6 +423,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             forwarded_message=forwarded_message,
             session_key=session_key,
             router_payload=ingress_payload.get("router_payload"),
+        )
+
+    @app.post("/webhooks/whatsapp/provider", response_model=InboundForwardResponse)
+    def whatsapp_provider_webhook(
+        request: ProviderWebhookRequest,
+    ) -> InboundForwardResponse:
+        if request.provider.lower() != "whatsapp":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="unsupported provider",
+            )
+        return whatsapp_inbound(
+            WhatsAppInboundRequest(
+                sender=request.sender,
+                channel=request.channel or active_settings.default_channel,
+                message=request.text,
+                provider_message_id=request.provider_message_id,
+                attachments=request.attachments,
+            )
         )
 
     @app.get("/sessions/{channel}/{sender}", response_model=SessionTranscriptResponse)

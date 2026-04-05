@@ -230,3 +230,43 @@ def test_duplicate_attachment_driven_add_is_suppressed(tmp_path: Path) -> None:
         assert calls == ["!add-pdf https://example.org/paper.pdf"]
     finally:
         main_module._request_research_ingress = original
+
+
+def test_provider_message_id_duplicate_is_suppressed(tmp_path: Path) -> None:
+    import app.main as main_module
+
+    calls: list[str] = []
+
+    def fake_ingress(settings, *, message, sender, channel):
+        calls.append(message)
+        return {
+            "handled": True,
+            "route": "deterministic-router",
+            "response_text": "Created research session.",
+            "router_payload": {"command": "new-session"},
+        }
+
+    original = main_module._request_research_ingress
+    main_module._request_research_ingress = fake_ingress
+    try:
+        client = TestClient(create_app(settings=Settings(state_dir=str(tmp_path))))
+        payload = {
+            "provider": "whatsapp",
+            "provider_message_id": "wamid-123",
+            "sender": "+15555550123",
+            "text": "!new-session provider dedupe test",
+            "attachments": [],
+        }
+        first = client.post("/webhooks/whatsapp/provider", json=payload)
+        second = client.post("/webhooks/whatsapp/provider", json=payload)
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert calls == ["!new-session provider dedupe test"]
+        assert second.json()["router_payload"]["duplicate_scope"] == "provider_message_id"
+        transcript = client.get("/sessions/whatsapp/+15555550123")
+        assert transcript.status_code == 200
+        messages = transcript.json()["messages"]
+        assert len(messages) == 2
+        assert messages[0]["provider_message_id"] == "wamid-123"
+    finally:
+        main_module._request_research_ingress = original

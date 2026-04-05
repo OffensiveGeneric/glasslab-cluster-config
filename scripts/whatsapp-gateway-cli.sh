@@ -12,6 +12,8 @@ usage() {
 Usage:
   whatsapp-gateway-cli.sh inbound "<message>" [sender] [channel]
   whatsapp-gateway-cli.sh inbound-pdf "<pdf-url>" [message] [sender] [channel]
+  whatsapp-gateway-cli.sh provider "<provider_message_id>" "<message>" [sender] [channel]
+  whatsapp-gateway-cli.sh provider-pdf "<provider_message_id>" "<pdf-url>" [message] [sender] [channel]
   whatsapp-gateway-cli.sh session [sender] [channel]
   whatsapp-gateway-cli.sh healthz
 USAGE
@@ -122,6 +124,65 @@ payload = {
 }
 req = urllib.request.Request(
     "http://127.0.0.1:${LOCAL_PORT}/webhooks/whatsapp/inbound",
+    data=json.dumps(payload).encode("utf-8"),
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+with urllib.request.urlopen(req, timeout=180) as response:
+    print(json.dumps(json.loads(response.read().decode("utf-8")), indent=2))
+PY
+    ;;
+  provider)
+    [[ $# -ge 2 ]] || usage
+    provider_message_id="$1"
+    message="$2"
+    sender="${3:-$SENDER}"
+    channel="${4:-$CHANNEL}"
+    python3 - <<PY
+import json
+import urllib.request
+payload = {
+    "provider": "whatsapp",
+    "provider_message_id": ${provider_message_id@Q},
+    "sender": ${sender@Q},
+    "channel": ${channel@Q},
+    "text": ${message@Q},
+    "attachments": [],
+}
+req = urllib.request.Request(
+    "http://127.0.0.1:${LOCAL_PORT}/webhooks/whatsapp/provider",
+    data=json.dumps(payload).encode("utf-8"),
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+with urllib.request.urlopen(req, timeout=180) as response:
+    print(json.dumps(json.loads(response.read().decode("utf-8")), indent=2))
+PY
+    ;;
+  provider-pdf)
+    [[ $# -ge 2 ]] || usage
+    provider_message_id="$1"
+    pdf_url="$2"
+    message="${3:-}"
+    sender="${4:-$SENDER}"
+    channel="${5:-$CHANNEL}"
+    python3 - <<PY
+import json
+import urllib.request
+payload = {
+    "provider": "whatsapp",
+    "provider_message_id": ${provider_message_id@Q},
+    "sender": ${sender@Q},
+    "channel": ${channel@Q},
+    "text": ${message@Q},
+    "attachments": [{
+        "url": ${pdf_url@Q},
+        "mime_type": "application/pdf",
+        "filename": "attachment.pdf",
+    }],
+}
+req = urllib.request.Request(
+    "http://127.0.0.1:${LOCAL_PORT}/webhooks/whatsapp/provider",
     data=json.dumps(payload).encode("utf-8"),
     headers={"Content-Type": "application/json"},
     method="POST",

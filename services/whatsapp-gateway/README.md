@@ -22,6 +22,15 @@ Current contract:
 
 - `GET /healthz`
 - `POST /webhooks/whatsapp/inbound`
+- `POST /webhooks/whatsapp/provider`
 - `GET /sessions/{channel}/{sender}`
 
 The first slice is a bounded control-plane replacement, not a full chat shell.
+
+Provider-facing notes:
+
+- `POST /webhooks/whatsapp/provider` is the provider-oriented entrypoint for
+  WhatsApp-style webhook events.
+- provider retries can be suppressed by stable `provider_message_id`, so the
+  gateway can absorb duplicate delivery events without re-forwarding the same
+  PDF add or command turn to the backend.

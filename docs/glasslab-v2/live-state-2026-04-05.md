@@ -79,6 +79,8 @@ What the gateway does now:
 - receives WhatsApp-shaped inbound messages
 - stores minimal transcript state
 - converts PDF uploads into `!add-pdf` behavior when appropriate
+- accepts provider-facing WhatsApp webhook events through
+  `POST /webhooks/whatsapp/provider`
 - forwards deterministic commands directly to `research-ingress`
 - returns backend `response_text` directly
 
@@ -113,6 +115,30 @@ This fix is intentionally gateway-local:
 - no workflow-api change was required
 - no OpenClaw behavior is involved
 - the command/control shell now owns a basic idempotency boundary itself
+
+## Provider Webhook Dedupe
+
+The gateway now also supports a provider-oriented WhatsApp webhook shape:
+
+- `POST /webhooks/whatsapp/provider`
+
+Live validation on `.44` confirmed:
+
+- a provider event with a new `provider_message_id` is processed normally
+- a PDF-style provider event with a new `provider_message_id` adds the manual
+  PDF candidate normally
+- a repeated provider retry with the same `provider_message_id` is suppressed
+  before a second backend forward
+
+Observed response characteristics for the repeated provider retry:
+
+- `router_payload.duplicate_suppressed: true`
+- `router_payload.duplicate_scope: "provider_message_id"`
+- `router_payload.provider_message_id` echoed the retried provider ID
+
+The transcript for the validated sender showed only one user turn and one
+assistant reply for the PDF add tied to that provider message ID, proving the
+gateway absorbed the duplicate delivery event locally.
 
 ## Why This Still Matters
 
