@@ -223,7 +223,9 @@ async function startLiteratureSearchForGoal(
 }
 
 type RoutedUserIntent =
+  | "start-runner"
   | "start-literature-search"
+  | "runner-status"
   | "refresh-literature-queue"
   | "stage-next-paper"
   | "add-manual-paper"
@@ -240,13 +242,17 @@ type RoutedUserIntent =
   | "decide-latest"
   | "autoresearch-summary"
   | "model-comparison"
+  | "runner-compare"
+  | "next-runner-step"
   | "capture-note"
   | "latest-operation"
   | "help"
   | "unsupported";
 
 type ExplicitCommand =
+  | { command: "start"; argument: string }
   | { command: "research"; argument: string }
+  | { command: "status"; argument: "" }
   | { command: "more-papers"; argument: "" }
   | { command: "next-paper"; argument: "" }
   | { command: "add-paper"; argument: string }
@@ -263,6 +269,8 @@ type ExplicitCommand =
   | { command: "decide-latest"; argument: "" }
   | { command: "autoresearch"; argument: "" }
   | { command: "model-comparison"; argument: "" }
+  | { command: "compare"; argument: "" }
+  | { command: "next"; argument: "" }
   | { command: "note"; argument: string }
   | { command: "op"; argument: "" }
   | { command: "help"; argument: "" };
@@ -277,8 +285,14 @@ function parseExplicitCommand(message: string): ExplicitCommand | null {
   }
   const command = match[1].toLowerCase();
   const argument = (match[2] || "").trim();
+  if (command === "start") {
+    return { command: "start", argument };
+  }
   if (command === "research") {
     return { command: "research", argument };
+  }
+  if (command === "status") {
+    return { command: "status", argument: "" };
   }
   if (command === "more-papers" || command === "papers") {
     return { command: "more-papers", argument: "" };
@@ -328,6 +342,12 @@ function parseExplicitCommand(message: string): ExplicitCommand | null {
   if (command === "model-comparison") {
     return { command: "model-comparison", argument: "" };
   }
+  if (command === "compare") {
+    return { command: "compare", argument: "" };
+  }
+  if (command === "next") {
+    return { command: "next", argument: "" };
+  }
   if (command === "note") {
     return { command: "note", argument };
   }
@@ -342,7 +362,14 @@ function parseExplicitCommand(message: string): ExplicitCommand | null {
 
 function commandHelpText(): string {
   return [
-    "Supported research commands:",
+    "Primary runner commands:",
+    "!start <topic>      or  start: <topic>",
+    "!status             or  status:",
+    "!run                or  run:",
+    "!next               or  next:",
+    "!compare            or  compare:",
+    "",
+    "Debug commands:",
     "!research <topic>  or  research: <topic>",
     "!more-papers       or  papers:",
     "!next-paper        or  next-paper:",
@@ -374,8 +401,14 @@ function detectRoutedUserIntent(message: string): RoutedUserIntent {
 
   const explicitCommand = parseExplicitCommand(message);
   if (explicitCommand) {
+    if (explicitCommand.command === "start") {
+      return "start-runner";
+    }
     if (explicitCommand.command === "research") {
       return "start-literature-search";
+    }
+    if (explicitCommand.command === "status") {
+      return "runner-status";
     }
     if (explicitCommand.command === "more-papers") {
       return "refresh-literature-queue";
@@ -424,6 +457,12 @@ function detectRoutedUserIntent(message: string): RoutedUserIntent {
     }
     if (explicitCommand.command === "model-comparison") {
       return "model-comparison";
+    }
+    if (explicitCommand.command === "compare") {
+      return "runner-compare";
+    }
+    if (explicitCommand.command === "next") {
+      return "next-runner-step";
     }
     if (explicitCommand.command === "note") {
       return "capture-note";
@@ -721,6 +760,20 @@ async function requestJson(
   }
 
   return { endpoint, payload };
+}
+
+async function getLatestSessionId(api: any): Promise<string> {
+  const { payload } = await requestJson(api, "/research-sessions/latest/context");
+  const sessionId = String(payload?.session?.session_id || "").trim();
+  if (!sessionId) {
+    throw new Error("research session not found");
+  }
+  return sessionId;
+}
+
+function isMissingCampaignError(error: unknown): boolean {
+  const detail = extractWorkflowApiErrorDetail(error).toLowerCase();
+  return detail.includes("campaign") || detail.includes("autoresearch");
 }
 
 async function appendAuditEvent(event: Record<string, unknown>): Promise<void> {
@@ -1319,6 +1372,36 @@ const plugin = {
           const routedIntent = detectRoutedUserIntent(latestUserMessage);
           const explicitCommand = parseExplicitCommand(latestUserMessage);
           try {
+            if (routedIntent === "start-runner") {
+              const goalStatement =
+                explicitCommand?.command === "start" && explicitCommand.argument
+                  ? explicitCommand.argument
+                  : "";
+              if (!goalStatement || goalStatement.length < 12) {
+                return buildJsonResult({
+                  routed_intent: routedIntent,
+                  status: "needs-input",
+                  detail: "use !start <topic> or start: <topic>"
+                });
+              }
+              const result = await startLiteratureSearchForGoal(api, goalStatement);
+              await appendAuditEvent({
+                tool: "workflow_api_dispatch_latest_user_message",
+                status: "ok",
+                routed_intent: routedIntent,
+                session_id: result.session?.session_id ?? null,
+                queue_id: result.queue?.queue_id ?? null,
+                goal_excerpt: result.goalStatement.slice(0, 160)
+              });
+              return buildJsonResult({
+                routed_intent: routedIntent,
+                goal_statement: result.goalStatement,
+                session: result.session,
+                research_problem: result.researchProblem,
+                paper_intake_queue: result.queue
+              });
+            }
+
             if (routedIntent === "start-literature-search") {
               const goalStatement =
                 explicitCommand?.command === "research" && explicitCommand.argument
@@ -1489,6 +1572,32 @@ const plugin = {
                 routed_intent: routedIntent,
                 endpoint,
                 session_context: payload
+              });
+            }
+
+            if (routedIntent === "runner-status") {
+              const { endpoint, payload } = await requestJson(api, "/research-sessions/latest/context");
+              let autoresearchSummary: any = null;
+              try {
+                const summaryResult = await requestJson(api, "/research-sessions/latest/autoresearch-summary");
+                autoresearchSummary = summaryResult.payload;
+              } catch (error) {
+                if (!isMissingCampaignError(error)) {
+                  throw error;
+                }
+              }
+              await appendAuditEvent({
+                tool: "workflow_api_dispatch_latest_user_message",
+                status: "ok",
+                routed_intent: routedIntent,
+                endpoint,
+                session_id: payload?.session?.session_id ?? null
+              });
+              return buildJsonResult({
+                routed_intent: routedIntent,
+                endpoint,
+                session_context: payload,
+                autoresearch_summary: autoresearchSummary
               });
             }
 
@@ -1665,6 +1774,97 @@ const plugin = {
                 endpoint
               });
               return buildJsonResult({ routed_intent: routedIntent, endpoint, model_comparison: payload });
+            }
+
+            if (routedIntent === "runner-compare") {
+              try {
+                const { endpoint, payload } = await requestJson(api, "/research-sessions/latest/autoresearch-model-comparison");
+                await appendAuditEvent({
+                  tool: "workflow_api_dispatch_latest_user_message",
+                  status: "ok",
+                  routed_intent: routedIntent,
+                  endpoint
+                });
+                return buildJsonResult({ routed_intent: routedIntent, endpoint, model_comparison: payload });
+              } catch (error) {
+                if (!isMissingCampaignError(error)) {
+                  throw error;
+                }
+                await appendAuditEvent({
+                  tool: "workflow_api_dispatch_latest_user_message",
+                  status: "ok",
+                  routed_intent: routedIntent,
+                  detail: "no autoresearch campaign yet"
+                });
+                return buildJsonResult({
+                  routed_intent: routedIntent,
+                  status: "no-campaign",
+                  detail: "No autoresearch campaign yet. Use !next after !run to start one."
+                });
+              }
+            }
+
+            if (routedIntent === "next-runner-step") {
+              let campaignExists = true;
+              try {
+                await requestJson(api, "/research-sessions/latest/autoresearch-summary");
+              } catch (error) {
+                if (isMissingCampaignError(error)) {
+                  campaignExists = false;
+                } else {
+                  throw error;
+                }
+              }
+
+              if (!campaignExists) {
+                const draftResult = await requestJson(
+                  api,
+                  "/research-sessions/latest/transitions/draft-methodologies",
+                  { method: "POST" }
+                );
+                const launchResult = await requestJson(
+                  api,
+                  "/research-sessions/latest/transitions/launch-autoresearch-batch",
+                  { method: "POST" }
+                );
+                await appendAuditEvent({
+                  tool: "workflow_api_dispatch_latest_user_message",
+                  status: "ok",
+                  routed_intent: routedIntent,
+                  endpoint: launchResult.endpoint
+                });
+                return buildJsonResult({
+                  routed_intent: routedIntent,
+                  draft_endpoint: draftResult.endpoint,
+                  launch_endpoint: launchResult.endpoint,
+                  methodology_drafts: draftResult.payload,
+                  launch_batch: launchResult.payload
+                });
+              }
+
+              const decideResult = await requestJson(
+                api,
+                "/research-sessions/latest/transitions/decide-autoresearch-batch",
+                { method: "POST" }
+              );
+              const launchResult = await requestJson(
+                api,
+                "/research-sessions/latest/transitions/launch-autoresearch-batch",
+                { method: "POST" }
+              );
+              await appendAuditEvent({
+                tool: "workflow_api_dispatch_latest_user_message",
+                status: "ok",
+                routed_intent: routedIntent,
+                endpoint: launchResult.endpoint
+              });
+              return buildJsonResult({
+                routed_intent: routedIntent,
+                decide_endpoint: decideResult.endpoint,
+                launch_endpoint: launchResult.endpoint,
+                batch_decision: decideResult.payload,
+                launch_batch: launchResult.payload
+              });
             }
 
             if (routedIntent === "capture-note") {

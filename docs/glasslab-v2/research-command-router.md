@@ -7,6 +7,11 @@ directly.
 
 Current commands:
 
+- `!start <topic>`
+- `!status`
+- `!run`
+- `!next`
+- `!compare`
 - `!research <topic>`
 - `!more-papers`
 - `!next-paper`
@@ -15,6 +20,15 @@ Current commands:
 - `!note <text>`
 - `!op`
 - `!help`
+
+Recommended primary runner flow:
+
+- `!start <topic>`
+- `!run`
+- `!next`
+- `!compare`
+
+The older granular commands remain available for debugging and operator control.
 
 Current contract:
 

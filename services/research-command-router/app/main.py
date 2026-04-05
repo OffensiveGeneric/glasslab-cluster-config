@@ -97,8 +97,12 @@ def _parse_command(message: str) -> tuple[str, str] | None:
         return None
     lowered = text.lower()
     prefixes = [
+        ("!start", "start"),
+        ("start:", "start"),
         ("!research", "research"),
         ("research:", "research"),
+        ("!status", "status"),
+        ("status:", "status"),
         ("!more-papers", "more-papers"),
         ("papers:", "more-papers"),
         ("!next-paper", "next-paper"),
@@ -135,6 +139,10 @@ def _parse_command(message: str) -> tuple[str, str] | None:
         ("autoresearch:", "autoresearch"),
         ("!model-comparison", "model-comparison"),
         ("model-comparison:", "model-comparison"),
+        ("!compare", "compare"),
+        ("compare:", "compare"),
+        ("!next", "next"),
+        ("next:", "next"),
         ("!note", "note"),
         ("note:", "note"),
         ("!op", "op"),
@@ -155,7 +163,14 @@ def _parse_command(message: str) -> tuple[str, str] | None:
 def _help_text() -> str:
     return "\n".join(
         [
-            "Supported research commands:",
+            "Primary runner commands:",
+            "!start <topic>",
+            "!status",
+            "!run",
+            "!next",
+            "!compare",
+            "",
+            "Debug commands:",
             "!research <topic>",
             "!more-papers",
             "!next-paper",
@@ -207,6 +222,19 @@ def _summarize_queue(payload: dict[str, Any]) -> str:
     )
 
 
+def _http_detail_text(exc: HTTPException) -> str:
+    if isinstance(exc.detail, str):
+        return exc.detail
+    return json.dumps(exc.detail, sort_keys=True)
+
+
+def _is_missing_campaign_error(exc: HTTPException) -> bool:
+    if exc.status_code != status.HTTP_404_NOT_FOUND:
+        return False
+    detail = _http_detail_text(exc).lower()
+    return "campaign" in detail or "autoresearch" in detail
+
+
 def _dispatch(
     request: DispatchRequest,
     settings: Settings,
@@ -231,11 +259,11 @@ def _dispatch(
             response_text=_help_text(),
         )
 
-    if command == "research":
+    if command in {"start", "research"}:
         if len(argument) < 12:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="!research needs a concrete topic after the command",
+                detail=f"!{command} needs a concrete topic after the command",
             )
         endpoint, payload = requester(
             settings,
@@ -335,7 +363,7 @@ def _dispatch(
             payload=payload,
         )
 
-    if command == "session":
+    if command in {"status", "session"}:
         endpoint, payload = requester(settings, "/research-sessions/latest/context")
         session = payload.get("session") or {}
         queue = payload.get("paper_intake_queue") or {}
@@ -344,6 +372,23 @@ def _dispatch(
             f"Goal: {session.get('goal_statement', 'n/a')}. "
             f"Queue status: {queue.get('status', 'none')} with {len(queue.get('candidates') or [])} candidate(s)."
         )
+        try:
+            _context_endpoint, _context_payload, session_id = _get_latest_session_id(
+                settings, requester
+            )
+            _summary_endpoint, summary_payload = requester(
+                settings,
+                f"/research-sessions/{session_id}/autoresearch-summary",
+            )
+            campaign = summary_payload.get("campaign") or {}
+            iterations = summary_payload.get("iterations") or []
+            response_text += (
+                f" Autoresearch campaign: {campaign.get('status', 'active')} "
+                f"with {len(iterations)} iteration(s)."
+            )
+        except HTTPException as exc:
+            if not _is_missing_campaign_error(exc):
+                raise
         return DispatchResponse(
             matched=True,
             forward_to_openclaw=False,
@@ -638,14 +683,24 @@ def _dispatch(
             payload=payload,
         )
 
-    if command == "model-comparison":
+    if command in {"compare", "model-comparison"}:
         _context_endpoint, _context_payload, session_id = _get_latest_session_id(
             settings, requester
         )
-        endpoint, payload = requester(
-            settings,
-            f"/research-sessions/{session_id}/autoresearch-model-comparison",
-        )
+        try:
+            endpoint, payload = requester(
+                settings,
+                f"/research-sessions/{session_id}/autoresearch-model-comparison",
+            )
+        except HTTPException as exc:
+            if _is_missing_campaign_error(exc):
+                return DispatchResponse(
+                    matched=True,
+                    forward_to_openclaw=False,
+                    command=command,
+                    response_text="No autoresearch campaign yet. Use !next after !run to start one.",
+                )
+            raise
         comparison = payload.get("model_comparison") or []
         response_text = (
             f"Model comparison is ready with {len(comparison)} compared candidate(s). "
@@ -658,6 +713,79 @@ def _dispatch(
             response_text=response_text,
             workflow_api_endpoint=endpoint,
             payload=payload,
+        )
+
+    if command == "next":
+        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
+            settings, requester
+        )
+        campaign_exists = True
+        try:
+            requester(
+                settings,
+                f"/research-sessions/{session_id}/autoresearch-summary",
+            )
+        except HTTPException as exc:
+            if _is_missing_campaign_error(exc):
+                campaign_exists = False
+            else:
+                raise
+
+        if not campaign_exists:
+            drafted_endpoint, drafted_payload = requester(
+                settings,
+                f"/research-sessions/{session_id}/transitions/draft-methodologies",
+                method="POST",
+            )
+            launch_endpoint, launch_payload = requester(
+                settings,
+                f"/research-sessions/{session_id}/transitions/launch-autoresearch-batch",
+                method="POST",
+            )
+            drafts = drafted_payload.get("methodology_drafts") or []
+            launches = launch_payload.get("launches") or []
+            return DispatchResponse(
+                matched=True,
+                forward_to_openclaw=False,
+                command=command,
+                response_text=(
+                    f"Started autoresearch, drafted {len(drafts)} variant(s), "
+                    f"and launched {len(launches)} iteration(s)."
+                ),
+                workflow_api_endpoint=launch_endpoint,
+                payload={
+                    "drafted": drafted_payload,
+                    "launch": launch_payload,
+                    "draft_endpoint": drafted_endpoint,
+                },
+            )
+
+        decide_endpoint, decide_payload = requester(
+            settings,
+            f"/research-sessions/{session_id}/transitions/decide-autoresearch-batch",
+            method="POST",
+        )
+        launch_endpoint, launch_payload = requester(
+            settings,
+            f"/research-sessions/{session_id}/transitions/launch-autoresearch-batch",
+            method="POST",
+        )
+        decisions = decide_payload.get("decisions") or []
+        launches = launch_payload.get("launches") or []
+        return DispatchResponse(
+            matched=True,
+            forward_to_openclaw=False,
+            command=command,
+            response_text=(
+                f"Recorded {len(decisions)} completed decision(s) and launched "
+                f"{len(launches)} next iteration(s)."
+            ),
+            workflow_api_endpoint=launch_endpoint,
+            payload={
+                "decide": decide_payload,
+                "launch": launch_payload,
+                "decide_endpoint": decide_endpoint,
+            },
         )
 
     if command == "note":

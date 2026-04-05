@@ -10,6 +10,7 @@ def test_help_command_returns_local_text() -> None:
     payload = response.json()
     assert payload["matched"] is True
     assert payload["forward_to_openclaw"] is False
+    assert "!start <topic>" in payload["response_text"]
     assert "!research <topic>" in payload["response_text"]
 
 
@@ -33,6 +34,30 @@ def test_research_command_calls_start_endpoint() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["command"] == "research"
+    assert "Started literature search" in payload["response_text"]
+    assert len(calls) == 1
+
+
+def test_start_command_alias_calls_start_endpoint() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        assert path == "/research-sessions/start-literature-search"
+        assert method == "POST"
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {
+                "session": {"title": "Artist Similarity"},
+                "paper_intake_queue": {"candidates": [], "coverage_summary": {"mode": "external"}},
+            },
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!start artist similarity metric learning"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["command"] == "start"
     assert "Started literature search" in payload["response_text"]
     assert len(calls) == 1
 
@@ -166,6 +191,97 @@ def test_autoresearch_summary_command_routes_to_summary_endpoint() -> None:
     assert payload["command"] == "autoresearch"
     assert calls[0][0] == "/research-sessions/latest/context"
     assert calls[1][0] == "/research-sessions/session-123/autoresearch-summary"
+
+
+def test_status_command_adds_campaign_summary_when_present() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        if path == "/research-sessions/latest/context":
+            return (
+                f"{settings.workflow_api_url}{path}",
+                {
+                    "session": {"session_id": "session-123", "title": "DreamSim", "goal_statement": "replicate dreamsim"},
+                    "paper_intake_queue": {"status": "ready", "candidates": [{"id": "a"}]},
+                },
+            )
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {"campaign": {"status": "active"}, "iterations": [{}, {}]},
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!status"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["command"] == "status"
+    assert "Autoresearch campaign: active with 2 iteration(s)." in payload["response_text"]
+
+
+def test_compare_command_returns_helpful_text_without_campaign() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        if path == "/research-sessions/latest/context":
+            return (f"{settings.workflow_api_url}{path}", {"session": {"session_id": "session-123"}})
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="autoresearch campaign not found")
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!compare"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["command"] == "compare"
+    assert "No autoresearch campaign yet" in payload["response_text"]
+
+
+def test_next_command_bootstraps_campaign_and_launches_batch() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        if path == "/research-sessions/latest/context":
+            return (f"{settings.workflow_api_url}{path}", {"session": {"session_id": "session-123"}})
+        if path.endswith("/autoresearch-summary"):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="autoresearch campaign not found")
+        if path.endswith("/draft-methodologies"):
+            return (f"{settings.workflow_api_url}{path}", {"methodology_drafts": [{}, {}, {}]})
+        if path.endswith("/launch-autoresearch-batch"):
+            return (f"{settings.workflow_api_url}{path}", {"launches": [{}, {}]})
+        raise AssertionError(path)
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!next"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["command"] == "next"
+    assert "Started autoresearch, drafted 3 variant(s), and launched 2 iteration(s)." == payload["response_text"]
+
+
+def test_next_command_decides_and_launches_when_campaign_exists() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        if path == "/research-sessions/latest/context":
+            return (f"{settings.workflow_api_url}{path}", {"session": {"session_id": "session-123"}})
+        if path.endswith("/autoresearch-summary"):
+            return (f"{settings.workflow_api_url}{path}", {"campaign": {"campaign_id": "camp-123"}})
+        if path.endswith("/decide-autoresearch-batch"):
+            return (f"{settings.workflow_api_url}{path}", {"decisions": [{}, {}]})
+        if path.endswith("/launch-autoresearch-batch"):
+            return (f"{settings.workflow_api_url}{path}", {"launches": [{}]})
+        raise AssertionError(path)
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!next"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["command"] == "next"
+    assert "Recorded 2 completed decision(s) and launched 1 next iteration(s)." == payload["response_text"]
 
 
 def test_start_autoresearch_resolves_session_before_transition() -> None:

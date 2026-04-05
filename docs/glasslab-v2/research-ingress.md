@@ -58,6 +58,11 @@ Examples:
 
 Important deterministic commands currently covered by the repo-owned ingress path:
 
+- `!start <topic>`
+- `!status`
+- `!run`
+- `!next`
+- `!compare`
 - `!research <topic>`
 - `!more-papers`
 - `!next-paper`
@@ -113,7 +118,16 @@ Operational note from the 2026-04-03 live validation:
 - `!decide-latest` now records a durable decision after the launched run
   completes and metrics are available
 
-Current runner-first sequence:
+Primary runner-first sequence:
+
+```text
+!start replicate DreamSim visual similarity metric with PyTorch and timm
+!run
+!next
+!compare
+```
+
+Granular debug sequence remains available:
 
 ```text
 !research replicate DreamSim visual similarity metric with PyTorch and timm
