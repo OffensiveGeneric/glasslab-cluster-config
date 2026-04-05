@@ -26,7 +26,12 @@ The active product is `glasslab-v2`, centered on:
 - `workflow-registry`: approved workflow templates
 - `runner`: bounded execution on the cluster
 - `research-command-router` and `research-ingress`: deterministic command seam
-- `openclaw-config`: the chat shell, kept thin
+- a repo-owned WhatsApp/control ingress
+
+OpenClaw is no longer treated as core to the critical experiment-runner path.
+It may remain useful later as an optional conversational surface, but the
+near-term product direction is to keep command/control deterministic and
+backend-owned.
 
 The main loop we are building is:
 
@@ -85,6 +90,7 @@ If you want the current architecture and direction:
 - [docs/glasslab-v2/bounded-experiment-runner-priority.md](docs/glasslab-v2/bounded-experiment-runner-priority.md)
 - [docs/glasslab-v2/runner-first-technique-knowledge-plan.md](docs/glasslab-v2/runner-first-technique-knowledge-plan.md)
 - [docs/glasslab-v2/technique-catalog.md](docs/glasslab-v2/technique-catalog.md)
+- [docs/glasslab-v2/openclaw-deprecation-and-custom-whatsapp-plan.md](docs/glasslab-v2/openclaw-deprecation-and-custom-whatsapp-plan.md)
 - [docs/glasslab-v2/live-state-2026-04-03.md](docs/glasslab-v2/live-state-2026-04-03.md)
 
 If you want the concrete first target problem:
