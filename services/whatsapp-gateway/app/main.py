@@ -8,9 +8,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib import error as urllib_error
+from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Query, status
+from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -34,6 +36,23 @@ class Settings:
     default_channel: str = os.environ.get(
         "GLASSLAB_WHATSAPP_GATEWAY_DEFAULT_CHANNEL",
         "whatsapp",
+    )
+    gateway_base_url: str = os.environ.get(
+        "GLASSLAB_WHATSAPP_GATEWAY_BASE_URL",
+        "http://glasslab-whatsapp-gateway.glasslab-v2.svc.cluster.local:8097",
+    )
+    meta_verify_token: str | None = os.environ.get(
+        "GLASSLAB_WHATSAPP_GATEWAY_META_VERIFY_TOKEN"
+    )
+    meta_access_token: str | None = os.environ.get(
+        "GLASSLAB_WHATSAPP_GATEWAY_META_ACCESS_TOKEN"
+    )
+    meta_phone_number_id: str | None = os.environ.get(
+        "GLASSLAB_WHATSAPP_GATEWAY_META_PHONE_NUMBER_ID"
+    )
+    meta_graph_api_base_url: str = os.environ.get(
+        "GLASSLAB_WHATSAPP_GATEWAY_META_GRAPH_API_BASE_URL",
+        "https://graph.facebook.com/v23.0",
     )
 
 
@@ -94,6 +113,8 @@ class HealthResponse(BaseModel):
     research_ingress_url: str
     state_dir: str
     timeout_seconds: int
+    meta_verify_enabled: bool
+    meta_send_enabled: bool
 
 
 class SessionMessage(BaseModel):
@@ -139,6 +160,16 @@ class ProviderWebhookRequest(BaseModel):
     @classmethod
     def normalize_text(cls, value: str) -> str:
         return " ".join(value.split()).strip()
+
+
+class MetaWebhookResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    handled: bool
+    provider: str
+    processed_messages: int
+    ignored_events: int
+    results: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def _session_key(channel: str, sender: str) -> str:
@@ -347,6 +378,272 @@ def _request_research_ingress(
         )
 
 
+def _meta_graph_endpoint(settings: Settings, path: str) -> str:
+    return f"{settings.meta_graph_api_base_url.rstrip('/')}/{path.lstrip('/')}"
+
+
+def _meta_headers(settings: Settings) -> dict[str, str]:
+    token = (settings.meta_access_token or "").strip()
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="meta access token is not configured",
+        )
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _meta_request_json(
+    settings: Settings,
+    path: str,
+    *,
+    method: str = "GET",
+    body: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    endpoint = _meta_graph_endpoint(settings, path)
+    data = None
+    headers = {
+        "Accept": "application/json",
+        **_meta_headers(settings),
+    }
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    req = urllib_request.Request(endpoint, data=data, method=method, headers=headers)
+    try:
+        with urllib_request.urlopen(req, timeout=settings.timeout_seconds) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib_error.HTTPError as exc:
+        try:
+            detail = json.loads(exc.read().decode("utf-8"))
+        except Exception:
+            detail = {"detail": exc.reason}
+        raise HTTPException(status_code=exc.code, detail=detail)
+    except urllib_error.URLError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"meta graph api unreachable: {exc.reason}",
+        )
+    except (TimeoutError, socket.timeout):
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="meta graph api timed out",
+        )
+
+
+def _fetch_meta_media_content(
+    settings: Settings,
+    media_id: str,
+) -> tuple[bytes, str | None, str | None]:
+    metadata = _meta_request_json(settings, media_id)
+    media_url = str(metadata.get("url") or "").strip()
+    if not media_url:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="meta media url missing",
+        )
+    req = urllib_request.Request(
+        media_url,
+        method="GET",
+        headers=_meta_headers(settings),
+    )
+    try:
+        with urllib_request.urlopen(req, timeout=settings.timeout_seconds) as response:
+            content_type = response.headers.get("Content-Type")
+            filename = None
+            content_disposition = response.headers.get("Content-Disposition") or ""
+            if "filename=" in content_disposition:
+                filename = content_disposition.split("filename=", 1)[1].strip().strip('"')
+            return response.read(), content_type, filename
+    except urllib_error.HTTPError as exc:
+        raise HTTPException(status_code=exc.code, detail=f"meta media fetch failed: {exc.reason}")
+    except urllib_error.URLError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"meta media unreachable: {exc.reason}",
+        )
+    except (TimeoutError, socket.timeout):
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="meta media fetch timed out",
+        )
+
+
+def _send_meta_text_reply(settings: Settings, *, recipient: str, text: str) -> dict[str, Any]:
+    phone_number_id = str(settings.meta_phone_number_id or "").strip()
+    if not phone_number_id:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="meta phone number id is not configured",
+        )
+    body = {
+        "messaging_product": "whatsapp",
+        "to": recipient,
+        "type": "text",
+        "text": {"preview_url": False, "body": text},
+    }
+    return _meta_request_json(settings, f"{phone_number_id}/messages", method="POST", body=body)
+
+
+def _meta_attachment_record(settings: Settings, document: dict[str, Any]) -> AttachmentRecord | None:
+    media_id = str(document.get("id") or "").strip()
+    if not media_id:
+        return None
+    base = settings.gateway_base_url.rstrip("/")
+    return AttachmentRecord(
+        url=f"{base}/attachments/meta/{urllib_parse.quote(media_id, safe='')}",
+        mime_type=str(document.get("mime_type") or "").strip() or None,
+        filename=str(document.get("filename") or "").strip() or None,
+    )
+
+
+def _meta_webhook_requests(settings: Settings, payload: dict[str, Any]) -> tuple[list[ProviderWebhookRequest], int]:
+    requests: list[ProviderWebhookRequest] = []
+    ignored_events = 0
+    for entry in payload.get("entry") or []:
+        for change in entry.get("changes") or []:
+            value = change.get("value") or {}
+            for message in value.get("messages") or []:
+                sender = str(message.get("from") or "").strip()
+                provider_message_id = str(message.get("id") or "").strip()
+                if not sender or not provider_message_id:
+                    ignored_events += 1
+                    continue
+                message_type = str(message.get("type") or "").strip().lower()
+                text = ""
+                attachments: list[AttachmentRecord] = []
+                if message_type == "text":
+                    text = str((message.get("text") or {}).get("body") or "").strip()
+                elif message_type == "document":
+                    document = message.get("document") or {}
+                    attachment = _meta_attachment_record(settings, document)
+                    if attachment is None:
+                        ignored_events += 1
+                        continue
+                    attachments = [attachment]
+                    text = str(document.get("caption") or "").strip()
+                else:
+                    ignored_events += 1
+                    continue
+                requests.append(
+                    ProviderWebhookRequest(
+                        provider="whatsapp",
+                        provider_message_id=provider_message_id,
+                        sender=sender,
+                        text=text,
+                        attachments=attachments,
+                        channel=settings.default_channel,
+                    )
+                )
+    return requests, ignored_events
+
+
+def _handle_inbound(
+    active_settings: Settings,
+    request: WhatsAppInboundRequest,
+) -> InboundForwardResponse:
+    channel = request.channel or active_settings.default_channel
+    session_key = _session_key(channel, request.sender)
+    forwarded_message = _augment_message_for_attachments(request)
+    if not forwarded_message:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="message is empty and no supported attachment action could be inferred",
+        )
+
+    prior_messages = _load_messages(active_settings, session_key)
+    pinned_session_id = _latest_workflow_session_id(prior_messages)
+    provider_message_id = (request.provider_message_id or "").strip() or None
+    if provider_message_id is not None:
+        provider_dedupe = _find_response_for_provider_message_id(
+            prior_messages,
+            provider_message_id,
+        )
+        if provider_dedupe is not None:
+            return InboundForwardResponse(
+                handled=bool(provider_dedupe.handled),
+                route=str(provider_dedupe.route or "provider-duplicate-suppressed"),
+                response_text=provider_dedupe.message,
+                forwarded_message=forwarded_message,
+                session_key=session_key,
+                router_payload={
+                    "duplicate_suppressed": True,
+                    "duplicate_scope": "provider_message_id",
+                    "provider_message_id": provider_message_id,
+                },
+            )
+    duplicate_response = _find_duplicate_response(
+        prior_messages,
+        raw_message=request.message,
+        forwarded_message=forwarded_message,
+        attachments=request.attachments,
+    )
+    if duplicate_response is not None:
+        return InboundForwardResponse(
+            handled=bool(duplicate_response.handled),
+            route=str(duplicate_response.route or "duplicate-suppressed"),
+            response_text=duplicate_response.message,
+            forwarded_message=forwarded_message,
+            session_key=session_key,
+            router_payload={"duplicate_suppressed": True},
+        )
+
+    _append_message(
+        active_settings,
+        session_key=session_key,
+        role="user",
+        message=request.message,
+        forwarded_message=forwarded_message,
+        provider_message_id=provider_message_id,
+        workflow_session_id=pinned_session_id,
+        attachments=request.attachments,
+    )
+    ingress_payload = _request_research_ingress(
+        active_settings,
+        message=forwarded_message,
+        sender=request.sender,
+        channel=channel,
+        session_id=(
+            None
+            if forwarded_message.lower().startswith(("!new-session", "!start", "!research"))
+            else pinned_session_id
+        ),
+    )
+    response_text = str(ingress_payload.get("response_text") or "").strip()
+    if (
+        not ingress_payload.get("handled")
+        and ingress_payload.get("forward_to_openclaw")
+    ):
+        response_text = (
+            "Free-form chat is not enabled in the Glasslab WhatsApp gateway yet. "
+            "Use a deterministic command like !start, !run, !next, !compare, "
+            "!status, !new-session, or !add-pdf."
+        )
+    if not response_text:
+        response_text = "No response text was returned by research-ingress."
+    _append_message(
+        active_settings,
+        session_key=session_key,
+        role="assistant",
+        message=response_text,
+        forwarded_message=None,
+        provider_message_id=None,
+        workflow_session_id=_extract_workflow_session_id(
+            ingress_payload.get("router_payload")
+        ) or pinned_session_id,
+        attachments=[],
+        route=str(ingress_payload.get("route") or ""),
+        handled=bool(ingress_payload.get("handled")),
+    )
+    return InboundForwardResponse(
+        handled=bool(ingress_payload.get("handled")),
+        route=str(ingress_payload.get("route") or "unknown"),
+        response_text=response_text,
+        forwarded_message=forwarded_message,
+        session_key=session_key,
+        router_payload=ingress_payload.get("router_payload"),
+    )
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     active_settings = settings or Settings()
     app = FastAPI(title="Glasslab WhatsApp Gateway", version="0.1.0")
@@ -358,111 +655,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             research_ingress_url=active_settings.research_ingress_url,
             state_dir=active_settings.state_dir,
             timeout_seconds=active_settings.timeout_seconds,
+            meta_verify_enabled=bool((active_settings.meta_verify_token or "").strip()),
+            meta_send_enabled=bool(
+                (active_settings.meta_access_token or "").strip()
+                and (active_settings.meta_phone_number_id or "").strip()
+            ),
         )
 
     @app.post("/webhooks/whatsapp/inbound", response_model=InboundForwardResponse)
     def whatsapp_inbound(request: WhatsAppInboundRequest) -> InboundForwardResponse:
-        channel = request.channel or active_settings.default_channel
-        session_key = _session_key(channel, request.sender)
-        forwarded_message = _augment_message_for_attachments(request)
-        if not forwarded_message:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="message is empty and no supported attachment action could be inferred",
-            )
-
-        prior_messages = _load_messages(active_settings, session_key)
-        pinned_session_id = _latest_workflow_session_id(prior_messages)
-        provider_message_id = (request.provider_message_id or "").strip() or None
-        if provider_message_id is not None:
-            provider_dedupe = _find_response_for_provider_message_id(
-                prior_messages,
-                provider_message_id,
-            )
-            if provider_dedupe is not None:
-                return InboundForwardResponse(
-                    handled=bool(provider_dedupe.handled),
-                    route=str(provider_dedupe.route or "provider-duplicate-suppressed"),
-                    response_text=provider_dedupe.message,
-                    forwarded_message=forwarded_message,
-                    session_key=session_key,
-                    router_payload={
-                        "duplicate_suppressed": True,
-                        "duplicate_scope": "provider_message_id",
-                        "provider_message_id": provider_message_id,
-                    },
-                )
-        duplicate_response = _find_duplicate_response(
-            prior_messages,
-            raw_message=request.message,
-            forwarded_message=forwarded_message,
-            attachments=request.attachments,
-        )
-        if duplicate_response is not None:
-            return InboundForwardResponse(
-                handled=bool(duplicate_response.handled),
-                route=str(duplicate_response.route or "duplicate-suppressed"),
-                response_text=duplicate_response.message,
-                forwarded_message=forwarded_message,
-                session_key=session_key,
-                router_payload={"duplicate_suppressed": True},
-            )
-
-        _append_message(
-            active_settings,
-            session_key=session_key,
-            role="user",
-            message=request.message,
-            forwarded_message=forwarded_message,
-            provider_message_id=provider_message_id,
-            workflow_session_id=pinned_session_id,
-            attachments=request.attachments,
-        )
-        ingress_payload = _request_research_ingress(
-            active_settings,
-            message=forwarded_message,
-            sender=request.sender,
-            channel=channel,
-            session_id=(
-                None
-                if forwarded_message.lower().startswith(("!new-session", "!start", "!research"))
-                else pinned_session_id
-            ),
-        )
-        response_text = str(ingress_payload.get("response_text") or "").strip()
-        if (
-            not ingress_payload.get("handled")
-            and ingress_payload.get("forward_to_openclaw")
-        ):
-            response_text = (
-                "Free-form chat is not enabled in the Glasslab WhatsApp gateway yet. "
-                "Use a deterministic command like !start, !run, !next, !compare, "
-                "!status, !new-session, or !add-pdf."
-            )
-        if not response_text:
-            response_text = "No response text was returned by research-ingress."
-        _append_message(
-            active_settings,
-            session_key=session_key,
-            role="assistant",
-            message=response_text,
-            forwarded_message=None,
-            provider_message_id=None,
-            workflow_session_id=_extract_workflow_session_id(
-                ingress_payload.get("router_payload")
-            ) or pinned_session_id,
-            attachments=[],
-            route=str(ingress_payload.get("route") or ""),
-            handled=bool(ingress_payload.get("handled")),
-        )
-        return InboundForwardResponse(
-            handled=bool(ingress_payload.get("handled")),
-            route=str(ingress_payload.get("route") or "unknown"),
-            response_text=response_text,
-            forwarded_message=forwarded_message,
-            session_key=session_key,
-            router_payload=ingress_payload.get("router_payload"),
-        )
+        return _handle_inbound(active_settings, request)
 
     @app.post("/webhooks/whatsapp/provider", response_model=InboundForwardResponse)
     def whatsapp_provider_webhook(
@@ -481,6 +683,79 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 provider_message_id=request.provider_message_id,
                 attachments=request.attachments,
             )
+        )
+
+    @app.get("/webhooks/meta/whatsapp")
+    def meta_whatsapp_verify(
+        hub_mode: str | None = Query(default=None, alias="hub.mode"),
+        hub_verify_token: str | None = Query(default=None, alias="hub.verify_token"),
+        hub_challenge: str | None = Query(default=None, alias="hub.challenge"),
+    ) -> PlainTextResponse:
+        expected = str(active_settings.meta_verify_token or "").strip()
+        if not expected:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="meta verify token is not configured",
+            )
+        if hub_mode != "subscribe" or hub_verify_token != expected:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="meta webhook verification failed",
+            )
+        return PlainTextResponse(hub_challenge or "")
+
+    @app.post("/webhooks/meta/whatsapp", response_model=MetaWebhookResponse)
+    def meta_whatsapp_webhook(payload: dict[str, Any]) -> MetaWebhookResponse:
+        requests, ignored_events = _meta_webhook_requests(active_settings, payload)
+        results: list[dict[str, Any]] = []
+        for request in requests:
+            response = _handle_inbound(
+                active_settings,
+                WhatsAppInboundRequest(
+                    sender=request.sender,
+                    channel=request.channel,
+                    message=request.text,
+                    provider_message_id=request.provider_message_id,
+                    attachments=request.attachments,
+                ),
+            )
+            result: dict[str, Any] = {
+                "provider_message_id": request.provider_message_id,
+                "sender": request.sender,
+                "forwarded_message": response.forwarded_message,
+                "route": response.route,
+                "handled": response.handled,
+                "session_key": response.session_key,
+            }
+            if (
+                bool((active_settings.meta_access_token or "").strip())
+                and bool((active_settings.meta_phone_number_id or "").strip())
+                and response.response_text.strip()
+            ):
+                outbound = _send_meta_text_reply(
+                    active_settings,
+                    recipient=request.sender,
+                    text=response.response_text,
+                )
+                result["reply_sent"] = True
+                result["reply_payload"] = outbound
+            else:
+                result["reply_sent"] = False
+            results.append(result)
+        return MetaWebhookResponse(
+            handled=True,
+            provider="meta-whatsapp",
+            processed_messages=len(results),
+            ignored_events=ignored_events,
+            results=results,
+        )
+
+    @app.get("/attachments/meta/{media_id}")
+    def meta_attachment_proxy(media_id: str) -> Response:
+        payload, content_type, _ = _fetch_meta_media_content(active_settings, media_id)
+        return Response(
+            content=payload,
+            media_type=content_type or "application/octet-stream",
         )
 
     @app.get("/sessions/{channel}/{sender}", response_model=SessionTranscriptResponse)

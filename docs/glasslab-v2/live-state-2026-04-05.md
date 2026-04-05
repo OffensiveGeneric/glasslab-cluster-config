@@ -81,6 +81,11 @@ What the gateway does now:
 - converts PDF uploads into `!add-pdf` behavior when appropriate
 - accepts provider-facing WhatsApp webhook events through
   `POST /webhooks/whatsapp/provider`
+- exposes a Meta WhatsApp Cloud API-style provider adapter through:
+  - `GET /webhooks/meta/whatsapp`
+  - `POST /webhooks/meta/whatsapp`
+- can proxy Meta media objects through:
+  - `GET /attachments/meta/{media_id}`
 - forwards deterministic commands directly to `research-ingress`
 - returns backend `response_text` directly
 
@@ -90,6 +95,21 @@ What it does not do yet:
 - provide free-form chat
 - call an LLM
 - replace every remaining OpenClaw-related operational path
+
+## Provider Adapter Follow-On
+
+The next gateway slice after sender-pinned sessions adds a real provider-aware
+surface for Meta WhatsApp Cloud API-style delivery:
+
+- webhook verification via `GET /webhooks/meta/whatsapp`
+- inbound normalization from provider payloads into the same deterministic
+  gateway path used by the internal webhook tests
+- document/media proxying so provider-hosted PDFs can become backend-fetchable
+  `!add-pdf` targets without requiring a pasted public URL
+- optional outbound reply dispatch when Meta credentials are configured
+
+This narrows the remaining gap between the current cluster-side gateway and the
+actual external WhatsApp front door.
 
 ## Follow-On Fix
 

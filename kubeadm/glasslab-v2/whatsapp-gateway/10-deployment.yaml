@@ -19,7 +19,7 @@ spec:
         - name: glasslab-ghcr-pull
       containers:
         - name: whatsapp-gateway
-          image: ghcr.io/offensivegeneric/glasslab-whatsapp-gateway:0.1.1-local
+          image: ghcr.io/offensivegeneric/glasslab-whatsapp-gateway:0.1.2-local
           imagePullPolicy: IfNotPresent
           env:
             - name: GLASSLAB_WHATSAPP_GATEWAY_RESEARCH_INGRESS_URL
@@ -28,6 +28,8 @@ spec:
               value: "120"
             - name: GLASSLAB_WHATSAPP_GATEWAY_DEFAULT_CHANNEL
               value: whatsapp
+            - name: GLASSLAB_WHATSAPP_GATEWAY_BASE_URL
+              value: http://glasslab-whatsapp-gateway.glasslab-v2.svc.cluster.local:8097
             - name: GLASSLAB_WHATSAPP_GATEWAY_STATE_DIR
               value: /var/lib/glasslab-whatsapp-gateway
           ports:

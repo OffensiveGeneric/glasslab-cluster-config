@@ -90,6 +90,16 @@ Current endpoints:
 - replace remaining OpenClaw-specific command documentation
 - make `!start`, `!run`, `!next`, `!compare`, and `!status` the main user path
 
+Current progress:
+
+- the gateway already exposes a Meta WhatsApp Cloud API-style webhook surface:
+  - `GET /webhooks/meta/whatsapp`
+  - `POST /webhooks/meta/whatsapp`
+- provider document uploads can now be normalized into backend-fetchable
+  gateway URLs instead of requiring a manually pasted public PDF URL
+- the remaining Phase 2 gap is credentials and live external-provider hookup,
+  not the internal adapter shape
+
 ### Phase 3
 
 - add optional bounded chat for:

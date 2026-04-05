@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INGRESS_IMAGE="${GLASSLAB_RESEARCH_INGRESS_IMAGE_REF:-ghcr.io/offensivegeneric/glasslab-research-ingress:0.1.1}"
 ROUTER_IMAGE="${GLASSLAB_RESEARCH_COMMAND_ROUTER_IMAGE_REF:-ghcr.io/offensivegeneric/glasslab-research-command-router:0.1.8-local}"
-GATEWAY_IMAGE="${GLASSLAB_WHATSAPP_GATEWAY_IMAGE_REF:-ghcr.io/offensivegeneric/glasslab-whatsapp-gateway:0.1.1-local}"
+GATEWAY_IMAGE="${GLASSLAB_WHATSAPP_GATEWAY_IMAGE_REF:-ghcr.io/offensivegeneric/glasslab-whatsapp-gateway:0.1.2-local}"
 INGRESS_NODE="${GLASSLAB_RESEARCH_INGRESS_NODE_HOST:-192.168.1.11}"
 ROUTER_NODE="${GLASSLAB_RESEARCH_COMMAND_ROUTER_NODE_HOST:-192.168.1.47}"
 GATEWAY_NODE="${GLASSLAB_WHATSAPP_GATEWAY_NODE_HOST:-192.168.1.47}"

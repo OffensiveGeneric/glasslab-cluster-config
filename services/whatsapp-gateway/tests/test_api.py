@@ -323,3 +323,171 @@ def test_gateway_reuses_pinned_workflow_session_id(tmp_path: Path) -> None:
     assert first.status_code == 200
     assert second.status_code == 200
     assert observed_session_ids == [None, "session-123"]
+
+
+def test_meta_webhook_verification_succeeds(tmp_path: Path) -> None:
+    client = TestClient(
+        create_app(
+            settings=Settings(
+                state_dir=str(tmp_path),
+                meta_verify_token="verify-me",
+            )
+        )
+    )
+    response = client.get(
+        "/webhooks/meta/whatsapp",
+        params={
+            "hub.mode": "subscribe",
+            "hub.verify_token": "verify-me",
+            "hub.challenge": "12345",
+        },
+    )
+    assert response.status_code == 200
+    assert response.text == "12345"
+
+
+def test_meta_webhook_text_message_is_normalized_and_replied(tmp_path: Path) -> None:
+    import app.main as main_module
+
+    observed_messages: list[str] = []
+    outbound_messages: list[tuple[str, str]] = []
+
+    def fake_ingress(settings, *, message, sender, channel, session_id=None):
+        observed_messages.append(message)
+        return {
+            "handled": True,
+            "route": "deterministic-router",
+            "response_text": "Current session status.",
+            "router_payload": {"command": "status"},
+        }
+
+    def fake_send(settings, *, recipient, text):
+        outbound_messages.append((recipient, text))
+        return {"messages": [{"id": "wamid-out-1"}]}
+
+    original_ingress = main_module._request_research_ingress
+    original_send = main_module._send_meta_text_reply
+    main_module._request_research_ingress = fake_ingress
+    main_module._send_meta_text_reply = fake_send
+    try:
+        client = TestClient(
+            create_app(
+                settings=Settings(
+                    state_dir=str(tmp_path),
+                    meta_access_token="token",
+                    meta_phone_number_id="123",
+                )
+            )
+        )
+        payload = {
+            "object": "whatsapp_business_account",
+            "entry": [
+                {
+                    "changes": [
+                        {
+                            "value": {
+                                "messages": [
+                                    {
+                                        "from": "15555550123",
+                                        "id": "wamid-meta-1",
+                                        "type": "text",
+                                        "text": {"body": "!status"},
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ],
+        }
+        response = client.post("/webhooks/meta/whatsapp", json=payload)
+    finally:
+        main_module._request_research_ingress = original_ingress
+        main_module._send_meta_text_reply = original_send
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["processed_messages"] == 1
+    assert observed_messages == ["!status"]
+    assert outbound_messages == [("15555550123", "Current session status.")]
+    assert body["results"][0]["reply_sent"] is True
+
+
+def test_meta_document_message_becomes_gateway_attachment_url(tmp_path: Path) -> None:
+    import app.main as main_module
+
+    observed_messages: list[str] = []
+
+    def fake_ingress(settings, *, message, sender, channel, session_id=None):
+        observed_messages.append(message)
+        return {
+            "handled": True,
+            "route": "deterministic-router",
+            "response_text": "Added PDF candidate.",
+            "router_payload": {"command": "add-pdf"},
+        }
+
+    original_ingress = main_module._request_research_ingress
+    main_module._request_research_ingress = fake_ingress
+    try:
+        client = TestClient(
+            create_app(
+                settings=Settings(
+                    state_dir=str(tmp_path),
+                    gateway_base_url="http://gateway.test",
+                )
+            )
+        )
+        payload = {
+            "object": "whatsapp_business_account",
+            "entry": [
+                {
+                    "changes": [
+                        {
+                            "value": {
+                                "messages": [
+                                    {
+                                        "from": "15555550123",
+                                        "id": "wamid-meta-doc-1",
+                                        "type": "document",
+                                        "document": {
+                                            "id": "meta-media-123",
+                                            "mime_type": "application/pdf",
+                                            "filename": "paper.pdf",
+                                        },
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ],
+        }
+        response = client.post("/webhooks/meta/whatsapp", json=payload)
+    finally:
+        main_module._request_research_ingress = original_ingress
+
+    assert response.status_code == 200
+    assert observed_messages == [
+        "!add-pdf http://gateway.test/attachments/meta/meta-media-123"
+    ]
+
+
+def test_meta_attachment_proxy_uses_media_fetcher(tmp_path: Path) -> None:
+    import app.main as main_module
+
+    def fake_fetch(settings, media_id):
+        assert media_id == "meta-media-123"
+        return (b"pdf-bytes", "application/pdf", "paper.pdf")
+
+    original_fetch = main_module._fetch_meta_media_content
+    main_module._fetch_meta_media_content = fake_fetch
+    try:
+        client = TestClient(create_app(settings=Settings(state_dir=str(tmp_path))))
+        response = client.get("/attachments/meta/meta-media-123")
+    finally:
+        main_module._fetch_meta_media_content = original_fetch
+
+    assert response.status_code == 200
+    assert response.content == b"pdf-bytes"
+    assert response.headers["content-type"].startswith("application/pdf")
