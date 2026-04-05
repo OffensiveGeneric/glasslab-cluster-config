@@ -97,6 +97,8 @@ def _parse_command(message: str) -> tuple[str, str] | None:
         return None
     lowered = text.lower()
     prefixes = [
+        ("!new-session", "new-session"),
+        ("new-session:", "new-session"),
         ("!start", "start"),
         ("start:", "start"),
         ("!research", "research"),
@@ -109,6 +111,8 @@ def _parse_command(message: str) -> tuple[str, str] | None:
         ("next-paper:", "next-paper"),
         ("!add-paper", "add-paper"),
         ("add-paper:", "add-paper"),
+        ("!add-pdf", "add-pdf"),
+        ("add-pdf:", "add-pdf"),
         ("!session", "session"),
         ("session:", "session"),
         ("!interpret", "interpret"),
@@ -169,6 +173,10 @@ def _help_text() -> str:
             "!run",
             "!next",
             "!compare",
+            "",
+            "Manual source commands:",
+            "!new-session <goal>",
+            "!add-pdf <url>",
             "",
             "Debug commands:",
             "!research <topic>",
@@ -257,6 +265,34 @@ def _dispatch(
             forward_to_openclaw=False,
             command=command,
             response_text=_help_text(),
+        )
+
+    if command == "new-session":
+        if len(argument) < 12:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="!new-session needs a concrete goal after the command",
+            )
+        endpoint, payload = requester(
+            settings,
+            "/research-sessions",
+            method="POST",
+            body={
+                "goal_statement": argument,
+                "priorities": [],
+                "submitted_by": submitted_by,
+            },
+        )
+        return DispatchResponse(
+            matched=True,
+            forward_to_openclaw=False,
+            command=command,
+            response_text=(
+                f"Created research session '{payload.get('title', 'untitled')}'. "
+                "You can now add a PDF directly with !add-pdf <url>."
+            ),
+            workflow_api_endpoint=endpoint,
+            payload=payload,
         )
 
     if command in {"start", "research"}:
@@ -359,6 +395,39 @@ def _dispatch(
             forward_to_openclaw=False,
             command=command,
             response_text=f"Added manual paper candidate '{latest_title}' to the current queue.",
+            workflow_api_endpoint=endpoint,
+            payload=payload,
+        )
+
+    if command == "add-pdf":
+        if not argument or not argument.startswith("http"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="!add-pdf needs a direct PDF URL",
+            )
+        endpoint, payload = requester(
+            settings,
+            "/research-sessions/latest/paper-intake-queue/manual-paper",
+            method="POST",
+            body={
+                "title": "Manual PDF candidate",
+                "pdf_url": argument,
+                "official_page": None,
+                "notes": ["Added as a direct PDF from deterministic research command router."],
+                "tags": ["manual", "pdf"],
+                "submitted_by": submitted_by,
+            },
+        )
+        candidates = payload.get("candidates") or []
+        latest_title = candidates[-1]["title"] if candidates else "Manual PDF candidate"
+        return DispatchResponse(
+            matched=True,
+            forward_to_openclaw=False,
+            command=command,
+            response_text=(
+                f"Added PDF candidate '{latest_title}' to the current queue. "
+                "Use !next-paper to stage it, or !design if you want the backend to bootstrap from the session goal."
+            ),
             workflow_api_endpoint=endpoint,
             payload=payload,
         )

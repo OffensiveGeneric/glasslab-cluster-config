@@ -223,12 +223,14 @@ async function startLiteratureSearchForGoal(
 }
 
 type RoutedUserIntent =
+  | "start-manual-session"
   | "start-runner"
   | "start-literature-search"
   | "runner-status"
   | "refresh-literature-queue"
   | "stage-next-paper"
   | "add-manual-paper"
+  | "add-manual-pdf"
   | "summarize-session"
   | "create-interpretation"
   | "create-design"
@@ -250,12 +252,14 @@ type RoutedUserIntent =
   | "unsupported";
 
 type ExplicitCommand =
+  | { command: "new-session"; argument: string }
   | { command: "start"; argument: string }
   | { command: "research"; argument: string }
   | { command: "status"; argument: "" }
   | { command: "more-papers"; argument: "" }
   | { command: "next-paper"; argument: "" }
   | { command: "add-paper"; argument: string }
+  | { command: "add-pdf"; argument: string }
   | { command: "session"; argument: "" }
   | { command: "interpret"; argument: "" }
   | { command: "design"; argument: "" }
@@ -285,6 +289,9 @@ function parseExplicitCommand(message: string): ExplicitCommand | null {
   }
   const command = match[1].toLowerCase();
   const argument = (match[2] || "").trim();
+  if (command === "new-session") {
+    return { command: "new-session", argument };
+  }
   if (command === "start") {
     return { command: "start", argument };
   }
@@ -302,6 +309,9 @@ function parseExplicitCommand(message: string): ExplicitCommand | null {
   }
   if (command === "add-paper") {
     return { command: "add-paper", argument };
+  }
+  if (command === "add-pdf") {
+    return { command: "add-pdf", argument };
   }
   if (command === "session") {
     return { command: "session", argument: "" };
@@ -369,6 +379,10 @@ function commandHelpText(): string {
     "!next               or  next:",
     "!compare            or  compare:",
     "",
+    "Manual source commands:",
+    "!new-session <goal> or  new-session: <goal>",
+    "!add-pdf <url>      or  add-pdf: <url>",
+    "",
     "Debug commands:",
     "!research <topic>  or  research: <topic>",
     "!more-papers       or  papers:",
@@ -401,6 +415,9 @@ function detectRoutedUserIntent(message: string): RoutedUserIntent {
 
   const explicitCommand = parseExplicitCommand(message);
   if (explicitCommand) {
+    if (explicitCommand.command === "new-session") {
+      return "start-manual-session";
+    }
     if (explicitCommand.command === "start") {
       return "start-runner";
     }
@@ -418,6 +435,9 @@ function detectRoutedUserIntent(message: string): RoutedUserIntent {
     }
     if (explicitCommand.command === "add-paper") {
       return "add-manual-paper";
+    }
+    if (explicitCommand.command === "add-pdf") {
+      return "add-manual-pdf";
     }
     if (explicitCommand.command === "session") {
       return "summarize-session";
@@ -1372,6 +1392,40 @@ const plugin = {
           const routedIntent = detectRoutedUserIntent(latestUserMessage);
           const explicitCommand = parseExplicitCommand(latestUserMessage);
           try {
+            if (routedIntent === "start-manual-session") {
+              const goalStatement =
+                explicitCommand?.command === "new-session" && explicitCommand.argument
+                  ? explicitCommand.argument
+                  : "";
+              if (!goalStatement || goalStatement.length < 12) {
+                return buildJsonResult({
+                  routed_intent: routedIntent,
+                  status: "needs-input",
+                  detail: "use !new-session <goal> or new-session: <goal>"
+                });
+              }
+              const { endpoint, payload } = await requestJson(api, "/research-sessions", {
+                method: "POST",
+                body: JSON.stringify({
+                  goal_statement: goalStatement,
+                  priorities: [],
+                  submitted_by: "openclaw-operator"
+                })
+              });
+              await appendAuditEvent({
+                tool: "workflow_api_dispatch_latest_user_message",
+                status: "ok",
+                routed_intent: routedIntent,
+                endpoint,
+                session_id: payload?.session_id ?? null
+              });
+              return buildJsonResult({
+                routed_intent: routedIntent,
+                endpoint,
+                session: payload
+              });
+            }
+
             if (routedIntent === "start-runner") {
               const goalStatement =
                 explicitCommand?.command === "start" && explicitCommand.argument
@@ -1540,6 +1594,46 @@ const plugin = {
                     pdf_url: pdfUrl,
                     notes: ["manually queued from OpenClaw command"],
                     tags: ["manual"],
+                    submitted_by: "openclaw-operator"
+                  })
+                }
+              );
+              await appendAuditEvent({
+                tool: "workflow_api_dispatch_latest_user_message",
+                status: "ok",
+                routed_intent: routedIntent,
+                endpoint,
+                queue_id: payload?.queue_id ?? null,
+                candidate_count: Array.isArray(payload?.candidates) ? payload.candidates.length : null
+              });
+              return buildJsonResult({
+                routed_intent: routedIntent,
+                endpoint,
+                paper_intake_queue: payload
+              });
+            }
+
+            if (routedIntent === "add-manual-pdf") {
+              const argument =
+                explicitCommand?.command === "add-pdf" ? explicitCommand.argument.trim() : "";
+              if (!argument || !/^https?:\/\/\S+$/i.test(argument) || !/\.pdf(?:$|\?)/i.test(argument)) {
+                return buildJsonResult({
+                  routed_intent: routedIntent,
+                  status: "needs-input",
+                  detail: "use !add-pdf <direct-pdf-url>"
+                });
+              }
+              const { endpoint, payload } = await requestJson(
+                api,
+                "/research-sessions/latest/paper-intake-queue/manual-paper",
+                {
+                  method: "POST",
+                  body: JSON.stringify({
+                    title: "Manual PDF candidate",
+                    official_page: null,
+                    pdf_url: argument,
+                    notes: ["manually queued direct pdf from OpenClaw command"],
+                    tags: ["manual", "pdf"],
                     submitted_by: "openclaw-operator"
                   })
                 }

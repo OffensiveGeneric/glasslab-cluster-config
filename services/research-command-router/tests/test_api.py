@@ -62,6 +62,27 @@ def test_start_command_alias_calls_start_endpoint() -> None:
     assert len(calls) == 1
 
 
+def test_new_session_command_creates_session_without_literature_search() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        assert path == "/research-sessions"
+        assert method == "POST"
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {"session_id": "session-123", "title": "Artist Similarity", "goal_statement": "artist similarity metric learning"},
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!new-session artist similarity metric learning"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["command"] == "new-session"
+    assert "Created research session" in payload["response_text"]
+    assert calls[0][0] == "/research-sessions"
+
+
 def test_more_papers_prefers_external_search() -> None:
     def fake_requester(settings, path, method="GET", body=None):
         assert path == "/research-sessions/latest/skills/external-literature-search"
@@ -97,6 +118,25 @@ def test_add_paper_routes_to_manual_queue() -> None:
     payload = response.json()
     assert payload["command"] == "add-paper"
     assert calls[0][0] == "/research-sessions/latest/paper-intake-queue/manual-paper"
+
+
+def test_add_pdf_routes_to_manual_queue_with_pdf_url() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {"candidates": [{"title": "Manual PDF candidate"}]},
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!add-pdf https://example.org/paper.pdf"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["command"] == "add-pdf"
+    assert calls[0][0] == "/research-sessions/latest/paper-intake-queue/manual-paper"
+    assert calls[0][2]["pdf_url"] == "https://example.org/paper.pdf"
 
 
 def test_run_command_routes_to_session_run_creation() -> None:
