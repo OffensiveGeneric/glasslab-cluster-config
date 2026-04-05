@@ -1,102 +1,103 @@
 # Glasslab Cluster Config
 
-This repo is the committed control plane for the Glasslab lab.
+Glasslab is a runner-first ML research system built on a home Kubernetes lab.
 
-The important distinction:
+The current goal is not “general AI research chat.” It is narrower:
+
+- take a concrete problem statement
+- turn it into a bounded execution contract
+- launch approved experiment variants
+- compare them
+- keep iterating while we are away
+
+## What This Repo Contains
+
+- `ansible/`: host bootstrap, maintenance, GPU prep
+- `kubeadm/`: cluster manifests, especially `glasslab-v2`
+- `services/`: backend services, runner code, OpenClaw runtime config
+- `scripts/`: deploy, export, sync, smoke-test helpers
+- `docs/`: architecture notes, runbooks, live-state notes
+
+## Current Product Direction
+
+The active product is `glasslab-v2`, centered on:
+
+- `workflow-api`: session state, interpretation, design, run creation, autoresearch
+- `workflow-registry`: approved workflow templates
+- `runner`: bounded execution on the cluster
+- `research-command-router` and `research-ingress`: deterministic command seam
+- `openclaw-config`: the chat shell, kept thin
+
+The main loop we are building is:
+
+1. start from a problem statement or manually added source
+2. derive bounded `TechniqueKnowledge` and `MethodSpec`
+3. launch approved run variants
+4. compare results
+5. propose and launch the next bounded mutations
+
+## Current Focus
+
+The current focus is the experiment-runner side:
+
+- technique cards imported from curated methodology knowledge
+- bounded interpretation output
+- GPU-ready design/run handoff
+- parallel autoresearch batches
+- deterministic comparison and follow-on mutation proposals
+
+The literature side exists, but it is secondary for now. Manual source addition is acceptable if it gets us to better runs faster.
+
+## Primary Operator Flow
+
+The happy-path command surface is now intentionally small:
+
+```text
+!start <topic>
+!run
+!next
+!compare
+!status
+```
+
+The older granular commands still exist for debugging, but they are no longer the primary UX.
+
+## Canonical Environment
+
+Important distinction:
 
 - the canonical live environment is the provisioner at `192.168.1.44`
-- this repo is the committed description of that environment
-- some operational truth still exists only on `.44`, including ignored secrets, exported runtime bundles, imported images, and any unpushed changes
+- this laptop checkout is a working client and Git copy
+- ignored secrets, runtime bundles, imported images, and some operational truth still live only on `.44`
 
-If you are trying to remember what this system is, start here:
+So:
 
-- `docs/operator-orientation.md`
-- `docs/glasslab-system-spec-for-research.md`
+- GitHub tells you committed repo state
+- docs tell you the last documented live state
+- only `.44` can confirm actual live state
 
-## The Short Version
+## Where To Start
 
-Glasslab currently contains two related stacks:
+If you want the current architecture and direction:
 
-- `v1`: a legacy/reference Titanic experiment stack using a FastAPI agent API, vLLM, a fixed runner, and Kubernetes Jobs
-- `v2`: a cleaner workflow platform built around `workflow-api`, a Git-backed workflow registry, deterministic evaluator/reporter services, OpenClaw as the operator gateway, persistent core service state, shared NFS-backed datasets/artifacts, and a live no-arg intake -> design -> run operator path
+- [docs/glasslab-v2/README.md](docs/glasslab-v2/README.md)
+- [docs/glasslab-v2/overview.md](docs/glasslab-v2/overview.md)
+- [docs/glasslab-v2/bounded-experiment-runner-priority.md](docs/glasslab-v2/bounded-experiment-runner-priority.md)
+- [docs/glasslab-v2/runner-first-technique-knowledge-plan.md](docs/glasslab-v2/runner-first-technique-knowledge-plan.md)
+- [docs/glasslab-v2/technique-catalog.md](docs/glasslab-v2/technique-catalog.md)
+- [docs/glasslab-v2/live-state-2026-04-03.md](docs/glasslab-v2/live-state-2026-04-03.md)
 
-The repo is large because it includes both platform infrastructure and application-layer workflow services.
+If you want the concrete first target problem:
 
-## How To Read The Repo
+- [docs/glasslab-v2/artist-similarity-v1.md](docs/glasslab-v2/artist-similarity-v1.md)
+- [docs/glasslab-v2/examples/artist-similarity-technique-cards.json](docs/glasslab-v2/examples/artist-similarity-technique-cards.json)
 
-- `ansible/`
-  Host bootstrap, SSH hardening, GPU enablement, and maintenance.
-- `docs/`
-  Human-readable architecture, runbooks, validation notes, and current assumptions.
-- `kubeadm/`
-  Cluster manifests for shared components, the v1 agent stack, and `glasslab-v2`.
-- `live-config/`
-  Tracked snapshots of provisioner-side config such as PXE and autoinstall state.
+If you are operating the lab:
+
 - `scripts/`
-  Operational wrappers for deploy, smoke-test, export, sync, and validation flows.
-- `services/`
-  Actual backend services, runner code, shared schemas, and OpenClaw runtime config.
+- `docs/glasslab-v2/runbooks/`
+- `ansible/playbooks/`
 
-## Current Working Mental Model
+## Legacy Material
 
-Think about the system in four layers:
-
-1. Infrastructure
-   PXE, autoinstall, Ansible, Kubernetes, GPU enablement.
-2. Execution
-   Jobs, runner images, vLLM, storage paths, artifact locations.
-3. Backend logic
-   `workflow-api`, workflow registry, evaluator, reporter.
-4. Operator gateway
-   OpenClaw config, prompts, bindings, and chat-channel entrypoints.
-
-If you want the deeper explanation, read:
-
-- `docs/operator-orientation.md`
-- `docs/glasslab-v2/overview.md`
-- `docs/glasslab-v2/cluster-primitives-gap-audit.md`
-- `docs/live-state-2026-03-23.md`
-- `docs/glasslab-v2/network-storage-integration.md`
-- `docs/glasslab-v2/intake-design-run-implementation-plan.md`
-
-## Current Machines
-
-- `192.168.1.44` (`glasslab-PXE-01`): provisioner, bastion, Ansible control host, kubectl admin workstation
-- `192.168.1.49` (`cp01`): Kubernetes control plane
-- `192.168.1.48` (`node01`): Kubernetes worker and active NVIDIA GPU worker
-- `192.168.1.11` (`node02`): Kubernetes worker and active NVIDIA GPU worker
-- `192.168.1.50` (`node03`): Kubernetes worker
-- `192.168.1.51` (`node04`): Kubernetes worker and active NVIDIA GPU worker
-- `192.168.1.47` (`node05`): Kubernetes worker and CPU-only in practice because its visible NVIDIA card would require the legacy 470 driver path
-
-## Current Repo-Documented State
-
-This is not a substitute for checking `.44`.
-
-- the cluster is a single-control-plane Kubernetes lab using Calico
-- `node01`, `node02`, and `node04` are documented as active NVIDIA workers
-- `glasslab-agents` contains the older Titanic stack, which should now be treated as legacy/reference scaffolding rather than the main platform direction
-- `glasslab-v2` contains the newer workflow platform direction
-- the current live-state report from `.44` is in `docs/live-state-2026-03-23.md`
-- OpenClaw is live in the cluster as an internal operator gateway, even though the committed Deployment manifest still keeps `replicas: 0` as the safe default posture
-- WhatsApp is active in the live OpenClaw path
-- shared NFS-backed datasets and artifacts are now available in `glasslab-v2`, with a tracked 5Ti reservation split across datasets and artifacts
-- Postgres, MinIO, OpenClaw state, and NATS now persist across pod replacement instead of depending on `emptyDir`
-- `workflow-api` now pulls from private GHCR instead of depending on `node03`-local image import
-- the first no-arg OpenClaw path now covers intake, design draft creation, accepted run creation, and follow-up status/artifact/log inspection
-
-## Best Entry Points
-
-If you are resuming work:
-
-1. `docs/operator-orientation.md`
-2. `docs/glasslab-v2/README.md`
-3. `docs/live-state-2026-03-23.md`
-4. `docs/titanic-agent-stack.md`
-5. `docs/gpu-workers.md`
-
-If you are operating the lab from `.44`:
-
-1. `scripts/`
-2. `docs/glasslab-v2/runbooks/`
-3. `ansible/playbooks/`
+The previous longer root README is preserved at [README-OLD.md](README-OLD.md).
