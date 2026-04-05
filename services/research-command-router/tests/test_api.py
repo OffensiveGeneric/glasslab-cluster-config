@@ -139,6 +139,28 @@ def test_add_pdf_routes_to_manual_queue_with_pdf_url() -> None:
     assert calls[0][2]["pdf_url"] == "https://example.org/paper.pdf"
 
 
+def test_add_pdf_uses_pinned_session_when_provided() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {"candidates": [{"title": "Manual PDF candidate"}]},
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post(
+        "/dispatch",
+        json={
+            "message": "!add-pdf https://example.org/paper.pdf",
+            "session_id": "session-123",
+        },
+    )
+    assert response.status_code == 200
+    assert calls[0][0] == "/research-sessions/session-123/paper-intake-queue/manual-paper"
+
+
 def test_run_command_routes_to_session_run_creation() -> None:
     calls: list[tuple[str, str, dict | None]] = []
 
@@ -257,6 +279,31 @@ def test_status_command_adds_campaign_summary_when_present() -> None:
     payload = response.json()
     assert payload["command"] == "status"
     assert "Autoresearch campaign: active with 2 iteration(s)." in payload["response_text"]
+
+
+def test_status_uses_pinned_session_context_when_provided() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        if path == "/research-sessions/session-123/context":
+            return (
+                f"{settings.workflow_api_url}{path}",
+                {
+                    "session": {"session_id": "session-123", "title": "Pinned", "goal_statement": "pinned goal"},
+                    "paper_intake_queue": {"status": "ready", "candidates": []},
+                },
+            )
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {"campaign": {"status": "active"}, "iterations": []},
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!status", "session_id": "session-123"})
+    assert response.status_code == 200
+    assert calls[0][0] == "/research-sessions/session-123/context"
+    assert response.json()["command"] == "status"
 
 
 def test_compare_command_returns_helpful_text_without_campaign() -> None:

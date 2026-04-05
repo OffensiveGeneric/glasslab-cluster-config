@@ -11,9 +11,10 @@ def test_healthz_reports_router_url() -> None:
 
 
 def test_inbound_handles_deterministic_command() -> None:
-    def fake_router(settings, message, submitted_by):
+    def fake_router(settings, message, submitted_by, session_id=None):
         assert message.startswith("!research")
         assert submitted_by == "whatsapp:+15555550123"
+        assert session_id is None
         return {
             "matched": True,
             "response_text": "Started literature search.",
@@ -52,7 +53,7 @@ def test_inbound_handles_deterministic_command() -> None:
 
 
 def test_inbound_marks_non_command_turn_for_openclaw() -> None:
-    def fake_router(settings, message, submitted_by):
+    def fake_router(settings, message, submitted_by, session_id=None):
         return {
             "matched": False,
             "forward_to_openclaw": True,
@@ -83,7 +84,7 @@ def test_inbound_marks_non_command_turn_for_openclaw() -> None:
 
 
 def test_inbound_handles_add_paper_command() -> None:
-    def fake_router(settings, message, submitted_by):
+    def fake_router(settings, message, submitted_by, session_id=None):
         assert message.startswith("!add-paper")
         assert submitted_by == "whatsapp:+15555550123"
         return {
@@ -120,7 +121,7 @@ def test_inbound_handles_add_paper_command() -> None:
 
 
 def test_inbound_handles_add_pdf_command() -> None:
-    def fake_router(settings, message, submitted_by):
+    def fake_router(settings, message, submitted_by, session_id=None):
         assert message.startswith("!add-pdf")
         assert submitted_by == "whatsapp:+15555550123"
         return {
@@ -157,7 +158,7 @@ def test_inbound_handles_add_pdf_command() -> None:
 
 
 def test_inbound_handles_run_command() -> None:
-    def fake_router(settings, message, submitted_by):
+    def fake_router(settings, message, submitted_by, session_id=None):
         assert message == "!run"
         assert submitted_by == "whatsapp:+15555550123"
         return {
@@ -194,7 +195,7 @@ def test_inbound_handles_run_command() -> None:
 
 
 def test_inbound_handles_launch_batch_command() -> None:
-    def fake_router(settings, message, submitted_by):
+    def fake_router(settings, message, submitted_by, session_id=None):
         assert message == "!launch-batch"
         assert submitted_by == "whatsapp:+15555550123"
         return {
@@ -231,7 +232,7 @@ def test_inbound_handles_launch_batch_command() -> None:
 
 
 def test_inbound_handles_decide_batch_command() -> None:
-    def fake_router(settings, message, submitted_by):
+    def fake_router(settings, message, submitted_by, session_id=None):
         assert message == "!decide-batch"
         assert submitted_by == "whatsapp:+15555550123"
         return {
@@ -270,7 +271,7 @@ def test_inbound_handles_decide_batch_command() -> None:
 def test_inbound_surfaces_router_timeout_as_gateway_timeout() -> None:
     import app.main as main_module
 
-    def fake_router(settings, message, submitted_by):
+    def fake_router(settings, message, submitted_by, session_id=None):
         raise main_module.HTTPException(status_code=504, detail="research-command-router timed out")
 
     original = main_module._request_router
@@ -290,3 +291,36 @@ def test_inbound_surfaces_router_timeout_as_gateway_timeout() -> None:
 
     assert response.status_code == 504
     assert response.json()["detail"] == "research-command-router timed out"
+
+
+def test_inbound_forwards_session_id_to_router() -> None:
+    import app.main as main_module
+
+    def fake_router(settings, message, submitted_by, session_id=None):
+        assert message == "!status"
+        assert submitted_by == "whatsapp:+15555550123"
+        assert session_id == "session-123"
+        return {
+            "matched": True,
+            "response_text": "Scoped session status.",
+            "command": "status",
+        }
+
+    original = main_module._request_router
+    main_module._request_router = fake_router
+    try:
+        client = TestClient(create_app(settings=Settings()))
+        response = client.post(
+            "/inbound",
+            json={
+                "message": "!status",
+                "sender": "+15555550123",
+                "channel": "whatsapp",
+                "session_id": "session-123",
+            },
+        )
+    finally:
+        main_module._request_router = original
+
+    assert response.status_code == 200
+    assert response.json()["handled"] is True

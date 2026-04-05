@@ -31,6 +31,7 @@ class DispatchRequest(BaseModel):
 
     message: str = Field(min_length=1)
     submitted_by: str | None = None
+    session_id: str | None = None
 
     @field_validator("message")
     @classmethod
@@ -39,6 +40,14 @@ class DispatchRequest(BaseModel):
         if not cleaned:
             raise ValueError("message must not be empty")
         return cleaned
+
+    @field_validator("session_id")
+    @classmethod
+    def validate_session_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = " ".join(value.split()).strip()
+        return cleaned or None
 
 
 class DispatchResponse(BaseModel):
@@ -208,8 +217,14 @@ def _help_text() -> str:
 def _get_latest_session_id(
     settings: Settings,
     requester: Callable[..., tuple[str, dict[str, Any]]],
+    session_id: str | None = None,
 ) -> tuple[str, dict[str, Any], str]:
-    endpoint, payload = requester(settings, "/research-sessions/latest/context")
+    path = (
+        f"/research-sessions/{session_id}/context"
+        if session_id
+        else "/research-sessions/latest/context"
+    )
+    endpoint, payload = requester(settings, path)
     session = payload.get("session") or {}
     session_id = str(session.get("session_id") or "").strip()
     if not session_id:
@@ -243,6 +258,17 @@ def _is_missing_campaign_error(exc: HTTPException) -> bool:
     return "campaign" in detail or "autoresearch" in detail
 
 
+def _scope_session_path(path: str, session_id: str | None) -> str:
+    if not session_id:
+        return path
+    prefix = "/research-sessions/latest"
+    if path == prefix:
+        return f"/research-sessions/{session_id}"
+    if path.startswith(prefix + "/"):
+        return f"/research-sessions/{session_id}" + path[len(prefix):]
+    return path
+
+
 def _dispatch(
     request: DispatchRequest,
     settings: Settings,
@@ -258,6 +284,21 @@ def _dispatch(
 
     command, argument = parsed
     submitted_by = request.submitted_by or settings.default_submitted_by
+    pinned_session_id = request.session_id
+
+    def scoped_requester(
+        local_settings: Settings,
+        path: str,
+        *,
+        method: str = "GET",
+        body: dict[str, Any] | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        return requester(
+            local_settings,
+            _scope_session_path(path, pinned_session_id),
+            method=method,
+            body=body,
+        )
 
     if command == "help":
         return DispatchResponse(
@@ -328,14 +369,14 @@ def _dispatch(
 
     if command == "more-papers":
         try:
-            endpoint, payload = requester(
+            endpoint, payload = scoped_requester(
                 settings,
                 "/research-sessions/latest/skills/external-literature-search",
                 method="POST",
             )
             source = "external literature search"
         except HTTPException:
-            endpoint, payload = requester(
+            endpoint, payload = scoped_requester(
                 settings,
                 "/research-sessions/latest/skills/literature-harvest",
                 method="POST",
@@ -351,7 +392,7 @@ def _dispatch(
         )
 
     if command == "next-paper":
-        endpoint, payload = requester(
+        endpoint, payload = scoped_requester(
             settings,
             "/research-sessions/latest/paper-intake-queues/stage-next-intake",
             method="POST",
@@ -382,7 +423,7 @@ def _dispatch(
             "tags": ["manual"],
             "submitted_by": submitted_by,
         }
-        endpoint, payload = requester(
+        endpoint, payload = scoped_requester(
             settings,
             "/research-sessions/latest/paper-intake-queue/manual-paper",
             method="POST",
@@ -405,7 +446,7 @@ def _dispatch(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="!add-pdf needs a direct PDF URL",
             )
-        endpoint, payload = requester(
+        endpoint, payload = scoped_requester(
             settings,
             "/research-sessions/latest/paper-intake-queue/manual-paper",
             method="POST",
@@ -433,7 +474,7 @@ def _dispatch(
         )
 
     if command in {"status", "session"}:
-        endpoint, payload = requester(settings, "/research-sessions/latest/context")
+        endpoint, payload = scoped_requester(settings, "/research-sessions/latest/context")
         session = payload.get("session") or {}
         queue = payload.get("paper_intake_queue") or {}
         response_text = (
@@ -443,9 +484,9 @@ def _dispatch(
         )
         try:
             _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-                settings, requester
+                settings, scoped_requester, pinned_session_id
             )
-            _summary_endpoint, summary_payload = requester(
+            _summary_endpoint, summary_payload = scoped_requester(
                 settings,
                 f"/research-sessions/{session_id}/autoresearch-summary",
             )
@@ -468,7 +509,7 @@ def _dispatch(
         )
 
     if command == "interpret":
-        endpoint, payload = requester(
+        endpoint, payload = scoped_requester(
             settings,
             "/research-sessions/latest/transitions/create-interpretation",
             method="POST",
@@ -487,7 +528,7 @@ def _dispatch(
         )
 
     if command == "design":
-        endpoint, payload = requester(
+        endpoint, payload = scoped_requester(
             settings,
             "/research-sessions/latest/skills/design",
             method="POST",
@@ -507,14 +548,14 @@ def _dispatch(
 
     if command == "preflight":
         _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, requester
+            settings, scoped_requester, pinned_session_id
         )
-        requester(
+        scoped_requester(
             settings,
             f"/research-sessions/{session_id}/skills/design",
             method="POST",
         )
-        endpoint, payload = requester(
+        endpoint, payload = scoped_requester(
             settings,
             f"/research-sessions/{session_id}/execution-preflight",
         )
@@ -535,14 +576,14 @@ def _dispatch(
 
     if command == "run":
         _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, requester
+            settings, scoped_requester, pinned_session_id
         )
-        requester(
+        scoped_requester(
             settings,
             f"/research-sessions/{session_id}/skills/design",
             method="POST",
         )
-        endpoint, payload = requester(
+        endpoint, payload = scoped_requester(
             settings,
             f"/research-sessions/{session_id}/runs/from-design",
             method="POST",
@@ -562,9 +603,9 @@ def _dispatch(
 
     if command == "start-autoresearch":
         _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, requester
+            settings, scoped_requester, pinned_session_id
         )
-        endpoint, payload = requester(
+        endpoint, payload = scoped_requester(
             settings,
             f"/research-sessions/{session_id}/transitions/start-autoresearch-campaign",
             method="POST",
@@ -584,9 +625,9 @@ def _dispatch(
 
     if command == "draft-methodologies":
         _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, requester
+            settings, scoped_requester, pinned_session_id
         )
-        endpoint, payload = requester(
+        endpoint, payload = scoped_requester(
             settings,
             f"/research-sessions/{session_id}/transitions/draft-methodologies",
             method="POST",
@@ -604,9 +645,9 @@ def _dispatch(
 
     if command == "draft-notebook":
         _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, requester
+            settings, scoped_requester, pinned_session_id
         )
-        endpoint, payload = requester(
+        endpoint, payload = scoped_requester(
             settings,
             f"/research-sessions/{session_id}/transitions/draft-autoresearch-notebook",
             method="POST",
@@ -625,9 +666,9 @@ def _dispatch(
 
     if command == "refine-notebook":
         _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, requester
+            settings, scoped_requester, pinned_session_id
         )
-        endpoint, payload = requester(
+        endpoint, payload = scoped_requester(
             settings,
             f"/research-sessions/{session_id}/transitions/refine-autoresearch-notebook",
             method="POST",
@@ -647,9 +688,9 @@ def _dispatch(
 
     if command == "launch-iteration":
         _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, requester
+            settings, scoped_requester, pinned_session_id
         )
-        endpoint, payload = requester(
+        endpoint, payload = scoped_requester(
             settings,
             f"/research-sessions/{session_id}/transitions/launch-autoresearch-iteration",
             method="POST",
@@ -670,9 +711,9 @@ def _dispatch(
 
     if command == "launch-batch":
         _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, requester
+            settings, scoped_requester, pinned_session_id
         )
-        endpoint, payload = requester(
+        endpoint, payload = scoped_requester(
             settings,
             f"/research-sessions/{session_id}/transitions/launch-autoresearch-batch",
             method="POST",
@@ -690,9 +731,9 @@ def _dispatch(
 
     if command == "decide-latest":
         _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, requester
+            settings, scoped_requester, pinned_session_id
         )
-        endpoint, payload = requester(
+        endpoint, payload = scoped_requester(
             settings,
             f"/research-sessions/{session_id}/transitions/decide-autoresearch-latest",
             method="POST",
@@ -713,9 +754,9 @@ def _dispatch(
 
     if command == "decide-batch":
         _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, requester
+            settings, scoped_requester, pinned_session_id
         )
-        endpoint, payload = requester(
+        endpoint, payload = scoped_requester(
             settings,
             f"/research-sessions/{session_id}/transitions/decide-autoresearch-batch",
             method="POST",
@@ -733,9 +774,9 @@ def _dispatch(
 
     if command == "autoresearch":
         _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, requester
+            settings, scoped_requester, pinned_session_id
         )
-        endpoint, payload = requester(
+        endpoint, payload = scoped_requester(
             settings,
             f"/research-sessions/{session_id}/autoresearch-summary",
         )
@@ -754,10 +795,10 @@ def _dispatch(
 
     if command in {"compare", "model-comparison"}:
         _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, requester
+            settings, scoped_requester, pinned_session_id
         )
         try:
-            endpoint, payload = requester(
+            endpoint, payload = scoped_requester(
                 settings,
                 f"/research-sessions/{session_id}/autoresearch-model-comparison",
             )
@@ -786,11 +827,11 @@ def _dispatch(
 
     if command == "next":
         _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, requester
+            settings, scoped_requester, pinned_session_id
         )
         campaign_exists = True
         try:
-            requester(
+            scoped_requester(
                 settings,
                 f"/research-sessions/{session_id}/autoresearch-summary",
             )
@@ -801,12 +842,12 @@ def _dispatch(
                 raise
 
         if not campaign_exists:
-            drafted_endpoint, drafted_payload = requester(
+            drafted_endpoint, drafted_payload = scoped_requester(
                 settings,
                 f"/research-sessions/{session_id}/transitions/draft-methodologies",
                 method="POST",
             )
-            launch_endpoint, launch_payload = requester(
+            launch_endpoint, launch_payload = scoped_requester(
                 settings,
                 f"/research-sessions/{session_id}/transitions/launch-autoresearch-batch",
                 method="POST",
@@ -829,12 +870,12 @@ def _dispatch(
                 },
             )
 
-        decide_endpoint, decide_payload = requester(
+        decide_endpoint, decide_payload = scoped_requester(
             settings,
             f"/research-sessions/{session_id}/transitions/decide-autoresearch-batch",
             method="POST",
         )
-        launch_endpoint, launch_payload = requester(
+        launch_endpoint, launch_payload = scoped_requester(
             settings,
             f"/research-sessions/{session_id}/transitions/launch-autoresearch-batch",
             method="POST",

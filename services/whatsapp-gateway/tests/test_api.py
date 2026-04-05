@@ -23,10 +23,11 @@ def test_healthz_reports_ingress_url(tmp_path: Path) -> None:
 def test_forwards_explicit_command_and_persists_session(tmp_path: Path) -> None:
     import app.main as main_module
 
-    def fake_ingress(settings, *, message, sender, channel):
+    def fake_ingress(settings, *, message, sender, channel, session_id=None):
         assert message == "!run"
         assert sender == "+15555550123"
         assert channel == "whatsapp"
+        assert session_id is None
         return {
             "handled": True,
             "route": "deterministic-router",
@@ -65,7 +66,7 @@ def test_forwards_explicit_command_and_persists_session(tmp_path: Path) -> None:
 def test_pdf_attachment_can_drive_add_pdf_without_text(tmp_path: Path) -> None:
     import app.main as main_module
 
-    def fake_ingress(settings, *, message, sender, channel):
+    def fake_ingress(settings, *, message, sender, channel, session_id=None):
         assert message == "!add-pdf https://example.org/paper.pdf"
         return {
             "handled": True,
@@ -104,7 +105,7 @@ def test_pdf_attachment_can_drive_add_pdf_without_text(tmp_path: Path) -> None:
 def test_add_pdf_command_is_augmented_by_pdf_attachment(tmp_path: Path) -> None:
     import app.main as main_module
 
-    def fake_ingress(settings, *, message, sender, channel):
+    def fake_ingress(settings, *, message, sender, channel, session_id=None):
         assert message == "!add-pdf https://example.org/paper.pdf"
         return {
             "handled": True,
@@ -160,7 +161,7 @@ def test_empty_non_pdf_turn_is_rejected(tmp_path: Path) -> None:
 def test_non_command_turn_returns_gateway_owned_message(tmp_path: Path) -> None:
     import app.main as main_module
 
-    def fake_ingress(settings, *, message, sender, channel):
+    def fake_ingress(settings, *, message, sender, channel, session_id=None):
         return {
             "handled": False,
             "route": "openclaw-fallback",
@@ -196,7 +197,7 @@ def test_duplicate_attachment_driven_add_is_suppressed(tmp_path: Path) -> None:
 
     calls: list[str] = []
 
-    def fake_ingress(settings, *, message, sender, channel):
+    def fake_ingress(settings, *, message, sender, channel, session_id=None):
         calls.append(message)
         return {
             "handled": True,
@@ -237,7 +238,7 @@ def test_provider_message_id_duplicate_is_suppressed(tmp_path: Path) -> None:
 
     calls: list[str] = []
 
-    def fake_ingress(settings, *, message, sender, channel):
+    def fake_ingress(settings, *, message, sender, channel, session_id=None):
         calls.append(message)
         return {
             "handled": True,
@@ -270,3 +271,55 @@ def test_provider_message_id_duplicate_is_suppressed(tmp_path: Path) -> None:
         assert messages[0]["provider_message_id"] == "wamid-123"
     finally:
         main_module._request_research_ingress = original
+
+
+def test_gateway_reuses_pinned_workflow_session_id(tmp_path: Path) -> None:
+    import app.main as main_module
+
+    observed_session_ids: list[str | None] = []
+
+    def fake_ingress(settings, *, message, sender, channel, session_id=None):
+        observed_session_ids.append(session_id)
+        if message == "!new-session artist similarity":
+            return {
+                "handled": True,
+                "route": "deterministic-router",
+                "response_text": "Created research session.",
+                "router_payload": {
+                    "command": "new-session",
+                    "payload": {"session_id": "session-123"},
+                },
+            }
+        return {
+            "handled": True,
+            "route": "deterministic-router",
+            "response_text": "Scoped session status.",
+            "router_payload": {"command": "status"},
+        }
+
+    original = main_module._request_research_ingress
+    main_module._request_research_ingress = fake_ingress
+    try:
+        client = TestClient(create_app(settings=Settings(state_dir=str(tmp_path))))
+        first = client.post(
+            "/webhooks/whatsapp/inbound",
+            json={
+                "sender": "+15555550123",
+                "message": "!new-session artist similarity",
+                "attachments": [],
+            },
+        )
+        second = client.post(
+            "/webhooks/whatsapp/inbound",
+            json={
+                "sender": "+15555550123",
+                "message": "!status",
+                "attachments": [],
+            },
+        )
+    finally:
+        main_module._request_research_ingress = original
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert observed_session_ids == [None, "session-123"]

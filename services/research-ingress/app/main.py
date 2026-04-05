@@ -33,6 +33,7 @@ class InboundMessageRequest(BaseModel):
     message: str = Field(min_length=1)
     sender: str = Field(min_length=1)
     channel: str | None = None
+    session_id: str | None = None
 
     @field_validator("message", "sender")
     @classmethod
@@ -65,14 +66,16 @@ def _request_router(
     settings: Settings,
     message: str,
     submitted_by: str,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     endpoint = f"{settings.command_router_url.rstrip('/')}/dispatch"
-    body = json.dumps(
-        {
-            "message": message,
-            "submitted_by": submitted_by,
-        }
-    ).encode("utf-8")
+    payload = {
+        "message": message,
+        "submitted_by": submitted_by,
+    }
+    if session_id:
+        payload["session_id"] = session_id
+    body = json.dumps(payload).encode("utf-8")
     req = urllib_request.Request(
         endpoint,
         data=body,
@@ -122,6 +125,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             active_settings,
             request.message,
             submitted_by=f"{channel}:{request.sender}",
+            session_id=request.session_id,
         )
         if router_payload.get("matched"):
             return InboundMessageResponse(

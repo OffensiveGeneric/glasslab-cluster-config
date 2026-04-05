@@ -104,6 +104,7 @@ class SessionMessage(BaseModel):
     message: str
     forwarded_message: str | None = None
     provider_message_id: str | None = None
+    workflow_session_id: str | None = None
     attachments: list[AttachmentRecord] = Field(default_factory=list)
     route: str | None = None
     handled: bool | None = None
@@ -159,6 +160,7 @@ def _append_message(
     message: str,
     forwarded_message: str | None = None,
     provider_message_id: str | None = None,
+    workflow_session_id: str | None = None,
     attachments: list[AttachmentRecord],
     route: str | None = None,
     handled: bool | None = None,
@@ -169,6 +171,7 @@ def _append_message(
         message=message,
         forwarded_message=forwarded_message,
         provider_message_id=provider_message_id,
+        workflow_session_id=workflow_session_id,
         attachments=attachments,
         route=route,
         handled=handled,
@@ -273,21 +276,47 @@ def _find_response_for_provider_message_id(
     return None
 
 
+def _latest_workflow_session_id(messages: list[SessionMessage]) -> str | None:
+    for message in reversed(messages):
+        session_id = (message.workflow_session_id or "").strip()
+        if session_id:
+            return session_id
+    return None
+
+
+def _extract_workflow_session_id(router_payload: dict[str, Any] | None) -> str | None:
+    if not isinstance(router_payload, dict):
+        return None
+    payload = router_payload.get("payload")
+    if isinstance(payload, dict):
+        session = payload.get("session")
+        if isinstance(session, dict):
+            session_id = str(session.get("session_id") or "").strip()
+            if session_id:
+                return session_id
+        session_id = str(payload.get("session_id") or "").strip()
+        if session_id:
+            return session_id
+    return None
+
+
 def _request_research_ingress(
     settings: Settings,
     *,
     message: str,
     sender: str,
     channel: str,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     endpoint = f"{settings.research_ingress_url.rstrip('/')}/inbound"
-    body = json.dumps(
-        {
-            "message": message,
-            "sender": sender,
-            "channel": channel,
-        }
-    ).encode("utf-8")
+    payload: dict[str, Any] = {
+        "message": message,
+        "sender": sender,
+        "channel": channel,
+    }
+    if session_id:
+        payload["session_id"] = session_id
+    body = json.dumps(payload).encode("utf-8")
     req = urllib_request.Request(
         endpoint,
         data=body,
@@ -343,6 +372,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
 
         prior_messages = _load_messages(active_settings, session_key)
+        pinned_session_id = _latest_workflow_session_id(prior_messages)
         provider_message_id = (request.provider_message_id or "").strip() or None
         if provider_message_id is not None:
             provider_dedupe = _find_response_for_provider_message_id(
@@ -385,6 +415,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             message=request.message,
             forwarded_message=forwarded_message,
             provider_message_id=provider_message_id,
+            workflow_session_id=pinned_session_id,
             attachments=request.attachments,
         )
         ingress_payload = _request_research_ingress(
@@ -392,6 +423,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             message=forwarded_message,
             sender=request.sender,
             channel=channel,
+            session_id=(
+                None
+                if forwarded_message.lower().startswith(("!new-session", "!start", "!research"))
+                else pinned_session_id
+            ),
         )
         response_text = str(ingress_payload.get("response_text") or "").strip()
         if (
@@ -412,6 +448,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             message=response_text,
             forwarded_message=None,
             provider_message_id=None,
+            workflow_session_id=_extract_workflow_session_id(
+                ingress_payload.get("router_payload")
+            ) or pinned_session_id,
             attachments=[],
             route=str(ingress_payload.get("route") or ""),
             handled=bool(ingress_payload.get("handled")),
