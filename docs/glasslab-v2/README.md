@@ -52,6 +52,7 @@ Canonical planning and architecture:
 - `research-command-router.md`: explicit deterministic front-door service for `!research`, `!more-papers`, `!add-paper`, and related commands
 - `research-ingress.md`: repo-owned inbound message router that makes the research assistant entrypoint explicit instead of delegating ingress semantics to OpenClaw
 - `openclaw-deprecation-and-custom-whatsapp-plan.md`: current decision to move the primary WhatsApp/control path out of OpenClaw and keep any future chat layer optional
+- `custom-chat-shell-plan.md`: concrete next-step plan for a Glasslab-owned WhatsApp/control shell that preserves sessions and attachments without keeping OpenClaw on the command path
 - `chat-ingress-and-openclaw-boundary.md`: current product stance for keeping one chat interface while moving deterministic control out of OpenClaw and into repo-owned ingress
 - `research-session-cli.md`: deterministic direct control path for the session/literature loop while OpenClaw still struggles with first-turn orchestration
 - `repo-review-2026-03-26.md`: current architecture concerns, bounded refactors, and issue follow-through after the shift toward session-centric research work
