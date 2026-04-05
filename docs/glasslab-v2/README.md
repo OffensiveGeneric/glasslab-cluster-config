@@ -45,6 +45,7 @@ Canonical planning and architecture:
 - `live-state-2026-03-30.md`: latest in-lab validation note for the bounded autoresearch lane, coding-model notebook refinement, interpretation path, and the remaining session-scoped intake gap
 - `live-state-2026-03-31.md`: follow-on live validation note for the fresh-session `!research` fix, the `!next-paper` timeout fix, the current `!interpret`/`!design` quality boundary, and the latest `.21` `flash-moe` status
 - `live-state-2026-04-03.md`: live validation note for technique-catalog import, explicit intake tags, catalog-driven workflow selection, and autoresearch methodology drafting
+- `live-state-2026-04-05.md`: first live validation note for the custom `whatsapp-gateway`, including deterministic command forwarding, transcript ownership, attachment-aware PDF adds, and the remaining duplicate-add caveat
 - `flash-moe-qwen35-397b-evaluation.md`: first `.21` bring-up note for the large `flash-moe` runtime, including the bootstrap/runtime mismatch fix and the current quality boundary
 - `research-assistant-infra-proposal.md`: concrete infra and control-surface changes to get closest to the research-assistant vision without making OpenClaw the workflow brain
 - `research-assistant-implementation-checklist.md`: concrete execution order for the deterministic-router, one-shot-action, session-memory, and `gpu-experiment` path

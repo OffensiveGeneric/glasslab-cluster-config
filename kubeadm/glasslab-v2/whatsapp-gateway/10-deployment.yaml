@@ -13,11 +13,13 @@ spec:
       labels:
         app.kubernetes.io/name: glasslab-whatsapp-gateway
     spec:
+      nodeSelector:
+        kubernetes.io/hostname: node05
       imagePullSecrets:
         - name: glasslab-ghcr-pull
       containers:
         - name: whatsapp-gateway
-          image: ghcr.io/offensivegeneric/glasslab-whatsapp-gateway:0.1.0-local
+          image: ghcr.io/offensivegeneric/glasslab-whatsapp-gateway:0.1.1-local
           imagePullPolicy: IfNotPresent
           env:
             - name: GLASSLAB_WHATSAPP_GATEWAY_RESEARCH_INGRESS_URL
