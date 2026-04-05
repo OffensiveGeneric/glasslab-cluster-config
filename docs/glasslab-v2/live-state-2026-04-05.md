@@ -179,3 +179,28 @@ The local gateway helper path is also stronger now:
   socket
 - `whatsapp-gateway-remote.sh` now invokes the remote helper through `bash`
   directly instead of assuming the execute bit is present
+
+## Sender-Pinned Sessions
+
+The control shell is now stronger in one important way:
+
+- the gateway persists the last workflow `session_id` it learned for each
+  sender transcript
+- `research-ingress` and `research-command-router` now accept an optional
+  `session_id`
+- deterministic commands can be scoped to that pinned workflow session instead
+  of always falling through the backend's global `latest` alias
+
+Live sequential validation on `.44` confirmed:
+
+1. a provider webhook `!new-session artist similarity session pinning test`
+   created a fresh workflow session for sender `+15555550987`
+2. the next provider webhook `!status` for the same sender hit:
+   - `/research-sessions/{session_id}/context`
+   - not `/research-sessions/latest/context`
+3. the gateway transcript for that sender stored the pinned
+   `workflow_session_id` on the assistant and subsequent user message records
+
+That means the repo-owned WhatsApp gateway is no longer just a thin text proxy.
+It now carries enough sender-local state to keep deterministic commands pointed
+at the right backend session.
