@@ -101,6 +101,7 @@ class SessionMessage(BaseModel):
     timestamp: str
     role: str
     message: str
+    forwarded_message: str | None = None
     attachments: list[AttachmentRecord] = Field(default_factory=list)
     route: str | None = None
     handled: bool | None = None
@@ -130,6 +131,7 @@ def _append_message(
     session_key: str,
     role: str,
     message: str,
+    forwarded_message: str | None = None,
     attachments: list[AttachmentRecord],
     route: str | None = None,
     handled: bool | None = None,
@@ -138,6 +140,7 @@ def _append_message(
         timestamp=_utc_now_iso(),
         role=role,
         message=message,
+        forwarded_message=forwarded_message,
         attachments=attachments,
         route=route,
         handled=handled,
@@ -193,6 +196,35 @@ def _augment_message_for_attachments(request: WhatsAppInboundRequest) -> str:
     if lowered == "!add-pdf":
         return f"!add-pdf {pdf_url}"
     return message
+
+
+def _attachment_signature(attachments: list[AttachmentRecord]) -> list[tuple[str, str | None, str | None]]:
+    return [
+        (attachment.url, attachment.mime_type, attachment.filename)
+        for attachment in attachments
+    ]
+
+
+def _find_duplicate_response(
+    messages: list[SessionMessage],
+    *,
+    raw_message: str,
+    forwarded_message: str,
+    attachments: list[AttachmentRecord],
+) -> SessionMessage | None:
+    if len(messages) < 2:
+        return None
+    last_assistant = messages[-1]
+    last_user = messages[-2]
+    if last_user.role != "user" or last_assistant.role != "assistant":
+        return None
+    if (last_user.forwarded_message or "") != forwarded_message:
+        return None
+    if last_user.message != raw_message:
+        return None
+    if _attachment_signature(last_user.attachments) != _attachment_signature(attachments):
+        return None
+    return last_assistant
 
 
 def _request_research_ingress(
@@ -264,11 +296,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 detail="message is empty and no supported attachment action could be inferred",
             )
 
+        prior_messages = _load_messages(active_settings, session_key)
+        duplicate_response = _find_duplicate_response(
+            prior_messages,
+            raw_message=request.message,
+            forwarded_message=forwarded_message,
+            attachments=request.attachments,
+        )
+        if duplicate_response is not None:
+            return InboundForwardResponse(
+                handled=bool(duplicate_response.handled),
+                route=str(duplicate_response.route or "duplicate-suppressed"),
+                response_text=duplicate_response.message,
+                forwarded_message=forwarded_message,
+                session_key=session_key,
+                router_payload={"duplicate_suppressed": True},
+            )
+
         _append_message(
             active_settings,
             session_key=session_key,
             role="user",
             message=request.message,
+            forwarded_message=forwarded_message,
             attachments=request.attachments,
         )
         ingress_payload = _request_research_ingress(
@@ -294,6 +344,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             session_key=session_key,
             role="assistant",
             message=response_text,
+            forwarded_message=None,
             attachments=[],
             route=str(ingress_payload.get("route") or ""),
             handled=bool(ingress_payload.get("handled")),

@@ -189,3 +189,44 @@ def test_non_command_turn_returns_gateway_owned_message(tmp_path: Path) -> None:
         assert "Free-form chat is not enabled" in payload["response_text"]
     finally:
         main_module._request_research_ingress = original
+
+
+def test_duplicate_attachment_driven_add_is_suppressed(tmp_path: Path) -> None:
+    import app.main as main_module
+
+    calls: list[str] = []
+
+    def fake_ingress(settings, *, message, sender, channel):
+        calls.append(message)
+        return {
+            "handled": True,
+            "route": "deterministic-router",
+            "response_text": "Added PDF candidate.",
+            "router_payload": {"command": "add-pdf"},
+        }
+
+    original = main_module._request_research_ingress
+    main_module._request_research_ingress = fake_ingress
+    try:
+        client = TestClient(create_app(settings=Settings(state_dir=str(tmp_path))))
+        payload = {
+            "sender": "+15555550123",
+            "message": "",
+            "attachments": [
+                {
+                    "url": "https://example.org/paper.pdf",
+                    "mime_type": "application/pdf",
+                    "filename": "paper.pdf",
+                }
+            ],
+        }
+        first = client.post("/webhooks/whatsapp/inbound", json=payload)
+        second = client.post("/webhooks/whatsapp/inbound", json=payload)
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.json()["response_text"] == "Added PDF candidate."
+        assert second.json()["response_text"] == "Added PDF candidate."
+        assert second.json()["router_payload"] == {"duplicate_suppressed": True}
+        assert calls == ["!add-pdf https://example.org/paper.pdf"]
+    finally:
+        main_module._request_research_ingress = original

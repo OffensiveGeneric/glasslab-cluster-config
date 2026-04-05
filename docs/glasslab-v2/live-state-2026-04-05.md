@@ -89,22 +89,30 @@ What it does not do yet:
 - call an LLM
 - replace every remaining OpenClaw-related operational path
 
-## Important Caveat
+## Follow-On Fix
 
-The PDF path is not yet idempotent enough.
+The first live slice exposed a real duplicate-add problem for repeated PDF
+retries.
 
-What the live validation showed:
+That is now fixed in the gateway layer.
 
-- repeated or retried PDF-style turns can add duplicate manual PDF candidates to
-  the active queue
-- the transcript can also record repeated assistant responses for those retries
+Validated behavior after the follow-on fix:
 
-So the first gateway slice is already good enough to prove the architecture, but
-it still needs:
+- the first PDF-style turn forwards to the deterministic backend and adds the
+  manual PDF candidate
+- the second identical PDF-style turn returns the same user-facing response
+  without forwarding again
+- the response now carries:
+  - `router_payload: {"duplicate_suppressed": true}`
+- the transcript stays clean:
+  - no second duplicate user/assistant pair
+- the queue does not gain an extra duplicate candidate from the retried turn
 
-- message dedupe / idempotency
-- attachment dedupe
-- queue-side duplicate suppression for identical manual PDF adds
+This fix is intentionally gateway-local:
+
+- no workflow-api change was required
+- no OpenClaw behavior is involved
+- the command/control shell now owns a basic idempotency boundary itself
 
 ## Why This Still Matters
 
