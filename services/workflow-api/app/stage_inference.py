@@ -567,6 +567,7 @@ def build_method_spec(
     default_dataset_uri: str | None = None,
     default_evaluation_target: str | None = None,
     default_training_notes: str | None = None,
+    default_execution_inputs: dict[str, str] | None = None,
 ) -> MethodSpecRecord:
     split_strategies = infer_split_strategies(intake, candidate_workflows)
     workflow_id = preferred_workflow_id or (candidate_workflows[0] if candidate_workflows else None)
@@ -602,6 +603,9 @@ def build_method_spec(
         execution_inputs['training_notes'] = (default_training_notes or objective[:500])[:500]
         if default_evaluation_target:
             execution_inputs['evaluation_target'] = default_evaluation_target
+
+    for key, value in (default_execution_inputs or {}).items():
+        execution_inputs.setdefault(key, value)
 
     blocking_reasons: list[str] = []
     if workflow_id is None:
@@ -761,6 +765,10 @@ def build_interpretation_record(intake: IntakeRecord, store: RunStore | None = N
     default_dataset_uri = next((record.default_dataset_uri for record in matched_catalog_records if record.default_dataset_uri), None)
     default_evaluation_target = next((record.default_evaluation_target for record in matched_catalog_records if record.default_evaluation_target), None)
     default_training_notes = next((record.default_training_notes for record in matched_catalog_records if record.default_training_notes), None)
+    default_execution_inputs = next(
+        (record.default_execution_inputs for record in matched_catalog_records if record.default_execution_inputs),
+        {},
+    )
     recommended_python_packages = normalize_unique_strings([*recommended_python_packages, *technique_knowledge.python_packages])
     recommended_losses = normalize_unique_strings([*recommended_losses, *technique_knowledge.losses_or_distances])
     evaluation_targets = normalize_unique_strings([*evaluation_targets, *technique_knowledge.metrics])
@@ -802,6 +810,7 @@ def build_interpretation_record(intake: IntakeRecord, store: RunStore | None = N
         default_dataset_uri=default_dataset_uri,
         default_evaluation_target=default_evaluation_target,
         default_training_notes=default_training_notes,
+        default_execution_inputs=default_execution_inputs,
     )
     return InterpretationRecord(
         interpretation_id=uuid4().hex,

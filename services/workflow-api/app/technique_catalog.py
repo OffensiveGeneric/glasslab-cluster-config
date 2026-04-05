@@ -34,6 +34,7 @@ def _record_completeness_score(record: TechniqueCatalogRecord) -> tuple[int, str
     score += 2 if record.default_dataset_uri else 0
     score += 2 if record.default_evaluation_target else 0
     score += 2 if record.default_training_notes else 0
+    score += len(record.default_execution_inputs)
     return score, record.updated_at.isoformat()
 
 
@@ -83,6 +84,7 @@ def build_technique_catalog_record(
         default_dataset_uri=card.default_dataset_uri,
         default_evaluation_target=card.default_evaluation_target,
         default_training_notes=card.default_training_notes,
+        default_execution_inputs={key: value for key, value in card.default_execution_inputs.items()},
         common_failure_modes=normalize_unique_strings(card.common_failure_modes),
         source_refs=normalize_unique_strings(card.source_refs),
         import_source=import_source.strip() or 'notebooklm-manual-export',

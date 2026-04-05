@@ -639,6 +639,11 @@ def test_gpu_technique_card_can_fill_executable_contract() -> None:
                     'default_dataset_uri': 's3://datasets/dreamsim/train.csv',
                     'default_evaluation_target': 'embedding retrieval auc',
                     'default_training_notes': 'Train a bounded DreamSim-style embedding model on the approved dataset.',
+                    'default_execution_inputs': {
+                        'pair_strategy': 'artist_positive_negative_pairs',
+                        'evaluation_protocol': 'same_artist_verification',
+                        'label_field': 'artist_id',
+                    },
                 }
             ]
         },
@@ -662,6 +667,9 @@ def test_gpu_technique_card_can_fill_executable_contract() -> None:
     assert interpretation_payload['method_spec']['execution_inputs']['dataset_uri'] == 's3://datasets/dreamsim/train.csv'
     assert interpretation_payload['method_spec']['execution_inputs']['evaluation_target'] == 'embedding retrieval auc'
     assert interpretation_payload['method_spec']['execution_inputs']['training_notes'].startswith('Train a bounded DreamSim-style embedding model')
+    assert interpretation_payload['method_spec']['execution_inputs']['pair_strategy'] == 'artist_positive_negative_pairs'
+    assert interpretation_payload['method_spec']['execution_inputs']['evaluation_protocol'] == 'same_artist_verification'
+    assert interpretation_payload['method_spec']['execution_inputs']['label_field'] == 'artist_id'
 
     design = client.post('/design-drafts/from-latest-intake')
     assert design.status_code == 201
@@ -671,6 +679,8 @@ def test_gpu_technique_card_can_fill_executable_contract() -> None:
     assert design_payload['method_spec']['run_readiness'] == 'ready'
     assert design_payload['declared_inputs']['dataset_uri'] == 's3://datasets/dreamsim/train.csv'
     assert design_payload['declared_inputs']['evaluation_target'] == 'embedding retrieval auc'
+    assert design_payload['declared_inputs']['pair_strategy'] == 'artist_positive_negative_pairs'
+    assert design_payload['declared_inputs']['evaluation_protocol'] == 'same_artist_verification'
 
 
 def test_create_app_rejects_implicit_memory_store_when_disallowed() -> None:

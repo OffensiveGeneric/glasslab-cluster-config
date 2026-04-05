@@ -60,6 +60,11 @@ The import route accepts a JSON payload like:
       "gpu_required": true,
       "resource_profile": "gpu-small",
       "workflow_ids": ["gpu-experiment"],
+      "default_execution_inputs": {
+        "pair_strategy": "artist_positive_negative_pairs",
+        "evaluation_protocol": "same_artist_verification",
+        "label_field": "artist_id"
+      },
       "common_failure_modes": ["overfitting_without_stratified_split"],
       "source_refs": ["notebooklm://vision-transformer-card"]
     }
@@ -80,6 +85,19 @@ The first pass is deliberately simple:
 
 This is enough to start enriching bounded runner state without depending on a
 larger semantic retrieval layer yet.
+
+Technique cards can also carry bounded `default_execution_inputs`.
+
+This is the current path for task-specific runner hints like:
+
+- `pair_strategy`
+- `evaluation_protocol`
+- `label_field`
+- `image_field`
+- `negative_sampling_strategy`
+
+Those values are merged into `MethodSpec.execution_inputs` without letting the
+catalog author arbitrary manifests.
 
 ## Explicit Tags
 

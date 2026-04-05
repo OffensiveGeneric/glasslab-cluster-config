@@ -69,6 +69,13 @@
       ],
       "default_evaluation_target": "same-artist verification and retrieval",
       "default_training_notes": "Train a bounded image embedding that brings same-artist works closer and pushes different-artist works apart while guarding against style drift and split leakage.",
+      "default_execution_inputs": {
+        "pair_strategy": "artist_positive_negative_pairs",
+        "evaluation_protocol": "same_artist_verification",
+        "label_field": "artist_id",
+        "image_field": "image_uri",
+        "negative_sampling_strategy": "hard_negative_style_match"
+      },
       "common_failure_modes": [
         "style_drift_within_artist",
         "hubness_in_embedding_space",
@@ -147,6 +154,13 @@
       ],
       "default_evaluation_target": "triplet-trained artist similarity retrieval",
       "default_training_notes": "Train a bounded triplet-loss embedding with explicit hard negatives and evaluate robustness to style drift across an artist's career.",
+      "default_execution_inputs": {
+        "pair_strategy": "artist_triplets",
+        "evaluation_protocol": "same_artist_verification",
+        "label_field": "artist_id",
+        "image_field": "image_uri",
+        "negative_sampling_strategy": "hard_negative_style_match"
+      },
       "common_failure_modes": [
         "uninformative_triplets",
         "hard_negative_instability",
@@ -222,6 +236,12 @@
       ],
       "default_evaluation_target": "classification-trained embedding baseline for artist similarity",
       "default_training_notes": "Train an angular-margin artist classifier and reuse its embedding space as a same-artist versus different-artist similarity baseline.",
+      "default_execution_inputs": {
+        "pair_strategy": "artist_classification_embeddings",
+        "evaluation_protocol": "embedding_retrieval",
+        "label_field": "artist_id",
+        "image_field": "image_uri"
+      },
       "common_failure_modes": [
         "margin_collapse",
         "classification_overfit_without_similarity_generalization",

@@ -254,6 +254,7 @@ class TechniqueCatalogImportCard(BaseModel):
     default_dataset_uri: str | None = None
     default_evaluation_target: str | None = None
     default_training_notes: str | None = None
+    default_execution_inputs: dict[str, str] = Field(default_factory=dict)
     common_failure_modes: list[str] = Field(default_factory=list)
     source_refs: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
@@ -299,6 +300,18 @@ class TechniqueCatalogImportCard(BaseModel):
         cleaned = ' '.join(value.split()).strip()
         return cleaned or None
 
+    @field_validator('default_execution_inputs')
+    @classmethod
+    def validate_default_execution_inputs(cls, value: dict[str, str]) -> dict[str, str]:
+        cleaned: dict[str, str] = {}
+        for key, raw in value.items():
+            normalized_key = ' '.join(str(key).split()).strip()
+            normalized_value = ' '.join(str(raw).split()).strip()
+            if not normalized_key or not normalized_value:
+                continue
+            cleaned[normalized_key] = normalized_value
+        return cleaned
+
 
 class TechniqueCatalogImportRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
@@ -337,6 +350,7 @@ class TechniqueCatalogRecord(BaseModel):
     default_dataset_uri: str | None = None
     default_evaluation_target: str | None = None
     default_training_notes: str | None = None
+    default_execution_inputs: dict[str, str] = Field(default_factory=dict)
     common_failure_modes: list[str] = Field(default_factory=list)
     source_refs: list[str] = Field(default_factory=list)
     import_source: str = 'notebooklm-manual-export'

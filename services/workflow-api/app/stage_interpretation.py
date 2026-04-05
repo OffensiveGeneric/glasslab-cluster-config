@@ -125,6 +125,10 @@ def build_interpretation_record_from_agent_draft(
     default_dataset_uri = next((record.default_dataset_uri for record in matched_catalog_records if record.default_dataset_uri), None)
     default_evaluation_target = next((record.default_evaluation_target for record in matched_catalog_records if record.default_evaluation_target), None)
     default_training_notes = next((record.default_training_notes for record in matched_catalog_records if record.default_training_notes), None)
+    default_execution_inputs = next(
+        (record.default_execution_inputs for record in matched_catalog_records if record.default_execution_inputs),
+        {},
+    )
     preferred_workflow_id = validated_draft.get("preferred_workflow_id")
     if matched_catalog_records and catalog_workflow_ids(matched_catalog_records):
         preferred_workflow_id = catalog_workflow_ids(matched_catalog_records)[0]
@@ -162,6 +166,7 @@ def build_interpretation_record_from_agent_draft(
         default_dataset_uri=default_dataset_uri,
         default_evaluation_target=default_evaluation_target,
         default_training_notes=default_training_notes,
+        default_execution_inputs=default_execution_inputs,
     )
     return InterpretationRecord(
         interpretation_id=uuid4().hex,
