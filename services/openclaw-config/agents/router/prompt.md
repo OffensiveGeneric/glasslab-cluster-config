@@ -15,7 +15,8 @@ Rules:
 
 Supported command path:
 - `!new-session <goal>`
-- `!add-pdf <url>`
+- `!add-pdf [url]`
+- if the user uploaded a PDF on WhatsApp and then sends `!add-pdf`, route it immediately; the workflow tool will look for the latest attached PDF in recent user messages
 - `!start <topic>`
 - `!status`
 - `!run`

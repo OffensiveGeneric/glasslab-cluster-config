@@ -381,7 +381,7 @@ function commandHelpText(): string {
     "",
     "Manual source commands:",
     "!new-session <goal> or  new-session: <goal>",
-    "!add-pdf <url>      or  add-pdf: <url>",
+    "!add-pdf [url]      or  add-pdf: [url]",
     "",
     "Debug commands:",
     "!research <topic>  or  research: <topic>",
@@ -634,6 +634,14 @@ function resolveAgentSessionDirsRoot(): string {
   return join(process.env.OPENCLAW_STATE_DIR || DEFAULT_STATE_DIR, "agents");
 }
 
+type UserMessageRecord = {
+  content: unknown;
+  cleanedText: string;
+  rawText: string;
+  sessionPath: string;
+  lineIndex: number;
+};
+
 function extractTextContent(content: unknown): string {
   if (!Array.isArray(content)) {
     return "";
@@ -655,6 +663,88 @@ function extractTextContent(content: unknown): string {
     .trim();
 }
 
+function extractPdfAttachmentUrl(content: unknown): string | null {
+  const candidates: Array<{ url: string; mime: string; name: string; type: string }> = [];
+
+  function pushCandidate(value: unknown, context: { mime?: string; name?: string; type?: string }) {
+    const url = typeof value === "string" ? value.trim() : "";
+    if (!/^https?:\/\/\S+$/i.test(url)) {
+      return;
+    }
+    candidates.push({
+      url,
+      mime: (context.mime || "").trim().toLowerCase(),
+      name: (context.name || "").trim().toLowerCase(),
+      type: (context.type || "").trim().toLowerCase()
+    });
+  }
+
+  function walk(node: unknown, inherited: { mime?: string; name?: string; type?: string } = {}) {
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        walk(item, inherited);
+      }
+      return;
+    }
+    if (!node || typeof node !== "object") {
+      return;
+    }
+    const record = node as Record<string, unknown>;
+    const context = {
+      mime:
+        typeof record.mimeType === "string"
+          ? record.mimeType
+          : typeof record.mime_type === "string"
+            ? record.mime_type
+            : typeof record.contentType === "string"
+              ? record.contentType
+              : typeof record.content_type === "string"
+                ? record.content_type
+                : typeof record.mediaType === "string"
+                  ? record.mediaType
+                  : inherited.mime,
+      name:
+        typeof record.name === "string"
+          ? record.name
+          : typeof record.filename === "string"
+            ? record.filename
+            : typeof record.fileName === "string"
+              ? record.fileName
+              : typeof record.title === "string"
+                ? record.title
+                : inherited.name,
+      type: typeof record.type === "string" ? record.type : inherited.type
+    };
+
+    pushCandidate(record.url, context);
+    pushCandidate(record.downloadUrl, context);
+    pushCandidate(record.download_url, context);
+    pushCandidate(record.sourceUrl, context);
+    pushCandidate(record.source_url, context);
+    pushCandidate(record.fileUrl, context);
+    pushCandidate(record.file_url, context);
+    pushCandidate(record.href, context);
+    pushCandidate(record.uri, context);
+
+    for (const value of Object.values(record)) {
+      if (value && typeof value === "object") {
+        walk(value, context);
+      }
+    }
+  }
+
+  walk(content);
+
+  const preferred = candidates.find(
+    (item) =>
+      item.mime.includes("application/pdf") ||
+      item.name.endsWith(".pdf") ||
+      /\.pdf(?:$|\?)/i.test(item.url) ||
+      item.type === "document"
+  );
+  return preferred?.url ?? null;
+}
+
 function cleanLatestUserIdea(raw: string): string {
   let text = raw.replace(/\r/g, "").trim();
   text = text.replace(/Conversation info \(untrusted metadata\):\s*```[\s\S]*?```/g, "").trim();
@@ -672,6 +762,14 @@ function cleanLatestUserIdea(raw: string): string {
 }
 
 async function loadLatestUserIdeaText(): Promise<string> {
+  const latest = await loadLatestUserMessageRecord();
+  if (latest.cleanedText) {
+    return latest.cleanedText;
+  }
+  throw new Error("no recent user idea was found in the agent session history");
+}
+
+async function loadRecentUserMessages(limit: number = 64): Promise<UserMessageRecord[]> {
   const agentsDir = resolveAgentSessionDirsRoot();
   const agentEntries = await readdir(agentsDir, { withFileTypes: true });
   const sessionFiles = await Promise.all(
@@ -712,6 +810,7 @@ async function loadLatestUserIdeaText(): Promise<string> {
   ).then((groups) => groups.flat());
   const ordered = sessionFiles
     .sort((left, right) => right.mtimeMs - left.mtimeMs);
+  const messages: UserMessageRecord[] = [];
   for (const sessionFile of ordered) {
     const raw = await readFile(sessionFile.path, "utf8");
     const lines = raw
@@ -719,6 +818,9 @@ async function loadLatestUserIdeaText(): Promise<string> {
       .map((line) => line.trim())
       .filter(Boolean);
     for (let index = lines.length - 1; index >= 0; index -= 1) {
+      if (messages.length >= limit) {
+        return messages;
+      }
       try {
         const payload = JSON.parse(lines[index]);
         if (payload?.type !== "message") {
@@ -728,17 +830,53 @@ async function loadLatestUserIdeaText(): Promise<string> {
         if (role !== "user") {
           continue;
         }
-        const text = extractTextContent(payload?.message?.content);
-        const cleaned = cleanLatestUserIdea(text);
-        if (cleaned) {
-          return cleaned;
-        }
+        const rawText = extractTextContent(payload?.message?.content);
+        messages.push({
+          content: payload?.message?.content,
+          rawText,
+          cleanedText: cleanLatestUserIdea(rawText),
+          sessionPath: sessionFile.path,
+          lineIndex: index
+        });
       } catch {
         continue;
       }
     }
   }
+  return messages;
+}
+
+async function loadLatestUserMessageRecord(): Promise<UserMessageRecord> {
+  const recentMessages = await loadRecentUserMessages(64);
+  const latest = recentMessages.find((item) => item.cleanedText);
+  if (latest) {
+    return latest;
+  }
   throw new Error("no recent user idea was found in the agent session history");
+}
+
+async function loadLatestPdfAttachmentUrl(reference: UserMessageRecord): Promise<string | null> {
+  const recentMessages = await loadRecentUserMessages(64);
+
+  const sameSession = recentMessages.filter((item) => item.sessionPath === reference.sessionPath);
+  const ordered = [
+    ...sameSession,
+    ...recentMessages.filter((item) => item.sessionPath !== reference.sessionPath)
+  ];
+
+  for (const message of ordered) {
+    if (
+      message.sessionPath === reference.sessionPath &&
+      message.lineIndex > reference.lineIndex
+    ) {
+      continue;
+    }
+    const attachmentUrl = extractPdfAttachmentUrl(message.content);
+    if (attachmentUrl) {
+      return attachmentUrl;
+    }
+  }
+  return null;
 }
 
 async function requestJson(
@@ -1388,7 +1526,8 @@ const plugin = {
           properties: {}
         },
         async execute() {
-          const latestUserMessage = cleanLatestUserIdea(await loadLatestUserIdeaText());
+          const latestUserMessageRecord = await loadLatestUserMessageRecord();
+          const latestUserMessage = cleanLatestUserIdea(latestUserMessageRecord.cleanedText);
           const routedIntent = detectRoutedUserIntent(latestUserMessage);
           const explicitCommand = parseExplicitCommand(latestUserMessage);
           try {
@@ -1616,11 +1755,14 @@ const plugin = {
             if (routedIntent === "add-manual-pdf") {
               const argument =
                 explicitCommand?.command === "add-pdf" ? explicitCommand.argument.trim() : "";
-              if (!argument || !/^https?:\/\/\S+$/i.test(argument) || !/\.pdf(?:$|\?)/i.test(argument)) {
+              const attachmentUrl =
+                !argument ? await loadLatestPdfAttachmentUrl(latestUserMessageRecord) : null;
+              const pdfUrl = argument || attachmentUrl || "";
+              if (!pdfUrl || !/^https?:\/\/\S+$/i.test(pdfUrl) || !/\.pdf(?:$|\?)/i.test(pdfUrl)) {
                 return buildJsonResult({
                   routed_intent: routedIntent,
                   status: "needs-input",
-                  detail: "use !add-pdf <direct-pdf-url>"
+                  detail: "use !add-pdf <direct-pdf-url> or upload a PDF on WhatsApp and then send !add-pdf"
                 });
               }
               const { endpoint, payload } = await requestJson(
@@ -1631,8 +1773,12 @@ const plugin = {
                   body: JSON.stringify({
                     title: "Manual PDF candidate",
                     official_page: null,
-                    pdf_url: argument,
-                    notes: ["manually queued direct pdf from OpenClaw command"],
+                    pdf_url: pdfUrl,
+                    notes: [
+                      attachmentUrl
+                        ? "manually queued latest WhatsApp PDF attachment from OpenClaw command"
+                        : "manually queued direct pdf from OpenClaw command"
+                    ],
                     tags: ["manual", "pdf"],
                     submitted_by: "openclaw-operator"
                   })

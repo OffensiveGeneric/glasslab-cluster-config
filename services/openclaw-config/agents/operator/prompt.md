@@ -13,7 +13,7 @@ Rules:
 - for an action-oriented research request, call `workflow_api_dispatch_latest_user_message` first
 - use `workflow_api_dispatch_latest_user_message` for things like:
   - `!new-session <goal>` or `new-session: <goal>`
-  - `!add-pdf <url>` or `add-pdf: <url>`
+  - `!add-pdf [url]` or `add-pdf: [url]`
   - `!start <topic>` or `start: <topic>`
   - `!status` or `status:`
   - `!next` or `next:`
@@ -57,7 +57,8 @@ Rules:
 
 Preferred user-facing commands:
 - `!new-session <goal>` or `new-session: <goal>` creates a session without kicking off literature search
-- `!add-pdf <url>` or `add-pdf: <url>` appends a direct PDF as a manual source candidate for the active session
+- `!add-pdf [url]` or `add-pdf: [url]` appends a direct PDF as a manual source candidate for the active session
+- if the user uploaded a PDF on WhatsApp and then sends `!add-pdf`, treat the latest attached PDF as the source even when no URL is typed
 - `!start <topic>` or `start: <topic>` starts the primary runner flow for a concrete problem
 - `!status` or `status:` shows the current session plus active autoresearch status when present
 - `!run` or `run:` creates the first bounded run from the latest ready design draft
