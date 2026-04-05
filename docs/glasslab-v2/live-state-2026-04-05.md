@@ -12,7 +12,7 @@ path with a repo-owned service.
 - service: `glasslab-whatsapp-gateway`
 - namespace: `glasslab-v2`
 - deployment image:
-  - `ghcr.io/offensivegeneric/glasslab-whatsapp-gateway:0.1.1-local`
+  - `ghcr.io/offensivegeneric/glasslab-whatsapp-gateway:0.1.2-local`
 - current node:
   - `node05`
 
@@ -110,6 +110,29 @@ surface for Meta WhatsApp Cloud API-style delivery:
 
 This narrows the remaining gap between the current cluster-side gateway and the
 actual external WhatsApp front door.
+
+Live validation on `.44` confirmed:
+
+- `GET /webhooks/meta/whatsapp` is present on the running gateway
+- when no verify token is configured, it fails explicitly with:
+  - `503 meta verify token is not configured`
+- `GET /attachments/meta/{media_id}` is present on the running gateway
+- when no Meta access token is configured, it fails explicitly with:
+  - `503 meta access token is not configured`
+- `POST /webhooks/meta/whatsapp` now accepts real Meta-style payloads and
+  normalizes them into the deterministic command path
+
+Validated live examples:
+
+- a Meta text payload with `!help` returned:
+  - `provider: "meta-whatsapp"`
+  - `processed_messages: 1`
+  - `forwarded_message: "!help"`
+  - `route: "deterministic-router"`
+- a Meta document payload with a PDF attachment returned:
+  - `forwarded_message: "!add-pdf http://glasslab-whatsapp-gateway.glasslab-v2.svc.cluster.local:8097/attachments/meta/meta-doc-2"`
+  - proving the gateway can turn a provider-hosted document into a
+    backend-fetchable PDF target without requiring a manually pasted public URL
 
 ## Follow-On Fix
 
