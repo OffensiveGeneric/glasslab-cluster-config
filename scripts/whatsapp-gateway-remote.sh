@@ -6,6 +6,8 @@ if [[ $# -lt 1 ]]; then
 Usage:
   whatsapp-gateway-remote.sh inbound "<message>" [sender] [channel]
   whatsapp-gateway-remote.sh inbound-pdf "<pdf-url>" [message] [sender] [channel]
+  whatsapp-gateway-remote.sh provider "<provider_message_id>" "<message>" [sender] [channel]
+  whatsapp-gateway-remote.sh provider-pdf "<provider_message_id>" "<pdf-url>" [message] [sender] [channel]
   whatsapp-gateway-remote.sh session [sender] [channel]
   whatsapp-gateway-remote.sh healthz
 USAGE
@@ -13,5 +15,4 @@ USAGE
 fi
 
 REMOTE_SCRIPT="/home/glasslab/cluster-config/scripts/whatsapp-gateway-cli.sh"
-remote_cmd="$(printf '%q ' "$REMOTE_SCRIPT" "$@")"
-exec ssh glasslab-44 "bash -lc $(printf '%q' "$remote_cmd")"
+exec ssh glasslab-44 bash "$REMOTE_SCRIPT" "$@"

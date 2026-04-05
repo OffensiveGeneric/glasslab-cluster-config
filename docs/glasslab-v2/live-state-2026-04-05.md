@@ -149,3 +149,33 @@ OpenClaw command path because:
 - session transcripts are now ours
 - attachment handling is now ours
 - OpenClaw is no longer required for the critical runner loop
+
+## Provisioner Reconciliation
+
+The `.44` provisioner checkout was reconciled after the gateway work:
+
+- `/home/glasslab/cluster-config` is clean again at the current GitHub-backed
+  state
+- the old dirty tree is preserved at:
+  - `/home/glasslab/cluster-config-prev`
+- an explicit preservation branch and handoff snapshot were written on `.44`
+
+The scary-looking `.44` conflict turned out not to hide major unpublished API
+progress:
+
+- most tracked files in the old tree were already byte-for-byte identical to
+  the current GitHub-backed checkout
+- the remaining genuine tracked diffs were older content, not newer runner or
+  workflow logic
+
+## Helper Reliability
+
+The local gateway helper path is also stronger now:
+
+- `whatsapp-gateway-cli.sh` no longer assumes one fixed local port for every
+  port-forward
+- it now chooses a free local port automatically when needed
+- it waits for a real `/healthz` response instead of only checking for an open
+  socket
+- `whatsapp-gateway-remote.sh` now invokes the remote helper through `bash`
+  directly instead of assuming the execute bit is present
