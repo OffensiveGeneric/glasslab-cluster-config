@@ -14,7 +14,7 @@ import app.autoresearch as autoresearch_module
 import app.main as main_module
 import app.source_documents as source_documents
 from app.schemas import AutoresearchDecisionRecord, AutoresearchIterationRecord
-from app.stage_interpretation import build_interpretation_record_from_agent_draft
+from app.stage_interpretation import build_interpretation_record_from_agent_draft, validate_interpretation_agent_draft
 from app.main import create_app
 from app.persistence import InMemoryRunStore
 from app.registry import WorkflowRegistry
@@ -681,6 +681,36 @@ def test_gpu_technique_card_can_fill_executable_contract() -> None:
     assert design_payload['declared_inputs']['evaluation_target'] == 'embedding retrieval auc'
     assert design_payload['declared_inputs']['pair_strategy'] == 'artist_positive_negative_pairs'
     assert design_payload['declared_inputs']['evaluation_protocol'] == 'same_artist_verification'
+
+
+def test_validate_interpretation_agent_draft_does_not_stringify_none_optionals() -> None:
+    registry = WorkflowRegistry(str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'))
+    intake = build_client().post(
+        '/intakes',
+        json={
+            'raw_request': 'Compare image metric learning methods.',
+            'source_refs': ['manual:artist-similarity-v1'],
+        },
+    ).json()
+
+    normalized = validate_interpretation_agent_draft(
+        {
+            'source_type': 'manual-note',
+            'normalized_summary': 'Compare image metric learning methods.',
+            'extracted_method_summary': 'Metric-learning framing for image similarity.',
+            'literature_state_summary': 'No linked paper yet.',
+            'candidate_workflow_families': ['gpu-experiment'],
+            'recommended_method_family': None,
+            'preferred_workflow_id': None,
+            'preferred_resource_profile': None,
+        },
+        intake=intake,
+        registry=registry,
+    )
+
+    assert normalized['recommended_method_family'] is None
+    assert normalized['preferred_workflow_id'] is None
+    assert normalized['preferred_resource_profile'] is None
 
 
 def test_create_app_rejects_implicit_memory_store_when_disallowed() -> None:

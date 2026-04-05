@@ -24,6 +24,13 @@ from .technique_catalog import enrich_technique_knowledge_from_catalog, match_ca
 LOGGER = logging.getLogger(__name__)
 
 
+def _optional_clean_string(value: Any, *, limit: int) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = ' '.join(value.split()).strip()
+    return cleaned[:limit] or None
+
+
 def validate_interpretation_agent_draft(
     draft: dict[str, Any],
     intake: IntakeRecord,
@@ -47,20 +54,14 @@ def validate_interpretation_agent_draft(
         "extracted_claims": normalize_unique_strings(list(draft.get("extracted_claims", [])))[:3],
         "research_gaps": normalize_unique_strings(list(draft.get("research_gaps", [])))[:4],
         "bounded_experiment_ideas": normalize_unique_strings(list(draft.get("bounded_experiment_ideas", [])))[:3],
-        "recommended_method_family": (
-            " ".join(str(draft.get("recommended_method_family", "")).split())[:120] or None
-        ),
+        "recommended_method_family": _optional_clean_string(draft.get("recommended_method_family"), limit=120),
         "recommended_datasets": normalize_unique_strings(list(draft.get("recommended_datasets", [])))[:4],
         "recommended_metrics": normalize_unique_strings(list(draft.get("recommended_metrics", [])))[:4],
         "recommended_baselines": normalize_unique_strings(list(draft.get("recommended_baselines", [])))[:4],
         "recommended_architectures": normalize_unique_strings(list(draft.get("recommended_architectures", [])))[:4],
         "recommended_python_packages": normalize_unique_strings(list(draft.get("recommended_python_packages", [])))[:6],
-        "preferred_workflow_id": (
-            " ".join(str(draft.get("preferred_workflow_id", "")).split())[:120] or None
-        ),
-        "preferred_resource_profile": (
-            " ".join(str(draft.get("preferred_resource_profile", "")).split())[:120] or None
-        ),
+        "preferred_workflow_id": _optional_clean_string(draft.get("preferred_workflow_id"), limit=120),
+        "preferred_resource_profile": _optional_clean_string(draft.get("preferred_resource_profile"), limit=120),
         "gpu_required": bool(draft.get("gpu_required", False)),
         "mutation_axes": normalize_unique_strings(list(draft.get("mutation_axes", [])))[:6],
         "unresolved_questions": normalize_unique_strings(list(draft.get("unresolved_questions", []))),
