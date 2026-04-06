@@ -139,6 +139,84 @@ def test_pdf_attachment_can_drive_add_pdf_without_text(tmp_path: Path) -> None:
         main_module._request_research_ingress = original
 
 
+def test_csv_attachment_can_drive_add_dataset_without_text(tmp_path: Path) -> None:
+    import app.main as main_module
+
+    def fake_ingress(settings, *, message, sender, channel, session_id=None):
+        assert message == "!add-dataset https://example.org/train.csv"
+        return {
+            "handled": True,
+            "route": "deterministic-router",
+            "response_text": "Attached dataset.",
+            "router_payload": {"command": "add-dataset"},
+        }
+
+    original = main_module._request_research_ingress
+    main_module._request_research_ingress = fake_ingress
+    try:
+        client = TestClient(
+            create_app(settings=Settings(state_dir=str(tmp_path)))
+        )
+        response = client.post(
+            "/webhooks/whatsapp/inbound",
+            json={
+                "sender": "+15555550123",
+                "message": "",
+                "attachments": [
+                    {
+                        "url": "https://example.org/train.csv",
+                        "mime_type": "text/csv",
+                        "filename": "train.csv",
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["forwarded_message"] == "!add-dataset https://example.org/train.csv"
+    finally:
+        main_module._request_research_ingress = original
+
+
+def test_add_dataset_command_is_augmented_by_csv_attachment(tmp_path: Path) -> None:
+    import app.main as main_module
+
+    def fake_ingress(settings, *, message, sender, channel, session_id=None):
+        assert message == "!add-dataset https://example.org/train.csv"
+        return {
+            "handled": True,
+            "route": "deterministic-router",
+            "response_text": "Attached dataset.",
+            "router_payload": {"command": "add-dataset"},
+        }
+
+    original = main_module._request_research_ingress
+    main_module._request_research_ingress = fake_ingress
+    try:
+        client = TestClient(
+            create_app(settings=Settings(state_dir=str(tmp_path)))
+        )
+        response = client.post(
+            "/webhooks/whatsapp/inbound",
+            json={
+                "sender": "+15555550123",
+                "message": "!add-dataset",
+                "attachments": [
+                    {
+                        "url": "https://example.org/train.csv",
+                        "mime_type": "text/csv",
+                        "filename": "train.csv",
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["forwarded_message"] == "!add-dataset https://example.org/train.csv"
+    finally:
+        main_module._request_research_ingress = original
+
+
 def test_add_pdf_command_is_augmented_by_pdf_attachment(tmp_path: Path) -> None:
     import app.main as main_module
 
@@ -802,6 +880,66 @@ def test_meta_document_message_becomes_gateway_attachment_url(tmp_path: Path) ->
     assert response.status_code == 200
     assert observed_messages == [
         "!add-pdf http://gateway.test/attachments/meta/meta-media-123"
+    ]
+
+
+def test_meta_csv_document_message_becomes_dataset_attachment_url(tmp_path: Path) -> None:
+    import app.main as main_module
+
+    observed_messages: list[str] = []
+
+    def fake_ingress(settings, *, message, sender, channel, session_id=None):
+        observed_messages.append(message)
+        return {
+            "handled": True,
+            "route": "deterministic-router",
+            "response_text": "Attached dataset.",
+            "router_payload": {"command": "add-dataset"},
+        }
+
+    original_ingress = main_module._request_research_ingress
+    main_module._request_research_ingress = fake_ingress
+    try:
+        client = TestClient(
+            create_app(
+                settings=Settings(
+                    state_dir=str(tmp_path),
+                    gateway_base_url="http://gateway.test",
+                )
+            )
+        )
+        payload = {
+            "object": "whatsapp_business_account",
+            "entry": [
+                {
+                    "changes": [
+                        {
+                            "value": {
+                                "messages": [
+                                    {
+                                        "from": "15555550123",
+                                        "id": "wamid-meta-csv-1",
+                                        "type": "document",
+                                        "document": {
+                                            "id": "meta-media-csv-123",
+                                            "mime_type": "text/csv",
+                                            "filename": "train.csv",
+                                        },
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ],
+        }
+        response = client.post("/webhooks/meta/whatsapp", json=payload)
+    finally:
+        main_module._request_research_ingress = original_ingress
+
+    assert response.status_code == 200
+    assert observed_messages == [
+        "!add-dataset http://gateway.test/attachments/meta/meta-media-csv-123"
     ]
 
 

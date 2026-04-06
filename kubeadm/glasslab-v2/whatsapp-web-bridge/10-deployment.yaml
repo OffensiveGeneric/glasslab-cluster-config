@@ -36,7 +36,7 @@ spec:
               readOnly: true
       containers:
         - name: whatsapp-web-bridge
-          image: ghcr.io/offensivegeneric/glasslab-whatsapp-web-bridge:0.1.1-local
+          image: ghcr.io/offensivegeneric/glasslab-whatsapp-web-bridge:0.1.2-local
           imagePullPolicy: IfNotPresent
           env:
             - name: PORT

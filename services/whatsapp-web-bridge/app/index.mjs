@@ -75,7 +75,20 @@ function extractText(message) {
   ).trim();
 }
 
-async function maybePersistPdf(message) {
+function isSupportedDocument(mime, fileName) {
+  const loweredName = String(fileName || "").toLowerCase();
+  const normalizedMime = String(mime || "").toLowerCase();
+  return (
+    normalizedMime === "application/pdf" ||
+    loweredName.endsWith(".pdf") ||
+    normalizedMime === "text/csv" ||
+    normalizedMime === "application/csv" ||
+    normalizedMime === "application/vnd.ms-excel" ||
+    loweredName.endsWith(".csv")
+  );
+}
+
+async function maybePersistDocument(message) {
   const payload = message?.message || {};
   const doc = payload.documentMessage;
   if (!doc) {
@@ -83,7 +96,7 @@ async function maybePersistPdf(message) {
   }
   const mime = String(doc.mimetype || "").toLowerCase();
   const fileName = String(doc.fileName || "");
-  if (mime !== "application/pdf" && !fileName.toLowerCase().endsWith(".pdf")) {
+  if (!isSupportedDocument(mime, fileName)) {
     return [];
   }
 
@@ -98,7 +111,14 @@ async function maybePersistPdf(message) {
   }
 
   const digest = crypto.createHash("sha256").update(buf).digest("hex");
-  const ext = fileName.toLowerCase().endsWith(".pdf") ? ".pdf" : ".bin";
+  let ext = ".bin";
+  if (fileName.toLowerCase().endsWith(".pdf")) {
+    ext = ".pdf";
+  } else if (fileName.toLowerCase().endsWith(".csv")) {
+    ext = ".csv";
+  } else if (mime === "text/csv" || mime === "application/csv" || mime === "application/vnd.ms-excel") {
+    ext = ".csv";
+  }
   const filename = `${digest}${ext}`;
   const fullPath = attachmentPath(filename);
   if (!fs.existsSync(fullPath)) {
@@ -107,7 +127,7 @@ async function maybePersistPdf(message) {
   return [
     {
       url: `${settings.baseUrl.replace(/\/$/, "")}/attachments/${filename}`,
-      mime_type: mime || "application/pdf",
+      mime_type: mime || (ext === ".csv" ? "text/csv" : "application/pdf"),
       filename: fileName || filename,
     },
   ];
@@ -140,7 +160,7 @@ async function handleInbound(message) {
 
   const sender = preferredSenderId(message?.key) || remoteJid;
   const text = extractText(message);
-  const attachments = await maybePersistPdf(message);
+  const attachments = await maybePersistDocument(message);
   const payload = {
     provider: "whatsapp",
     provider_message_id: providerMessageId(message),

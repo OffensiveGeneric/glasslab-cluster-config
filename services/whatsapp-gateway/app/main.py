@@ -73,7 +73,7 @@ class Settings:
             "You are the Glasslab assistant. Help researchers think through experiments, "
             "summarize results, and discuss next steps. Do not claim to execute actions "
             "unless a deterministic command is used. When appropriate, suggest commands "
-            "like !start, !run, !next, !compare, !status, !new-session, or !add-pdf."
+            "like !start, !run, !next, !compare, !status, !new-session, !add-pdf, or !add-dataset."
         ),
     )
     dm_policy: str = os.environ.get(
@@ -338,9 +338,27 @@ def _is_pdf_attachment(attachment: AttachmentRecord) -> bool:
     )
 
 
+def _is_csv_attachment(attachment: AttachmentRecord) -> bool:
+    mime = (attachment.mime_type or "").lower()
+    filename = (attachment.filename or "").lower()
+    url = attachment.url.lower()
+    return (
+        mime in {"text/csv", "application/csv", "application/vnd.ms-excel"}
+        or filename.endswith(".csv")
+        or url.endswith(".csv")
+    )
+
+
 def _latest_pdf_url(attachments: list[AttachmentRecord]) -> str | None:
     for attachment in reversed(attachments):
         if _is_pdf_attachment(attachment):
+            return attachment.url
+    return None
+
+
+def _latest_csv_url(attachments: list[AttachmentRecord]) -> str | None:
+    for attachment in reversed(attachments):
+        if _is_csv_attachment(attachment):
             return attachment.url
     return None
 
@@ -350,11 +368,20 @@ def _augment_message_for_attachments(request: WhatsAppInboundRequest) -> str:
     if not request.attachments:
         return message
     pdf_url = _latest_pdf_url(request.attachments)
+    csv_url = _latest_csv_url(request.attachments)
+    if not message:
+        if csv_url is not None:
+            return f"!add-dataset {csv_url}"
+        if pdf_url is not None:
+            return f"!add-pdf {pdf_url}"
+        return message
+    lowered = message.lower()
+    if csv_url is not None and lowered == "!add-dataset":
+        return f"!add-dataset {csv_url}"
     if pdf_url is None:
         return message
     if not message:
         return f"!add-pdf {pdf_url}"
-    lowered = message.lower()
     if lowered == "!add-pdf":
         return f"!add-pdf {pdf_url}"
     return message
@@ -694,7 +721,7 @@ def _chat_reply(
         return (
             "Free-form chat is not enabled in the Glasslab WhatsApp gateway yet. "
             "Use a deterministic command like !start, !run, !next, !compare, "
-            "!status, !new-session, or !add-pdf."
+            "!status, !new-session, !add-pdf, or !add-dataset."
         )
 
     prompt_messages: list[dict[str, str]] = [

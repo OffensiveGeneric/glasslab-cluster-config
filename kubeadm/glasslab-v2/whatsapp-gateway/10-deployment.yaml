@@ -19,7 +19,7 @@ spec:
         - name: glasslab-ghcr-pull
       containers:
         - name: whatsapp-gateway
-          image: ghcr.io/offensivegeneric/glasslab-whatsapp-gateway:0.1.4-local
+          image: ghcr.io/offensivegeneric/glasslab-whatsapp-gateway:0.1.5-local
           imagePullPolicy: IfNotPresent
           env:
             - name: GLASSLAB_WHATSAPP_GATEWAY_RESEARCH_INGRESS_URL
@@ -40,7 +40,7 @@ spec:
                 visual art or paintings unless the user clearly says music.
                 Do not claim to execute actions unless a deterministic command
                 is used. Suggest commands like !start, !run, !next, !compare,
-                !status, !new-session, or !add-pdf when useful.
+                !status, !new-session, !add-pdf, or !add-dataset when useful.
             - name: GLASSLAB_WHATSAPP_GATEWAY_DM_POLICY
               value: allowlist
             - name: GLASSLAB_WHATSAPP_GATEWAY_OWNER
