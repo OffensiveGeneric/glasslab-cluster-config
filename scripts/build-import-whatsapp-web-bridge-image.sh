@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-IMAGE_REF="${GLASSLAB_WHATSAPP_WEB_BRIDGE_IMAGE_REF:-ghcr.io/offensivegeneric/glasslab-whatsapp-web-bridge:0.1.0-local}"
+IMAGE_REF="${GLASSLAB_WHATSAPP_WEB_BRIDGE_IMAGE_REF:-ghcr.io/offensivegeneric/glasslab-whatsapp-web-bridge:0.1.1-local}"
 NODE_HOST="${GLASSLAB_WHATSAPP_WEB_BRIDGE_NODE_HOST:-192.168.1.47}"
 NODE_USER="${GLASSLAB_WHATSAPP_WEB_BRIDGE_NODE_USER:-clusteradmin}"
 NODE_SSH_KEY="${GLASSLAB_WHATSAPP_WEB_BRIDGE_NODE_SSH_KEY:-/home/glasslab/.ssh/id_ed25519}"

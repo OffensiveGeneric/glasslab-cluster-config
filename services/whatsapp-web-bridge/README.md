@@ -10,3 +10,17 @@ Purpose:
 - let `whatsapp-gateway` remain the control/chat shell
 
 The bridge is transport only. It should not contain workflow logic.
+
+Canonical transport contract:
+
+- forward inbound turns to `POST /webhooks/whatsapp/provider`
+- send provider-shaped payloads with:
+  - `provider`
+  - `provider_message_id`
+  - `sender`
+  - `text`
+  - `conversation_id`
+  - `is_group`
+  - `attachments`
+- leave sender normalization, dedupe, session pinning, and policy enforcement
+  to `whatsapp-gateway`

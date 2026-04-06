@@ -114,7 +114,7 @@ async function maybePersistPdf(message) {
 }
 
 async function postGatewayInbound(payload) {
-  const response = await fetch(`${settings.gatewayUrl.replace(/\/$/, "")}/webhooks/whatsapp/inbound`, {
+  const response = await fetch(`${settings.gatewayUrl.replace(/\/$/, "")}/webhooks/whatsapp/provider`, {
     method: "POST",
     headers: { "content-type": "application/json", "accept": "application/json" },
     body: JSON.stringify(payload),
@@ -142,10 +142,11 @@ async function handleInbound(message) {
   const text = extractText(message);
   const attachments = await maybePersistPdf(message);
   const payload = {
+    provider: "whatsapp",
+    provider_message_id: providerMessageId(message),
     sender,
     channel: "whatsapp",
-    message: text,
-    provider_message_id: providerMessageId(message),
+    text,
     conversation_id: remoteJid,
     is_group: isGroupJid(remoteJid),
     attachments,
