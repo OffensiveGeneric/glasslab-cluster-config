@@ -229,7 +229,31 @@ def _parse_csv_set(value: str) -> set[str]:
 
 
 def _normalized_sender(sender: str) -> str:
-    return " ".join(sender.split()).strip()
+    cleaned = " ".join(sender.split()).strip()
+    if not cleaned:
+        return cleaned
+    if "@" in cleaned:
+        cleaned = cleaned.split("@", 1)[0]
+    if ":" in cleaned:
+        prefix, suffix = cleaned.split(":", 1)
+        if prefix.lstrip("+").isdigit() and suffix.isdigit():
+            cleaned = prefix
+    if cleaned.isdigit():
+        return f"+{cleaned}"
+    if cleaned.startswith("+") and cleaned[1:].isdigit():
+        return cleaned
+    return cleaned
+
+
+def _normalized_conversation_id(conversation_id: str | None) -> str:
+    if not conversation_id:
+        return ""
+    cleaned = " ".join(conversation_id.split()).strip()
+    if not cleaned:
+        return cleaned
+    if "@" in cleaned:
+        cleaned = cleaned.split("@", 1)[0]
+    return cleaned
 
 
 def _session_key(channel: str, sender: str, conversation_id: str | None = None) -> str:
@@ -377,9 +401,21 @@ def _access_decision(
                 "Group chat is not enabled in the Glasslab WhatsApp gateway yet. "
                 "Use a direct message or a deterministic command path."
             )
+        normalized_group = _normalized_conversation_id(conversation_id)
+        if policy in {"open", "enabled"}:
+            return True, None
         if policy == "allowlist":
-            if not conversation_id or conversation_id not in allowed_groups:
+            if (
+                not conversation_id
+                or (
+                    conversation_id not in allowed_groups
+                    and normalized_group not in allowed_groups
+                )
+            ):
                 return False, "This group is not on the approved Glasslab allowlist."
+        if policy in {"member-allowlist", "member_allowlist", "member"}:
+            if normalized_sender not in allowed_senders:
+                return False, "This sender is not on the approved Glasslab allowlist for group chat."
         return True, None
 
     policy = settings.dm_policy.strip().lower()

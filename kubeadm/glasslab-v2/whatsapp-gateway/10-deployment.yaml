@@ -56,7 +56,7 @@ spec:
                   key: OPENCLAW_WHATSAPP_ALLOW_FROM
                   optional: true
             - name: GLASSLAB_WHATSAPP_GATEWAY_GROUP_POLICY
-              value: disabled
+              value: member-allowlist
             - name: GLASSLAB_WHATSAPP_GATEWAY_DEFAULT_CHANNEL
               value: whatsapp
             - name: GLASSLAB_WHATSAPP_GATEWAY_BASE_URL

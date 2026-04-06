@@ -49,6 +49,16 @@ function senderFromJid(jid) {
   return jid.split("@")[0];
 }
 
+function preferredSenderId(key) {
+  return (
+    key?.participantAlt ||
+    key?.remoteJidAlt ||
+    key?.participant ||
+    key?.remoteJid ||
+    null
+  );
+}
+
 function isGroupJid(jid) {
   return typeof jid === "string" && jid.endsWith("@g.us");
 }
@@ -128,7 +138,7 @@ async function handleInbound(message) {
     return;
   }
 
-  const sender = senderFromJid(message?.key?.participant || remoteJid);
+  const sender = preferredSenderId(message?.key) || remoteJid;
   const text = extractText(message);
   const attachments = await maybePersistPdf(message);
   const payload = {

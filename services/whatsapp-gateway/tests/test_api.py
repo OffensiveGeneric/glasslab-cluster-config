@@ -266,6 +266,47 @@ def test_dm_allowlist_blocks_unknown_sender(tmp_path: Path) -> None:
     assert "approved Glasslab allowlist" in payload["response_text"]
 
 
+def test_dm_allowlist_accepts_whatsapp_phone_jid(tmp_path: Path) -> None:
+    import app.main as main_module
+
+    def fake_ingress(settings, *, message, sender, channel, session_id=None):
+        assert sender == "19145316570@s.whatsapp.net"
+        return {
+            "handled": True,
+            "route": "deterministic-router",
+            "response_text": "Session status is available.",
+            "router_payload": {"command": "status"},
+        }
+
+    original = main_module._request_research_ingress
+    main_module._request_research_ingress = fake_ingress
+    try:
+        client = TestClient(
+            create_app(
+                settings=Settings(
+                    state_dir=str(tmp_path),
+                    dm_policy="allowlist",
+                    allow_from="+19145316570",
+                )
+            )
+        )
+        response = client.post(
+            "/webhooks/whatsapp/inbound",
+            json={
+                "sender": "19145316570@s.whatsapp.net",
+                "message": "!status",
+                "attachments": [],
+            },
+        )
+    finally:
+        main_module._request_research_ingress = original
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["handled"] is True
+    assert payload["route"] == "deterministic-router"
+
+
 def test_owner_is_allowed_even_if_not_listed_in_allow_from(tmp_path: Path) -> None:
     import app.main as main_module
 
@@ -358,6 +399,59 @@ def test_group_chat_can_use_chat_backend_when_allowlisted(tmp_path: Path) -> Non
     assert payload["handled"] is True
     assert payload["route"] == "gateway-chat"
     assert "approved group" in payload["response_text"]
+
+
+def test_group_chat_can_use_chat_backend_when_member_is_allowlisted(tmp_path: Path) -> None:
+    import app.main as main_module
+
+    def fake_ingress(settings, *, message, sender, channel, session_id=None):
+        return {
+            "handled": False,
+            "route": "openclaw-fallback",
+            "response_text": "",
+            "forward_to_openclaw": True,
+        }
+
+    def fake_chat(settings, *, messages, request):
+        assert request.is_group is True
+        assert request.conversation_id == "120363419610000000@g.us"
+        assert request.sender == "16466376467@s.whatsapp.net"
+        return "Group chat is enabled for approved members."
+
+    original_ingress = main_module._request_research_ingress
+    original_chat = main_module._chat_reply
+    main_module._request_research_ingress = fake_ingress
+    main_module._chat_reply = fake_chat
+    try:
+        client = TestClient(
+            create_app(
+                settings=Settings(
+                    state_dir=str(tmp_path),
+                    chat_backend_url="http://example.test/api/chat",
+                    group_policy="member-allowlist",
+                    allow_from="+16466376467",
+                )
+            )
+        )
+        response = client.post(
+            "/webhooks/whatsapp/inbound",
+            json={
+                "sender": "16466376467@s.whatsapp.net",
+                "conversation_id": "120363419610000000@g.us",
+                "is_group": True,
+                "message": "what happened in the last batch?",
+                "attachments": [],
+            },
+        )
+    finally:
+        main_module._request_research_ingress = original_ingress
+        main_module._chat_reply = original_chat
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["handled"] is True
+    assert payload["route"] == "gateway-chat"
+    assert "approved members" in payload["response_text"]
 
 
 def test_duplicate_attachment_driven_add_is_suppressed(tmp_path: Path) -> None:
