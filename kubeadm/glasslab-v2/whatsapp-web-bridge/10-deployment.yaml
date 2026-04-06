@@ -25,8 +25,8 @@ spec:
             - -lc
             - |
               mkdir -p /state/default
-              if [ ! -f /state/default/creds.json ] && [ -f /seed/creds.json ]; then
-                cp -R /seed/. /state/default/
+              if [ ! -f /state/default/creds.json ] && [ -f /seed/auth.tgz ]; then
+                tar -xzf /seed/auth.tgz -C /state/default
               fi
           volumeMounts:
             - name: state
