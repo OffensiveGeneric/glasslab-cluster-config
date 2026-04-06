@@ -17,6 +17,7 @@ from .persistence import RunStore
 from .schemas import SourceDocumentRecord
 
 HTML_TAG_RE = re.compile(r'<[^>]+>')
+HTML_TITLE_RE = re.compile(r'<title[^>]*>(.*?)</title>', re.IGNORECASE | re.DOTALL)
 TITLE_WORD_RE = re.compile(r"[A-Za-z0-9]+")
 TITLE_NORMALIZE_RE = re.compile(r'[^a-z0-9]+')
 COMMON_TITLE_WORDS = {
@@ -230,6 +231,25 @@ def _truncate_text(value: str | None, limit: int = 1200) -> str | None:
     return normalized[:limit]
 
 
+def sanitize_document_title(title: str | None, fallback: str) -> str:
+    cleaned = _truncate_text(title, 300)
+    if not cleaned:
+        return fallback
+    suspicious_markers = ('@import', '{', '}', ';', 'function(', 'var ', 'const ')
+    if any(marker in cleaned.lower() for marker in suspicious_markers):
+        return fallback
+    return cleaned
+
+
+def extract_html_title(content: bytes) -> str | None:
+    decoded = content.decode('utf-8', errors='ignore')
+    match = HTML_TITLE_RE.search(decoded)
+    if not match:
+        return None
+    title = html.unescape(match.group(1))
+    return _truncate_text(title, 300)
+
+
 def extract_document_metadata(
     *,
     source_url: str,
@@ -402,13 +422,16 @@ def ingest_source_document(
     try:
         content, content_type = fetch_source_document_bytes(source_url)
         fetched_title = guess_document_title(source_url)
+        media_type = (content_type or '').split(';', 1)[0].strip().lower()
+        if media_type in {'text/html', 'application/xhtml+xml'} or source_url.lower().endswith(('.html', '.htm', '/')):
+            fetched_title = sanitize_document_title(extract_html_title(content), fetched_title)
         text_excerpt = extract_text_excerpt(content, content_type, source_url)
         metadata = extract_document_metadata(
             source_url=source_url,
             guessed_title=fetched_title,
             text_excerpt=text_excerpt,
         )
-        fetched_title = str(metadata.get('title') or fetched_title)
+        fetched_title = sanitize_document_title(str(metadata.get('title') or fetched_title), fetched_title)
         validation_status, validation_notes = validate_document_identity(
             expected_title=expected_title,
             fetched_title=fetched_title,

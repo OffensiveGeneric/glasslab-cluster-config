@@ -39,6 +39,36 @@
       "input_type": "parameter_set",
       "required": false,
       "description": "Declared validation split fraction when the GPU workflow uses an internal validation partition."
+    },
+    {
+      "name": "pair_strategy",
+      "input_type": "parameter_set",
+      "required": false,
+      "description": "Bounded pairing or triplet-construction strategy for similarity-style image experiments."
+    },
+    {
+      "name": "evaluation_protocol",
+      "input_type": "parameter_set",
+      "required": false,
+      "description": "Named evaluation protocol for the bounded GPU experiment."
+    },
+    {
+      "name": "label_field",
+      "input_type": "parameter_set",
+      "required": false,
+      "description": "Primary label field used by the dataset contract."
+    },
+    {
+      "name": "image_field",
+      "input_type": "parameter_set",
+      "required": false,
+      "description": "Primary image field used by the dataset contract."
+    },
+    {
+      "name": "negative_sampling_strategy",
+      "input_type": "parameter_set",
+      "required": false,
+      "description": "Named hard-negative or contrastive sampling strategy for similarity-style experiments."
     }
   ],
   "allowed_models": [

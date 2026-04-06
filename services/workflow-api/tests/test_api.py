@@ -760,6 +760,14 @@ def test_gpu_technique_card_can_fill_executable_contract() -> None:
     assert design_payload['declared_inputs']['pair_strategy'] == 'artist_positive_negative_pairs'
     assert design_payload['declared_inputs']['evaluation_protocol'] == 'same_artist_verification'
 
+    run = client.post('/runs/from-latest-design-draft')
+    assert run.status_code == 201
+    run_payload = run.json()
+    assert run_payload['workflow_id'] == 'gpu-experiment'
+    assert run_payload['manifest']['inputs']['pair_strategy'] == 'artist_positive_negative_pairs'
+    assert run_payload['manifest']['inputs']['evaluation_protocol'] == 'same_artist_verification'
+    assert run_payload['manifest']['inputs']['label_field'] == 'artist_id'
+
 
 def test_validate_interpretation_agent_draft_does_not_stringify_none_optionals() -> None:
     registry = WorkflowRegistry(str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'))

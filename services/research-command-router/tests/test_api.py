@@ -187,6 +187,22 @@ def test_add_url_routes_to_manual_queue_with_official_page() -> None:
     assert calls[0][2]["source_url"] == "https://example.org/paper-page.html"
 
 
+def test_add_url_sanitizes_garbage_source_title() -> None:
+    def fake_requester(settings, path, method="GET", body=None):
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {"title": "@import url('https://fonts.example/css'); body { color: red; }"},
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!add-url https://dreamsim-nights.github.io/"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["command"] == "add-url"
+    assert "dreamsim-nights.github.io" in payload["response_text"]
+    assert "@import" not in payload["response_text"]
+
+
 def test_add_pdf_uses_pinned_session_when_provided() -> None:
     calls: list[tuple[str, str, dict | None]] = []
 

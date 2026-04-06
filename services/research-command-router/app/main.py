@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 from urllib import error as urllib_error
 from urllib import request as urllib_request
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -256,6 +257,19 @@ def _http_detail_text(exc: HTTPException) -> str:
     return json.dumps(exc.detail, sort_keys=True)
 
 
+def _safe_source_label(title: str | None, source_url: str, fallback: str) -> str:
+    cleaned = " ".join(str(title or "").split()).strip()
+    suspicious_markers = ("@import", "{", "}", ";", "function(", "var ", "const ")
+    if cleaned and len(cleaned) <= 120 and not any(marker in cleaned.lower() for marker in suspicious_markers):
+        return cleaned
+    parsed = urlparse(source_url)
+    host = parsed.netloc or fallback
+    path_tail = parsed.path.rstrip("/").rsplit("/", 1)[-1] if parsed.path else ""
+    if path_tail and path_tail not in {"", "/"}:
+        return f"{host}/{path_tail}"[:120]
+    return host[:120] or fallback
+
+
 def _is_missing_campaign_error(exc: HTTPException) -> bool:
     if exc.status_code != status.HTTP_404_NOT_FOUND:
         return False
@@ -461,7 +475,7 @@ def _dispatch(
                 "submitted_by": submitted_by,
             },
         )
-        latest_title = payload.get("title") or "web source"
+        latest_title = _safe_source_label(payload.get("title"), argument, "web source")
         return DispatchResponse(
             matched=True,
             forward_to_openclaw=False,
@@ -490,7 +504,7 @@ def _dispatch(
                 "submitted_by": submitted_by,
             },
         )
-        latest_title = payload.get("title") or "PDF source"
+        latest_title = _safe_source_label(payload.get("title"), argument, "PDF source")
         return DispatchResponse(
             matched=True,
             forward_to_openclaw=False,
