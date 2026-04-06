@@ -19,7 +19,7 @@ spec:
         - name: glasslab-ghcr-pull
       containers:
         - name: whatsapp-gateway
-          image: ghcr.io/offensivegeneric/glasslab-whatsapp-gateway:0.1.2-local
+          image: ghcr.io/offensivegeneric/glasslab-whatsapp-gateway:0.1.3-local
           imagePullPolicy: IfNotPresent
           env:
             - name: GLASSLAB_WHATSAPP_GATEWAY_RESEARCH_INGRESS_URL

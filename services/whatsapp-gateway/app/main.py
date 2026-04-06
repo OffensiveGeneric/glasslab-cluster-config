@@ -120,6 +120,7 @@ class WhatsAppInboundRequest(BaseModel):
     sender: str = Field(min_length=1)
     channel: str | None = None
     message: str = ""
+    session_id: str | None = None
     provider_message_id: str | None = None
     conversation_id: str | None = None
     is_group: bool = False
@@ -137,6 +138,14 @@ class WhatsAppInboundRequest(BaseModel):
     @classmethod
     def normalize_message(cls, value: str) -> str:
         return " ".join(value.split()).strip()
+
+    @field_validator("session_id")
+    @classmethod
+    def normalize_session_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = " ".join(value.split()).strip()
+        return cleaned or None
 
 
 class InboundForwardResponse(BaseModel):
@@ -772,7 +781,7 @@ def _handle_inbound(
         )
 
     prior_messages = _load_messages(active_settings, session_key)
-    pinned_session_id = _latest_workflow_session_id(prior_messages)
+    pinned_session_id = request.session_id or _latest_workflow_session_id(prior_messages)
     provider_message_id = (request.provider_message_id or "").strip() or None
     if provider_message_id is not None:
         provider_dedupe = _find_response_for_provider_message_id(

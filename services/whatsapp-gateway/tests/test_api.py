@@ -64,6 +64,41 @@ def test_forwards_explicit_command_and_persists_session(tmp_path: Path) -> None:
         main_module._request_research_ingress = original
 
 
+def test_inbound_accepts_explicit_session_id_hint(tmp_path: Path) -> None:
+    import app.main as main_module
+
+    def fake_ingress(settings, *, message, sender, channel, session_id=None):
+        assert message == "!run"
+        assert session_id == "session-123"
+        return {
+            "handled": True,
+            "route": "deterministic-router",
+            "response_text": "Created run 'run-123'.",
+            "router_payload": {"command": "run"},
+        }
+
+    original = main_module._request_research_ingress
+    main_module._request_research_ingress = fake_ingress
+    try:
+        client = TestClient(create_app(settings=Settings(state_dir=str(tmp_path))))
+        response = client.post(
+            "/webhooks/whatsapp/inbound",
+            json={
+                "sender": "+15555550123",
+                "channel": "whatsapp",
+                "message": "!run",
+                "session_id": "session-123",
+                "attachments": [],
+            },
+        )
+    finally:
+        main_module._request_research_ingress = original
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["response_text"] == "Created run 'run-123'."
+
+
 def test_pdf_attachment_can_drive_add_pdf_without_text(tmp_path: Path) -> None:
     import app.main as main_module
 
