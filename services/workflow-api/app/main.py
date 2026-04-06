@@ -111,6 +111,7 @@ from .schemas import (
     ResearchProblemRecord,
     ResearchProblemPipelineRequest,
     ResearchProblemPipelineResponse,
+    ResearchSessionRecord,
     ReplicabilityAssessmentRecord,
     RunArtifactsResponse,
     RunCreateRequest,
@@ -118,6 +119,7 @@ from .schemas import (
     RunRecord,
     ScheduledExecutionRecord,
     ScheduledOperationRecord,
+    SourceDocumentIngestRequest,
     SourceDocumentRecord,
     WorkflowFamilySummary,
 )
@@ -336,14 +338,13 @@ def build_fresh_paper_request_from_problem(
         next(iter(build_source_fetch_candidates(chosen_paper.official_page, chosen_paper.pdf_url)), None)
         or chosen_paper.paper_id
     )
-    notes = [chosen_paper.why_seed]
-    notes.extend(chosen_paper.first_jobs[:2])
-    if selected_track_ids:
-        notes.append('Selected tracks: ' + ', '.join(selected_track_ids))
+    notes = [f"Source title: {chosen_paper.title.strip()}"]
+    if chosen_paper.abstract_excerpt:
+        notes.append(chosen_paper.abstract_excerpt.strip())
     return FreshPaperPipelineRequest(
         paper_ref=paper_ref,
         raw_request=(
-            f'Investigate this research problem with a bounded literature-derived experiment: '
+            f'Use this source to plan a bounded experiment for the active session goal: '
             f'{request.problem_statement.strip()}'
         ),
         notes=notes,
@@ -483,18 +484,19 @@ def build_intake_request_from_problem_candidate(
         next(iter(build_source_fetch_candidates(candidate.official_page, candidate.pdf_url)), None)
         or candidate.paper_id
     )
+    manual_source = 'manual' in candidate.tags or 'manual' in candidate.tracks
     notes: list[str] = []
-    append_unique_note(notes, candidate.why_seed)
+    append_unique_note(notes, f'Source title: {candidate.title.strip()}')
     for note in candidate.first_jobs[:2]:
         append_unique_note(notes, note)
-    if queue.selected_tracks:
-        append_unique_note(notes, 'Selected tracks: ' + ', '.join(queue.selected_tracks))
+    if not manual_source and candidate.abstract_excerpt:
+        append_unique_note(notes, candidate.abstract_excerpt.strip())
     if extra_notes:
         for note in extra_notes:
             append_unique_note(notes, note)
     return IntakeCreateRequest(
         raw_request=(
-            'Investigate this research problem with a bounded literature-derived experiment: '
+            'Use this source to plan a bounded experiment for the active session goal: '
             + queue.problem_statement.strip()
         ),
         source_refs=[paper_ref],
@@ -503,6 +505,61 @@ def build_intake_request_from_problem_candidate(
         notes=notes,
         submitted_by=queue.submitted_by,
     )
+
+
+def build_session_bootstrap_intake_request(
+    session: ResearchSessionRecord,
+    store: RunStore,
+) -> IntakeCreateRequest:
+    raw_request = (session.goal_statement or session.title or '').strip()
+    if len(raw_request) < 10:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail='research session goal is too sparse to bootstrap an intake',
+        )
+
+    def append_unique_note(target: list[str], value: str | None) -> None:
+        if not value:
+            return
+        cleaned = value.strip()
+        if cleaned and cleaned not in target:
+            target.append(cleaned)
+
+    notes = [item.strip() for item in session.working_notes[-3:] if item.strip()]
+    source_refs: list[str] = []
+    document_refs: list[str] = []
+    latest_document = store.get_source_document(session.latest_document_id or '')
+    if latest_document is not None:
+        if latest_document.source_url:
+            source_refs.append(latest_document.source_url)
+        if latest_document.status == 'fetched':
+            document_refs.append(latest_document.document_id)
+        append_unique_note(notes, f"Attached source: {latest_document.title or latest_document.source_url}")
+        append_unique_note(notes, latest_document.abstract_excerpt)
+        for note in latest_document.validation_notes[:2]:
+            append_unique_note(notes, note)
+    return IntakeCreateRequest(
+        raw_request=raw_request,
+        source_refs=source_refs,
+        document_refs=document_refs,
+        technique_tags=infer_technique_tags(raw_request, source_refs, notes),
+        notes=notes,
+        submitted_by=session.submitted_by,
+    )
+
+
+def ensure_session_latest_intake(
+    store: RunStore,
+    settings: Settings,
+    registry: WorkflowRegistry,
+    session_id: str,
+) -> IntakeRecord:
+    session = get_required_research_session(store, session_id)
+    intake = store.get_intake(session.latest_intake_id or '')
+    if intake is not None:
+        return intake
+    request = build_session_bootstrap_intake_request(session, store)
+    return stage_intake_from_request(request, settings, registry, store, session_id=session_id)
 
 
 def stage_intake_from_request(
@@ -576,30 +633,6 @@ def stage_intake_from_request(
     return record
 
 
-def ensure_session_latest_intake(
-    store: RunStore,
-    settings: Settings,
-    registry: WorkflowRegistry,
-    session_id: str,
-) -> IntakeRecord:
-    session = get_required_research_session(store, session_id)
-    intake = store.get_intake(session.latest_intake_id or '')
-    if intake is not None:
-        return intake
-    raw_request = (session.goal_statement or session.title or '').strip()
-    if len(raw_request) < 10:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail='research session goal is too sparse to bootstrap an intake',
-        )
-    notes = [item.strip() for item in session.working_notes[-3:] if item.strip()]
-    request = IntakeCreateRequest(
-        raw_request=raw_request,
-        technique_tags=infer_technique_tags(raw_request, [], notes),
-        notes=notes,
-        submitted_by=session.submitted_by,
-    )
-    return stage_intake_from_request(request, settings, registry, store, session_id=session_id)
 
 
 def build_design_draft(
@@ -1031,6 +1064,28 @@ def create_app(
         if session is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
         return create_session_intake(session.session_id, request)
+
+    @app.post('/research-sessions/{session_id}/source-documents/ingest', response_model=SourceDocumentRecord, status_code=status.HTTP_201_CREATED)
+    def ingest_session_source_document(session_id: str, request: SourceDocumentIngestRequest) -> SourceDocumentRecord:
+        session_id = resolve_latest_session_id(session_id)
+        session = get_required_research_session(store, session_id)
+        record = ingest_source_document(
+            request.source_url,
+            submitted_by=request.submitted_by or session.submitted_by,
+            settings=settings,
+            store=store,
+            session_id=session_id,
+            expected_title=request.expected_title,
+        )
+        touch_research_session(store, session_id, latest_document_id=record.document_id)
+        return record
+
+    @app.post('/research-sessions/latest/source-documents/ingest', response_model=SourceDocumentRecord, status_code=status.HTTP_201_CREATED)
+    def ingest_latest_session_source_document(request: SourceDocumentIngestRequest) -> SourceDocumentRecord:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return ingest_session_source_document(session.session_id, request)
 
     @app.get('/intakes/latest', response_model=IntakeRecord)
     def get_latest_intake() -> IntakeRecord:

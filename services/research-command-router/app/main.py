@@ -182,8 +182,8 @@ def _help_text() -> str:
         [
             "Glasslab runner flow:",
             "1. !new-session <goal> creates a blank workspace without literature search.",
-            "2. !add-pdf [url] attaches a paper or spec to the active workspace.",
-            "   !add-url <url> attaches a webpage source to the active workspace.",
+            "2. !add-pdf [url] ingests a PDF source into the active workspace.",
+            "   !add-url <url> ingests a webpage source into the active workspace.",
             "3. !run prepares interpretation/design and launches the first bounded run.",
             "4. !next advances the active autoresearch campaign by deciding finished runs and launching the next batch.",
             "5. !compare summarizes the active campaign and best current method.",
@@ -209,7 +209,7 @@ def _help_text() -> str:
             "Use !new-session + !add-pdf or !add-url when you already have the source.",
             "",
             "Legacy/debug commands still available:",
-            "!research !search !more-papers !next-paper !add-paper !add-url !session !interpret !design !preflight",
+            "!research !search !more-papers !add-paper !session !interpret !design !preflight",
             "!start-autoresearch !draft-methodologies !draft-notebook !refine-notebook",
             "!launch-iteration !launch-batch !decide-batch !decide-latest !autoresearch !model-comparison",
             "!note <text>",
@@ -453,26 +453,22 @@ def _dispatch(
             )
         endpoint, payload = scoped_requester(
             settings,
-            "/research-sessions/latest/paper-intake-queue/manual-paper",
+            "/research-sessions/latest/source-documents/ingest",
             method="POST",
             body={
-                "title": "Manual web source",
-                "official_page": argument,
-                "pdf_url": None,
-                "notes": ["Added as a direct webpage from deterministic research command router."],
-                "tags": ["manual", "web"],
+                "source_url": argument,
+                "expected_title": None,
                 "submitted_by": submitted_by,
             },
         )
-        candidates = payload.get("candidates") or []
-        latest_title = candidates[-1]["title"] if candidates else "Manual web source"
+        latest_title = payload.get("title") or "web source"
         return DispatchResponse(
             matched=True,
             forward_to_openclaw=False,
             command=command,
             response_text=(
-                f"Added webpage source '{latest_title}' to the current queue. "
-                "Use !next-paper to stage it, or !run if you want the backend to proceed from the current session context."
+                f"Attached webpage source '{latest_title}' to the current workspace. "
+                "Use !run when you want the backend to proceed from the current session context."
             ),
             workflow_api_endpoint=endpoint,
             payload=payload,
@@ -486,26 +482,22 @@ def _dispatch(
             )
         endpoint, payload = scoped_requester(
             settings,
-            "/research-sessions/latest/paper-intake-queue/manual-paper",
+            "/research-sessions/latest/source-documents/ingest",
             method="POST",
             body={
-                "title": "Manual PDF candidate",
-                "pdf_url": argument,
-                "official_page": None,
-                "notes": ["Added as a direct PDF from deterministic research command router."],
-                "tags": ["manual", "pdf"],
+                "source_url": argument,
+                "expected_title": None,
                 "submitted_by": submitted_by,
             },
         )
-        candidates = payload.get("candidates") or []
-        latest_title = candidates[-1]["title"] if candidates else "Manual PDF candidate"
+        latest_title = payload.get("title") or "PDF source"
         return DispatchResponse(
             matched=True,
             forward_to_openclaw=False,
             command=command,
             response_text=(
-                f"Added PDF candidate '{latest_title}' to the current queue. "
-                "Use !next-paper to stage it, or !design if you want the backend to bootstrap from the session goal."
+                f"Attached PDF source '{latest_title}' to the current workspace. "
+                "Use !run when you want the backend to proceed from the current session context."
             ),
             workflow_api_endpoint=endpoint,
             payload=payload,

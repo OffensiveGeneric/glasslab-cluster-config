@@ -140,6 +140,55 @@ def test_stage_next_paper_intake_supports_session_scoped_route() -> None:
     assert staged_payload['session_id'] == session_id
     assert staged_payload['status'] == 'ready_for_design'
     assert staged_payload['source_type'] == 'paper-link'
+    assert 'literature-derived experiment' not in staged_payload['raw_request']
+    assert not any(note.startswith('Selected tracks:') for note in staged_payload['notes'])
+    assert 'Manually added by the operator.' not in staged_payload['notes']
+
+
+def test_session_source_document_ingest_bootstraps_intake_for_run(monkeypatch) -> None:
+    client = build_client()
+
+    monkeypatch.setattr(
+        source_documents,
+        'fetch_source_document_bytes',
+        lambda source_url: (
+            b'<html><title>DreamSim</title><body>DreamSim uses contrastive loss with timm and torch.</body></html>',
+            'text/html',
+        ),
+    )
+    monkeypatch.setattr(
+        source_documents,
+        'persist_source_document_bytes',
+        lambda **kwargs: 'file:///tmp/source.html',
+    )
+    monkeypatch.setattr(main_module, 'ingest_source_document', source_documents.ingest_source_document)
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Develop an artist similarity metric from an attached source.'},
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    ingest = client.post(
+        f'/research-sessions/{session_id}/source-documents/ingest',
+        json={'source_url': 'https://example.org/dreamsim.html', 'submitted_by': 'test-suite'},
+    )
+    assert ingest.status_code == 201
+    document_payload = ingest.json()
+    assert document_payload['session_id'] == session_id
+    assert document_payload['status'] == 'fetched'
+
+    design = client.post(f'/research-sessions/{session_id}/skills/design')
+    assert design.status_code == 201
+
+    intake = client.get(f'/research-sessions/{session_id}/intake')
+    assert intake.status_code == 200
+    intake_payload = intake.json()
+    assert intake_payload['session_id'] == session_id
+    assert document_payload['document_id'] in intake_payload['document_refs']
+    assert 'https://example.org/dreamsim.html' in intake_payload['source_refs']
+    assert any(note.startswith('Attached source:') for note in intake_payload['notes'])
 
 
 def test_json_store_persists_intake_across_restart(tmp_path) -> None:

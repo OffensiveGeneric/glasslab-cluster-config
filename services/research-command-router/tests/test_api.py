@@ -16,6 +16,7 @@ def test_help_command_returns_local_text() -> None:
     assert "!add-url <url>" in payload["response_text"]
     assert "!search <topic>" in payload["response_text"]
     assert "Legacy/debug commands still available:" in payload["response_text"]
+    assert "!next-paper" not in payload["response_text"]
 
 
 def test_research_command_calls_start_endpoint() -> None:
@@ -155,7 +156,7 @@ def test_add_pdf_routes_to_manual_queue_with_pdf_url() -> None:
         calls.append((path, method, body))
         return (
             f"{settings.workflow_api_url}{path}",
-            {"candidates": [{"title": "Manual PDF candidate"}]},
+            {"title": "source.pdf"},
         )
 
     client = TestClient(create_app(settings=Settings(), requester=fake_requester))
@@ -163,8 +164,8 @@ def test_add_pdf_routes_to_manual_queue_with_pdf_url() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["command"] == "add-pdf"
-    assert calls[0][0] == "/research-sessions/latest/paper-intake-queue/manual-paper"
-    assert calls[0][2]["pdf_url"] == "https://example.org/paper.pdf"
+    assert calls[0][0] == "/research-sessions/latest/source-documents/ingest"
+    assert calls[0][2]["source_url"] == "https://example.org/paper.pdf"
 
 
 def test_add_url_routes_to_manual_queue_with_official_page() -> None:
@@ -174,7 +175,7 @@ def test_add_url_routes_to_manual_queue_with_official_page() -> None:
         calls.append((path, method, body))
         return (
             f"{settings.workflow_api_url}{path}",
-            {"candidates": [{"title": "Manual web source"}]},
+            {"title": "source.html"},
         )
 
     client = TestClient(create_app(settings=Settings(), requester=fake_requester))
@@ -182,9 +183,8 @@ def test_add_url_routes_to_manual_queue_with_official_page() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["command"] == "add-url"
-    assert calls[0][0] == "/research-sessions/latest/paper-intake-queue/manual-paper"
-    assert calls[0][2]["official_page"] == "https://example.org/paper-page.html"
-    assert calls[0][2]["pdf_url"] is None
+    assert calls[0][0] == "/research-sessions/latest/source-documents/ingest"
+    assert calls[0][2]["source_url"] == "https://example.org/paper-page.html"
 
 
 def test_add_pdf_uses_pinned_session_when_provided() -> None:
@@ -194,7 +194,7 @@ def test_add_pdf_uses_pinned_session_when_provided() -> None:
         calls.append((path, method, body))
         return (
             f"{settings.workflow_api_url}{path}",
-            {"candidates": [{"title": "Manual PDF candidate"}]},
+            {"title": "source.pdf"},
         )
 
     client = TestClient(create_app(settings=Settings(), requester=fake_requester))
@@ -206,7 +206,7 @@ def test_add_pdf_uses_pinned_session_when_provided() -> None:
         },
     )
     assert response.status_code == 200
-    assert calls[0][0] == "/research-sessions/session-123/paper-intake-queue/manual-paper"
+    assert calls[0][0] == "/research-sessions/session-123/source-documents/ingest"
 
 
 def test_next_paper_uses_pinned_session_when_provided() -> None:

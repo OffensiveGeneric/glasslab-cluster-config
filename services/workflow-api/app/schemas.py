@@ -51,6 +51,14 @@ class IntakeCreateRequest(BaseModel):
         return deduped
 
 
+class SourceDocumentIngestRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    source_url: str = Field(min_length=8)
+    expected_title: str | None = None
+    submitted_by: str | None = None
+
+
 class FreshPaperPipelineRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
