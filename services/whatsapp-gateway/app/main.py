@@ -84,6 +84,10 @@ class Settings:
         "GLASSLAB_WHATSAPP_GATEWAY_GROUP_POLICY",
         "disabled",
     )
+    owner: str = os.environ.get(
+        "GLASSLAB_WHATSAPP_GATEWAY_OWNER",
+        "",
+    )
     allow_from: str = os.environ.get(
         "GLASSLAB_WHATSAPP_GATEWAY_ALLOW_FROM",
         "",
@@ -361,6 +365,9 @@ def _access_decision(
 ) -> tuple[bool, str | None]:
     normalized_sender = _normalized_sender(sender)
     allowed_senders = _parse_csv_set(settings.allow_from)
+    owner = _normalized_sender(settings.owner)
+    if owner:
+        allowed_senders.add(owner)
     allowed_groups = _parse_csv_set(settings.allow_groups)
 
     if is_group:

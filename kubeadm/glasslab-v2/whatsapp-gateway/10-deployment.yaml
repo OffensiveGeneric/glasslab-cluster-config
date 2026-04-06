@@ -43,11 +43,17 @@ spec:
                 !status, !new-session, or !add-pdf when useful.
             - name: GLASSLAB_WHATSAPP_GATEWAY_DM_POLICY
               value: allowlist
-            - name: GLASSLAB_WHATSAPP_GATEWAY_ALLOW_FROM
+            - name: GLASSLAB_WHATSAPP_GATEWAY_OWNER
               valueFrom:
                 secretKeyRef:
                   name: glasslab-openclaw
                   key: OPENCLAW_WHATSAPP_OWNER
+                  optional: true
+            - name: GLASSLAB_WHATSAPP_GATEWAY_ALLOW_FROM
+              valueFrom:
+                secretKeyRef:
+                  name: glasslab-openclaw
+                  key: OPENCLAW_WHATSAPP_ALLOW_FROM
                   optional: true
             - name: GLASSLAB_WHATSAPP_GATEWAY_GROUP_POLICY
               value: disabled

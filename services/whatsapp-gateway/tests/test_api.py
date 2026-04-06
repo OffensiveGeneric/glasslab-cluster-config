@@ -266,6 +266,48 @@ def test_dm_allowlist_blocks_unknown_sender(tmp_path: Path) -> None:
     assert "approved Glasslab allowlist" in payload["response_text"]
 
 
+def test_owner_is_allowed_even_if_not_listed_in_allow_from(tmp_path: Path) -> None:
+    import app.main as main_module
+
+    def fake_ingress(settings, *, message, sender, channel, session_id=None):
+        assert sender == "+15555550001"
+        return {
+            "handled": True,
+            "route": "deterministic-router",
+            "response_text": "Session status is available.",
+            "router_payload": {"command": "status"},
+        }
+
+    original = main_module._request_research_ingress
+    main_module._request_research_ingress = fake_ingress
+    try:
+        client = TestClient(
+            create_app(
+                settings=Settings(
+                    state_dir=str(tmp_path),
+                    dm_policy="allowlist",
+                    owner="+15555550001",
+                    allow_from="+15555550002",
+                )
+            )
+        )
+        response = client.post(
+            "/webhooks/whatsapp/inbound",
+            json={
+                "sender": "+15555550001",
+                "message": "!status",
+                "attachments": [],
+            },
+        )
+    finally:
+        main_module._request_research_ingress = original
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["handled"] is True
+    assert payload["route"] == "deterministic-router"
+
+
 def test_group_chat_can_use_chat_backend_when_allowlisted(tmp_path: Path) -> None:
     import app.main as main_module
 
