@@ -5596,8 +5596,39 @@ def test_session_dataset_bootstraps_design_and_run() -> None:
     assert 'dataset_uri is still unresolved' not in ' '.join(design_payload['method_spec']['blocking_reasons'])
 
     run = client.post(f'/research-sessions/{session_id}/runs/from-design')
-    assert run.status_code == 409
-    assert 'test_uri is unresolved' in run.json()['detail']
+    assert run.status_code == 201
+    assert run.json()['manifest']['inputs']['train_uri'] == 'https://www.wikiart.org/'
+
+
+def test_explicit_session_dataset_overrides_builtin_titanic_fixture() -> None:
+    client = build_client()
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Run a bounded Titanic survival benchmark from an attached CSV dataset.'},
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    dataset = client.post(
+        f'/research-sessions/{session_id}/datasets',
+        json={
+            'uri': 'https://example.com/titanic-train.csv',
+            'name': 'titanic-train.csv',
+            'modality': 'tabular',
+            'task_type': 'binary_classification',
+        },
+    )
+    assert dataset.status_code == 201
+
+    design = client.post(f'/research-sessions/{session_id}/skills/design')
+    assert design.status_code == 201
+    design_payload = design.json()
+    assert design_payload['workflow_id'] == 'generic-tabular-benchmark'
+    assert design_payload['declared_inputs']['train_uri'] == 'https://example.com/titanic-train.csv'
+    assert design_payload['declared_inputs']['test_uri'] == 'https://example.com/titanic-train.csv'
+    assert design_payload['declared_inputs']['dataset_name'] == 'titanic-train.csv'
+    assert design_payload['declared_inputs']['target_column'] == 'Survived'
 
 
 def test_autoresearch_notebook_refinement_falls_back_cleanly(tmp_path) -> None:

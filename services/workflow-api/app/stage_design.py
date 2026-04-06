@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import json
 import logging
 from typing import Any
+from urllib.parse import urlparse
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 from uuid import uuid4
@@ -238,8 +239,47 @@ def derive_design_from_intake(intake: IntakeRecord, workflow: WorkflowRegistryEn
     declared_inputs: dict[str, Any] = {}
     design_notes: list[str] = []
 
+    explicit_dataset_uri = next(
+        (
+            ref
+            for ref in intake.source_refs
+            if isinstance(ref, str)
+            and ref.strip()
+            and (
+                ref.startswith('http://')
+                or ref.startswith('https://')
+                or ref.startswith('s3://')
+                or ref.startswith('file://')
+                or ref.startswith('/mnt/')
+            )
+        ),
+        None,
+    )
+    explicit_dataset_name = next(
+        (
+            note.split(':', 1)[1].strip()
+            for note in intake.notes
+            if isinstance(note, str) and note.startswith('Selected dataset:')
+        ),
+        None,
+    )
+    if not explicit_dataset_name and explicit_dataset_uri:
+        parsed = urlparse(explicit_dataset_uri)
+        explicit_dataset_name = parsed.path.rsplit('/', 1)[-1] or parsed.netloc or 'dataset'
+
     if workflow.workflow_id == 'generic-tabular-benchmark':
-        if 'titanic' in lowered:
+        if explicit_dataset_uri:
+            declared_inputs = {
+                'dataset_name': explicit_dataset_name or ('titanic' if 'titanic' in lowered else 'dataset'),
+                'train_uri': explicit_dataset_uri,
+                'test_uri': explicit_dataset_uri.replace('/train.csv', '/test.csv') if explicit_dataset_uri.endswith('/train.csv') else explicit_dataset_uri,
+                'validation_strategy': 'holdout',
+                'validation_split': '0.2',
+                'target_column': 'Survived' if 'titanic' in lowered else 'label',
+            }
+            design_notes.append('Resolved benchmark inputs from the explicitly attached dataset.')
+            design_notes.append('Declared holdout validation strategy with a 0.2 validation split to help guard against overfitting.')
+        elif 'titanic' in lowered:
             declared_inputs = {
                 'dataset_name': 'titanic',
                 'train_uri': 's3://datasets/titanic/train.csv',
