@@ -74,6 +74,9 @@ Current endpoints:
 
 - `GET /healthz`
 - `POST /webhooks/whatsapp/inbound`
+- `POST /webhooks/whatsapp/provider`
+- `GET /webhooks/meta/whatsapp`
+- `POST /webhooks/meta/whatsapp`
 - `GET /sessions/{channel}/{sender}`
 
 ## What Comes Next
@@ -95,10 +98,12 @@ Current progress:
 - the gateway already exposes a Meta WhatsApp Cloud API-style webhook surface:
   - `GET /webhooks/meta/whatsapp`
   - `POST /webhooks/meta/whatsapp`
+- the repo-owned `whatsapp-web-bridge` now targets
+  `POST /webhooks/whatsapp/provider` as the canonical transport contract
 - provider document uploads can now be normalized into backend-fetchable
   gateway URLs instead of requiring a manually pasted public PDF URL
-- the remaining Phase 2 gap is credentials and live external-provider hookup,
-  not the internal adapter shape
+- the remaining Phase 2 gap is broader provider optionality and operational
+  cleanup, not command mediation through OpenClaw
 
 ### Phase 3
 

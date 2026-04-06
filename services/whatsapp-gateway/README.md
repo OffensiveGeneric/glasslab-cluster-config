@@ -39,6 +39,10 @@ Provider-facing notes:
 
 - `POST /webhooks/whatsapp/provider` is the provider-oriented entrypoint for
   WhatsApp-style webhook events.
+- repo-owned transports like `whatsapp-web-bridge` should target the provider
+  entrypoint, not the legacy raw inbound shape.
+- `POST /webhooks/whatsapp/inbound` remains available as a legacy/manual test
+  seam, not the canonical transport contract.
 - provider retries can be suppressed by stable `provider_message_id`, so the
   gateway can absorb duplicate delivery events without re-forwarding the same
   PDF add or command turn to the backend.
