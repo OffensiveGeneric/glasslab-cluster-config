@@ -802,6 +802,16 @@ def register_literature_routes(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='latest research session has no paper intake queue yet')
         return stage_next_intake_from_queue(queue_id)
 
+    @app.post('/research-sessions/{session_id}/paper-intake-queues/stage-next-intake', response_model=IntakeRecord, status_code=status.HTTP_201_CREATED)
+    def stage_next_intake_from_session_queue(session_id: str) -> IntakeRecord:
+        session = store.get_latest_research_session() if session_id == 'latest' else store.get_research_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session not found')
+        queue_id = session.latest_queue_id or ''
+        if not queue_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session has no paper intake queue yet')
+        return stage_next_intake_from_queue(queue_id)
+
     @app.post('/research-sessions/latest/skills/paper-intake', response_model=IntakeRecord, status_code=status.HTTP_201_CREATED)
     def apply_latest_session_paper_intake_skill() -> IntakeRecord:
         return stage_next_intake_from_latest_session_queue()

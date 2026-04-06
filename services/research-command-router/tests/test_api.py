@@ -209,6 +209,29 @@ def test_add_pdf_uses_pinned_session_when_provided() -> None:
     assert calls[0][0] == "/research-sessions/session-123/paper-intake-queue/manual-paper"
 
 
+def test_next_paper_uses_pinned_session_when_provided() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {"normalized_summary": "Pinned-session staged paper summary."},
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post(
+        "/dispatch",
+        json={
+            "message": "!next-paper",
+            "session_id": "session-123",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["command"] == "next-paper"
+    assert calls[0][0] == "/research-sessions/session-123/paper-intake-queues/stage-next-intake"
+
+
 def test_run_command_routes_to_session_run_creation() -> None:
     calls: list[tuple[str, str, dict | None]] = []
 

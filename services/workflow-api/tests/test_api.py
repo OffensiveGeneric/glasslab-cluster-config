@@ -113,6 +113,35 @@ def test_create_session_scoped_intake_updates_latest_session_intake() -> None:
     assert latest.json()['intake_id'] == payload['intake_id']
 
 
+def test_stage_next_paper_intake_supports_session_scoped_route() -> None:
+    client = build_client()
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Stage a manual paper candidate through the pinned session route.'},
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    manual = client.post(
+        f'/research-sessions/{session_id}/paper-intake-queue/manual-paper',
+        json={
+            'title': 'Manual metric learning paper',
+            'official_page': 'https://example.org/metric-learning-paper',
+            'notes': ['Pinned-session next-paper regression test.'],
+            'tags': ['manual'],
+        },
+    )
+    assert manual.status_code == 201
+
+    staged = client.post(f'/research-sessions/{session_id}/paper-intake-queues/stage-next-intake')
+    assert staged.status_code == 201
+    staged_payload = staged.json()
+    assert staged_payload['session_id'] == session_id
+    assert staged_payload['status'] == 'ready_for_design'
+    assert staged_payload['source_type'] == 'paper-link'
+
+
 def test_json_store_persists_intake_across_restart(tmp_path) -> None:
     state_path = tmp_path / 'run-store.json'
     settings = Settings(
