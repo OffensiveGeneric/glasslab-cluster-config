@@ -3,7 +3,6 @@ import pino from "pino";
 import makeWASocket, {
   downloadMediaMessage,
   fetchLatestBaileysVersion,
-  makeInMemoryStore,
   useMultiFileAuthState,
 } from "@whiskeysockets/baileys";
 import fs from "node:fs";
@@ -152,7 +151,6 @@ async function handleInbound(message) {
 async function connect() {
   const { state, saveCreds } = await useMultiFileAuthState(settings.authDir);
   const { version } = await fetchLatestBaileysVersion();
-  const store = makeInMemoryStore({ logger });
 
   sock = makeWASocket({
     version,
@@ -164,7 +162,6 @@ async function connect() {
     browser: ["Glasslab", "Chrome", "1.0"],
   });
 
-  store.bind(sock.ev);
   sock.ev.on("creds.update", saveCreds);
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     if (type !== "notify") {
