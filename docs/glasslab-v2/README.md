@@ -38,6 +38,7 @@ Canonical planning and architecture:
 - `bounded-experiment-runner-priority.md`: current narrowing of scope toward manual-source intake, bounded interpretation, dependable run creation, and unattended methodology iteration
 - `runner-first-technique-knowledge-plan.md`: fastest path for turning NotebookLM-curated methodology knowledge into Glasslab-owned structured technique knowledge that the bounded runner can consume
 - `technique-catalog.md`: current import-and-match path for turning NotebookLM technique cards into Glasslab-owned structured methodology knowledge
+- `grossberg-kb-notes-for-runner.md`: short note on what to borrow from the broader research-KB references without letting Glasslab drift away from the runner-first objective
 - `artist-similarity-research-note.md`: Grossberg's concrete research framing for same-artist vs different-artist painting comparison, style-drift robustness, and methodology comparison
 - `artist-similarity-v1.md`: first bounded runner target for same-artist versus different-artist painting similarity, including dataset contract and initial metric-learning families
 - `examples/artist-similarity-technique-cards.json`: first importable technique-card seeds for contrastive, triplet, and angular-margin artist-similarity experiments
