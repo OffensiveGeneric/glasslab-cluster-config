@@ -136,6 +136,35 @@ Validated live examples:
   - proving the gateway can turn a provider-hosted document into a
     backend-fetchable PDF target without requiring a manually pasted public URL
 
+## Direct Chat Follow-On
+
+The gateway now also supports actual non-command chat without OpenClaw when a
+chat backend is configured.
+
+Live `.44` validation confirmed:
+
+- the gateway can call `.12` native Ollama at:
+  - `http://192.168.1.12:11434/api/chat`
+- health now reports:
+  - `chat_enabled: true`
+  - `dm_policy: "allowlist"`
+  - `group_policy: "disabled"`
+- an allowlisted direct-message sender received a real chat response through:
+  - `route: "gateway-chat"`
+- a non-allowlisted sender was rejected cleanly with:
+  - `route: "gateway-policy"`
+  - `This sender is not on the approved Glasslab allowlist.`
+- a group-style turn was rejected cleanly with:
+  - `route: "gateway-policy"`
+  - `Group chat is not enabled in the Glasslab WhatsApp gateway yet.`
+
+The current live chat path therefore supports:
+
+- deterministic commands
+- direct-message chat for allowlisted senders
+
+without OpenClaw on the path.
+
 ## Follow-On Fix
 
 The first live slice exposed a real duplicate-add problem for repeated PDF

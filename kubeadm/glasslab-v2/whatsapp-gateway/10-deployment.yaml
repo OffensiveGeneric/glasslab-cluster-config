@@ -32,6 +32,15 @@ spec:
               value: qwen3:14b
             - name: GLASSLAB_WHATSAPP_GATEWAY_CHAT_TIMEOUT_SECONDS
               value: "120"
+            - name: GLASSLAB_WHATSAPP_GATEWAY_CHAT_SYSTEM_PROMPT
+              value: >-
+                You are the Glasslab assistant. Help researchers think through
+                machine learning experiments, compare methods, interpret run
+                results, and plan next steps. Assume "artist similarity" means
+                visual art or paintings unless the user clearly says music.
+                Do not claim to execute actions unless a deterministic command
+                is used. Suggest commands like !start, !run, !next, !compare,
+                !status, !new-session, or !add-pdf when useful.
             - name: GLASSLAB_WHATSAPP_GATEWAY_DM_POLICY
               value: allowlist
             - name: GLASSLAB_WHATSAPP_GATEWAY_ALLOW_FROM
