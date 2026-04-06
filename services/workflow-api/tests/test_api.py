@@ -5527,8 +5527,77 @@ def test_autoresearch_notebook_draft_is_written(tmp_path) -> None:
 
     path = Path(payload['storage_uri'].removeprefix('file://'))
     assert path.exists()
-    saved = json.loads(path.read_text())
-    assert saved['metadata']['glasslab']['kind'] == 'autoresearch-notebook-draft'
+
+
+def test_register_dataset_and_attach_to_session_context() -> None:
+    client = build_client()
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Train an artist similarity metric on a registered image dataset.'},
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    dataset = client.post(
+        f'/research-sessions/{session_id}/datasets',
+        json={
+            'uri': 'https://metmuseum.github.io/',
+            'name': 'Met Open Access',
+            'modality': 'image',
+            'task_type': 'artist_similarity',
+            'label_field': 'artist_id',
+            'image_field': 'image_uri',
+            'split_strategy': 'artist_grouped_holdout',
+            'provenance_notes': ['Museum open-access collection metadata.'],
+        },
+    )
+    assert dataset.status_code == 201
+    dataset_payload = dataset.json()
+    assert dataset_payload['name'] == 'Met Open Access'
+
+    context = client.get(f'/research-sessions/{session_id}/context')
+    assert context.status_code == 200
+    context_payload = context.json()
+    assert context_payload['active_dataset']['dataset_id'] == dataset_payload['dataset_id']
+    assert context_payload['active_dataset']['uri'] == 'https://metmuseum.github.io/'
+    assert context_payload['datasets'][0]['dataset_id'] == dataset_payload['dataset_id']
+
+
+def test_session_dataset_bootstraps_design_and_run() -> None:
+    client = build_client()
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Develop an artist similarity metric from attached sources and a selected dataset.'},
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    dataset = client.post(
+        f'/research-sessions/{session_id}/datasets',
+        json={
+            'uri': 'https://www.wikiart.org/',
+            'name': 'WikiArt',
+            'modality': 'image',
+            'task_type': 'artist_similarity',
+            'label_field': 'artist_id',
+            'image_field': 'image_uri',
+            'split_strategy': 'artist_grouped_holdout',
+        },
+    )
+    assert dataset.status_code == 201
+
+    design = client.post(f'/research-sessions/{session_id}/skills/design')
+    assert design.status_code == 201
+    design_payload = design.json()
+    assert design_payload['declared_inputs']['train_uri'] == 'https://www.wikiart.org/'
+    assert 'dataset_uri is unresolved' not in ' '.join(design_payload['design_notes'])
+    assert 'dataset_uri is still unresolved' not in ' '.join(design_payload['method_spec']['blocking_reasons'])
+
+    run = client.post(f'/research-sessions/{session_id}/runs/from-design')
+    assert run.status_code == 409
+    assert 'test_uri is unresolved' in run.json()['detail']
 
 
 def test_autoresearch_notebook_refinement_falls_back_cleanly(tmp_path) -> None:

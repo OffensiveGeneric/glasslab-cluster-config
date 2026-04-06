@@ -173,6 +173,8 @@ class ResearchSessionRecord(BaseModel):
     next_experiment_ideas: list[str] = Field(default_factory=list)
     latest_problem_id: str | None = None
     latest_queue_id: str | None = None
+    dataset_ids: list[str] = Field(default_factory=list)
+    latest_dataset_id: str | None = None
     latest_document_id: str | None = None
     latest_intake_id: str | None = None
     latest_interpretation_id: str | None = None
@@ -234,6 +236,66 @@ class IntakeRecord(BaseModel):
     notes: list[str] = Field(default_factory=list)
     submitted_by: str
     session_id: str | None = None
+
+
+class DatasetCreateRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    name: str | None = None
+    uri: str = Field(min_length=8)
+    modality: str | None = None
+    task_type: str | None = None
+    label_field: str | None = None
+    image_field: str | None = None
+    split_strategy: str | None = None
+    provenance_notes: list[str] = Field(default_factory=list)
+    submitted_by: str | None = None
+
+    @field_validator('provenance_notes')
+    @classmethod
+    def validate_unique_dataset_notes(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value if item.strip()]
+        return list(dict.fromkeys(cleaned))
+
+    @field_validator('name', 'modality', 'task_type', 'label_field', 'image_field', 'split_strategy')
+    @classmethod
+    def validate_optional_dataset_strings(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = ' '.join(value.split()).strip()
+        return cleaned or None
+
+
+class SessionDatasetAttachRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    dataset_id: str = Field(min_length=4)
+
+    @field_validator('dataset_id')
+    @classmethod
+    def validate_dataset_id(cls, value: str) -> str:
+        cleaned = ' '.join(value.split()).strip()
+        if not cleaned:
+            raise ValueError('dataset_id must not be empty')
+        return cleaned
+
+
+class DatasetRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    dataset_id: str
+    created_at: datetime
+    updated_at: datetime
+    status: str
+    name: str
+    uri: str
+    modality: str | None = None
+    task_type: str | None = None
+    label_field: str | None = None
+    image_field: str | None = None
+    split_strategy: str | None = None
+    provenance_notes: list[str] = Field(default_factory=list)
+    submitted_by: str
 
 
 class TechniqueCatalogImportCard(BaseModel):
@@ -815,6 +877,8 @@ class ResearchSessionContextResponse(BaseModel):
     session: ResearchSessionRecord
     research_problem: ResearchProblemRecord | None = None
     paper_intake_queue: PaperIntakeQueueRecord | None = None
+    active_dataset: DatasetRecord | None = None
+    datasets: list[DatasetRecord] = Field(default_factory=list)
     source_document: SourceDocumentRecord | None = None
     intake: IntakeRecord | None = None
     interpretation: InterpretationRecord | None = None

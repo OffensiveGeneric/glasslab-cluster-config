@@ -12,6 +12,7 @@ from .schemas import (
     AutoresearchCampaignRecord,
     AutoresearchDecisionRecord,
     AutoresearchIterationRecord,
+    DatasetRecord,
     DesignDraftRecord,
     IntakeRecord,
     InterpretationRecord,
@@ -33,6 +34,18 @@ ModelT = TypeVar('ModelT')
 
 
 class RunStore(ABC):
+    @abstractmethod
+    def save_dataset_record(self, record: DatasetRecord) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_dataset_record(self, dataset_id: str) -> DatasetRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_dataset_records(self) -> list[DatasetRecord]:
+        raise NotImplementedError
+
     @abstractmethod
     def save_technique_catalog_record(self, record: TechniqueCatalogRecord) -> None:
         raise NotImplementedError
@@ -303,6 +316,7 @@ def _parse_logs_map(items: dict[str, Any]) -> dict[str, list[LogEntry]]:
 
 class InMemoryRunStore(RunStore):
     def __init__(self) -> None:
+        self._datasets: dict[str, DatasetRecord] = {}
         self._technique_catalog: dict[str, TechniqueCatalogRecord] = {}
         self._methodology_drafts: dict[str, MethodologyDraftRecord] = {}
         self._latest_methodology_draft_id: str | None = None
@@ -337,6 +351,19 @@ class InMemoryRunStore(RunStore):
         self._operations: dict[str, OperationRecord] = {}
         self._latest_operation_id: str | None = None
         self._lock = Lock()
+
+    def save_dataset_record(self, record: DatasetRecord) -> None:
+        with self._lock:
+            self._datasets[record.dataset_id] = record
+
+    def get_dataset_record(self, dataset_id: str) -> DatasetRecord | None:
+        with self._lock:
+            return self._datasets.get(dataset_id)
+
+    def list_dataset_records(self) -> list[DatasetRecord]:
+        with self._lock:
+            records = list(self._datasets.values())
+        return sorted(records, key=lambda record: record.created_at)
 
     def save_technique_catalog_record(self, record: TechniqueCatalogRecord) -> None:
         with self._lock:
@@ -668,6 +695,7 @@ class JsonFileRunStore(InMemoryRunStore):
             return
         payload = json.loads(self._state_path.read_text(encoding='utf-8'))
         with self._lock:
+            self._datasets = _parse_record_map(payload.get('datasets', {}), DatasetRecord)
             self._technique_catalog = _parse_record_map(payload.get('technique_catalog', {}), TechniqueCatalogRecord)
             self._methodology_drafts = _parse_record_map(payload.get('methodology_drafts', {}), MethodologyDraftRecord)
             self._latest_methodology_draft_id = payload.get('latest_methodology_draft_id')
@@ -723,6 +751,9 @@ class JsonFileRunStore(InMemoryRunStore):
     def _flush(self) -> None:
         with self._lock:
             payload = {
+                'datasets': {
+                    key: record.model_dump(mode='json') for key, record in self._datasets.items()
+                },
                 'technique_catalog': {
                     key: record.model_dump(mode='json') for key, record in self._technique_catalog.items()
                 },
@@ -780,6 +811,10 @@ class JsonFileRunStore(InMemoryRunStore):
 
     def save_research_session(self, record: ResearchSessionRecord) -> None:
         super().save_research_session(record)
+        self._flush()
+
+    def save_dataset_record(self, record: DatasetRecord) -> None:
+        super().save_dataset_record(record)
         self._flush()
 
     def save_technique_catalog_record(self, record: TechniqueCatalogRecord) -> None:

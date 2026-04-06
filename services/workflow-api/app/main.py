@@ -74,6 +74,7 @@ from .stage_inference import (
     validate_ranker_response,
 )
 from .session_helpers import (
+    attach_dataset_to_session,
     append_research_session_memory,
     build_research_problem_request_from_session,
     build_research_session_context,
@@ -93,6 +94,8 @@ from .run_artifacts import (
     resolve_run_status,
 )
 from .schemas import (
+    DatasetCreateRequest,
+    DatasetRecord,
     DesignDraftRecord,
     DesignDraftReviewRequest,
     ExecutionPreflightResult,
@@ -112,6 +115,7 @@ from .schemas import (
     ResearchProblemPipelineRequest,
     ResearchProblemPipelineResponse,
     ResearchSessionRecord,
+    SessionDatasetAttachRequest,
     ReplicabilityAssessmentRecord,
     RunArtifactsResponse,
     RunCreateRequest,
@@ -528,6 +532,19 @@ def build_session_bootstrap_intake_request(
     notes = [item.strip() for item in session.working_notes[-3:] if item.strip()]
     source_refs: list[str] = []
     document_refs: list[str] = []
+    active_dataset = store.get_dataset_record(session.latest_dataset_id or '')
+    if active_dataset is not None:
+        source_refs.append(active_dataset.uri)
+        append_unique_note(notes, f'Selected dataset: {active_dataset.name}')
+        append_unique_note(notes, f'Dataset URI: {active_dataset.uri}')
+        if active_dataset.image_field:
+            append_unique_note(notes, f'Dataset image field: {active_dataset.image_field}')
+        if active_dataset.label_field:
+            append_unique_note(notes, f'Dataset label field: {active_dataset.label_field}')
+        if active_dataset.split_strategy:
+            append_unique_note(notes, f'Dataset split strategy: {active_dataset.split_strategy}')
+        for note in active_dataset.provenance_notes[:2]:
+            append_unique_note(notes, note)
     latest_document = store.get_source_document(session.latest_document_id or '')
     if latest_document is not None:
         if latest_document.source_url:
@@ -540,11 +557,41 @@ def build_session_bootstrap_intake_request(
             append_unique_note(notes, note)
     return IntakeCreateRequest(
         raw_request=raw_request,
-        source_refs=source_refs,
+        source_refs=list(dict.fromkeys(source_refs)),
         document_refs=document_refs,
         technique_tags=infer_technique_tags(raw_request, source_refs, notes),
         notes=notes,
         submitted_by=session.submitted_by,
+    )
+
+
+def summarize_dataset_name(name: str | None, uri: str) -> str:
+    cleaned = ' '.join((name or '').split()).strip()
+    if cleaned:
+        return cleaned[:120]
+    tail = uri.rstrip('/').rsplit('/', 1)[-1]
+    return (tail or uri)[:120]
+
+
+def build_dataset_record(
+    request: DatasetCreateRequest,
+    settings: Settings,
+) -> DatasetRecord:
+    now = datetime.now(timezone.utc)
+    return DatasetRecord(
+        dataset_id=uuid4().hex,
+        created_at=now,
+        updated_at=now,
+        status='registered',
+        name=summarize_dataset_name(request.name, request.uri.strip()),
+        uri=request.uri.strip(),
+        modality=request.modality,
+        task_type=request.task_type,
+        label_field=request.label_field,
+        image_field=request.image_field,
+        split_strategy=request.split_strategy,
+        provenance_notes=request.provenance_notes,
+        submitted_by=request.submitted_by or settings.default_submitted_by,
     )
 
 
@@ -1047,6 +1094,71 @@ def create_app(
         if session is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
         return session.session_id
+
+    @app.post('/datasets', response_model=DatasetRecord, status_code=status.HTTP_201_CREATED)
+    def create_dataset(request: DatasetCreateRequest) -> DatasetRecord:
+        record = build_dataset_record(request, settings)
+        store.save_dataset_record(record)
+        return record
+
+    @app.get('/datasets', response_model=list[DatasetRecord])
+    def list_datasets() -> list[DatasetRecord]:
+        return store.list_dataset_records()
+
+    @app.get('/datasets/{dataset_id}', response_model=DatasetRecord)
+    def get_dataset(dataset_id: str) -> DatasetRecord:
+        record = store.get_dataset_record(dataset_id)
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='dataset not found')
+        return record
+
+    @app.get('/research-sessions/{session_id}/datasets', response_model=list[DatasetRecord])
+    def list_session_datasets(session_id: str) -> list[DatasetRecord]:
+        session_id = resolve_latest_session_id(session_id)
+        session = get_required_research_session(store, session_id)
+        return [
+            record
+            for dataset_id in session.dataset_ids
+            if (record := store.get_dataset_record(dataset_id)) is not None
+        ]
+
+    @app.get('/research-sessions/latest/datasets', response_model=list[DatasetRecord])
+    def list_latest_session_datasets() -> list[DatasetRecord]:
+        return list_session_datasets('latest')
+
+    @app.post('/research-sessions/{session_id}/datasets', response_model=DatasetRecord, status_code=status.HTTP_201_CREATED)
+    def create_session_dataset(session_id: str, request: DatasetCreateRequest) -> DatasetRecord:
+        session_id = resolve_latest_session_id(session_id)
+        session = get_required_research_session(store, session_id)
+        record = build_dataset_record(
+            request.model_copy(
+                update={
+                    'submitted_by': request.submitted_by or session.submitted_by,
+                }
+            ),
+            settings,
+        )
+        store.save_dataset_record(record)
+        attach_dataset_to_session(store, session_id, record)
+        return record
+
+    @app.post('/research-sessions/latest/datasets', response_model=DatasetRecord, status_code=status.HTTP_201_CREATED)
+    def create_latest_session_dataset(request: DatasetCreateRequest) -> DatasetRecord:
+        return create_session_dataset('latest', request)
+
+    @app.post('/research-sessions/{session_id}/datasets/attach', response_model=DatasetRecord)
+    def attach_existing_dataset_to_session(session_id: str, request: SessionDatasetAttachRequest) -> DatasetRecord:
+        session_id = resolve_latest_session_id(session_id)
+        get_required_research_session(store, session_id)
+        record = store.get_dataset_record(request.dataset_id)
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='dataset not found')
+        attach_dataset_to_session(store, session_id, record)
+        return record
+
+    @app.post('/research-sessions/latest/datasets/attach', response_model=DatasetRecord)
+    def attach_existing_dataset_to_latest_session(request: SessionDatasetAttachRequest) -> DatasetRecord:
+        return attach_existing_dataset_to_session('latest', request)
 
     @app.post('/intakes', response_model=IntakeRecord, status_code=status.HTTP_201_CREATED)
     def create_intake(request: IntakeCreateRequest) -> IntakeRecord:

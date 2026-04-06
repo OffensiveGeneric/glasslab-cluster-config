@@ -14,6 +14,9 @@ def test_help_command_returns_local_text() -> None:
     assert "campaign = the autoresearch loop inside a session" in payload["response_text"]
     assert "!new-session <goal>" in payload["response_text"]
     assert "!add-url <url>" in payload["response_text"]
+    assert "!add-dataset <uri>" in payload["response_text"]
+    assert "!datasets" in payload["response_text"]
+    assert "!use-dataset <dataset_id>" in payload["response_text"]
     assert "!search <topic>" in payload["response_text"]
     assert "Legacy/debug commands still available:" in payload["response_text"]
     assert "!next-paper" not in payload["response_text"]
@@ -203,6 +206,64 @@ def test_add_url_sanitizes_garbage_source_title() -> None:
     assert "@import" not in payload["response_text"]
 
 
+def test_add_dataset_routes_to_session_dataset_creation() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {"dataset_id": "dataset-123", "name": "WikiArt", "uri": "https://www.wikiart.org/"},
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!add-dataset https://www.wikiart.org/"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["command"] == "add-dataset"
+    assert calls[0][0] == "/research-sessions/latest/datasets"
+    assert calls[0][2]["uri"] == "https://www.wikiart.org/"
+
+
+def test_datasets_lists_attached_datasets() -> None:
+    def fake_requester(settings, path, method="GET", body=None):
+        assert path == "/research-sessions/latest/datasets"
+        return (
+            f"{settings.workflow_api_url}{path}",
+            [
+                {"dataset_id": "dataset-1", "name": "Met Open Access", "uri": "https://metmuseum.github.io/"},
+                {"dataset_id": "dataset-2", "name": "WikiArt", "uri": "https://www.wikiart.org/"},
+            ],
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!datasets"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["command"] == "datasets"
+    assert "dataset-1: Met Open Access" in payload["response_text"]
+    assert "dataset-2: WikiArt" in payload["response_text"]
+
+
+def test_use_dataset_attaches_existing_dataset() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {"dataset_id": "dataset-123", "name": "Met Open Access"},
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!use-dataset dataset-123"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["command"] == "use-dataset"
+    assert calls[0][0] == "/research-sessions/latest/datasets/attach"
+    assert calls[0][2]["dataset_id"] == "dataset-123"
+
+
 def test_add_pdf_uses_pinned_session_when_provided() -> None:
     calls: list[tuple[str, str, dict | None]] = []
 
@@ -353,6 +414,7 @@ def test_status_command_adds_campaign_summary_when_present() -> None:
                 {
                     "session": {"session_id": "session-123", "title": "DreamSim", "goal_statement": "replicate dreamsim"},
                     "paper_intake_queue": {"status": "ready", "candidates": [{"id": "a"}]},
+                    "active_dataset": {"dataset_id": "dataset-1", "name": "WikiArt"},
                 },
             )
         return (
@@ -365,6 +427,7 @@ def test_status_command_adds_campaign_summary_when_present() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["command"] == "status"
+    assert "Active dataset: WikiArt." in payload["response_text"]
     assert "Campaign status: active with 2 iteration(s)." in payload["response_text"]
     assert "Active session 'DreamSim'." in payload["response_text"]
 

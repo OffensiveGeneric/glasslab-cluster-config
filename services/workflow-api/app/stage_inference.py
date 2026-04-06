@@ -499,7 +499,7 @@ def infer_split_strategies(
 
 def infer_dataset_uri_hint(intake: IntakeRecord) -> str | None:
     text = ' '.join([intake.raw_request, intake.normalized_summary, *intake.notes, *intake.source_refs])
-    match = re.search(r'(s3://\S+|file://\S+|/mnt/\S+)', text)
+    match = re.search(r'(https?://\S+|s3://\S+|file://\S+|/mnt/\S+)', text)
     if match:
         return match.group(1).rstrip('.,);')
     lowered = text.lower()

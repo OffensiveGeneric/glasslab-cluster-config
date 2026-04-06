@@ -9,6 +9,7 @@ from fastapi import HTTPException, status
 from .config import Settings
 from .persistence import RunStore
 from .schemas import (
+    DatasetRecord,
     IntakeRecord,
     InterpretationRecord,
     LiteratureDigestResponse,
@@ -85,7 +86,7 @@ def touch_research_session(
     session = store.get_research_session(session_id)
     if session is None:
         return None
-    normalized_updates = {key: value for key, value in updates.items() if value}
+    normalized_updates = {key: value for key, value in updates.items() if value is not None}
     if not normalized_updates:
         return session
     updated = session.model_copy(
@@ -130,10 +131,17 @@ def build_research_session_context(
     session: ResearchSessionRecord,
     store: RunStore,
 ) -> ResearchSessionContextResponse:
+    datasets = [
+        record
+        for dataset_id in session.dataset_ids
+        if (record := store.get_dataset_record(dataset_id)) is not None
+    ]
     return ResearchSessionContextResponse(
         session=session,
         research_problem=store.get_research_problem(session.latest_problem_id) if session.latest_problem_id else None,
         paper_intake_queue=store.get_paper_intake_queue(session.latest_queue_id) if session.latest_queue_id else None,
+        active_dataset=store.get_dataset_record(session.latest_dataset_id) if session.latest_dataset_id else None,
+        datasets=datasets,
         source_document=store.get_source_document(session.latest_document_id) if session.latest_document_id else None,
         intake=store.get_intake(session.latest_intake_id) if session.latest_intake_id else None,
         interpretation=store.get_interpretation(session.latest_interpretation_id) if session.latest_interpretation_id else None,
@@ -228,6 +236,30 @@ def build_research_session_literature_digest(
         notable_titles=notable_titles,
         summary_notes=summary_notes,
     )
+
+
+def attach_dataset_to_session(
+    store: RunStore,
+    session_id: str,
+    dataset: DatasetRecord,
+) -> ResearchSessionRecord:
+    session = get_required_research_session(store, session_id)
+    dataset_ids = list(session.dataset_ids)
+    if dataset.dataset_id not in dataset_ids:
+        dataset_ids.append(dataset.dataset_id)
+    updated = session.model_copy(
+        update={
+            'dataset_ids': dataset_ids,
+            'latest_dataset_id': dataset.dataset_id,
+            'latest_intake_id': None,
+            'latest_interpretation_id': None,
+            'latest_assessment_id': None,
+            'latest_design_id': None,
+            'updated_at': datetime.now(timezone.utc),
+        }
+    )
+    store.save_research_session(updated)
+    return updated
 
 
 def get_required_research_session(store: RunStore, session_id: str) -> ResearchSessionRecord:

@@ -123,6 +123,12 @@ def _parse_command(message: str) -> tuple[str, str] | None:
         ("next-paper:", "next-paper"),
         ("!add-paper", "add-paper"),
         ("add-paper:", "add-paper"),
+        ("!add-dataset", "add-dataset"),
+        ("add-dataset:", "add-dataset"),
+        ("!datasets", "datasets"),
+        ("datasets:", "datasets"),
+        ("!use-dataset", "use-dataset"),
+        ("use-dataset:", "use-dataset"),
         ("!add-url", "add-url"),
         ("add-url:", "add-url"),
         ("!add-pdf", "add-pdf"),
@@ -185,15 +191,20 @@ def _help_text() -> str:
             "1. !new-session <goal> creates a blank workspace without literature search.",
             "2. !add-pdf [url] ingests a PDF source into the active workspace.",
             "   !add-url <url> ingests a webpage source into the active workspace.",
-            "3. !run prepares interpretation/design and launches the first bounded run.",
-            "4. !next advances the active autoresearch campaign by deciding finished runs and launching the next batch.",
-            "5. !compare summarizes the active campaign and best current method.",
-            "6. !status shows the current workspace and campaign state.",
+            "3. !add-dataset <uri> registers and attaches a dataset to the active workspace.",
+            "   !datasets lists attached datasets. !use-dataset <id> switches the active one.",
+            "4. !run prepares interpretation/design and launches the first bounded run.",
+            "5. !next advances the active autoresearch campaign by deciding finished runs and launching the next batch.",
+            "6. !compare summarizes the active campaign and best current method.",
+            "7. !status shows the current workspace, active dataset, and campaign state.",
             "",
             "Core commands:",
             "!new-session <goal>",
             "!add-pdf [url]",
             "!add-url <url>",
+            "!add-dataset <uri>",
+            "!datasets",
+            "!use-dataset <dataset_id>",
             "!start <topic>",
             "!search <topic>",
             "!run",
@@ -208,6 +219,7 @@ def _help_text() -> str:
             "",
             "Use !start or !search when you want internet/paper search.",
             "Use !new-session + !add-pdf or !add-url when you already have the source.",
+            "Use !add-dataset before !run when the experiment needs an explicit dataset.",
             "",
             "Legacy/debug commands still available:",
             "!research !search !more-papers !add-paper !session !interpret !design !preflight",
@@ -459,6 +471,82 @@ def _dispatch(
             payload=payload,
         )
 
+    if command == "add-dataset":
+        if not argument or not argument.startswith("http"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="!add-dataset needs a direct dataset URI or webpage URL",
+            )
+        endpoint, payload = scoped_requester(
+            settings,
+            "/research-sessions/latest/datasets",
+            method="POST",
+            body={
+                "uri": argument,
+                "submitted_by": submitted_by,
+            },
+        )
+        dataset_name = payload.get("name") or argument
+        return DispatchResponse(
+            matched=True,
+            forward_to_openclaw=False,
+            command=command,
+            response_text=(
+                f"Attached dataset '{dataset_name}' to the current workspace. "
+                "Use !run when you want the backend to proceed with that dataset."
+            ),
+            workflow_api_endpoint=endpoint,
+            payload=payload,
+        )
+
+    if command == "datasets":
+        endpoint, payload = scoped_requester(
+            settings,
+            "/research-sessions/latest/datasets",
+            method="GET",
+        )
+        datasets = payload if isinstance(payload, list) else []
+        if not datasets:
+            response_text = "No datasets are attached to the current workspace. Use !add-dataset <uri> first."
+        else:
+            lines = [
+                f"{dataset.get('dataset_id', 'n/a')}: {dataset.get('name', dataset.get('uri', 'dataset'))}"
+                for dataset in datasets[:5]
+            ]
+            response_text = "Attached datasets:\n" + "\n".join(lines)
+        return DispatchResponse(
+            matched=True,
+            forward_to_openclaw=False,
+            command=command,
+            response_text=response_text,
+            workflow_api_endpoint=endpoint,
+            payload={"datasets": datasets},
+        )
+
+    if command == "use-dataset":
+        if not argument:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="!use-dataset needs a dataset id",
+            )
+        endpoint, payload = scoped_requester(
+            settings,
+            "/research-sessions/latest/datasets/attach",
+            method="POST",
+            body={
+                "dataset_id": argument,
+            },
+        )
+        dataset_name = payload.get("name") or argument
+        return DispatchResponse(
+            matched=True,
+            forward_to_openclaw=False,
+            command=command,
+            response_text=f"Set active dataset to '{dataset_name}'.",
+            workflow_api_endpoint=endpoint,
+            payload=payload,
+        )
+
     if command == "add-url":
         if not argument or not argument.startswith("http"):
             raise HTTPException(
@@ -521,11 +609,14 @@ def _dispatch(
         endpoint, payload = scoped_requester(settings, "/research-sessions/latest/context")
         session = payload.get("session") or {}
         queue = payload.get("paper_intake_queue") or {}
+        active_dataset = payload.get("active_dataset") or {}
         response_text = (
             f"Active session '{session.get('title', 'untitled')}'. "
             f"Goal: {session.get('goal_statement', 'n/a')}. "
             f"Source queue: {queue.get('status', 'none')} with {len(queue.get('candidates') or [])} candidate(s)."
         )
+        if active_dataset:
+            response_text += f" Active dataset: {active_dataset.get('name', active_dataset.get('uri', 'dataset'))}."
         try:
             _context_endpoint, _context_payload, session_id = _get_latest_session_id(
                 settings, scoped_requester, pinned_session_id
