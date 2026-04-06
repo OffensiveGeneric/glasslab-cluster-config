@@ -26,6 +26,22 @@ spec:
               value: http://glasslab-research-ingress.glasslab-v2.svc.cluster.local:8096
             - name: GLASSLAB_WHATSAPP_GATEWAY_TIMEOUT_SECONDS
               value: "120"
+            - name: GLASSLAB_WHATSAPP_GATEWAY_CHAT_BACKEND_URL
+              value: http://192.168.1.12:11434/api/chat
+            - name: GLASSLAB_WHATSAPP_GATEWAY_CHAT_MODEL
+              value: qwen3:14b
+            - name: GLASSLAB_WHATSAPP_GATEWAY_CHAT_TIMEOUT_SECONDS
+              value: "120"
+            - name: GLASSLAB_WHATSAPP_GATEWAY_DM_POLICY
+              value: allowlist
+            - name: GLASSLAB_WHATSAPP_GATEWAY_ALLOW_FROM
+              valueFrom:
+                secretKeyRef:
+                  name: glasslab-openclaw
+                  key: OPENCLAW_WHATSAPP_OWNER
+                  optional: true
+            - name: GLASSLAB_WHATSAPP_GATEWAY_GROUP_POLICY
+              value: disabled
             - name: GLASSLAB_WHATSAPP_GATEWAY_DEFAULT_CHANNEL
               value: whatsapp
             - name: GLASSLAB_WHATSAPP_GATEWAY_BASE_URL

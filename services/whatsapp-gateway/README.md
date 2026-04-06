@@ -13,10 +13,15 @@ Its job is intentionally narrow:
 
 It does **not** currently:
 
-- provide free-form chat
-- call an LLM
 - perform tool orchestration
 - own workflow logic
+
+It can now optionally:
+
+- provide free-form chat on non-command turns through a configured Ollama-style
+  chat backend
+- enforce a direct-message allowlist and a separate group-chat policy before
+  allowing that chat path
 
 Current contract:
 
@@ -50,3 +55,15 @@ Optional Meta settings:
 - `GLASSLAB_WHATSAPP_GATEWAY_META_PHONE_NUMBER_ID`
 - `GLASSLAB_WHATSAPP_GATEWAY_META_GRAPH_API_BASE_URL`
 - `GLASSLAB_WHATSAPP_GATEWAY_BASE_URL`
+
+Optional chat/policy settings:
+
+- `GLASSLAB_WHATSAPP_GATEWAY_CHAT_BACKEND_URL`
+- `GLASSLAB_WHATSAPP_GATEWAY_CHAT_MODEL`
+- `GLASSLAB_WHATSAPP_GATEWAY_CHAT_TIMEOUT_SECONDS`
+- `GLASSLAB_WHATSAPP_GATEWAY_CHAT_HISTORY_MESSAGES`
+- `GLASSLAB_WHATSAPP_GATEWAY_CHAT_SYSTEM_PROMPT`
+- `GLASSLAB_WHATSAPP_GATEWAY_DM_POLICY`
+- `GLASSLAB_WHATSAPP_GATEWAY_GROUP_POLICY`
+- `GLASSLAB_WHATSAPP_GATEWAY_ALLOW_FROM`
+- `GLASSLAB_WHATSAPP_GATEWAY_ALLOW_GROUPS`

@@ -87,14 +87,16 @@ What the gateway does now:
 - can proxy Meta media objects through:
   - `GET /attachments/meta/{media_id}`
 - forwards deterministic commands directly to `research-ingress`
+- can optionally answer non-command turns through a configured Ollama-style chat
+  backend
+- can enforce sender allowlists and separate group-chat policy before allowing
+  that chat path
 - returns backend `response_text` directly
 
 What it does not do yet:
 
-- integrate with the live external WhatsApp provider directly
-- provide free-form chat
-- call an LLM
 - replace every remaining OpenClaw-related operational path
+- provide proven true group-chat support on a real external WhatsApp provider
 
 ## Provider Adapter Follow-On
 
