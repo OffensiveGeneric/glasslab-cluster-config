@@ -195,6 +195,7 @@ def workflow_lookup_tool_name(workflow_id: str) -> str:
 generated_workflow_lookup_tools = [workflow_lookup_tool_name(workflow_id) for workflow_id in known_workflow_ids]
 
 expected_workflow_api = "http://glasslab-workflow-api.glasslab-v2.svc.cluster.local:8080"
+expected_whatsapp_gateway = "http://glasslab-whatsapp-gateway.glasslab-v2.svc.cluster.local:8097"
 expected_ollama = "http://192.168.1.12:11434"
 provider_base_url_override = os.environ.get("GLASSLAB_OPENCLAW_PROVIDER_BASE_URL", "").strip()
 provider_api_override = os.environ.get("GLASSLAB_OPENCLAW_PROVIDER_API", "").strip()
@@ -518,6 +519,7 @@ runtime_config = {
                 "enabled": True,
                 "config": {
                     "baseUrl": workflow_binding["base_url"],
+                    "gatewayUrl": expected_whatsapp_gateway,
                     "timeoutSeconds": workflow_binding.get("timeoutSeconds", 10),
                     "paperIntakeRequest": paper_intake_request,
                     "literatureIntakeRequest": literature_intake_request,

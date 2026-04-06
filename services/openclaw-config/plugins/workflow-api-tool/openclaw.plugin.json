@@ -11,6 +11,11 @@
         "minLength": 1,
         "description": "Approved workflow-api base URL for internal Glasslab v2 reads and bounded run submission."
       },
+      "gatewayUrl": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Optional Glasslab WhatsApp gateway base URL. When set, latest-message dispatch can bridge WhatsApp turns into the repo-owned gateway instead of routing only inside workflow-api."
+      },
       "validationRunRequest": {
         "type": "object",
         "additionalProperties": true,

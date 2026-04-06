@@ -13,6 +13,15 @@ function resolveBaseUrl(api: any): string {
   return value.trim();
 }
 
+function resolveGatewayUrl(api: any): string | null {
+  const value = api?.pluginConfig?.gatewayUrl;
+  if (typeof value !== "string") {
+    return null;
+  }
+  const cleaned = value.trim();
+  return cleaned || null;
+}
+
 function resolveTimeoutSeconds(api: any): number {
   const value = api?.pluginConfig?.timeoutSeconds;
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -642,6 +651,14 @@ type UserMessageRecord = {
   lineIndex: number;
 };
 
+type LatestMessageMetadata = {
+  senderId: string | null;
+  senderLabel: string | null;
+  providerMessageId: string | null;
+  conversationId: string | null;
+  isGroup: boolean;
+};
+
 function extractTextContent(content: unknown): string {
   if (!Array.isArray(content)) {
     return "";
@@ -743,6 +760,65 @@ function extractPdfAttachmentUrl(content: unknown): string | null {
       item.type === "document"
   );
   return preferred?.url ?? null;
+}
+
+function parseEmbeddedJsonBlock(rawText: string, label: string): Record<string, unknown> | null {
+  const pattern = new RegExp(
+    `${label.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}\\s*:\\s*\`\`\`json\\s*([\\s\\S]*?)\\s*\`\`\``,
+    "i"
+  );
+  const match = rawText.match(pattern);
+  if (!match?.[1]) {
+    return null;
+  }
+  try {
+    const payload = JSON.parse(match[1]);
+    return payload && typeof payload === "object" ? (payload as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function latestMessageMetadata(record: UserMessageRecord): LatestMessageMetadata {
+  const conversation = parseEmbeddedJsonBlock(record.rawText, "Conversation info (untrusted metadata)");
+  const sender = parseEmbeddedJsonBlock(record.rawText, "Sender (untrusted metadata)");
+
+  const senderId = [
+    sender?.id,
+    sender?.e164,
+    conversation?.sender_id,
+  ].find((value) => typeof value === "string" && value.trim()) as string | undefined;
+  const senderLabel = [
+    sender?.label,
+    sender?.name,
+    conversation?.sender,
+  ].find((value) => typeof value === "string" && value.trim()) as string | undefined;
+  const providerMessageId = (
+    typeof conversation?.message_id === "string" ? conversation.message_id.trim() : ""
+  ) || null;
+  const conversationIdCandidates = [
+    conversation?.conversation_id,
+    conversation?.chat_id,
+    conversation?.thread_id,
+    conversation?.group_id,
+  ];
+  const conversationId = (
+    conversationIdCandidates.find((value) => typeof value === "string" && value.trim()) as
+      | string
+      | undefined
+  ) || null;
+  const isGroup = Boolean(
+    conversation?.is_group === true ||
+      (typeof conversationId === "string" && conversationId.includes("@g.us"))
+  );
+
+  return {
+    senderId: senderId?.trim() || null,
+    senderLabel: senderLabel?.trim() || null,
+    providerMessageId,
+    conversationId,
+    isGroup,
+  };
 }
 
 function cleanLatestUserIdea(raw: string): string {
@@ -917,6 +993,63 @@ async function requestJson(
     );
   }
 
+  return { endpoint, payload };
+}
+
+async function requestGatewayInbound(
+  api: any,
+  record: UserMessageRecord
+): Promise<{ endpoint: string; payload: any }> {
+  const gatewayUrl = resolveGatewayUrl(api);
+  if (!gatewayUrl) {
+    throw new Error("plugins.entries.workflow-api-tool.config.gatewayUrl is required for gateway dispatch");
+  }
+  const timeoutSeconds = resolveTimeoutSeconds(api);
+  const endpoint = new URL("/webhooks/whatsapp/inbound", gatewayUrl).toString();
+  const metadata = latestMessageMetadata(record);
+  const pdfUrl = extractPdfAttachmentUrl(record.content);
+  const body = {
+    sender: metadata.senderId || "openclaw-whatsapp",
+    conversation_id: metadata.conversationId,
+    is_group: metadata.isGroup,
+    message: record.cleanedText,
+    provider_message_id: metadata.providerMessageId,
+    attachments: pdfUrl
+      ? [
+          {
+            url: pdfUrl,
+            mime_type: "application/pdf",
+          },
+        ]
+      : [],
+  };
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutSeconds * 1000),
+  });
+  const responseText = await response.text();
+  let payload: unknown = null;
+  if (responseText) {
+    try {
+      payload = JSON.parse(responseText);
+    } catch {
+      payload = responseText;
+    }
+  }
+  if (!response.ok) {
+    const detail =
+      typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
+    throw new Error(
+      `gateway request failed (${response.status}) for ${endpoint}: ${
+        detail.slice(0, 2000) || response.statusText
+      }`
+    );
+  }
   return { endpoint, payload };
 }
 
@@ -1528,9 +1661,33 @@ const plugin = {
         async execute() {
           const latestUserMessageRecord = await loadLatestUserMessageRecord();
           const latestUserMessage = cleanLatestUserIdea(latestUserMessageRecord.cleanedText);
+          const gatewayUrl = resolveGatewayUrl(api);
           const routedIntent = detectRoutedUserIntent(latestUserMessage);
           const explicitCommand = parseExplicitCommand(latestUserMessage);
           try {
+            if (gatewayUrl) {
+              const gatewayResult = await requestGatewayInbound(api, latestUserMessageRecord);
+              const gatewayPayload = gatewayResult.payload ?? {};
+              await appendAuditEvent({
+                tool: "workflow_api_dispatch_latest_user_message",
+                status: "ok",
+                routed_intent: routedIntent,
+                endpoint: gatewayResult.endpoint,
+                bridge: "whatsapp-gateway",
+                route:
+                  gatewayPayload && typeof gatewayPayload === "object"
+                    ? (gatewayPayload as any).route ?? null
+                    : null,
+                sender: latestMessageMetadata(latestUserMessageRecord).senderId ?? null
+              });
+              return buildJsonResult({
+                routed_intent: routedIntent,
+                bridge: "whatsapp-gateway",
+                endpoint: gatewayResult.endpoint,
+                gateway_response: gatewayPayload
+              });
+            }
+
             if (routedIntent === "start-manual-session") {
               const goalStatement =
                 explicitCommand?.command === "new-session" && explicitCommand.argument
