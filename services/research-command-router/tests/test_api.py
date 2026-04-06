@@ -10,8 +10,10 @@ def test_help_command_returns_local_text() -> None:
     payload = response.json()
     assert payload["matched"] is True
     assert payload["forward_to_openclaw"] is False
-    assert "!start <topic>" in payload["response_text"]
-    assert "!research <topic>" in payload["response_text"]
+    assert "session = one research workspace" in payload["response_text"]
+    assert "campaign = the autoresearch loop inside a session" in payload["response_text"]
+    assert "!new-session <goal>" in payload["response_text"]
+    assert "Legacy/debug commands still available:" in payload["response_text"]
 
 
 def test_research_command_calls_start_endpoint() -> None:
@@ -278,7 +280,8 @@ def test_status_command_adds_campaign_summary_when_present() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["command"] == "status"
-    assert "Autoresearch campaign: active with 2 iteration(s)." in payload["response_text"]
+    assert "Campaign status: active with 2 iteration(s)." in payload["response_text"]
+    assert "Active session 'DreamSim'." in payload["response_text"]
 
 
 def test_status_uses_pinned_session_context_when_provided() -> None:
@@ -322,6 +325,26 @@ def test_compare_command_returns_helpful_text_without_campaign() -> None:
     payload = response.json()
     assert payload["command"] == "compare"
     assert "No autoresearch campaign yet" in payload["response_text"]
+
+
+def test_status_mentions_missing_campaign_when_none_exists() -> None:
+    def fake_requester(settings, path, method="GET", body=None):
+        if path == "/research-sessions/latest/context":
+            return (
+                f"{settings.workflow_api_url}{path}",
+                {
+                    "session": {"session_id": "session-123", "title": "Artist Similarity", "goal_statement": "learn an art metric"},
+                    "paper_intake_queue": {"status": "ready", "candidates": []},
+                },
+            )
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="autoresearch campaign not found")
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!status"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert "No autoresearch campaign yet." in payload["response_text"]
 
 
 def test_next_command_bootstraps_campaign_and_launches_batch() -> None:

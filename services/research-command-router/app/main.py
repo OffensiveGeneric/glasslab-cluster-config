@@ -176,37 +176,35 @@ def _parse_command(message: str) -> tuple[str, str] | None:
 def _help_text() -> str:
     return "\n".join(
         [
-            "Primary runner commands:",
+            "Glasslab runner flow:",
+            "1. !new-session <goal> creates a blank workspace without literature search.",
+            "2. !add-pdf [url] attaches a paper or spec to the active workspace.",
+            "3. !run prepares interpretation/design and launches the first bounded run.",
+            "4. !next advances the active autoresearch campaign by deciding finished runs and launching the next batch.",
+            "5. !compare summarizes the active campaign and best current method.",
+            "6. !status shows the current workspace and campaign state.",
+            "",
+            "Core commands:",
+            "!new-session <goal>",
+            "!add-pdf [url]",
             "!start <topic>",
-            "!status",
             "!run",
             "!next",
             "!compare",
+            "!status",
             "",
-            "Manual source commands:",
-            "!new-session <goal>",
-            "!add-pdf <url>",
+            "Terms:",
+            "session = one research workspace for one problem",
+            "campaign = the autoresearch loop inside a session",
+            "iteration = one candidate method/run inside a campaign",
             "",
-            "Debug commands:",
-            "!research <topic>",
-            "!more-papers",
-            "!next-paper",
-            "!add-paper <url|title>",
-            "!session",
-            "!interpret",
-            "!design",
-            "!preflight",
-            "!run",
-            "!start-autoresearch",
-            "!draft-methodologies",
-            "!draft-notebook",
-            "!refine-notebook",
-            "!launch-iteration",
-            "!launch-batch",
-            "!decide-batch",
-            "!decide-latest",
-            "!autoresearch",
-            "!model-comparison",
+            "Use !start when you want literature search.",
+            "Use !new-session + !add-pdf when you already have the paper or spec.",
+            "",
+            "Legacy/debug commands still available:",
+            "!research !more-papers !next-paper !add-paper !session !interpret !design !preflight",
+            "!start-autoresearch !draft-methodologies !draft-notebook !refine-notebook",
+            "!launch-iteration !launch-batch !decide-batch !decide-latest !autoresearch !model-comparison",
             "!note <text>",
             "!op",
             "!help",
@@ -478,9 +476,9 @@ def _dispatch(
         session = payload.get("session") or {}
         queue = payload.get("paper_intake_queue") or {}
         response_text = (
-            f"Current session: '{session.get('title', 'untitled')}'. "
+            f"Active session '{session.get('title', 'untitled')}'. "
             f"Goal: {session.get('goal_statement', 'n/a')}. "
-            f"Queue status: {queue.get('status', 'none')} with {len(queue.get('candidates') or [])} candidate(s)."
+            f"Source queue: {queue.get('status', 'none')} with {len(queue.get('candidates') or [])} candidate(s)."
         )
         try:
             _context_endpoint, _context_payload, session_id = _get_latest_session_id(
@@ -493,12 +491,13 @@ def _dispatch(
             campaign = summary_payload.get("campaign") or {}
             iterations = summary_payload.get("iterations") or []
             response_text += (
-                f" Autoresearch campaign: {campaign.get('status', 'active')} "
+                f" Campaign status: {campaign.get('status', 'active')} "
                 f"with {len(iterations)} iteration(s)."
             )
         except HTTPException as exc:
             if not _is_missing_campaign_error(exc):
                 raise
+            response_text += " No autoresearch campaign yet."
         return DispatchResponse(
             matched=True,
             forward_to_openclaw=False,
@@ -813,7 +812,7 @@ def _dispatch(
             raise
         comparison = payload.get("model_comparison") or []
         response_text = (
-            f"Model comparison is ready with {len(comparison)} compared candidate(s). "
+            f"Campaign comparison is ready with {len(comparison)} compared candidate(s). "
             f"Recommended model: {payload.get('recommended_model', 'n/a')}."
         )
         return DispatchResponse(
