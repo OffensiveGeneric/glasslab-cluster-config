@@ -871,17 +871,57 @@ def _handle_inbound(
         is_group=request.is_group,
         attachments=request.attachments,
     )
-    ingress_payload = _request_research_ingress(
-        active_settings,
-        message=forwarded_message,
-        sender=request.sender,
-        channel=channel,
-        session_id=(
-            None
-            if forwarded_message.lower().startswith(("!new-session", "!start", "!research"))
-            else pinned_session_id
-        ),
+    ingress_payload: dict[str, Any]
+    ingress_session_id = (
+        None
+        if forwarded_message.lower().startswith(("!new-session", "!start", "!research"))
+        else pinned_session_id
     )
+    try:
+        ingress_payload = _request_research_ingress(
+            active_settings,
+            message=forwarded_message,
+            sender=request.sender,
+            channel=channel,
+            session_id=ingress_session_id,
+        )
+    except HTTPException as exc:
+        detail = exc.detail
+        if isinstance(detail, dict):
+            response_text = str(detail.get("response_text") or detail.get("detail") or detail).strip()
+        else:
+            response_text = str(detail).strip()
+        if not response_text:
+            response_text = "The backend did not return a response."
+        route = "deterministic-router-error"
+        handled = False
+        _append_message(
+            active_settings,
+            session_key=session_key,
+            role="assistant",
+            message=response_text,
+            forwarded_message=None,
+            provider_message_id=None,
+            workflow_session_id=ingress_session_id or pinned_session_id,
+            sender=None,
+            conversation_id=request.conversation_id,
+            is_group=request.is_group,
+            attachments=[],
+            route=route,
+            handled=handled,
+        )
+        return InboundForwardResponse(
+            handled=handled,
+            route=route,
+            response_text=response_text,
+            forwarded_message=forwarded_message,
+            session_key=session_key,
+            router_payload={
+                "backend_error": True,
+                "status_code": exc.status_code,
+                "detail": detail,
+            },
+        )
     response_text = str(ingress_payload.get("response_text") or "").strip()
     if (
         not ingress_payload.get("handled")

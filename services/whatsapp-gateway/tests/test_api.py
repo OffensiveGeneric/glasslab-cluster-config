@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.main import Settings, create_app
@@ -620,6 +621,40 @@ def test_gateway_reuses_pinned_workflow_session_id(tmp_path: Path) -> None:
     assert first.status_code == 200
     assert second.status_code == 200
     assert observed_session_ids == [None, "session-123"]
+
+
+def test_deterministic_backend_error_is_returned_as_user_reply(tmp_path: Path) -> None:
+    import app.main as main_module
+
+    def fake_ingress(settings, *, message, sender, channel, session_id=None):
+        raise HTTPException(
+            status_code=409,
+            detail="design method_spec is not ready_for_run: dataset_uri is unresolved",
+        )
+
+    original = main_module._request_research_ingress
+    main_module._request_research_ingress = fake_ingress
+    try:
+        client = TestClient(create_app(settings=Settings(state_dir=str(tmp_path))))
+        response = client.post(
+            "/webhooks/whatsapp/provider",
+            json={
+                "provider": "whatsapp",
+                "provider_message_id": "wamid-error-1",
+                "sender": "+15555550123",
+                "text": "!run",
+                "attachments": [],
+            },
+        )
+    finally:
+        main_module._request_research_ingress = original
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["handled"] is False
+    assert payload["route"] == "deterministic-router-error"
+    assert "dataset_uri is unresolved" in payload["response_text"]
+    assert payload["router_payload"]["backend_error"] is True
 
 
 def test_meta_webhook_verification_succeeds(tmp_path: Path) -> None:
