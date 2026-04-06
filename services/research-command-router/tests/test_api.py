@@ -13,6 +13,8 @@ def test_help_command_returns_local_text() -> None:
     assert "session = one research workspace" in payload["response_text"]
     assert "campaign = the autoresearch loop inside a session" in payload["response_text"]
     assert "!new-session <goal>" in payload["response_text"]
+    assert "!add-url <url>" in payload["response_text"]
+    assert "!search <topic>" in payload["response_text"]
     assert "Legacy/debug commands still available:" in payload["response_text"]
 
 
@@ -36,7 +38,31 @@ def test_research_command_calls_start_endpoint() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["command"] == "research"
-    assert "Started literature search" in payload["response_text"]
+    assert "Started internet-backed literature search" in payload["response_text"]
+    assert len(calls) == 1
+
+
+def test_search_command_alias_calls_start_endpoint() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        assert path == "/research-sessions/start-literature-search"
+        assert method == "POST"
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {
+                "session": {"title": "Artist Similarity"},
+                "paper_intake_queue": {"candidates": [{"paper_id": "a"}], "coverage_summary": {"mode": "external"}},
+            },
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!search artist similarity metric learning"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["command"] == "search"
+    assert "Started internet-backed literature search" in payload["response_text"]
     assert len(calls) == 1
 
 
@@ -60,7 +86,7 @@ def test_start_command_alias_calls_start_endpoint() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["command"] == "start"
-    assert "Started literature search" in payload["response_text"]
+    assert "Started internet-backed literature search" in payload["response_text"]
     assert len(calls) == 1
 
 
@@ -139,6 +165,26 @@ def test_add_pdf_routes_to_manual_queue_with_pdf_url() -> None:
     assert payload["command"] == "add-pdf"
     assert calls[0][0] == "/research-sessions/latest/paper-intake-queue/manual-paper"
     assert calls[0][2]["pdf_url"] == "https://example.org/paper.pdf"
+
+
+def test_add_url_routes_to_manual_queue_with_official_page() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {"candidates": [{"title": "Manual web source"}]},
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!add-url https://example.org/paper-page.html"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["command"] == "add-url"
+    assert calls[0][0] == "/research-sessions/latest/paper-intake-queue/manual-paper"
+    assert calls[0][2]["official_page"] == "https://example.org/paper-page.html"
+    assert calls[0][2]["pdf_url"] is None
 
 
 def test_add_pdf_uses_pinned_session_when_provided() -> None:

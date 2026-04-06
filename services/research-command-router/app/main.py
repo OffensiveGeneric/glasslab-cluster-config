@@ -112,6 +112,8 @@ def _parse_command(message: str) -> tuple[str, str] | None:
         ("start:", "start"),
         ("!research", "research"),
         ("research:", "research"),
+        ("!search", "search"),
+        ("search:", "search"),
         ("!status", "status"),
         ("status:", "status"),
         ("!more-papers", "more-papers"),
@@ -120,6 +122,8 @@ def _parse_command(message: str) -> tuple[str, str] | None:
         ("next-paper:", "next-paper"),
         ("!add-paper", "add-paper"),
         ("add-paper:", "add-paper"),
+        ("!add-url", "add-url"),
+        ("add-url:", "add-url"),
         ("!add-pdf", "add-pdf"),
         ("add-pdf:", "add-pdf"),
         ("!session", "session"),
@@ -179,6 +183,7 @@ def _help_text() -> str:
             "Glasslab runner flow:",
             "1. !new-session <goal> creates a blank workspace without literature search.",
             "2. !add-pdf [url] attaches a paper or spec to the active workspace.",
+            "   !add-url <url> attaches a webpage source to the active workspace.",
             "3. !run prepares interpretation/design and launches the first bounded run.",
             "4. !next advances the active autoresearch campaign by deciding finished runs and launching the next batch.",
             "5. !compare summarizes the active campaign and best current method.",
@@ -187,7 +192,9 @@ def _help_text() -> str:
             "Core commands:",
             "!new-session <goal>",
             "!add-pdf [url]",
+            "!add-url <url>",
             "!start <topic>",
+            "!search <topic>",
             "!run",
             "!next",
             "!compare",
@@ -198,11 +205,11 @@ def _help_text() -> str:
             "campaign = the autoresearch loop inside a session",
             "iteration = one candidate method/run inside a campaign",
             "",
-            "Use !start when you want literature search.",
-            "Use !new-session + !add-pdf when you already have the paper or spec.",
+            "Use !start or !search when you want internet/paper search.",
+            "Use !new-session + !add-pdf or !add-url when you already have the source.",
             "",
             "Legacy/debug commands still available:",
-            "!research !more-papers !next-paper !add-paper !session !interpret !design !preflight",
+            "!research !search !more-papers !next-paper !add-paper !add-url !session !interpret !design !preflight",
             "!start-autoresearch !draft-methodologies !draft-notebook !refine-notebook",
             "!launch-iteration !launch-batch !decide-batch !decide-latest !autoresearch !model-comparison",
             "!note <text>",
@@ -334,7 +341,7 @@ def _dispatch(
             payload=payload,
         )
 
-    if command in {"start", "research"}:
+    if command in {"start", "research", "search"}:
         if len(argument) < 12:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -360,7 +367,7 @@ def _dispatch(
             matched=True,
             forward_to_openclaw=False,
             command=command,
-            response_text=response_text,
+            response_text=response_text.replace("Started literature search", "Started internet-backed literature search"),
             workflow_api_endpoint=endpoint,
             payload=payload,
         )
@@ -434,6 +441,39 @@ def _dispatch(
             forward_to_openclaw=False,
             command=command,
             response_text=f"Added manual paper candidate '{latest_title}' to the current queue.",
+            workflow_api_endpoint=endpoint,
+            payload=payload,
+        )
+
+    if command == "add-url":
+        if not argument or not argument.startswith("http"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="!add-url needs a direct webpage URL",
+            )
+        endpoint, payload = scoped_requester(
+            settings,
+            "/research-sessions/latest/paper-intake-queue/manual-paper",
+            method="POST",
+            body={
+                "title": "Manual web source",
+                "official_page": argument,
+                "pdf_url": None,
+                "notes": ["Added as a direct webpage from deterministic research command router."],
+                "tags": ["manual", "web"],
+                "submitted_by": submitted_by,
+            },
+        )
+        candidates = payload.get("candidates") or []
+        latest_title = candidates[-1]["title"] if candidates else "Manual web source"
+        return DispatchResponse(
+            matched=True,
+            forward_to_openclaw=False,
+            command=command,
+            response_text=(
+                f"Added webpage source '{latest_title}' to the current queue. "
+                "Use !next-paper to stage it, or !run if you want the backend to proceed from the current session context."
+            ),
             workflow_api_endpoint=endpoint,
             payload=payload,
         )
