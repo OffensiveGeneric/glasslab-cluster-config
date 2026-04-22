@@ -196,51 +196,63 @@ def _parse_command(message: str) -> tuple[str, str] | None:
     return None
 
 
-def _help_text() -> str:
-    return "\n".join(
-        [
-            "Glasslab runner flow:",
-            "1. !new <goal> creates a pinned research session.",
-            "2. !add <url|note: ...|dataset: ...|baseline: ...> records one useful input.",
-            "3. !plan prepares the current bounded design draft.",
-            "4. !check runs preflight for the current plan.",
-            "5. !run launches the current approved design.",
-            "6. !compare summarizes the current results.",
-            "7. !decide <keep|discard|revise> records the current judgment.",
-            "8. !next advances to the next bounded variant.",
-            "",
-            "Core commands:",
-            "!new <goal>",
-            "!state",
-            "!add <thing>",
-            "!plan",
-            "!check",
-            "!run",
-            "!compare",
-            "!decide <keep|discard|revise>",
-            "!next",
-            "",
-            "Terms:",
-            "session = one research workspace for one problem",
-            "campaign = the autoresearch loop inside a session",
-            "iteration = one candidate method/run inside a campaign",
-            "",
-            "Compatibility aliases:",
-            "!start -> !new",
-            "!status -> !state",
-            "",
-            "Use !research or !search only when you intentionally want literature search.",
-            "Use !add note: ..., !add dataset: ..., or !add baseline: ... to add structured context.",
-            "",
-            "Legacy/debug commands still available:",
-            "!research !search !more-papers !next-paper !add-paper !session !interpret !design !preflight",
-            "!start-autoresearch !draft-methodologies !draft-notebook !refine-notebook",
-            "!launch-iteration !launch-batch !decide-batch !decide-latest !autoresearch !model-comparison",
-            "!note <text>",
-            "!op",
-            "!help",
-        ]
-    )
+def _help_text(*, include_legacy: bool = False) -> str:
+    lines = [
+        "Glasslab runner flow:",
+        "1. !new <goal> creates a pinned research session.",
+        "2. !add <url|note: ...|dataset: ...|baseline: ...> records one useful input.",
+        "3. !plan prepares the current bounded design draft.",
+        "4. !check runs preflight for the current plan.",
+        "5. !run launches the current approved design.",
+        "6. !compare summarizes the current results.",
+        "7. !decide <keep|discard|revise> records the current judgment.",
+        "8. !next advances to the next bounded variant.",
+        "",
+        "Core commands:",
+        "!new <goal>",
+        "!state",
+        "!add <thing>",
+        "!plan",
+        "!check",
+        "!run",
+        "!compare",
+        "!decide <keep|discard|revise>",
+        "!next",
+        "",
+        "Terms:",
+        "session = one research workspace for one problem",
+        "campaign = the autoresearch loop inside a session",
+        "iteration = one candidate method/run inside a campaign",
+        "",
+        "Compatibility aliases:",
+        "!start -> !new",
+        "!status -> !state",
+        "",
+        "Optional secondary path:",
+        "!research or !search triggers literature search on purpose.",
+        "",
+        "Structured intake examples:",
+        "!add note: ...",
+        "!add dataset: ...",
+        "!add baseline: ...",
+        "",
+        "Operator/debug compatibility commands are intentionally hidden from the primary help surface.",
+        "Use !help legacy if you explicitly need the older command set.",
+    ]
+    if include_legacy:
+        lines.extend(
+            [
+                "",
+                "Legacy/debug commands still supported:",
+                "!research !search !more-papers !next-paper !add-paper !session !interpret !design !preflight",
+                "!start-autoresearch !draft-methodologies !draft-notebook !refine-notebook",
+                "!launch-iteration !launch-batch !decide-batch !decide-latest !autoresearch !model-comparison",
+                "!note <text>",
+                "!op",
+                "!help",
+            ]
+        )
+    return "\n".join(lines)
 
 
 def _get_latest_session_id(
@@ -343,11 +355,12 @@ def _dispatch(
         )
 
     if command == "help":
+        include_legacy = argument.lower() in {"legacy", "debug", "compat", "compatibility"}
         return DispatchResponse(
             matched=True,
             forward_to_openclaw=False,
             command=command,
-            response_text=_help_text(),
+            response_text=_help_text(include_legacy=include_legacy),
         )
 
     if command == "new":

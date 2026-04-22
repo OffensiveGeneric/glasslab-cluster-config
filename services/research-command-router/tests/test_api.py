@@ -17,8 +17,21 @@ def test_help_command_returns_local_text() -> None:
     assert "!plan" in payload["response_text"]
     assert "!check" in payload["response_text"]
     assert "!decide <keep|discard|revise>" in payload["response_text"]
-    assert "Legacy/debug commands still available:" in payload["response_text"]
+    assert "Use !help legacy" in payload["response_text"]
+    assert "Legacy/debug commands still supported:" not in payload["response_text"]
+    assert "!next-paper" not in payload["response_text"]
+
+
+def test_help_legacy_command_returns_compatibility_surface() -> None:
+    client = TestClient(create_app(settings=Settings(), requester=lambda *args, **kwargs: ("", {})))
+    response = client.post("/dispatch", json={"message": "!help legacy"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["matched"] is True
+    assert payload["forward_to_openclaw"] is False
+    assert "Legacy/debug commands still supported:" in payload["response_text"]
     assert "!next-paper" in payload["response_text"]
+    assert "!decide-latest" in payload["response_text"]
 
 
 def test_research_command_calls_start_endpoint() -> None:
