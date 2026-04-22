@@ -1,5 +1,11 @@
 # Ollama Native OpenClaw Path
 
+Status: historical integration note.
+
+This file records an earlier OpenClaw + Ollama integration path. It is useful
+for migration context, but it is not the current product-facing inference or
+control recommendation.
+
 This note records the 2026-03-24 finding that mattered most after the Mac cutover:
 
 - remote Ollama with OpenClaw should use the native Ollama API

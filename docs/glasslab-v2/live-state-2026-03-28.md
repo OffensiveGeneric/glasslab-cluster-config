@@ -1,5 +1,10 @@
 # Live State 2026-03-28
 
+Status: historical live snapshot.
+
+This note records what was true on 2026-03-28. It is not a substitute for the
+current architecture docs or a fresh live check from `.44`.
+
 This note records the actual outcomes of the 2026-03-28 debugging and integration session.
 
 ## What Changed

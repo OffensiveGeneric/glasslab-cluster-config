@@ -1,5 +1,11 @@
 # External Literature Path
 
+Status: aspirational / secondary.
+
+This file describes a future external-literature capability. It is not the
+current product center. Current product docs should frame literature as bounded
+source intake and review, not as the primary identity of the system.
+
 ## Goal
 
 Move Glasslab from a seed-manifest-only paper picker to a real literature pipeline

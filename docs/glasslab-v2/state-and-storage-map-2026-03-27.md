@@ -1,5 +1,15 @@
 # State And Storage Map 2026-03-27
 
+Status: mixed historical note with a current-state override.
+
+This file was originally written when `workflow-api` still used the JSON store
+on the shared artifacts PVC. As of the 2026-04-22 rollout, the live
+`workflow-api` store backend is now `postgres`, with the prior JSON store
+imported into Postgres from `.44`.
+
+Use this file for the broad storage map, but do not rely on its older JSON-store
+details without checking the current override below.
+
 This note is the current high-signal answer to:
 
 - where research-session state lives
@@ -48,29 +58,32 @@ Current live backend:
 
 - `validated live`
 - `workflow-api` now runs with:
-  - `GLASSLAB_WORKFLOW_API_STORE_BACKEND=json`
-  - `GLASSLAB_WORKFLOW_API_ALLOW_INMEMORY_STORE=false`
-  - `GLASSLAB_WORKFLOW_API_STORE_JSON_PATH=/mnt/artifacts/workflow-api/state/run-store.json`
+  - `GLASSLAB_WORKFLOW_API_STORE_BACKEND=postgres`
+  - `GLASSLAB_WORKFLOW_API_STORE_POSTGRES_DSN` from the local workflow-api secret on `.44`
 
 Current live location:
 
-- inside the `workflow-api` pod:
-  - `/mnt/artifacts/workflow-api/state/run-store.json`
+- `validated live`
+- Postgres table:
+  - `workflow_state`
+- current imported store row:
+  - `store_key='default'`
 
 Backing storage:
 
-- `validated live` that the JSON store survives `workflow-api` restart
-- `repo contract` says `/mnt/artifacts` comes from the shared RWX PVC:
-  - `glasslab-shared-artifacts`
-- `repo contract` for that PVC:
-  - NFS server: `192.168.1.207`
-  - export: `/volume1/backup/glasslab-v2/shared-artifacts`
+- `validated live`
+- Postgres StatefulSet:
+  - `glasslab-postgres`
+- PVC:
+  - `glasslab-postgres-data`
+- local PV path on `node01`:
+  - `/var/lib/glasslab-v2/postgres`
 
 Important implication:
 
 - research-session state is no longer ephemeral pod memory
-- it is still not in Postgres
-- the current source of truth for session/stage metadata is the JSON store on the shared artifacts PVC
+- the live source of truth for session/stage metadata is now Postgres
+- the old JSON file on the shared artifacts PVC is now a backup/import source, not the active record store
 
 ## Literature And Paper Storage
 
@@ -89,9 +102,8 @@ What it contains:
 
 Current metadata store:
 
-- `validated live` indirectly through the same `workflow-api` JSON store
-- this metadata sits in:
-  - `/mnt/artifacts/workflow-api/state/run-store.json`
+- `validated live`
+- source-document metadata now lives in the same Postgres-backed workflow store as the rest of the session/stage records
 
 ### Source-document blobs
 
@@ -154,11 +166,11 @@ Backing storage:
 
 Important implication:
 
-- run artifacts and research-session metadata currently share the same top-level PVC
-- that is convenient right now, but it means the shared artifacts volume is doing double duty as:
-  - workflow metadata backing store
-  - source-document blob store
-  - run artifact store
+- run artifacts and source-document blobs still share the shared artifacts PVC
+- workflow metadata no longer uses that same PVC as the active record store
+- the storage split is now closer to the intended model:
+  - Postgres for records
+  - shared artifacts path for files
 
 ## Datasets
 

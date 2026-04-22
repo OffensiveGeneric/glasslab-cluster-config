@@ -1,5 +1,10 @@
 # Resume Next Session: 2026-03-24
 
+Status: historical handoff.
+
+This note captures a specific March recovery point during the OpenClaw/Ollama
+phase. Do not treat it as the current operating runbook.
+
 This is the shortest accurate handoff for where to resume next time.
 
 ## Current State

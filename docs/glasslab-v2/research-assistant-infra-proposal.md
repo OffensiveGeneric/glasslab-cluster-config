@@ -1,5 +1,11 @@
 # Research Assistant Infra Proposal
 
+Status: superseded design note.
+
+This proposal helped move responsibility out of OpenClaw, but it still reflects
+the older research-assistant framing. Prefer the canonical 2026-04 stack docs
+for the current product definition.
+
 This note proposes the infrastructure and control-surface changes most likely to get Glasslab closer to the actual product vision:
 
 - a human starts from a research idea in natural language

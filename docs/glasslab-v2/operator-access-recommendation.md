@@ -1,5 +1,12 @@
 # Operator Access Recommendation
 
+Status: historical recommendation from the OpenClaw-first period.
+
+Use [canonical-stack-2026-04.md](./canonical-stack-2026-04.md) and
+[deprecation-map-2026-04.md](./deprecation-map-2026-04.md) for the current
+product posture. This note is kept for decision history, not as the current
+primary operator-surface recommendation.
+
 This note makes a concrete recommendation for issue `#34`.
 
 The question is not whether Glasslab should build a broad ingress layer.

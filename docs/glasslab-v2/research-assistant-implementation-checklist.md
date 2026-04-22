@@ -1,5 +1,14 @@
 # Research Assistant Implementation Checklist
 
+Status: partially superseded.
+
+This file comes from the literature-first / research-assistant framing. Keep it
+for migration context, but prefer the current command and control docs:
+
+- [canonical-stack-2026-04.md](./canonical-stack-2026-04.md)
+- [command-surface-spec.md](./command-surface-spec.md)
+- [router-and-backend-contract.md](./router-and-backend-contract.md)
+
 This checklist turns [research-assistant-infra-proposal.md](./research-assistant-infra-proposal.md) into a concrete execution order.
 
 The priority is not "more agents."

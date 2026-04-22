@@ -1,5 +1,10 @@
 # Research Assistant UX Boundary
 
+Status: superseded UX note.
+
+The core lesson here still matters, but the current product language is now
+runner-first and session-first rather than "research assistant" first.
+
 This note exists because the last round of OpenClaw work made one thing painfully clear:
 
 - a research assistant that cannot reliably start a research session or gather the first papers does not have a usable UX

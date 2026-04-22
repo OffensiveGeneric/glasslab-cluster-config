@@ -1,5 +1,10 @@
 # Live State 2026-03-30
 
+Status: historical live snapshot.
+
+This note records what was true on 2026-03-30. Use it for provenance and
+decision history, not as a current-state summary.
+
 This note captures what was actually validated from `.44` during the 2026-03-30 lab session.
 
 ## What Is Live

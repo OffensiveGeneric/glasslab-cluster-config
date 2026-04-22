@@ -8,6 +8,7 @@ Glasslab v2 is live, but its durable-storage story is still in the bring-up phas
 - `glasslab-v2` now has explicit PVCs for `Postgres` and `MinIO`
 - `glasslab-v2` now has an explicit PVC for OpenClaw writable state
 - the cluster now also has a tracked NFS-backed RWX path for shared datasets and artifacts
+- `workflow-api` session and stage metadata now live in Postgres rather than the JSON store on the artifacts share
 - Postgres uses a static local PV/PVC on `node01`
 - MinIO uses a static local PV/PVC on `node01`
 - OpenClaw writable state uses a static local PV/PVC on `node01`
@@ -16,6 +17,7 @@ Glasslab v2 is live, but its durable-storage story is still in the bring-up phas
 This means the current live path is partially durable:
 
 - `Postgres`: durable on local disk
+- `workflow-api` records: durable through Postgres
 - `MinIO`: durable on local disk
 - OpenClaw writable state: durable on local disk
 - `NATS`: durable on local disk

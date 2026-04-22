@@ -1,5 +1,13 @@
 # OpenClaw Gateway
 
+Status: secondary/historical.
+
+OpenClaw is no longer the command critical path. Treat this file as context for
+the optional OpenClaw surface and the earlier OpenClaw-centered architecture,
+not as the current primary control story. For the current path, prefer
+[router-and-backend-contract.md](./router-and-backend-contract.md) and
+[canonical-stack-2026-04.md](./canonical-stack-2026-04.md).
+
 OpenClaw is the operator shell for Glasslab v2, not the experiment brain.
 
 ## Current live status
