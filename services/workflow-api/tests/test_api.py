@@ -56,6 +56,21 @@ def test_healthz_and_workflow_families() -> None:
     assert by_id['replication-lite']['submission_backend'] == 'unimplemented'
 
 
+def test_healthz_redacts_postgres_password() -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        store_backend='postgres',
+        store_postgres_dsn='postgresql://glasslab:super-secret@glasslab-postgres.glasslab-v2.svc.cluster.local:5432/glasslab',
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    health = client.get('/healthz')
+    assert health.status_code == 200
+    assert health.json()['store_target'] == 'postgresql://glasslab:***@glasslab-postgres.glasslab-v2.svc.cluster.local:5432/glasslab'
+
+
 def test_create_and_fetch_latest_intake() -> None:
     client = build_client()
 

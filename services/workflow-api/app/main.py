@@ -5,6 +5,7 @@ import json
 import logging
 import time
 from typing import Any, Iterable
+from urllib.parse import urlsplit, urlunsplit
 from urllib import request as urllib_request
 from uuid import uuid4
 
@@ -146,6 +147,18 @@ def log_stage_record_source(stage: str, source: str, record_id: str, **context: 
         if value:
             fields.append(f'{key}={value}')
     LOGGER.info('stage-record-created %s', ' '.join(fields))
+
+
+def redact_dsn_secret(dsn: str) -> str:
+    parts = urlsplit(dsn)
+    if not parts.password:
+        return dsn
+    username = parts.username or ''
+    host = parts.hostname or ''
+    port = f":{parts.port}" if parts.port else ''
+    userinfo = f"{username}:***@" if username else "***@"
+    netloc = f"{userinfo}{host}{port}"
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
 
 
 def record_operation(
@@ -1121,7 +1134,11 @@ def create_app(
             'build_source_label': settings.build_source_label,
             'workflow_count': len(registry.list_workflows()),
             'store_backend': settings.store_backend,
-            'store_target': settings.store_postgres_dsn if settings.store_backend == 'postgres' else settings.store_json_path,
+            'store_target': (
+                redact_dsn_secret(settings.store_postgres_dsn)
+                if settings.store_backend == 'postgres'
+                else settings.store_json_path
+            ),
         }
 
     def resolve_latest_session_id(session_id: str) -> str:
