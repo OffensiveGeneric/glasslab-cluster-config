@@ -114,7 +114,9 @@ from .schemas import (
     ResearchProblemRecord,
     ResearchProblemPipelineRequest,
     ResearchProblemPipelineResponse,
+    ResearchSessionNextCommandResponse,
     ResearchSessionRecord,
+    ResearchSessionRunCommandResponse,
     SessionDatasetAttachRequest,
     ReplicabilityAssessmentRecord,
     RunArtifactsResponse,
@@ -1049,6 +1051,35 @@ def create_run_record(
     )
     return record
 
+
+def enrich_run_inputs_with_method_context(design: DesignDraftRecord) -> dict[str, Any]:
+    method_spec = getattr(design, 'method_spec', None)
+    inputs = dict(method_spec.execution_inputs) if method_spec is not None else dict(design.declared_inputs)
+    if method_spec is None:
+        return inputs
+    if method_spec.candidate_models:
+        inputs['technique_candidate_models'] = list(method_spec.candidate_models)
+    if method_spec.baseline_models:
+        inputs['technique_baseline_models'] = list(method_spec.baseline_models)
+    if method_spec.loss_or_distance:
+        inputs['technique_loss_or_distance'] = method_spec.loss_or_distance
+    if method_spec.task_type:
+        inputs['technique_task_type'] = method_spec.task_type
+    if method_spec.metrics:
+        inputs['technique_metrics'] = list(method_spec.metrics)
+    return inputs
+
+
+def resolve_run_requested_models(requested_models: list[str], workflow: WorkflowRegistryEntry) -> list[str]:
+    allowed = list(workflow.allowed_models or [])
+    requested = [str(model).strip() for model in requested_models if str(model).strip()]
+    compatible = [model for model in requested if model in allowed]
+    if compatible:
+        return compatible
+    if allowed:
+        return allowed[:1]
+    return requested[:1]
+
 def create_app(
     settings: Settings | None = None,
     registry: WorkflowRegistry | None = None,
@@ -1508,6 +1539,67 @@ def create_app(
         if interpretation is None or interpretation.intake_id != intake.intake_id:
             interpretation = create_interpretation_for_intake(intake)
         return create_design_draft_for_intake(intake, interpretation=interpretation)
+
+    @app.post(
+        '/research-sessions/{session_id}/transitions/run-happy-path',
+        response_model=ResearchSessionRunCommandResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def transition_run_session_happy_path(session_id: str) -> ResearchSessionRunCommandResponse:
+        session_id = resolve_latest_session_id(session_id)
+        session = get_required_research_session(store, session_id)
+        design = apply_session_design_skill(session_id)
+        method_spec = getattr(design, 'method_spec', None)
+        if method_spec is not None and method_spec.run_readiness != 'ready':
+            detail = 'design method_spec is not ready_for_run'
+            if method_spec.blocking_reasons:
+                detail += ': ' + '; '.join(method_spec.blocking_reasons[:2])
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
+        if design.status != 'ready_for_run':
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='design draft is not ready_for_run')
+        workflow = registry.get_workflow(design.workflow_id)
+        if workflow is None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='workflow registry entry not found')
+        run_request = RunCreateRequest(
+            workflow_id=design.workflow_id,
+            objective=design.objective,
+            inputs=enrich_run_inputs_with_method_context(design),
+            models=resolve_run_requested_models(
+                (
+                    method_spec.candidate_models
+                    if method_spec is not None and method_spec.candidate_models
+                    else design.candidate_models
+                )
+                or workflow.allowed_models[:1],
+                workflow,
+            ),
+            resource_profile=design.resource_profile,
+            submitted_by=design.submitted_by,
+        )
+        run = create_run_record(
+            run_request,
+            workflow,
+            settings,
+            submitter,
+            store,
+            source_design_id=design.design_id,
+            source_intake_id=design.intake_id,
+            run_purpose='validation',
+            session_id=design.session_id,
+        )
+        session = get_required_research_session(store, session_id)
+        return ResearchSessionRunCommandResponse(session=session, design=design, run=run)
+
+    @app.post(
+        '/research-sessions/latest/transitions/run-happy-path',
+        response_model=ResearchSessionRunCommandResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def transition_run_latest_session_happy_path() -> ResearchSessionRunCommandResponse:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return transition_run_session_happy_path(session.session_id)
 
     @app.get('/design-drafts/latest', response_model=DesignDraftRecord)
     def get_latest_design_draft() -> DesignDraftRecord:

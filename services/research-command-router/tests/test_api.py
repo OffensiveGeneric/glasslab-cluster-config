@@ -314,14 +314,13 @@ def test_run_command_routes_to_session_run_creation() -> None:
 
     def fake_requester(settings, path, method="GET", body=None):
         calls.append((path, method, body))
-        if path == "/research-sessions/latest/context":
-            return (
-                f"{settings.workflow_api_url}{path}",
-                {"session": {"session_id": "session-123"}},
-            )
         return (
             f"{settings.workflow_api_url}{path}",
-            {"run_id": "run-123", "workflow_id": "gpu-experiment"},
+            {
+                "session": {"session_id": "session-123"},
+                "design": {"design_id": "design-123"},
+                "run": {"run_id": "run-123", "workflow_id": "gpu-experiment"},
+            },
         )
 
     client = TestClient(create_app(settings=Settings(), requester=fake_requester))
@@ -329,9 +328,31 @@ def test_run_command_routes_to_session_run_creation() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["command"] == "run"
-    assert calls[0][0] == "/research-sessions/latest/context"
-    assert calls[1][0] == "/research-sessions/session-123/skills/design"
-    assert calls[2][0] == "/research-sessions/session-123/runs/from-design"
+    assert calls == [
+        ("/research-sessions/latest/transitions/run-happy-path", "POST", None),
+    ]
+
+
+def test_run_command_uses_pinned_session_alias() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {
+                "session": {"session_id": "session-123"},
+                "design": {"design_id": "design-123"},
+                "run": {"run_id": "run-123", "workflow_id": "gpu-experiment"},
+            },
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!run", "session_id": "session-123"})
+    assert response.status_code == 200
+    assert calls == [
+        ("/research-sessions/session-123/transitions/run-happy-path", "POST", None),
+    ]
 
 
 def test_preflight_command_bootstraps_design_before_fetching_preflight() -> None:
@@ -462,8 +483,6 @@ def test_compare_command_returns_helpful_text_without_campaign() -> None:
 
     def fake_requester(settings, path, method="GET", body=None):
         calls.append((path, method, body))
-        if path == "/research-sessions/latest/context":
-            return (f"{settings.workflow_api_url}{path}", {"session": {"session_id": "session-123"}})
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="autoresearch campaign not found")
 
@@ -473,6 +492,9 @@ def test_compare_command_returns_helpful_text_without_campaign() -> None:
     payload = response.json()
     assert payload["command"] == "compare"
     assert "No autoresearch campaign yet" in payload["response_text"]
+    assert calls == [
+        ("/research-sessions/latest/autoresearch-model-comparison", "GET", None),
+    ]
 
 
 def test_status_mentions_missing_campaign_when_none_exists() -> None:
@@ -500,23 +522,27 @@ def test_next_command_bootstraps_campaign_and_launches_batch() -> None:
 
     def fake_requester(settings, path, method="GET", body=None):
         calls.append((path, method, body))
-        if path == "/research-sessions/latest/context":
-            return (f"{settings.workflow_api_url}{path}", {"session": {"session_id": "session-123"}})
-        if path.endswith("/autoresearch-summary"):
-            from fastapi import HTTPException
-            raise HTTPException(status_code=404, detail="autoresearch campaign not found")
-        if path.endswith("/draft-methodologies"):
-            return (f"{settings.workflow_api_url}{path}", {"methodology_drafts": [{}, {}, {}]})
-        if path.endswith("/launch-autoresearch-batch"):
-            return (f"{settings.workflow_api_url}{path}", {"launches": [{}, {}]})
-        raise AssertionError(path)
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {
+                "drafted_methodology_count": 3,
+                "decisions_recorded": 0,
+                "launches_started": 2,
+            },
+        )
 
     client = TestClient(create_app(settings=Settings(), requester=fake_requester))
     response = client.post("/dispatch", json={"message": "!next"})
     assert response.status_code == 200
     payload = response.json()
     assert payload["command"] == "next"
-    assert "Started autoresearch, drafted 3 variant(s), and launched 2 iteration(s)." == payload["response_text"]
+    assert (
+        "Drafted 3 methodology variant(s), recorded 0 completed decision(s), and launched 2 next iteration(s)."
+        == payload["response_text"]
+    )
+    assert calls == [
+        ("/research-sessions/latest/transitions/advance-autoresearch", "POST", None),
+    ]
 
 
 def test_next_command_decides_and_launches_when_campaign_exists() -> None:
@@ -524,22 +550,49 @@ def test_next_command_decides_and_launches_when_campaign_exists() -> None:
 
     def fake_requester(settings, path, method="GET", body=None):
         calls.append((path, method, body))
-        if path == "/research-sessions/latest/context":
-            return (f"{settings.workflow_api_url}{path}", {"session": {"session_id": "session-123"}})
-        if path.endswith("/autoresearch-summary"):
-            return (f"{settings.workflow_api_url}{path}", {"campaign": {"campaign_id": "camp-123"}})
-        if path.endswith("/decide-autoresearch-batch"):
-            return (f"{settings.workflow_api_url}{path}", {"decisions": [{}, {}]})
-        if path.endswith("/launch-autoresearch-batch"):
-            return (f"{settings.workflow_api_url}{path}", {"launches": [{}]})
-        raise AssertionError(path)
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {
+                "drafted_methodology_count": 0,
+                "decisions_recorded": 2,
+                "launches_started": 1,
+            },
+        )
 
     client = TestClient(create_app(settings=Settings(), requester=fake_requester))
     response = client.post("/dispatch", json={"message": "!next"})
     assert response.status_code == 200
     payload = response.json()
     assert payload["command"] == "next"
-    assert "Recorded 2 completed decision(s) and launched 1 next iteration(s)." == payload["response_text"]
+    assert (
+        "Drafted 0 methodology variant(s), recorded 2 completed decision(s), and launched 1 next iteration(s)."
+        == payload["response_text"]
+    )
+    assert calls == [
+        ("/research-sessions/latest/transitions/advance-autoresearch", "POST", None),
+    ]
+
+
+def test_next_command_uses_pinned_session_alias() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {
+                "drafted_methodology_count": 0,
+                "decisions_recorded": 1,
+                "launches_started": 1,
+            },
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!next", "session_id": "session-123"})
+    assert response.status_code == 200
+    assert calls == [
+        ("/research-sessions/session-123/transitions/advance-autoresearch", "POST", None),
+    ]
 
 
 def test_start_autoresearch_resolves_session_before_transition() -> None:

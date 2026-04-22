@@ -28,6 +28,16 @@ Recommended primary runner flow:
 - `!next`
 - `!compare`
 
+Current deterministic happy-path ownership:
+
+- `whatsapp-gateway` owns sender/session transcript handling
+- `research-ingress` owns inbound routing
+- `research-command-router` owns command matching and dispatch
+- `workflow-api` owns the backend transitions for the primary five commands
+
+For `!start`, `!status`, `!run`, `!next`, and `!compare`, the command turn does
+not depend on OpenClaw.
+
 The older granular commands remain available for debugging and operator control.
 
 Current contract:
@@ -48,10 +58,10 @@ contract instead of relying on the operator model to notice and honor commands.
 
 Important boundary:
 
-- today, the WhatsApp/OpenClaw path still does **not** invoke this service first
-- that means command handling in chat is still partially model-dependent
-- the next integration step is to place this service in front of OpenClaw for
-  explicit `!` commands and only forward non-command turns to the operator shell
+- deterministic `!` commands now belong on the repo-owned ingress path
+- only non-command turns should fall through to OpenClaw
+- do not widen the router into a general agent/tool surface; keep command turns
+  narrow and backend-owned
 
 Validated blocker from `.44` on 2026-03-29:
 

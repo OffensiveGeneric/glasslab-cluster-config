@@ -2279,6 +2279,97 @@ def test_create_run_from_latest_session_design(monkeypatch) -> None:
     assert payload['manifest']['inputs']['dataset_name'] == 'titanic'
 
 
+def test_transition_run_happy_path_creates_design_and_run(monkeypatch) -> None:
+    client = build_client()
+
+    class FakeResponse:
+        def __init__(self, payload: dict) -> None:
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            import json
+            return json.dumps(self.payload).encode('utf-8')
+
+    monkeypatch.setattr(
+        main_module.urllib_request,
+        'urlopen',
+        lambda request_obj, timeout: FakeResponse(
+            {
+                'request_id': 'session-run-happy-path-1',
+                'selected_tracks': [{'track_id': 'agent_evaluation', 'track': 'agent_evaluation'}],
+                'selected_queries': [{'queries': ['bounded literature harvest']}],
+                'selected_papers': [
+                    {
+                        'paper_id': 'mle_bench_arxiv_2024',
+                        'title': 'MLE-bench: Evaluating Machine Learning Agents on Machine Learning Engineering',
+                        'year': 2024,
+                        'venue': 'arXiv',
+                        'priority': 'P1',
+                        'tracks': ['agent_evaluation'],
+                        'bounded_job_fit': 4,
+                        'replication_complexity': 4,
+                        'official_page': 'https://arxiv.org/abs/2410.07095',
+                        'pdf_url': None,
+                        'why_seed': 'benchmark for bounded ML engineering work',
+                        'first_jobs': ['reduce the benchmark into a smaller internal harness'],
+                        'tags': ['agents'],
+                    }
+                ],
+                'warnings': [],
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        main_module,
+        'ingest_source_document',
+        lambda source_url, submitted_by, settings, store, session_id=None, expected_title=None: main_module.SourceDocumentRecord(
+            document_id='session-run-happy-doc',
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            status='fetched',
+            source_url=source_url,
+            submitted_by=submitted_by,
+            storage_uri='file:///tmp/source-documents/session-run-happy-doc/source.html',
+            content_type='text/html',
+            size_bytes=42,
+            sha256='runhappy123',
+            title='source.html',
+            text_excerpt='Session execution route document excerpt.',
+            session_id=session_id,
+        ),
+    )
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Benchmark the approved models on Titanic and create a validation run.'},
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    problem = client.post(f'/research-sessions/{session_id}/skills/research-problem')
+    assert problem.status_code == 201
+    queue = client.post(f'/research-sessions/{session_id}/skills/literature-harvest')
+    assert queue.status_code == 201
+    intake = client.post(f'/research-sessions/{session_id}/skills/paper-intake')
+    assert intake.status_code == 201
+
+    run = client.post(f'/research-sessions/{session_id}/transitions/run-happy-path')
+    assert run.status_code == 201
+    payload = run.json()
+    assert payload['session']['session_id'] == session_id
+    assert payload['design']['session_id'] == session_id
+    assert payload['run']['session_id'] == session_id
+    assert payload['run']['source_design_id'] == payload['design']['design_id']
+    assert payload['run']['source_intake_id'] == payload['design']['intake_id']
+    assert payload['run']['run_purpose'] == 'validation'
+
+
 def test_create_run_from_latest_design_draft_blocks_non_ready_design() -> None:
     client = build_client()
 
@@ -5194,6 +5285,60 @@ def test_session_autoresearch_transition_chain(tmp_path) -> None:
     summary = client.get(f'/research-sessions/{session_id}/autoresearch-summary')
     assert summary.status_code == 200
     assert summary.json()['campaign']['session_id'] == session_id
+
+
+def test_transition_advance_autoresearch_bootstraps_campaign_and_launches_batch(tmp_path) -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        artifacts_mount_path=str(tmp_path),
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+    client = TestClient(create_app(settings=settings, registry=registry, store=store))
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Turn the current literature-backed tabular idea into a bounded validation loop.'},
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    intake = client.post(
+        '/intakes',
+        json={
+            'raw_request': 'Benchmark a bounded set of approved Titanic baselines and compare one small methodology variant.',
+            'source_refs': ['https://example.org/titanic-method-note'],
+            'notes': ['Keep the happy-path autoresearch transition narrow and deterministic.'],
+        },
+    )
+    assert intake.status_code == 201
+
+    design = client.post('/design-drafts/from-latest-intake')
+    assert design.status_code == 201
+    design_payload = design.json()
+
+    reviewed = client.post(
+        f"/design-drafts/{design_payload['design_id']}/review",
+        json={
+            'resolved_inputs': {
+                'dataset_name': 'titanic',
+                'train_uri': 's3://datasets/titanic/train.csv',
+                'test_uri': 's3://datasets/titanic/test.csv',
+                'target_column': 'Survived',
+            },
+            'review_notes': ['Advance-autoresearch happy-path review complete.'],
+        },
+    )
+    assert reviewed.status_code == 200
+
+    advanced = client.post(f'/research-sessions/{session_id}/transitions/advance-autoresearch')
+    assert advanced.status_code == 201
+    payload = advanced.json()
+    assert payload['session']['session_id'] == session_id
+    assert payload['campaign']['session_id'] == session_id
+    assert payload['drafted_methodology_count'] >= 1
+    assert payload['launches_started'] >= 1
+    assert payload['launch']['launches']
 
 
 def test_autoresearch_launch_iteration_uses_method_spec_inputs(tmp_path) -> None:

@@ -711,22 +711,15 @@ def _dispatch(
         )
 
     if command == "run":
-        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, scoped_requester, pinned_session_id
-        )
-        scoped_requester(
-            settings,
-            f"/research-sessions/{session_id}/skills/design",
-            method="POST",
-        )
         endpoint, payload = scoped_requester(
             settings,
-            f"/research-sessions/{session_id}/runs/from-design",
+            "/research-sessions/latest/transitions/run-happy-path",
             method="POST",
         )
+        run = payload.get("run") or {}
         response_text = (
-            f"Created run '{payload.get('run_id', 'n/a')}' for workflow "
-            f"'{payload.get('workflow_id', 'n/a')}'."
+            f"Created run '{run.get('run_id', 'n/a')}' for workflow "
+            f"'{run.get('workflow_id', 'n/a')}'."
         )
         return DispatchResponse(
             matched=True,
@@ -930,13 +923,10 @@ def _dispatch(
         )
 
     if command in {"compare", "model-comparison"}:
-        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, scoped_requester, pinned_session_id
-        )
         try:
             endpoint, payload = scoped_requester(
                 settings,
-                f"/research-sessions/{session_id}/autoresearch-model-comparison",
+                "/research-sessions/latest/autoresearch-model-comparison",
             )
         except HTTPException as exc:
             if _is_missing_campaign_error(exc):
@@ -962,76 +952,24 @@ def _dispatch(
         )
 
     if command == "next":
-        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, scoped_requester, pinned_session_id
-        )
-        campaign_exists = True
-        try:
-            scoped_requester(
-                settings,
-                f"/research-sessions/{session_id}/autoresearch-summary",
-            )
-        except HTTPException as exc:
-            if _is_missing_campaign_error(exc):
-                campaign_exists = False
-            else:
-                raise
-
-        if not campaign_exists:
-            drafted_endpoint, drafted_payload = scoped_requester(
-                settings,
-                f"/research-sessions/{session_id}/transitions/draft-methodologies",
-                method="POST",
-            )
-            launch_endpoint, launch_payload = scoped_requester(
-                settings,
-                f"/research-sessions/{session_id}/transitions/launch-autoresearch-batch",
-                method="POST",
-            )
-            drafts = drafted_payload.get("methodology_drafts") or []
-            launches = launch_payload.get("launches") or []
-            return DispatchResponse(
-                matched=True,
-                forward_to_openclaw=False,
-                command=command,
-                response_text=(
-                    f"Started autoresearch, drafted {len(drafts)} variant(s), "
-                    f"and launched {len(launches)} iteration(s)."
-                ),
-                workflow_api_endpoint=launch_endpoint,
-                payload={
-                    "drafted": drafted_payload,
-                    "launch": launch_payload,
-                    "draft_endpoint": drafted_endpoint,
-                },
-            )
-
-        decide_endpoint, decide_payload = scoped_requester(
+        endpoint, payload = scoped_requester(
             settings,
-            f"/research-sessions/{session_id}/transitions/decide-autoresearch-batch",
+            "/research-sessions/latest/transitions/advance-autoresearch",
             method="POST",
         )
-        launch_endpoint, launch_payload = scoped_requester(
-            settings,
-            f"/research-sessions/{session_id}/transitions/launch-autoresearch-batch",
-            method="POST",
-        )
-        decisions = decide_payload.get("decisions") or []
-        launches = launch_payload.get("launches") or []
+        drafted_count = int(payload.get("drafted_methodology_count") or 0)
+        decisions = int(payload.get("decisions_recorded") or 0)
+        launches = int(payload.get("launches_started") or 0)
         return DispatchResponse(
             matched=True,
             forward_to_openclaw=False,
             command=command,
             response_text=(
-                f"Recorded {len(decisions)} completed decision(s) and launched "
-                f"{len(launches)} next iteration(s)."
+                f"Drafted {drafted_count} methodology variant(s), recorded {decisions} "
+                f"completed decision(s), and launched {launches} next iteration(s)."
             ),
-            workflow_api_endpoint=launch_endpoint,
-            payload={
-                "decide": decide_payload,
-                "launch": launch_payload,
-                "decide_endpoint": decide_endpoint,
-            },
+            workflow_api_endpoint=endpoint,
+            payload=payload,
         )
 
     if command == "note":

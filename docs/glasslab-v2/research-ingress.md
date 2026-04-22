@@ -28,6 +28,23 @@ Current behavior:
   `research-command-router`
 - non-command turns are marked for OpenClaw fallback
 
+Deterministic happy-path boundary for the primary runner loop:
+
+- `!start`
+- `!status`
+- `!run`
+- `!next`
+- `!compare`
+
+These five commands now execute through:
+
+- `whatsapp-gateway`
+- `research-ingress`
+- `research-command-router`
+- `workflow-api`
+
+without any OpenClaw dependency on the command turn itself.
+
 Important current boundary:
 
 - this service does **not** yet directly forward non-command turns into OpenClaw
@@ -117,6 +134,15 @@ Operational note from the 2026-04-03 live validation:
   one pass instead of requiring repeated `!decide-latest` calls
 - `!decide-latest` now records a durable decision after the launched run
   completes and metrics are available
+
+Current backend-owned one-shot transitions:
+
+- `!start` -> `POST /research-sessions/start-literature-search`
+- `!status` -> `GET /research-sessions/latest/context` plus
+  `GET /research-sessions/latest/autoresearch-summary` when a campaign exists
+- `!run` -> `POST /research-sessions/latest/transitions/run-happy-path`
+- `!next` -> `POST /research-sessions/latest/transitions/advance-autoresearch`
+- `!compare` -> `GET /research-sessions/latest/autoresearch-model-comparison`
 
 Primary runner-first sequence:
 

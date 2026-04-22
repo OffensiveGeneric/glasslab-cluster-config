@@ -42,6 +42,7 @@ from .schemas import (
     AutoresearchNotebookDraftResponse,
     MethodologyDraftRecord,
     OperationRecord,
+    ResearchSessionNextCommandResponse,
     RunRecord,
 )
 from .session_helpers import touch_research_session
@@ -714,6 +715,56 @@ def register_autoresearch_routes(
         if session is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
         return transition_launch_session_autoresearch_batch(session.session_id)
+
+    @app.post(
+        '/research-sessions/{session_id}/transitions/advance-autoresearch',
+        response_model=ResearchSessionNextCommandResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def transition_advance_session_autoresearch(session_id: str) -> ResearchSessionNextCommandResponse:
+        session = store.get_research_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='research session not found')
+
+        campaign = store.get_autoresearch_campaign(session.latest_autoresearch_campaign_id or '')
+        draft_response = None
+        decide_response = None
+
+        if campaign is None:
+            draft_response = transition_draft_session_methodologies(session_id)
+            campaign = get_required_session_campaign(session_id)
+        else:
+            try:
+                decide_response = transition_decide_session_autoresearch_batch(session_id)
+            except HTTPException as exc:
+                if exc.status_code != status.HTTP_409_CONFLICT or str(exc.detail).strip() != 'no completed undecided autoresearch iterations are ready':
+                    raise
+            campaign = get_required_session_campaign(session_id)
+
+        launch_response = transition_launch_session_autoresearch_batch(session_id)
+        session = store.get_research_session(session_id) or session
+        campaign = get_required_session_campaign(session_id)
+        return ResearchSessionNextCommandResponse(
+            session=session,
+            campaign=campaign,
+            draft=draft_response,
+            decide=decide_response,
+            launch=launch_response,
+            drafted_methodology_count=len((draft_response.methodology_drafts if draft_response is not None else [])),
+            decisions_recorded=len((decide_response.decisions if decide_response is not None else [])),
+            launches_started=len(launch_response.launches),
+        )
+
+    @app.post(
+        '/research-sessions/latest/transitions/advance-autoresearch',
+        response_model=ResearchSessionNextCommandResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def transition_advance_latest_session_autoresearch() -> ResearchSessionNextCommandResponse:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return transition_advance_session_autoresearch(session.session_id)
 
     @app.post(
         '/research-sessions/{session_id}/transitions/decide-autoresearch-latest',

@@ -1126,3 +1126,24 @@ class RunLogsResponse(BaseModel):
 
     run_id: str
     logs: list[LogEntry]
+
+
+class ResearchSessionRunCommandResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    session: ResearchSessionRecord
+    design: DesignDraftRecord
+    run: RunRecord
+
+
+class ResearchSessionNextCommandResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    session: ResearchSessionRecord
+    campaign: AutoresearchCampaignRecord
+    draft: AutoresearchDraftMethodologiesResponse | None = None
+    decide: AutoresearchDecisionBatchResponse | None = None
+    launch: AutoresearchLaunchBatchResponse
+    drafted_methodology_count: int = 0
+    decisions_recorded: int = 0
+    launches_started: int = 0

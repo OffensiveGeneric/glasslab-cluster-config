@@ -118,7 +118,13 @@ Current caution from the 2026-03-24 Mac cutover:
 9. Send the first test message from the linked WhatsApp account to itself.
 
 Recommended first message:
-- `What workflow families are available?`
+- `!status`
+
+Recommended deterministic happy-path checks:
+- `!start replicate DreamSim visual similarity metric with PyTorch and timm`
+- `!run`
+- `!next`
+- `!compare`
 
 Optional backend-backed messages:
 - `Create the validation run.`
@@ -146,9 +152,10 @@ kubectl -n glasslab-v2 logs deploy/glasslab-workflow-api --since=5m | grep '/run
 ```
 
 Expected response shape:
-- the WhatsApp reply is plain-language operator text
+- deterministic command turns should come back from the repo-owned path:
+  `whatsapp-gateway -> research-ingress -> research-command-router -> workflow-api`
+- they should not require OpenClaw to interpret the command turn itself
 - the backend proof is in `workflow-api` logs, not in the WhatsApp message itself
-- the safe path still relies on the existing no-arg workflow-api tools
 
 11. If the runtime changes again later, re-export and restart before retesting.
 
