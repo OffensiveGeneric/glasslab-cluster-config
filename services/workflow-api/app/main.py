@@ -799,12 +799,12 @@ def build_approved_rerun_schedule(
     if run.manifest.approval_tier != 'tier-2-approved-execution':
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail='latest run is not eligible for approved rerun scheduling',
+            detail='current run is not eligible for approved rerun scheduling',
         )
     if run.status.status != 'succeeded':
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail='latest run must be succeeded before creating an approved rerun schedule',
+            detail='current run must have status succeeded before creating an approved rerun schedule',
         )
 
     dataset_uri = None

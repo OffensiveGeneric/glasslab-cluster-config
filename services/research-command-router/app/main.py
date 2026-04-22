@@ -1130,7 +1130,7 @@ def _dispatch(
     if command == "op":
         endpoint, payload = requester(settings, "/operations/latest")
         response_text = (
-            f"Latest operation: {payload.get('operation_type', 'unknown')} "
+            f"Most recent operation: {payload.get('operation_type', 'unknown')} "
             f"({payload.get('status', 'unknown')}). {payload.get('result_detail', '')}".strip()
         )
         return DispatchResponse(

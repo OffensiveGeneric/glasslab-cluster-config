@@ -195,7 +195,7 @@ def register_literature_routes(
                 bootstrap_action='created-session-from-latest-problem',
                 session=store.get_research_session(session.session_id) or session,
                 staged_research_problem=problem,
-                detail='created a research session from the latest staged research problem',
+                detail='created a research session from the current staged research problem',
             )
         return ResearchSessionBootstrapResponse(
             bootstrap_action='create-session-manually',
@@ -799,7 +799,7 @@ def register_literature_routes(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
         queue_id = session.latest_queue_id or ''
         if not queue_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='latest research session has no paper intake queue yet')
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='current research session has no paper intake queue yet')
         return stage_next_intake_from_queue(queue_id)
 
     @app.post('/research-sessions/{session_id}/paper-intake-queues/stage-next-intake', response_model=IntakeRecord, status_code=status.HTTP_201_CREATED)
