@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import socket
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -53,28 +52,6 @@ class Settings:
     meta_graph_api_base_url: str = os.environ.get(
         "GLASSLAB_WHATSAPP_GATEWAY_META_GRAPH_API_BASE_URL",
         "https://graph.facebook.com/v23.0",
-    )
-    chat_backend_url: str | None = os.environ.get(
-        "GLASSLAB_WHATSAPP_GATEWAY_CHAT_BACKEND_URL"
-    )
-    chat_model: str = os.environ.get(
-        "GLASSLAB_WHATSAPP_GATEWAY_CHAT_MODEL",
-        "qwen3:14b",
-    )
-    chat_timeout_seconds: int = int(
-        os.environ.get("GLASSLAB_WHATSAPP_GATEWAY_CHAT_TIMEOUT_SECONDS", "120")
-    )
-    chat_history_messages: int = int(
-        os.environ.get("GLASSLAB_WHATSAPP_GATEWAY_CHAT_HISTORY_MESSAGES", "12")
-    )
-    chat_system_prompt: str = os.environ.get(
-        "GLASSLAB_WHATSAPP_GATEWAY_CHAT_SYSTEM_PROMPT",
-        (
-            "You are the Glasslab assistant. Help researchers think through experiments, "
-            "summarize results, and discuss next steps. Do not claim to execute actions "
-            "unless a deterministic command is used. When appropriate, suggest commands "
-            "like !start, !run, !next, !compare, !status, !new-session, !add-pdf, or !add-dataset."
-        ),
     )
     dm_policy: str = os.environ.get(
         "GLASSLAB_WHATSAPP_GATEWAY_DM_POLICY",
@@ -168,7 +145,6 @@ class HealthResponse(BaseModel):
     timeout_seconds: int
     meta_verify_enabled: bool
     meta_send_enabled: bool
-    chat_enabled: bool
     dm_policy: str
     group_policy: str
 
@@ -371,19 +347,17 @@ def _augment_message_for_attachments(request: WhatsAppInboundRequest) -> str:
     csv_url = _latest_csv_url(request.attachments)
     if not message:
         if csv_url is not None:
-            return f"!add-dataset {csv_url}"
+            return f"!add dataset: {csv_url}"
         if pdf_url is not None:
-            return f"!add-pdf {pdf_url}"
+            return f"!add {pdf_url}"
         return message
     lowered = message.lower()
-    if csv_url is not None and lowered == "!add-dataset":
-        return f"!add-dataset {csv_url}"
+    if csv_url is not None and lowered == "!add":
+        return f"!add dataset: {csv_url}"
     if pdf_url is None:
         return message
-    if not message:
-        return f"!add-pdf {pdf_url}"
-    if lowered == "!add-pdf":
-        return f"!add-pdf {pdf_url}"
+    if lowered == "!add":
+        return f"!add {pdf_url}"
     return message
 
 
@@ -710,90 +684,6 @@ def _meta_webhook_requests(settings: Settings, payload: dict[str, Any]) -> tuple
     return requests, ignored_events
 
 
-def _chat_reply(
-    settings: Settings,
-    *,
-    messages: list[SessionMessage],
-    request: WhatsAppInboundRequest,
-) -> str:
-    backend_url = str(settings.chat_backend_url or "").strip()
-    if not backend_url:
-        return (
-            "Free-form chat is not enabled in the Glasslab WhatsApp gateway yet. "
-            "Use a deterministic command like !start, !run, !next, !compare, "
-            "!status, !new-session, !add-pdf, or !add-dataset."
-        )
-
-    prompt_messages: list[dict[str, str]] = [
-        {"role": "system", "content": settings.chat_system_prompt.strip()}
-    ]
-    for prior in messages[-settings.chat_history_messages :]:
-        if prior.role not in {"user", "assistant"}:
-            continue
-        content = prior.message
-        if prior.role == "user" and prior.is_group and prior.sender:
-            content = f"{prior.sender}: {content}"
-        prompt_messages.append({"role": prior.role, "content": content})
-
-    current_content = request.message
-    if request.is_group:
-        current_content = f"{request.sender}: {current_content}"
-    prompt_messages.append({"role": "user", "content": current_content})
-
-    body = json.dumps(
-        {
-            "model": settings.chat_model,
-            "stream": False,
-            "messages": prompt_messages,
-        }
-    ).encode("utf-8")
-    req = urllib_request.Request(
-        backend_url,
-        data=body,
-        method="POST",
-        headers={
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        },
-    )
-    try:
-        with urllib_request.urlopen(req, timeout=settings.chat_timeout_seconds) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except urllib_error.HTTPError as exc:
-        try:
-            detail = exc.read().decode("utf-8")
-        except Exception:
-            detail = exc.reason
-        raise HTTPException(
-            status_code=exc.code,
-            detail=f"chat backend request failed: {detail}",
-        )
-    except urllib_error.URLError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"chat backend unreachable: {exc.reason}",
-        )
-    except (TimeoutError, socket.timeout):
-        raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail="chat backend timed out",
-        )
-
-    message = payload.get("message")
-    if not isinstance(message, dict):
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="chat backend response missing message object",
-        )
-    content = str(message.get("content") or "").strip()
-    if not content:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="chat backend response missing message content",
-        )
-    return content
-
-
 def _handle_inbound(
     active_settings: Settings,
     request: WhatsAppInboundRequest,
@@ -901,7 +791,7 @@ def _handle_inbound(
     ingress_payload: dict[str, Any]
     ingress_session_id = (
         None
-        if forwarded_message.lower().startswith(("!new-session", "!start", "!research"))
+        if forwarded_message.lower().startswith(("!new", "!start"))
         else pinned_session_id
     )
     try:
@@ -950,29 +840,8 @@ def _handle_inbound(
             },
         )
     response_text = str(ingress_payload.get("response_text") or "").strip()
-    if (
-        not ingress_payload.get("handled")
-        and ingress_payload.get("forward_to_openclaw")
-    ):
-        if str(active_settings.chat_backend_url or "").strip():
-            response_text = _chat_reply(
-                active_settings,
-                messages=_load_messages(active_settings, session_key),
-                request=request,
-            )
-            route = "gateway-chat"
-            handled = True
-        else:
-            response_text = (
-                "Free-form chat is not enabled in the Glasslab WhatsApp gateway yet. "
-                "Use a deterministic command like !start, !run, !next, !compare, "
-                "!status, !new-session, or !add-pdf."
-            )
-            route = str(ingress_payload.get("route") or "openclaw-fallback")
-            handled = False
-    else:
-        route = str(ingress_payload.get("route") or "unknown")
-        handled = bool(ingress_payload.get("handled"))
+    route = str(ingress_payload.get("route") or "unknown")
+    handled = bool(ingress_payload.get("handled"))
     if not response_text:
         response_text = "No response text was returned by research-ingress."
     _append_message(
@@ -1000,8 +869,8 @@ def _handle_inbound(
         session_key=session_key,
         router_payload=(
             ingress_payload.get("router_payload")
-            if route != "gateway-chat"
-            else {"chat_backend": True}
+            if isinstance(ingress_payload.get("router_payload"), dict)
+            else None
         ),
     )
 
@@ -1022,7 +891,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 (active_settings.meta_access_token or "").strip()
                 and (active_settings.meta_phone_number_id or "").strip()
             ),
-            chat_enabled=bool((active_settings.chat_backend_url or "").strip()),
             dm_policy=active_settings.dm_policy,
             group_policy=active_settings.group_policy,
         )

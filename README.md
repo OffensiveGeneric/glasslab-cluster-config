@@ -41,8 +41,6 @@ Useful service buckets:
   - `services/interpretation-agent`
   - `services/assessment-agent`
   - `services/design-agent`
-- secondary / optional:
-  - `services/openclaw-config`
 
 ## Canonical Product Direction
 
@@ -63,8 +61,7 @@ The canonical bounded inference lane is:
 
 - exo OpenAI-compatible serving
 
-OpenClaw is not part of the primary command path.
-It is optional and secondary.
+There is no supported OpenClaw path in the current product.
 
 ## Primary Operator Loop
 

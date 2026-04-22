@@ -181,22 +181,14 @@ List artifacts for the latest or selected run.
 
 Resume an explicit session or re-pin the latest sender-owned session.
 
-## Debug/operator-only commands
+## Removed command surface
 
-These are not headline UX:
+The following older command families are not supported going forward:
 
-* `!research`
-* `!more-papers`
-* `!next-paper`
-* `!interpret`
-* `!design`
-* `!preflight`
-* `!start-autoresearch`
-* `!launch-batch`
-* `!decide-batch`
-* `!op`
-* `!health`
-* `!raw`
+* literature/debug commands such as `!research`, `!more-papers`, `!next-paper`
+* staging/debug commands such as `!interpret`, `!design`, `!preflight`
+* batch/autoresearch control commands such as `!start-autoresearch`, `!launch-batch`, `!decide-batch`
+* raw/operator debug commands such as `!op`, `!health`, `!raw`
 
 ## Session rule
 

@@ -1,17 +1,19 @@
 # Research Command Router
 
-This service is the deterministic front door for the narrow research-loop commands
-that were too flaky when routed through OpenClaw's model/tool-selection path.
+This service is the deterministic front door for the supported Glasslab command
+surface.
 
-It is intended to sit in front of OpenClaw for explicit command traffic such as:
+It owns explicit command traffic such as:
 
-- `!research <topic>`
-- `!more-papers`
-- `!next-paper`
-- `!add-paper <url|title>`
-- `!session`
-- `!note <text>`
-- `!op`
+- `!new <goal>`
+- `!state`
+- `!add <thing>`
+- `!plan`
+- `!check`
+- `!run`
+- `!compare`
+- `!decide <keep|discard|revise>`
+- `!next`
 - `!help`
 
 The current contract is:
@@ -20,7 +22,7 @@ The current contract is:
 - command router matches a supported explicit command
 - router calls `workflow-api` directly
 - router returns `response_text` suitable for chat plus the structured backend payload
-- non-command text returns `forward_to_openclaw=true`
+- unsupported or non-command text returns a deterministic rejection that points
+  the user back to `!help`
 
-This is deliberately more limited than OpenClaw chat. It exists to make the
-critical research-session path deterministic.
+This service intentionally does not provide free-form chat fallback.

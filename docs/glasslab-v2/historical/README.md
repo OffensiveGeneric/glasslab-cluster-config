@@ -9,6 +9,7 @@ current product definition.
 
 - `../ollama-native-openclaw.md`
 - `../openclaw-gateway.md`
+- `../chat-ingress-and-openclaw-boundary.md`
 - `../operator-access-recommendation.md`
 - `../resume-next-session-2026-03-24.md`
 - `../mac-studio-inference.md`

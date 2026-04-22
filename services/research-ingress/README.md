@@ -7,10 +7,10 @@ Its job is intentionally narrow:
 - accept inbound messages from a chat or UI channel
 - send explicit research commands to `research-command-router`
 - return deterministic user-facing text for those commands
-- mark non-command turns for forwarding to OpenClaw
+- return deterministic rejection text for unsupported or non-command turns
 
-This keeps cluster ingress under repo control without pretending OpenClaw itself
-is a reliable intent router.
+This keeps cluster ingress under repo control and avoids any conversational
+fallback dependency.
 
 Current contract:
 
@@ -23,11 +23,4 @@ Current contract:
     - `handled`
     - `route`
     - `response_text`
-    - `forward_to_openclaw`
     - `router_payload`
-
-Important current limitation:
-
-- `research-ingress` does not yet directly invoke OpenClaw for free-form chat
-- it returns `forward_to_openclaw=true` for non-command turns
-- that is deliberate until the actual OpenClaw bridge contract is made explicit

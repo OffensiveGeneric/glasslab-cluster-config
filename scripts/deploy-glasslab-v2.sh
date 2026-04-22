@@ -5,11 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MANIFEST_ROOT="$ROOT_DIR/kubeadm/glasslab-v2"
 KUBECTL="${KUBECTL:-kubectl}"
 NAMESPACE="${GLASSLAB_V2_NAMESPACE:-glasslab-v2}"
-INCLUDE_OPENCLAW=false
-
 usage() {
   cat <<'USAGE'
-Usage: deploy-glasslab-v2.sh [--include-openclaw]
+Usage: deploy-glasslab-v2.sh
 
 Deploy the core Glasslab v2 services by default:
 - namespace
@@ -20,8 +18,6 @@ Deploy the core Glasslab v2 services by default:
 - MinIO
 - bounded stage-agent services
 - workflow-api
-
-OpenClaw is skipped unless --include-openclaw is supplied.
 Example manifests ending in .example.yaml are never applied.
 USAGE
 }
@@ -58,10 +54,6 @@ apply_yaml_dir() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --include-openclaw)
-      INCLUDE_OPENCLAW=true
-      shift
-      ;;
     --help|-h)
       usage
       exit 0
@@ -92,19 +84,3 @@ apply_yaml_dir "$MANIFEST_ROOT/assessment-agent"
 apply_yaml_dir "$MANIFEST_ROOT/design-agent"
 apply_yaml_dir "$MANIFEST_ROOT/schedule-worker"
 apply_yaml_dir "$MANIFEST_ROOT/workflow-api"
-
-if [[ "$INCLUDE_OPENCLAW" == true ]]; then
-  if [[ ! -f "$MANIFEST_ROOT/secrets/30-openclaw.local.yaml" ]]; then
-    printf '[deploy-glasslab-v2] missing local OpenClaw secret manifest: %s\n' "$MANIFEST_ROOT/secrets/30-openclaw.local.yaml" >&2
-    exit 1
-  fi
-
-  require_k8s_object "$NAMESPACE" service glasslab-workflow-api
-  require_k8s_object glasslab-agents service vllm
-
-  printf '[deploy-glasslab-v2] exporting repo-managed OpenClaw config\n'
-  "$ROOT_DIR/scripts/export-openclaw-config.sh"
-  apply_yaml_dir "$MANIFEST_ROOT/openclaw"
-else
-  printf '[deploy-glasslab-v2] skipping OpenClaw (core-only deploy)\n'
-fi

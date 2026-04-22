@@ -30,19 +30,18 @@ This document explains what is current, what is secondary, and what should now b
 
 ## Secondary
 
-### OpenClaw
+### Historical OpenClaw material
 
-Keep only for:
+Keep only as:
 
-* optional chat
-* bounded summaries
-* read-only help
+* historical reference
 
-Not for:
+Not as:
 
+* a deployed control surface
 * command routing
 * workflow control
-* critical experiment turns
+* a supported conversational fallback
 
 ### Granular debug commands
 

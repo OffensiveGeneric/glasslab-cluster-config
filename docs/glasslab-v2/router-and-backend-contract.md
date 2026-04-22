@@ -195,6 +195,7 @@ Owns:
 * attachment normalization
 * duplicate suppression
 * direct forwarding of deterministic commands to `research-ingress`
+* deterministic rejection of unsupported turns
 
 Should not own:
 
@@ -206,8 +207,8 @@ Should not own:
 Owns:
 
 * normalization of inbound control messages
-* dispatch to deterministic router for command turns
-* fallthrough marker for non-command turns
+* dispatch to deterministic router
+* deterministic response shaping for supported and unsupported turns
 
 Should not own:
 
@@ -222,6 +223,7 @@ Owns:
 * session-aware routing
 * exactly one backend-owned action per primary command
 * stable operator-facing response text
+* deterministic rejection for unsupported turns
 
 Should not own:
 
@@ -271,4 +273,4 @@ Do not return:
 1. keep current deterministic happy path for the five primary commands
 2. add `!plan`, `!check`, `!add`, and `!decide`
 3. demote literature/debug commands from headline documentation
-4. keep OpenClaw fallback only for non-command conversational turns
+4. reject unsupported turns deterministically instead of inventing fallback paths

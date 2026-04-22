@@ -12,161 +12,13 @@ def test_healthz_reports_router_url() -> None:
 
 def test_inbound_handles_deterministic_command() -> None:
     def fake_router(settings, message, submitted_by, session_id=None):
-        assert message.startswith("!research")
+        assert message == "!run"
         assert submitted_by == "whatsapp:+15555550123"
         assert session_id is None
         return {
             "matched": True,
-            "response_text": "Started literature search.",
-            "command": "research",
-        }
-
-    app = create_app(settings=Settings())
-    app.dependency_overrides = {}
-    app.router.routes.clear()  # not used; keep factory-style tests simple
-
-    from app.main import InboundMessageRequest, InboundMessageResponse, FastAPI
-
-    # rebuild app with a monkeypatched module-level helper
-    import app.main as main_module
-
-    original = main_module._request_router
-    main_module._request_router = fake_router
-    try:
-        client = TestClient(create_app(settings=Settings()))
-        response = client.post(
-            "/inbound",
-            json={
-                "message": "!research forged art detection with computer vision methods",
-                "sender": "+15555550123",
-                "channel": "whatsapp",
-            },
-        )
-    finally:
-        main_module._request_router = original
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["handled"] is True
-    assert payload["forward_to_openclaw"] is False
-    assert payload["route"] == "deterministic-router"
-
-
-def test_inbound_marks_non_command_turn_for_openclaw() -> None:
-    def fake_router(settings, message, submitted_by, session_id=None):
-        return {
-            "matched": False,
-            "forward_to_openclaw": True,
-            "response_text": "No deterministic command matched.",
-        }
-
-    import app.main as main_module
-
-    original = main_module._request_router
-    main_module._request_router = fake_router
-    try:
-        client = TestClient(create_app(settings=Settings()))
-        response = client.post(
-            "/inbound",
-            json={
-                "message": "what do you think about this paper?",
-                "sender": "+15555550123",
-            },
-        )
-    finally:
-        main_module._request_router = original
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["handled"] is False
-    assert payload["forward_to_openclaw"] is True
-    assert payload["route"] == "openclaw-fallback"
-
-
-def test_inbound_handles_add_paper_command() -> None:
-    def fake_router(settings, message, submitted_by, session_id=None):
-        assert message.startswith("!add-paper")
-        assert submitted_by == "whatsapp:+15555550123"
-        return {
-            "matched": True,
-            "response_text": "Added manual paper candidate 'Manual paper candidate' to the current queue.",
-            "command": "add-paper",
-            "workflow_api_endpoint": "http://workflow-api/research-sessions/latest/paper-intake-queue/manual-paper",
-            "payload": {"candidates": [{"title": "Manual paper candidate"}]},
-        }
-
-    import app.main as main_module
-
-    original = main_module._request_router
-    main_module._request_router = fake_router
-    try:
-        client = TestClient(create_app(settings=Settings()))
-        response = client.post(
-            "/inbound",
-            json={
-                "message": "!add-paper https://arxiv.org/abs/2401.12345",
-                "sender": "+15555550123",
-                "channel": "whatsapp",
-            },
-        )
-    finally:
-        main_module._request_router = original
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["handled"] is True
-    assert payload["forward_to_openclaw"] is False
-    assert payload["route"] == "deterministic-router"
-    assert payload["router_payload"]["command"] == "add-paper"
-
-
-def test_inbound_handles_add_pdf_command() -> None:
-    def fake_router(settings, message, submitted_by, session_id=None):
-        assert message.startswith("!add-pdf")
-        assert submitted_by == "whatsapp:+15555550123"
-        return {
-            "matched": True,
-            "response_text": "Added PDF candidate 'Manual PDF candidate' to the current queue.",
-            "command": "add-pdf",
-            "workflow_api_endpoint": "http://workflow-api/research-sessions/latest/paper-intake-queue/manual-paper",
-            "payload": {"candidates": [{"title": "Manual PDF candidate"}]},
-        }
-
-    import app.main as main_module
-
-    original = main_module._request_router
-    main_module._request_router = fake_router
-    try:
-        client = TestClient(create_app(settings=Settings()))
-        response = client.post(
-            "/inbound",
-            json={
-                "message": "!add-pdf https://example.org/paper.pdf",
-                "sender": "+15555550123",
-                "channel": "whatsapp",
-            },
-        )
-    finally:
-        main_module._request_router = original
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["handled"] is True
-    assert payload["forward_to_openclaw"] is False
-    assert payload["route"] == "deterministic-router"
-    assert payload["router_payload"]["command"] == "add-pdf"
-
-
-def test_inbound_handles_run_command() -> None:
-    def fake_router(settings, message, submitted_by, session_id=None):
-        assert message == "!run"
-        assert submitted_by == "whatsapp:+15555550123"
-        return {
-            "matched": True,
-            "response_text": "Created run 'run-123' for workflow 'gpu-experiment'.",
+            "response_text": "Created run 'run-123'.",
             "command": "run",
-            "workflow_api_endpoint": "http://workflow-api/research-sessions/latest/runs/from-design",
-            "payload": {"run_id": "run-123", "workflow_id": "gpu-experiment"},
         }
 
     import app.main as main_module
@@ -189,21 +41,14 @@ def test_inbound_handles_run_command() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["handled"] is True
-    assert payload["forward_to_openclaw"] is False
     assert payload["route"] == "deterministic-router"
-    assert payload["router_payload"]["command"] == "run"
 
 
-def test_inbound_handles_launch_batch_command() -> None:
+def test_inbound_returns_deterministic_unsupported_turn_response() -> None:
     def fake_router(settings, message, submitted_by, session_id=None):
-        assert message == "!launch-batch"
-        assert submitted_by == "whatsapp:+15555550123"
         return {
-            "matched": True,
-            "response_text": "Launched 2 autoresearch iteration(s) for the active campaign.",
-            "command": "launch-batch",
-            "workflow_api_endpoint": "http://workflow-api/research-sessions/latest/transitions/launch-autoresearch-batch",
-            "payload": {"launches": [{}, {}]},
+            "matched": False,
+            "response_text": "This surface only supports deterministic Glasslab commands. Use !help for the supported command surface.",
         }
 
     import app.main as main_module
@@ -215,9 +60,8 @@ def test_inbound_handles_launch_batch_command() -> None:
         response = client.post(
             "/inbound",
             json={
-                "message": "!launch-batch",
+                "message": "what do you think about this paper?",
                 "sender": "+15555550123",
-                "channel": "whatsapp",
             },
         )
     finally:
@@ -226,85 +70,20 @@ def test_inbound_handles_launch_batch_command() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["handled"] is True
-    assert payload["forward_to_openclaw"] is False
-    assert payload["route"] == "deterministic-router"
-    assert payload["router_payload"]["command"] == "launch-batch"
+    assert payload["route"] == "unsupported-turn"
+    assert "Use !help" in payload["response_text"]
 
 
-def test_inbound_handles_decide_batch_command() -> None:
+def test_inbound_passes_session_id_hint() -> None:
     def fake_router(settings, message, submitted_by, session_id=None):
-        assert message == "!decide-batch"
-        assert submitted_by == "whatsapp:+15555550123"
-        return {
-            "matched": True,
-            "response_text": "Recorded 2 autoresearch decision(s) for ready completed iterations.",
-            "command": "decide-batch",
-            "workflow_api_endpoint": "http://workflow-api/research-sessions/latest/transitions/decide-autoresearch-batch",
-            "payload": {"decisions": [{}, {}]},
-        }
-
-    import app.main as main_module
-
-    original = main_module._request_router
-    main_module._request_router = fake_router
-    try:
-        client = TestClient(create_app(settings=Settings()))
-        response = client.post(
-            "/inbound",
-            json={
-                "message": "!decide-batch",
-                "sender": "+15555550123",
-                "channel": "whatsapp",
-            },
-        )
-    finally:
-        main_module._request_router = original
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["handled"] is True
-    assert payload["forward_to_openclaw"] is False
-    assert payload["route"] == "deterministic-router"
-    assert payload["router_payload"]["command"] == "decide-batch"
-
-
-def test_inbound_surfaces_router_timeout_as_gateway_timeout() -> None:
-    import app.main as main_module
-
-    def fake_router(settings, message, submitted_by, session_id=None):
-        raise main_module.HTTPException(status_code=504, detail="research-command-router timed out")
-
-    original = main_module._request_router
-    main_module._request_router = fake_router
-    try:
-        client = TestClient(create_app(settings=Settings()))
-        response = client.post(
-            "/inbound",
-            json={
-                "message": "!interpret",
-                "sender": "+15555550123",
-                "channel": "whatsapp",
-            },
-        )
-    finally:
-        main_module._request_router = original
-
-    assert response.status_code == 504
-    assert response.json()["detail"] == "research-command-router timed out"
-
-
-def test_inbound_forwards_session_id_to_router() -> None:
-    import app.main as main_module
-
-    def fake_router(settings, message, submitted_by, session_id=None):
-        assert message == "!status"
-        assert submitted_by == "whatsapp:+15555550123"
         assert session_id == "session-123"
         return {
             "matched": True,
-            "response_text": "Scoped session status.",
-            "command": "status",
+            "response_text": "Current session is ready.",
+            "command": "state",
         }
+
+    import app.main as main_module
 
     original = main_module._request_router
     main_module._request_router = fake_router
@@ -313,9 +92,8 @@ def test_inbound_forwards_session_id_to_router() -> None:
         response = client.post(
             "/inbound",
             json={
-                "message": "!status",
+                "message": "!state",
                 "sender": "+15555550123",
-                "channel": "whatsapp",
                 "session_id": "session-123",
             },
         )
@@ -323,4 +101,4 @@ def test_inbound_forwards_session_id_to_router() -> None:
         main_module._request_router = original
 
     assert response.status_code == 200
-    assert response.json()["handled"] is True
+    assert response.json()["route"] == "deterministic-router"

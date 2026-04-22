@@ -16,7 +16,6 @@ historical path that got the repo here.
 - `../bounded-experiment-runner-priority.md`
 - `../runner-first-technique-knowledge-plan.md`
 - `../technique-catalog.md`
-- `../chat-ingress-and-openclaw-boundary.md`
 - `../custom-chat-shell-plan.md`
 
 ## Current Operational / Data Notes

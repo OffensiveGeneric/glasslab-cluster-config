@@ -1,27 +1,20 @@
 # WhatsApp Gateway
 
-`whatsapp-gateway` is the first repo-owned replacement for OpenClaw on the
-critical command/control path.
+`whatsapp-gateway` is the repo-owned command/control edge for WhatsApp.
 
 Its job is intentionally narrow:
 
 - accept inbound WhatsApp-shaped messages
 - persist a minimal session/message log
-- merge PDF attachment URLs into `!add-pdf` when appropriate
+- merge supported attachments into `!add` when appropriate
 - forward deterministic commands to `research-ingress`
 - return the backend `response_text` directly
 
 It does **not** currently:
 
 - perform tool orchestration
+- provide free-form chat fallback
 - own workflow logic
-
-It can now optionally:
-
-- provide free-form chat on non-command turns through a configured Ollama-style
-  chat backend
-- enforce a direct-message allowlist and a separate group-chat policy before
-  allowing that chat path
 
 Current contract:
 
@@ -33,7 +26,7 @@ Current contract:
 - `GET /attachments/meta/{media_id}`
 - `GET /sessions/{channel}/{sender}`
 
-The first slice is a bounded control-plane replacement, not a full chat shell.
+This is a bounded deterministic control surface, not a chat shell.
 
 Provider-facing notes:
 
@@ -60,13 +53,8 @@ Optional Meta settings:
 - `GLASSLAB_WHATSAPP_GATEWAY_META_GRAPH_API_BASE_URL`
 - `GLASSLAB_WHATSAPP_GATEWAY_BASE_URL`
 
-Optional chat/policy settings:
+Policy settings:
 
-- `GLASSLAB_WHATSAPP_GATEWAY_CHAT_BACKEND_URL`
-- `GLASSLAB_WHATSAPP_GATEWAY_CHAT_MODEL`
-- `GLASSLAB_WHATSAPP_GATEWAY_CHAT_TIMEOUT_SECONDS`
-- `GLASSLAB_WHATSAPP_GATEWAY_CHAT_HISTORY_MESSAGES`
-- `GLASSLAB_WHATSAPP_GATEWAY_CHAT_SYSTEM_PROMPT`
 - `GLASSLAB_WHATSAPP_GATEWAY_DM_POLICY`
 - `GLASSLAB_WHATSAPP_GATEWAY_GROUP_POLICY`
 - `GLASSLAB_WHATSAPP_GATEWAY_ALLOW_FROM`

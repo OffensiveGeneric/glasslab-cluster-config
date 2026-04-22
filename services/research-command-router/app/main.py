@@ -55,7 +55,6 @@ class DispatchResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     matched: bool
-    forward_to_openclaw: bool
     command: str | None = None
     response_text: str
     workflow_api_endpoint: str | None = None
@@ -107,82 +106,28 @@ def _parse_command(message: str) -> tuple[str, str] | None:
         return None
     lowered = text.lower()
     prefixes = [
-        ("!new-session", "new"),
-        ("new-session:", "new"),
         ("!new", "new"),
         ("new:", "new"),
         ("!start", "new"),
         ("start:", "new"),
-        ("!research", "research"),
-        ("research:", "research"),
-        ("!search", "search"),
-        ("search:", "search"),
         ("!status", "state"),
         ("status:", "state"),
         ("!state", "state"),
         ("state:", "state"),
         ("!add", "add"),
         ("add:", "add"),
-        ("!more-papers", "more-papers"),
-        ("papers:", "more-papers"),
-        ("!next-paper", "next-paper"),
-        ("next-paper:", "next-paper"),
-        ("!add-paper", "add-paper"),
-        ("add-paper:", "add-paper"),
-        ("!add-dataset", "add-dataset"),
-        ("add-dataset:", "add-dataset"),
-        ("!datasets", "datasets"),
-        ("datasets:", "datasets"),
-        ("!use-dataset", "use-dataset"),
-        ("use-dataset:", "use-dataset"),
-        ("!add-url", "add-url"),
-        ("add-url:", "add-url"),
-        ("!add-pdf", "add-pdf"),
-        ("add-pdf:", "add-pdf"),
-        ("!session", "session"),
-        ("session:", "session"),
-        ("!interpret", "interpret"),
-        ("interpret:", "interpret"),
         ("!plan", "plan"),
         ("plan:", "plan"),
-        ("!design", "design"),
-        ("design:", "design"),
         ("!check", "check"),
         ("check:", "check"),
-        ("!preflight", "preflight"),
-        ("preflight:", "preflight"),
         ("!run", "run"),
         ("run:", "run"),
-        ("!start-autoresearch", "start-autoresearch"),
-        ("start-autoresearch:", "start-autoresearch"),
-        ("!draft-methodologies", "draft-methodologies"),
-        ("draft-methodologies:", "draft-methodologies"),
-        ("!draft-notebook", "draft-notebook"),
-        ("draft-notebook:", "draft-notebook"),
-        ("!refine-notebook", "refine-notebook"),
-        ("refine-notebook:", "refine-notebook"),
-        ("!launch-iteration", "launch-iteration"),
-        ("launch-iteration:", "launch-iteration"),
-        ("!launch-batch", "launch-batch"),
-        ("launch-batch:", "launch-batch"),
-        ("!decide-batch", "decide-batch"),
-        ("decide-batch:", "decide-batch"),
-        ("!decide-latest", "decide-latest"),
-        ("decide-latest:", "decide-latest"),
-        ("!autoresearch", "autoresearch"),
-        ("autoresearch:", "autoresearch"),
-        ("!model-comparison", "model-comparison"),
-        ("model-comparison:", "model-comparison"),
         ("!compare", "compare"),
         ("compare:", "compare"),
         ("!decide", "decide"),
         ("decide:", "decide"),
         ("!next", "next"),
         ("next:", "next"),
-        ("!note", "note"),
-        ("note:", "note"),
-        ("!op", "op"),
-        ("op:", "op"),
         ("!help", "help"),
         ("help:", "help"),
     ]
@@ -196,7 +141,7 @@ def _parse_command(message: str) -> tuple[str, str] | None:
     return None
 
 
-def _help_text(*, include_legacy: bool = False) -> str:
+def _help_text() -> str:
     lines = [
         "Glasslab runner flow:",
         "1. !new <goal> creates a pinned research session.",
@@ -228,30 +173,13 @@ def _help_text(*, include_legacy: bool = False) -> str:
         "!start -> !new",
         "!status -> !state",
         "",
-        "Optional secondary path:",
-        "!research or !search triggers literature search on purpose.",
-        "",
         "Structured intake examples:",
         "!add note: ...",
         "!add dataset: ...",
         "!add baseline: ...",
         "",
-        "Operator/debug compatibility commands are intentionally hidden from the primary help surface.",
-        "Use !help legacy if you explicitly need the older command set.",
+        "That is the full supported command surface.",
     ]
-    if include_legacy:
-        lines.extend(
-            [
-                "",
-                "Legacy/debug commands still supported:",
-                "!research !search !more-papers !next-paper !add-paper !session !interpret !design !preflight",
-                "!start-autoresearch !draft-methodologies !draft-notebook !refine-notebook",
-                "!launch-iteration !launch-batch !decide-batch !decide-latest !autoresearch !model-comparison",
-                "!note <text>",
-                "!op",
-                "!help",
-            ]
-        )
     return "\n".join(lines)
 
 
@@ -332,8 +260,10 @@ def _dispatch(
     if parsed is None:
         return DispatchResponse(
             matched=False,
-            forward_to_openclaw=True,
-            response_text="No deterministic command matched. Forward this turn to OpenClaw.",
+            response_text=(
+                "This surface only supports deterministic Glasslab commands. "
+                "Use !help for the supported command surface."
+            ),
         )
 
     command, argument = parsed
@@ -355,12 +285,10 @@ def _dispatch(
         )
 
     if command == "help":
-        include_legacy = argument.lower() in {"legacy", "debug", "compat", "compatibility"}
         return DispatchResponse(
             matched=True,
-            forward_to_openclaw=False,
             command=command,
-            response_text=_help_text(include_legacy=include_legacy),
+            response_text=_help_text(),
         )
 
     if command == "new":
@@ -381,7 +309,6 @@ def _dispatch(
         )
         return DispatchResponse(
             matched=True,
-            forward_to_openclaw=False,
             command=command,
             response_text=(
                 f"Created research session '{payload.get('title', 'untitled')}'. "
@@ -391,245 +318,7 @@ def _dispatch(
             payload=payload,
         )
 
-    if command in {"start", "research", "search"}:
-        if len(argument) < 12:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"!{command} needs a concrete topic after the command",
-            )
-        endpoint, payload = requester(
-            settings,
-            "/research-sessions/start-literature-search",
-            method="POST",
-            body={
-                "goal_statement": argument,
-                "priorities": [],
-                "submitted_by": submitted_by,
-            },
-        )
-        session = payload.get("session") or {}
-        queue = payload.get("paper_intake_queue") or {}
-        response_text = (
-            f"Started literature search for session '{session.get('title', 'untitled')}'. "
-            f"{_summarize_queue(queue)}"
-        )
-        return DispatchResponse(
-            matched=True,
-            forward_to_openclaw=False,
-            command=command,
-            response_text=response_text.replace("Started literature search", "Started internet-backed literature search"),
-            workflow_api_endpoint=endpoint,
-            payload=payload,
-        )
-
-    if command == "more-papers":
-        try:
-            endpoint, payload = scoped_requester(
-                settings,
-                "/research-sessions/latest/skills/external-literature-search",
-                method="POST",
-            )
-            source = "external literature search"
-        except HTTPException:
-            endpoint, payload = scoped_requester(
-                settings,
-                "/research-sessions/latest/skills/literature-harvest",
-                method="POST",
-            )
-            source = "seed literature harvest"
-        return DispatchResponse(
-            matched=True,
-            forward_to_openclaw=False,
-            command=command,
-            response_text=f"Refreshed the paper queue from {source}. {_summarize_queue(payload)}",
-            workflow_api_endpoint=endpoint,
-            payload=payload,
-        )
-
-    if command == "next-paper":
-        endpoint, payload = scoped_requester(
-            settings,
-            "/research-sessions/latest/paper-intake-queues/stage-next-intake",
-            method="POST",
-        )
-        response_text = (
-            f"Staged the next paper intake. Summary: {payload.get('normalized_summary', 'n/a')}"
-        )
-        return DispatchResponse(
-            matched=True,
-            forward_to_openclaw=False,
-            command=command,
-            response_text=response_text,
-            workflow_api_endpoint=endpoint,
-            payload=payload,
-        )
-
-    if command == "add-paper":
-        if not argument:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="!add-paper needs a URL or paper title",
-            )
-        body = {
-            "title": argument if not argument.startswith("http") else "Manual paper candidate",
-            "official_page": argument if argument.startswith("http") else None,
-            "pdf_url": argument if argument.startswith("http") and argument.endswith(".pdf") else None,
-            "notes": ["Added from deterministic research command router."],
-            "tags": ["manual"],
-            "submitted_by": submitted_by,
-        }
-        endpoint, payload = scoped_requester(
-            settings,
-            "/research-sessions/latest/paper-intake-queue/manual-paper",
-            method="POST",
-            body=body,
-        )
-        candidates = payload.get("candidates") or []
-        latest_title = candidates[-1]["title"] if candidates else argument
-        return DispatchResponse(
-            matched=True,
-            forward_to_openclaw=False,
-            command=command,
-            response_text=f"Added manual paper candidate '{latest_title}' to the current queue.",
-            workflow_api_endpoint=endpoint,
-            payload=payload,
-        )
-
-    if command == "add-dataset":
-        if not argument or not argument.startswith("http"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="!add-dataset needs a direct dataset URI or webpage URL",
-            )
-        endpoint, payload = scoped_requester(
-            settings,
-            "/research-sessions/latest/datasets",
-            method="POST",
-            body={
-                "uri": argument,
-                "submitted_by": submitted_by,
-            },
-        )
-        dataset_name = payload.get("name") or argument
-        return DispatchResponse(
-            matched=True,
-            forward_to_openclaw=False,
-            command=command,
-            response_text=(
-                f"Attached dataset '{dataset_name}' to the current workspace. "
-                "Use !run when you want the backend to proceed with that dataset."
-            ),
-            workflow_api_endpoint=endpoint,
-            payload=payload,
-        )
-
-    if command == "datasets":
-        endpoint, payload = scoped_requester(
-            settings,
-            "/research-sessions/latest/datasets",
-            method="GET",
-        )
-        datasets = payload if isinstance(payload, list) else []
-        if not datasets:
-            response_text = "No datasets are attached to the current workspace. Use !add-dataset <uri> first."
-        else:
-            lines = [
-                f"{dataset.get('dataset_id', 'n/a')}: {dataset.get('name', dataset.get('uri', 'dataset'))}"
-                for dataset in datasets[:5]
-            ]
-            response_text = "Attached datasets:\n" + "\n".join(lines)
-        return DispatchResponse(
-            matched=True,
-            forward_to_openclaw=False,
-            command=command,
-            response_text=response_text,
-            workflow_api_endpoint=endpoint,
-            payload={"datasets": datasets},
-        )
-
-    if command == "use-dataset":
-        if not argument:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="!use-dataset needs a dataset id",
-            )
-        endpoint, payload = scoped_requester(
-            settings,
-            "/research-sessions/latest/datasets/attach",
-            method="POST",
-            body={
-                "dataset_id": argument,
-            },
-        )
-        dataset_name = payload.get("name") or argument
-        return DispatchResponse(
-            matched=True,
-            forward_to_openclaw=False,
-            command=command,
-            response_text=f"Set active dataset to '{dataset_name}'.",
-            workflow_api_endpoint=endpoint,
-            payload=payload,
-        )
-
-    if command == "add-url":
-        if not argument or not argument.startswith("http"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="!add-url needs a direct webpage URL",
-            )
-        endpoint, payload = scoped_requester(
-            settings,
-            "/research-sessions/latest/source-documents/ingest",
-            method="POST",
-            body={
-                "source_url": argument,
-                "expected_title": None,
-                "submitted_by": submitted_by,
-            },
-        )
-        latest_title = _safe_source_label(payload.get("title"), argument, "web source")
-        return DispatchResponse(
-            matched=True,
-            forward_to_openclaw=False,
-            command=command,
-            response_text=(
-                f"Attached webpage source '{latest_title}' to the current workspace. "
-                "Use !run when you want the backend to proceed from the current session context."
-            ),
-            workflow_api_endpoint=endpoint,
-            payload=payload,
-        )
-
-    if command == "add-pdf":
-        if not argument or not argument.startswith("http"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="!add-pdf needs a direct PDF URL",
-            )
-        endpoint, payload = scoped_requester(
-            settings,
-            "/research-sessions/latest/source-documents/ingest",
-            method="POST",
-            body={
-                "source_url": argument,
-                "expected_title": None,
-                "submitted_by": submitted_by,
-            },
-        )
-        latest_title = _safe_source_label(payload.get("title"), argument, "PDF source")
-        return DispatchResponse(
-            matched=True,
-            forward_to_openclaw=False,
-            command=command,
-            response_text=(
-                f"Attached PDF source '{latest_title}' to the current workspace. "
-                "Use !run when you want the backend to proceed from the current session context."
-            ),
-            workflow_api_endpoint=endpoint,
-            payload=payload,
-        )
-
-    if command in {"state", "session"}:
+    if command == "state":
         endpoint, payload = scoped_requester(settings, "/research-sessions/latest/context")
         session = payload.get("session") or {}
         queue = payload.get("paper_intake_queue") or {}
@@ -661,7 +350,6 @@ def _dispatch(
             response_text += " No autoresearch campaign yet."
         return DispatchResponse(
             matched=True,
-            forward_to_openclaw=False,
             command=command,
             response_text=response_text,
             workflow_api_endpoint=endpoint,
@@ -706,45 +394,6 @@ def _dispatch(
             response_text += f" Current plan status: {payload.get('current_plan_status')}."
         return DispatchResponse(
             matched=True,
-            forward_to_openclaw=False,
-            command=command,
-            response_text=response_text,
-            workflow_api_endpoint=endpoint,
-            payload=payload,
-        )
-
-    if command == "interpret":
-        endpoint, payload = scoped_requester(
-            settings,
-            "/research-sessions/latest/transitions/create-interpretation",
-            method="POST",
-        )
-        response_text = (
-            f"Created interpretation '{payload.get('interpretation_id', 'n/a')}'. "
-            f"Preferred workflow: {payload.get('preferred_workflow_id', 'n/a')}."
-        )
-        return DispatchResponse(
-            matched=True,
-            forward_to_openclaw=False,
-            command=command,
-            response_text=response_text,
-            workflow_api_endpoint=endpoint,
-            payload=payload,
-        )
-
-    if command == "design":
-        endpoint, payload = scoped_requester(
-            settings,
-            "/research-sessions/latest/skills/design",
-            method="POST",
-        )
-        response_text = (
-            f"Created design draft '{payload.get('design_id', 'n/a')}'. "
-            f"Workflow: {payload.get('workflow_id', 'n/a')} ({payload.get('status', 'unknown')})."
-        )
-        return DispatchResponse(
-            matched=True,
-            forward_to_openclaw=False,
             command=command,
             response_text=response_text,
             workflow_api_endpoint=endpoint,
@@ -763,35 +412,6 @@ def _dispatch(
         )
         return DispatchResponse(
             matched=True,
-            forward_to_openclaw=False,
-            command=command,
-            response_text=response_text,
-            workflow_api_endpoint=endpoint,
-            payload=payload,
-        )
-
-    if command == "preflight":
-        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, scoped_requester, pinned_session_id
-        )
-        scoped_requester(
-            settings,
-            f"/research-sessions/{session_id}/skills/design",
-            method="POST",
-        )
-        endpoint, payload = scoped_requester(
-            settings,
-            f"/research-sessions/{session_id}/execution-preflight",
-        )
-        issues = payload.get("blocking_issues") or []
-        warnings = payload.get("warnings") or []
-        response_text = (
-            f"Execution preflight for workflow '{payload.get('workflow_id', 'n/a')}' "
-            f"has {len(issues)} blocking issue(s) and {len(warnings)} warning(s)."
-        )
-        return DispatchResponse(
-            matched=True,
-            forward_to_openclaw=False,
             command=command,
             response_text=response_text,
             workflow_api_endpoint=endpoint,
@@ -811,7 +431,6 @@ def _dispatch(
         )
         return DispatchResponse(
             matched=True,
-            forward_to_openclaw=False,
             command=command,
             response_text=response_text,
             workflow_api_endpoint=endpoint,
@@ -831,206 +450,13 @@ def _dispatch(
         )
         return DispatchResponse(
             matched=True,
-            forward_to_openclaw=False,
             command=command,
             response_text=response_text,
             workflow_api_endpoint=endpoint,
             payload=payload,
         )
 
-    if command == "start-autoresearch":
-        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, scoped_requester, pinned_session_id
-        )
-        endpoint, payload = scoped_requester(
-            settings,
-            f"/research-sessions/{session_id}/transitions/start-autoresearch-campaign",
-            method="POST",
-        )
-        response_text = (
-            f"Started autoresearch campaign '{payload.get('campaign_id', 'n/a')}' "
-            f"for objective '{payload.get('objective', 'n/a')}'."
-        )
-        return DispatchResponse(
-            matched=True,
-            forward_to_openclaw=False,
-            command=command,
-            response_text=response_text,
-            workflow_api_endpoint=endpoint,
-            payload=payload,
-        )
-
-    if command == "draft-methodologies":
-        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, scoped_requester, pinned_session_id
-        )
-        endpoint, payload = scoped_requester(
-            settings,
-            f"/research-sessions/{session_id}/transitions/draft-methodologies",
-            method="POST",
-        )
-        drafts = payload.get("methodology_drafts") or []
-        response_text = f"Drafted {len(drafts)} methodology variant(s) for the active autoresearch campaign."
-        return DispatchResponse(
-            matched=True,
-            forward_to_openclaw=False,
-            command=command,
-            response_text=response_text,
-            workflow_api_endpoint=endpoint,
-            payload=payload,
-        )
-
-    if command == "draft-notebook":
-        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, scoped_requester, pinned_session_id
-        )
-        endpoint, payload = scoped_requester(
-            settings,
-            f"/research-sessions/{session_id}/transitions/draft-autoresearch-notebook",
-            method="POST",
-        )
-        response_text = (
-            f"Drafted analysis notebook at {payload.get('storage_uri', 'n/a')}."
-        )
-        return DispatchResponse(
-            matched=True,
-            forward_to_openclaw=False,
-            command=command,
-            response_text=response_text,
-            workflow_api_endpoint=endpoint,
-            payload=payload,
-        )
-
-    if command == "refine-notebook":
-        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, scoped_requester, pinned_session_id
-        )
-        endpoint, payload = scoped_requester(
-            settings,
-            f"/research-sessions/{session_id}/transitions/refine-autoresearch-notebook",
-            method="POST",
-        )
-        response_text = (
-            f"Refined analysis notebook via {payload.get('refinement_source', 'unknown')} "
-            f"at {payload.get('storage_uri', 'n/a')}."
-        )
-        return DispatchResponse(
-            matched=True,
-            forward_to_openclaw=False,
-            command=command,
-            response_text=response_text,
-            workflow_api_endpoint=endpoint,
-            payload=payload,
-        )
-
-    if command == "launch-iteration":
-        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, scoped_requester, pinned_session_id
-        )
-        endpoint, payload = scoped_requester(
-            settings,
-            f"/research-sessions/{session_id}/transitions/launch-autoresearch-iteration",
-            method="POST",
-        )
-        iteration = payload.get("iteration") or {}
-        response_text = (
-            f"Launched autoresearch iteration '{iteration.get('iteration_id', 'n/a')}' "
-            f"with run '{iteration.get('run_id', 'n/a')}'."
-        )
-        return DispatchResponse(
-            matched=True,
-            forward_to_openclaw=False,
-            command=command,
-            response_text=response_text,
-            workflow_api_endpoint=endpoint,
-            payload=payload,
-        )
-
-    if command == "launch-batch":
-        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, scoped_requester, pinned_session_id
-        )
-        endpoint, payload = scoped_requester(
-            settings,
-            f"/research-sessions/{session_id}/transitions/launch-autoresearch-batch",
-            method="POST",
-        )
-        launches = payload.get("launches") or []
-        response_text = f"Launched {len(launches)} autoresearch iteration(s) for the active campaign."
-        return DispatchResponse(
-            matched=True,
-            forward_to_openclaw=False,
-            command=command,
-            response_text=response_text,
-            workflow_api_endpoint=endpoint,
-            payload=payload,
-        )
-
-    if command == "decide-latest":
-        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, scoped_requester, pinned_session_id
-        )
-        endpoint, payload = scoped_requester(
-            settings,
-            f"/research-sessions/{session_id}/transitions/decide-autoresearch-latest",
-            method="POST",
-        )
-        decision = payload.get("decision") or {}
-        response_text = (
-            f"Recorded autoresearch decision '{decision.get('decision_type', 'n/a')}' "
-            f"for iteration '{decision.get('iteration_id', 'n/a')}'."
-        )
-        return DispatchResponse(
-            matched=True,
-            forward_to_openclaw=False,
-            command=command,
-            response_text=response_text,
-            workflow_api_endpoint=endpoint,
-            payload=payload,
-        )
-
-    if command == "decide-batch":
-        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, scoped_requester, pinned_session_id
-        )
-        endpoint, payload = scoped_requester(
-            settings,
-            f"/research-sessions/{session_id}/transitions/decide-autoresearch-batch",
-            method="POST",
-        )
-        decisions = payload.get("decisions") or []
-        response_text = f"Recorded {len(decisions)} autoresearch decision(s) for ready completed iterations."
-        return DispatchResponse(
-            matched=True,
-            forward_to_openclaw=False,
-            command=command,
-            response_text=response_text,
-            workflow_api_endpoint=endpoint,
-            payload=payload,
-        )
-
-    if command == "autoresearch":
-        _context_endpoint, _context_payload, session_id = _get_latest_session_id(
-            settings, scoped_requester, pinned_session_id
-        )
-        endpoint, payload = scoped_requester(
-            settings,
-            f"/research-sessions/{session_id}/autoresearch-summary",
-        )
-        response_text = (
-            f"Autoresearch summary: campaign '{payload.get('campaign', {}).get('campaign_id', 'n/a')}', "
-            f"recommended model '{payload.get('recommended_model', 'n/a')}'."
-        )
-        return DispatchResponse(
-            matched=True,
-            forward_to_openclaw=False,
-            command=command,
-            response_text=response_text,
-            workflow_api_endpoint=endpoint,
-            payload=payload,
-        )
-
-    if command in {"compare", "model-comparison"}:
+    if command == "compare":
         try:
             endpoint, payload = scoped_requester(
                 settings,
@@ -1040,7 +466,6 @@ def _dispatch(
             if _is_missing_campaign_error(exc):
                 return DispatchResponse(
                     matched=True,
-                    forward_to_openclaw=False,
                     command=command,
                     response_text="No autoresearch campaign yet. Use !next after !run to start one.",
                 )
@@ -1052,7 +477,6 @@ def _dispatch(
         )
         return DispatchResponse(
             matched=True,
-            forward_to_openclaw=False,
             command=command,
             response_text=response_text,
             workflow_api_endpoint=endpoint,
@@ -1070,7 +494,6 @@ def _dispatch(
         launches = int(payload.get("launches_started") or 0)
         return DispatchResponse(
             matched=True,
-            forward_to_openclaw=False,
             command=command,
             response_text=(
                 f"Drafted {drafted_count} methodology variant(s), recorded {decisions} "
@@ -1099,53 +522,18 @@ def _dispatch(
         )
         return DispatchResponse(
             matched=True,
-            forward_to_openclaw=False,
             command=command,
             response_text=f"Recorded decision '{decision_parts[0]}' for the current session state.",
             workflow_api_endpoint=endpoint,
             payload=payload,
         )
 
-    if command == "note":
-        if not argument:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="!note needs text after the command",
-            )
-        endpoint, payload = requester(
-            settings,
-            "/research-sessions/latest/memory",
-            method="POST",
-            body={"working_note": argument},
-        )
-        return DispatchResponse(
-            matched=True,
-            forward_to_openclaw=False,
-            command=command,
-            response_text="Saved that note to the active research session.",
-            workflow_api_endpoint=endpoint,
-            payload=payload,
-        )
-
-    if command == "op":
-        endpoint, payload = requester(settings, "/operations/latest")
-        response_text = (
-            f"Most recent operation: {payload.get('operation_type', 'unknown')} "
-            f"({payload.get('status', 'unknown')}). {payload.get('result_detail', '')}".strip()
-        )
-        return DispatchResponse(
-            matched=True,
-            forward_to_openclaw=False,
-            command=command,
-            response_text=response_text,
-            workflow_api_endpoint=endpoint,
-            payload=payload,
-        )
-
     return DispatchResponse(
         matched=False,
-        forward_to_openclaw=True,
-        response_text="No deterministic command matched. Forward this turn to OpenClaw.",
+        response_text=(
+            "This surface only supports deterministic Glasslab commands. "
+            "Use !help for the supported command surface."
+        ),
     )
 
 

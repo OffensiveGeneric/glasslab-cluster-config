@@ -20,7 +20,7 @@ Short version:
 - Glasslab is runner-first
 - the primary control path is repo-owned and deterministic
 - `workflow-api` is the control plane
-- OpenClaw is optional and secondary
+- there is no supported OpenClaw runtime path in the current product
 - Postgres should own records
 - shared filesystem and/or MinIO should own files
 
@@ -34,7 +34,6 @@ These remain current and useful after the cleanup pass:
 - `research-ingress.md`
 - `research-command-router.md`
 - `custom-chat-shell-plan.md`
-- `chat-ingress-and-openclaw-boundary.md`
 - `bounded-experiment-runner-priority.md`
 - `runner-first-technique-knowledge-plan.md`
 - `technique-catalog.md`

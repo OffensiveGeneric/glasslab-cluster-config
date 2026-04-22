@@ -50,7 +50,6 @@ class InboundMessageResponse(BaseModel):
     handled: bool
     route: str
     response_text: str
-    forward_to_openclaw: bool
     router_payload: dict[str, Any] | None = None
 
 
@@ -132,15 +131,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 handled=True,
                 route="deterministic-router",
                 response_text=router_payload.get("response_text", ""),
-                forward_to_openclaw=False,
                 router_payload=router_payload,
             )
 
         return InboundMessageResponse(
-            handled=False,
-            route="openclaw-fallback",
-            response_text="This turn should be forwarded to OpenClaw for free-form handling.",
-            forward_to_openclaw=True,
+            handled=True,
+            route="unsupported-turn",
+            response_text=router_payload.get("response_text", ""),
             router_payload=router_payload,
         )
 

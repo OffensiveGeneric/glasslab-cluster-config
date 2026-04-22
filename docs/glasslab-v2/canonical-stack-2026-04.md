@@ -117,11 +117,7 @@ Current primary command surface:
 
 * repo-owned WhatsApp/control shell through `whatsapp-gateway`
 
-Optional secondary conversational surface:
-
-* OpenClaw
-
-OpenClaw is not required for primary command turns.
+There is no supported secondary conversational surface in the current product.
 
 ## Canonical deployment posture
 
@@ -162,7 +158,6 @@ Avoid centering current docs on:
 
 * literature pipeline
 * general research assistant
-* OpenClaw operator shell
 * multi-agent orchestration
 
 ## Primary success condition
@@ -178,4 +173,4 @@ A user should be able to:
 7. record a decision
 8. launch the next bounded mutation
 
-without depending on OpenClaw or broad literature search.
+without depending on broad literature search or any conversational fallback layer.

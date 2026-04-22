@@ -5,7 +5,6 @@ KUBECTL="${KUBECTL:-kubectl}"
 CURL="${CURL:-curl}"
 NAMESPACE="${GLASSLAB_V2_NAMESPACE:-glasslab-v2}"
 HEALTH_PORT="${GLASSLAB_V2_HEALTH_PORT:-18081}"
-INCLUDE_OPENCLAW=false
 INCLUDE_BOUNDED_AGENTS=false
 EXPECTED_SERVICES=(glasslab-workflow-api glasslab-postgres glasslab-nats glasslab-minio)
 PORT_FORWARD_PID=""
@@ -13,10 +12,9 @@ PORT_FORWARD_LOG=""
 
 usage() {
   cat <<'USAGE'
-Usage: smoke-test-v2.sh [--include-openclaw] [--include-bounded-agents]
+Usage: smoke-test-v2.sh [--include-bounded-agents]
 
 Validate the core Glasslab v2 services by default.
-OpenClaw checks are optional until that deployment is intentionally enabled.
 Bounded-agent checks are optional until those Deployments are intentionally applied.
 USAGE
 }
@@ -41,11 +39,6 @@ trap cleanup EXIT
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --include-openclaw)
-      INCLUDE_OPENCLAW=true
-      EXPECTED_SERVICES+=(glasslab-openclaw)
-      shift
-      ;;
     --include-bounded-agents)
       INCLUDE_BOUNDED_AGENTS=true
       EXPECTED_SERVICES+=(
@@ -116,12 +109,6 @@ printf '\n'
 printf '[smoke-test-v2] workflow-api family catalog\n'
 "$CURL" -fsS "http://127.0.0.1:${HEALTH_PORT}/workflow-families"
 printf '\n'
-
-if [[ "$INCLUDE_OPENCLAW" == true ]]; then
-  printf '[smoke-test-v2] OpenClaw service presence checked because --include-openclaw was supplied.\n'
-else
-  printf '[smoke-test-v2] OpenClaw checks skipped by default.\n'
-fi
 
 if [[ "$INCLUDE_BOUNDED_AGENTS" == true ]]; then
   printf '[smoke-test-v2] bounded-agent rollout checks were included.\n'
