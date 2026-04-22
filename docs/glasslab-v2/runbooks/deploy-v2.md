@@ -12,7 +12,6 @@ cd /home/glasslab/cluster-config
 ```bash
 sed -n '1,200p' kubeadm/glasslab-v2/postgres/10-secret.example.yaml
 sed -n '1,200p' kubeadm/glasslab-v2/minio/10-secret.example.yaml
-sed -n '1,200p' kubeadm/glasslab-v2/openclaw/10-secret.example.yaml
 ```
 
 3. Create local non-committed core secret manifests under `kubeadm/glasslab-v2/secrets/`.
@@ -82,8 +81,7 @@ Current storage caveat:
 The provenance check should make drift obvious:
 
 - `workflow-api` should report the expected `build_source_revision` and `build_source_label`
-- OpenClaw should expose runtime provenance from `/var/lib/openclaw/runtime/PROVENANCE.json`
-- if either side is missing provenance, the rollout is incomplete even if pods are `Running`
+- if provenance is missing, the rollout is incomplete even if pods are `Running`
 
 Bounded-agent rollout check:
 
@@ -95,25 +93,7 @@ kubectl -n glasslab-v2 rollout status deployment/glasslab-design-agent --timeout
 kubectl -n glasslab-v2 rollout status deployment/glasslab-schedule-worker --timeout=120s
 ```
 
-8. OpenClaw is intentionally excluded from the default deploy path. Do not deploy it until the runtime bundle, local secret manifest, and in-cluster service references are confirmed.
-
-OpenClaw predeploy checklist:
-- create `kubeadm/glasslab-v2/secrets/30-openclaw.local.yaml`
-- confirm `kubectl -n glasslab-v2 get svc glasslab-workflow-api`
-- inspect the generated runtime tree with `./scripts/export-openclaw-config.sh --output-dir /tmp/openclaw-runtime --no-apply`
-- verify `/tmp/openclaw-runtime/openclaw.json` contains the expected `workflow-api` URL and the intended reviewed inference backend URL
-- keep `replicas: 0` until the predeploy checklist is complete
-
-If the default in-cluster path is still being used, also confirm:
-
-- `kubectl -n glasslab-agents get svc vllm`
-
-```bash
-./scripts/deploy-glasslab-v2.sh --include-openclaw
-./scripts/smoke-test-v2.sh --include-openclaw
-```
-
-9. If the smoke test fails, inspect the namespace directly.
+8. If the smoke test fails, inspect the namespace directly.
 
 ```bash
 kubectl -n glasslab-v2 get pods -o wide
@@ -122,16 +102,16 @@ kubectl -n glasslab-v2 describe statefulset/glasslab-postgres
 kubectl -n glasslab-v2 logs deploy/glasslab-workflow-api --tail=200
 ```
 
-10. If the rollout fails with image pull errors, verify the private registry secret before falling back to a manual import.
+9. If the rollout fails with image pull errors, verify the private registry secret before falling back to a manual import.
 
 ```bash
 kubectl -n glasslab-v2 get secret glasslab-ghcr-pull
 kubectl -n glasslab-v2 describe pod -l app.kubernetes.io/name=glasslab-workflow-api
 ```
 
-11. Do not expose v2 publicly yet. Keep access internal until OpenClaw posture, auth, and policy manifests are in place.
+10. Do not expose v2 publicly yet. Keep access internal until the deterministic WhatsApp/control path and backend policies are fully validated.
 
-12. Keep all bounded-agent feature flags disabled in `workflow-api` until each service has been deployed and tested one stage at a time.
+11. Keep all bounded-agent feature flags disabled in `workflow-api` until each service has been deployed and tested one stage at a time.
 
 Reference:
 

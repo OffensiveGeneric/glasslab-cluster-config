@@ -9,7 +9,7 @@ Usage: k44.sh <kubectl args...>
 
 Examples:
   k44.sh get pods -n glasslab-v2
-  k44.sh -n glasslab-v2 logs deploy/glasslab-openclaw --tail=100
+  k44.sh -n glasslab-v2 logs deploy/glasslab-workflow-api --tail=100
 USAGE
   exit 2
 fi

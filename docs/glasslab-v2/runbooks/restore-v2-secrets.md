@@ -23,7 +23,7 @@ Required files:
 
 - `kubeadm/glasslab-v2/secrets/10-postgres.local.yaml`
 - `kubeadm/glasslab-v2/secrets/20-minio.local.yaml`
-- `kubeadm/glasslab-v2/secrets/30-openclaw.local.yaml` if OpenClaw is in use
+- `kubeadm/glasslab-v2/secrets/30-whatsapp-gateway.local.yaml` if local allowlist values are managed outside Kubernetes
 
 Related v1 file if the copied vLLM API key must also be restored:
 
@@ -41,7 +41,7 @@ chmod 600 kubeadm/agent-stack/12-agent-secrets.yaml 2>/dev/null || true
 ```bash
 sed -n '1,200p' kubeadm/glasslab-v2/secrets/10-postgres.local.yaml
 sed -n '1,200p' kubeadm/glasslab-v2/secrets/20-minio.local.yaml
-sed -n '1,200p' kubeadm/glasslab-v2/secrets/30-openclaw.local.yaml 2>/dev/null || true
+sed -n '1,200p' kubeadm/glasslab-v2/secrets/30-whatsapp-gateway.local.yaml 2>/dev/null || true
 ```
 
 5. Apply the restored secrets.
@@ -61,7 +61,7 @@ kubectl apply -f kubeadm/agent-stack/12-agent-secrets.yaml
 ```bash
 kubectl -n glasslab-v2 rollout restart statefulset/glasslab-postgres
 kubectl -n glasslab-v2 rollout restart deployment/glasslab-minio
-kubectl -n glasslab-v2 rollout restart deployment/glasslab-openclaw 2>/dev/null || true
+kubectl -n glasslab-v2 rollout restart deployment/glasslab-whatsapp-gateway 2>/dev/null || true
 kubectl -n glasslab-agents rollout restart deployment/vllm 2>/dev/null || true
 kubectl -n glasslab-agents rollout restart deployment/glasslab-agent-api 2>/dev/null || true
 ```
@@ -71,7 +71,7 @@ kubectl -n glasslab-agents rollout restart deployment/glasslab-agent-api 2>/dev/
 ```bash
 kubectl -n glasslab-v2 rollout status statefulset/glasslab-postgres --timeout=300s
 kubectl -n glasslab-v2 rollout status deployment/glasslab-minio --timeout=300s
-kubectl -n glasslab-v2 rollout status deployment/glasslab-openclaw --timeout=300s 2>/dev/null || true
+kubectl -n glasslab-v2 rollout status deployment/glasslab-whatsapp-gateway --timeout=300s 2>/dev/null || true
 kubectl -n glasslab-agents rollout status deployment/vllm --timeout=1200s 2>/dev/null || true
 ```
 
@@ -79,7 +79,7 @@ kubectl -n glasslab-agents rollout status deployment/vllm --timeout=1200s 2>/dev
 
 ```bash
 ./scripts/smoke-test-v2.sh
-kubectl -n glasslab-v2 get secret glasslab-v2-postgres glasslab-v2-minio glasslab-openclaw 2>/dev/null || true
+kubectl -n glasslab-v2 get secret glasslab-v2-postgres glasslab-v2-minio glasslab-whatsapp-gateway 2>/dev/null || true
 ```
 
 10. If the original secret values are not available, generate new values, update the local manifests, apply them, and treat the restore as a rotation event.

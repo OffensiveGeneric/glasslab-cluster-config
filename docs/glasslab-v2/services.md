@@ -8,7 +8,7 @@ Glasslab v2 treats workflow execution as a contract-driven pipeline.
 - `evaluator` reads multiple completed run bundles and produces deterministic `comparison.json` and `summary.md` outputs.
 - `reporter` converts manifests, metrics, and optional evaluator output into a stable Markdown memo for operators.
 - Kubernetes Jobs remain the bounded execution layer.
-- OpenClaw remains a gateway and session layer in front of these components rather than a replacement for them.
+- `whatsapp-gateway`, `research-ingress`, and `research-command-router` are the deterministic command surface in front of these components.
 
 ## Canonical artifact contract
 

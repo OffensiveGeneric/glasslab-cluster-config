@@ -1,15 +1,12 @@
 # Glasslab v2 Runbooks
 
-This directory holds operator-facing procedures for deployment, rollback, workflow addition, OpenClaw changes, secret restore, and PXE cleanup follow-up work.
+This directory holds operator-facing procedures for deployment, rollback, workflow addition, secret restore, and PXE cleanup follow-up work.
 
 Key runbooks:
 
 - `deploy-v2.md`
 - `deploy-bounded-agents.md`
-- `deploy-openclaw.md`
-- `switch-openclaw-inference-backend.md`
 - `choose-operator-access-path.md`
-- `test-openclaw-shared-state.md`
 - `backup-restore-local-pv-services.md`
 - `rollback-v2.md`
 - `restore-v2-secrets.md`

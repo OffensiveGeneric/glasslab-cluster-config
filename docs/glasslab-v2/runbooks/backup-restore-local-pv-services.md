@@ -4,7 +4,6 @@ This runbook covers the first backup/restore path for the local-PV-backed Glassl
 
 - Postgres on `node01`
 - MinIO on `node01`
-- OpenClaw writable state on `node01`
 - NATS JetStream data on `node05`
 
 These procedures are about surviving node-local disk loss or accidental service data loss before true multi-node failover exists.
@@ -15,14 +14,12 @@ Tracked local PV paths:
 
 - Postgres: `/var/lib/glasslab-v2/postgres` on `node01`
 - MinIO: `/var/lib/glasslab-v2/minio` on `node01`
-- OpenClaw: `/var/lib/glasslab-v2/openclaw-state` on `node01`
 - NATS: `/var/lib/glasslab-v2/nats` on `node05`
 
 Tracked PVC names:
 
 - `glasslab-postgres-data`
 - `glasslab-minio-data`
-- `glasslab-openclaw-state`
 - `glasslab-nats-data`
 
 ## Recommended Backup Cadence
@@ -32,9 +29,6 @@ Tracked PVC names:
   - weekly filesystem-level archive during a short maintenance window
 - MinIO:
   - daily filesystem-level archive or bucket-level replication if that becomes available later
-- OpenClaw:
-  - daily filesystem-level archive
-  - extra backup before channel/runtime changes
 - NATS:
   - daily filesystem-level archive if JetStream state matters
   - extra backup before changing subjects/stream retention policy
@@ -53,8 +47,6 @@ What these backups recover:
   - database files or logical dumps
 - MinIO:
   - object data and local metadata from the mounted path
-- OpenClaw:
-  - device/session state, workflow tool memory, local operator-state files
 - NATS:
   - JetStream data on disk
 
@@ -79,60 +71,6 @@ Why:
 - does not require broad node sudo access
 - works with the current local-PV posture
 - keeps the backup procedure close to Kubernetes reality
-
-## OpenClaw Backup
-
-Temporary backup pod:
-
-```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: openclaw-backup-drill
-  namespace: glasslab-v2
-spec:
-  restartPolicy: Never
-  nodeSelector:
-    kubernetes.io/hostname: node01
-  containers:
-    - name: drill
-      image: busybox:1.36
-      command: ["sh", "-c", "sleep 3600"]
-      volumeMounts:
-        - name: openclaw-state
-          mountPath: /mnt/openclaw-state
-  volumes:
-    - name: openclaw-state
-      persistentVolumeClaim:
-        claimName: glasslab-openclaw-state
-```
-
-Archive and dry-restore inside the pod:
-
-```sh
-kubectl -n glasslab-v2 exec openclaw-backup-drill -- sh -lc '
-  tar -C /mnt -czf /tmp/openclaw-state-backup.tgz openclaw-state
-  mkdir -p /tmp/restore-check
-  tar -C /tmp/restore-check -xzf /tmp/openclaw-state-backup.tgz
-  find /tmp/restore-check/openclaw-state -maxdepth 2 -type f | sort | head -n 20
-'
-```
-
-Verified dry-restore contents on 2026-03-24 included:
-
-- `identity/device.json`
-- `devices/paired.json`
-- `memory/operator.sqlite`
-- `workflow-api-tool/last-validation-run.json`
-
-Restore sequence:
-
-1. scale the OpenClaw deployment down or ensure no pod is actively writing state
-2. mount the PVC in a temporary pod on `node01`
-3. extract the backup archive into the mounted path
-4. verify expected files such as `identity/device.json`
-5. restart or scale OpenClaw back up
-6. validate channel/device behavior before declaring success
 
 ## NATS Backup
 
@@ -196,12 +134,9 @@ Restore notes:
 
 Verified on 2026-03-24:
 
-- OpenClaw PVC mounted in a temporary pod on `node01`
-- tar backup created from the mounted state path
+- local-PV dry-restore pattern worked for a stateful service PVC
 - archive extracted into a temporary restore directory inside the pod
-- restored file listing confirmed expected OpenClaw state files were present
-
-This was a dry restore check, not a destructive in-place restore.
+- restored file listing confirmed expected files were present
 
 ## Restore Preconditions
 

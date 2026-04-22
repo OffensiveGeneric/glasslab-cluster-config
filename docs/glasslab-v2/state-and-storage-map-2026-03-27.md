@@ -15,7 +15,7 @@ This note is the current high-signal answer to:
 - where research-session state lives
 - where fetched papers and source documents live
 - where run artifacts live
-- where OpenClaw keeps chat and WhatsApp state
+- where historical OpenClaw state used to live
 - where secrets and images live
 
 It is meant to reduce the recurring confusion between:
@@ -191,6 +191,11 @@ Current use:
 - bounded runs and future CV/GPU runs are expected to read datasets from this shared RWX path
 
 ## OpenClaw State
+
+Status: historical only.
+
+The live OpenClaw runtime, PVC, and secret were removed on 2026-04-22. Keep
+this section only as migration history for old state paths and cleanup notes.
 
 ### OpenClaw runtime bundle
 

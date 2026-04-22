@@ -13,10 +13,12 @@ cd /home/glasslab/cluster-config
 kubectl -n glasslab-v2 get deploy,statefulset,svc,configmap,secret
 ```
 
-3. Disable the user-facing deployments first.
+3. Disable the user-facing deterministic command surface first.
 
 ```bash
-kubectl -n glasslab-v2 scale deploy/glasslab-openclaw --replicas=0 || true
+kubectl -n glasslab-v2 scale deploy/glasslab-whatsapp-gateway --replicas=0 || true
+kubectl -n glasslab-v2 scale deploy/glasslab-research-ingress --replicas=0 || true
+kubectl -n glasslab-v2 scale deploy/glasslab-research-command-router --replicas=0 || true
 kubectl -n glasslab-v2 scale deploy/glasslab-workflow-api --replicas=0
 ```
 
@@ -27,10 +29,9 @@ git log --oneline -n 5
 git revert <bad-commit>
 ```
 
-5. Re-apply the known-good manifests and exported OpenClaw config.
+5. Re-apply the known-good manifests.
 
 ```bash
-./scripts/export-openclaw-config.sh
 ./scripts/deploy-glasslab-v2.sh
 ```
 
@@ -47,4 +48,4 @@ kubectl -n glasslab-v2 scale deploy/glasslab-workflow-api --replicas=1
 ./scripts/smoke-test-v2.sh
 ```
 
-8. Only scale OpenClaw up again after its config export, image, and secret inputs are confirmed.
+8. Only scale the deterministic command surface back up after the gateway, ingress, router, and secret inputs are confirmed.

@@ -2,14 +2,13 @@
 
 Date: 2026-03-16
 
-This document records the remaining infrastructure primitives Glasslab v2 still needs after the first live backend and OpenClaw validation pass.
+This document records the remaining infrastructure primitives Glasslab v2 still needs after the first live backend validation pass.
 
 ## Current state
 
 - `glasslab-v2` is live on the cluster. Postgres, NATS, MinIO, and `workflow-api` are healthy.
-- OpenClaw has been validated live as an internal-only service, but the committed Deployment manifest still defaults to `replicas: 0` so a raw manifest apply does not auto-enable it.
 - The cluster has no `StorageClass`.
-- `glasslab-v2` now has explicit PVCs for `Postgres`, `MinIO`, and OpenClaw writable state, all backed by static local PVs on `node01`.
+- `glasslab-v2` now has explicit PVCs for `Postgres` and `MinIO`, both backed by static local PVs on `node01`.
 - `glasslab-v2` now also has an explicit PVC for NATS JetStream data, backed by a static local PV on `node05`.
 - All Glasslab v2 Services are `ClusterIP`. No `Ingress` objects exist in the cluster.
 - `workflow-api` now targets a private GHCR image pull path via the in-cluster `glasslab-ghcr-pull` secret and has been revalidated live on `node05`.
@@ -23,7 +22,6 @@ This document records the remaining infrastructure primitives Glasslab v2 still 
 
 - `workflow-api` is stateless enough for the current loop.
 - `Postgres` and `MinIO` are now on explicit retained local PV/PVC storage and no longer depend on `emptyDir`.
-- OpenClaw state and session data are now on explicit retained local PV/PVC storage and survive pod replacement on `node01`.
 - NATS is running with JetStream enabled on an explicit retained local PV/PVC on `node05`, which is sufficient for the current single-node durability target.
 - The cluster still has no shared or default storage strategy beyond the new explicit local PVs.
 
@@ -31,13 +29,12 @@ This document records the remaining infrastructure primitives Glasslab v2 still 
 
 - Current access is safe-by-default because everything is `ClusterIP`, but the steady-state access pattern is still implicit.
 - `kubectl port-forward` is doing too much work today: smoke tests, operator checks, and service admin access all assume it.
-- There is no declared internal ingress or reverse-proxy path for OpenClaw, MinIO console, or optional MLflow.
+- There is no declared internal ingress or reverse-proxy path for the deterministic command surface, MinIO console, or optional MLflow.
 
 ### Image distribution
 
 - `workflow-api` now uses a private GHCR pull path with the in-cluster `glasslab-ghcr-pull` secret and no longer depends on node-local import or `node03` pinning.
 - `workflow-api` no longer depends on `node03`-local image import and can reschedule onto other workers that can reach GHCR.
-- OpenClaw is pinned to `ghcr.io/openclaw/openclaw@sha256:b86307b257ff42a81353b0d6b3963ccd09bbd9eb1916077d1833a967763c5bc7`, which matches the digest validated live on 2026-03-24.
 
 ### Secrets durability and disaster recovery
 

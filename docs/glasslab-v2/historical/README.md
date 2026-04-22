@@ -7,12 +7,10 @@ current product definition.
 
 ### Old control-surface and inference experiments
 
-- `../ollama-native-openclaw.md`
-- `../openclaw-gateway.md`
-- `../chat-ingress-and-openclaw-boundary.md`
 - `../operator-access-recommendation.md`
 - `../resume-next-session-2026-03-24.md`
 - `../mac-studio-inference.md`
+- `../openclaw-deprecation-and-custom-whatsapp-plan.md`
 
 ### Old live-state snapshots
 

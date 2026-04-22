@@ -1,4 +1,4 @@
-# Validate Chat Channel
+# Validate WhatsApp Command Channel
 
 1. Log into the provisioner host and move to the canonical repo.
 
@@ -7,180 +7,95 @@ ssh glasslab@192.168.1.44
 cd /home/glasslab/cluster-config
 ```
 
-2. Confirm the first chat channel config is present in the repo-managed source tree.
+2. Confirm the deterministic command surface is healthy.
 
 ```bash
-sed -n '1,200p' services/openclaw-config/channels/whatsapp.yaml
+./scripts/smoke-test-v2.sh
+kubectl -n glasslab-v2 get deploy,svc | egrep 'workflow|research|whatsapp'
 ```
 
-Expected policy:
-- channel: `whatsapp`
-- route: direct messages to `operator`
-- `dm_policy: allowlist`
-- `self_chat_mode: true`
-- `group_policy: disabled`
-
-Current interpretation:
-- `self_chat_mode: true` is the bootstrap/debug posture only
-- do not treat that as the desired long-term researcher-facing setup
-- the intended steady state is documented in `../whatsapp-dedicated-account-migration.md`
-
-3. Confirm the existing OpenClaw secret exists.
+3. Confirm the WhatsApp gateway secret exists.
 
 ```bash
-kubectl -n glasslab-v2 get secret glasslab-openclaw
+kubectl -n glasslab-v2 get secret glasslab-whatsapp-gateway
 ```
 
-4. Add the operator's WhatsApp number to the local non-committed OpenClaw secret manifest.
+Expected keys:
 
-Required local file:
-- `kubeadm/glasslab-v2/secrets/30-openclaw.local.yaml`
+- `WHATSAPP_OWNER`
+- `WHATSAPP_ALLOW_FROM`
 
-Required additional key:
-- `OPENCLAW_WHATSAPP_OWNER`
-
-Example patch:
+4. Port-forward the live services for direct checks.
 
 ```bash
-python3 - <<'PY'
-from pathlib import Path
-import yaml
-
-path = Path("kubeadm/glasslab-v2/secrets/30-openclaw.local.yaml")
-payload = yaml.safe_load(path.read_text())
-payload.setdefault("stringData", {})["OPENCLAW_WHATSAPP_OWNER"] = "+15551234567"
-path.write_text(yaml.safe_dump(payload, sort_keys=False))
-PY
-chmod 600 kubeadm/glasslab-v2/secrets/30-openclaw.local.yaml
+kubectl -n glasslab-v2 port-forward svc/glasslab-research-command-router 18096:8095 &
+kubectl -n glasslab-v2 port-forward svc/glasslab-research-ingress 18097:8096 &
+kubectl -n glasslab-v2 port-forward svc/glasslab-whatsapp-gateway 18098:8097 &
 ```
 
-5. Re-export the runtime bundle, apply the updated Secret manifest, and restart the live OpenClaw Deployment so the pod unpacks the updated runtime.
+5. Verify router help and unsupported-turn behavior.
 
 ```bash
-kubectl apply -f kubeadm/glasslab-v2/secrets/30-openclaw.local.yaml
-./scripts/export-openclaw-config.sh
-kubectl -n glasslab-v2 rollout restart deploy/glasslab-openclaw
-kubectl -n glasslab-v2 rollout status deploy/glasslab-openclaw --timeout=300s
+curl -fsS -X POST http://127.0.0.1:18096/dispatch \
+  -H 'content-type: application/json' \
+  -d '{"message":"!help"}'
+
+curl -fsS -X POST http://127.0.0.1:18096/dispatch \
+  -H 'content-type: application/json' \
+  -d '{"message":"what do you think?"}'
 ```
 
-6. Verify the live runtime bundle contains the WhatsApp channel block and the operator binding.
+Expected:
+
+- `!help` returns only the supported command surface
+- unsupported turns return a deterministic `Use !help` response
+
+6. Verify ingress behavior.
 
 ```bash
-kubectl -n glasslab-v2 exec deploy/glasslab-openclaw -- \
-  sed -n '1,260p' /var/lib/openclaw/runtime/openclaw.json
+curl -fsS -X POST http://127.0.0.1:18097/inbound \
+  -H 'content-type: application/json' \
+  -d '{"message":"!state","sender":"+15555550123","channel":"whatsapp"}'
+
+curl -fsS -X POST http://127.0.0.1:18097/inbound \
+  -H 'content-type: application/json' \
+  -d '{"message":"what do you think?","sender":"+15555550123","channel":"whatsapp"}'
 ```
 
-Confirm:
-- `channels.whatsapp.dmPolicy` is `allowlist`
-- `channels.whatsapp.allowFrom[0]` is `${OPENCLAW_WHATSAPP_OWNER}`
-- `channels.whatsapp.defaultAccount` is `default`
-- `channels.whatsapp.accounts.default.authDir` is `/var/lib/openclaw/state/credentials/whatsapp/default`
-- `channels.whatsapp.selfChatMode` is `true`
-- `channels.whatsapp.groupPolicy` is `disabled`
-- `bindings[]` includes `channel: "whatsapp"` for agent `operator`
+Expected:
 
-7. Link the WhatsApp account from the live OpenClaw pod.
+- supported commands return `route=deterministic-router`
+- unsupported turns return `route=unsupported-turn`
+
+7. Verify gateway health.
 
 ```bash
-kubectl -n glasslab-v2 exec -it deploy/glasslab-openclaw -- \
-  openclaw channels login --channel whatsapp --account default --verbose
+curl -fsS http://127.0.0.1:18098/healthz
 ```
 
-Expected behavior:
-- OpenClaw prints a QR code or pairing prompt in the terminal
-- scan it from the operator phone's WhatsApp client
-- this first validation path assumes self-chat on the linked account only
+Expected:
 
-Important caution:
-- self-chat is acceptable for bootstrap validation
-- it can create echo loops where OpenClaw sees its own replies as new inbound messages
-- once the channel is proven live, move to the dedicated-account path before treating WhatsApp as a shared assistant surface
+- no chat-backend or OpenClaw fallback fields
+- only deterministic gateway config and policy fields
 
-8. Verify channel readiness.
+8. Send a real WhatsApp command through the provider path and verify backend proof.
+
+Recommended deterministic checks:
+
+- `!state`
+- `!new replicate DreamSim visual similarity metric with PyTorch and timm`
+- `!plan`
+- `!check`
+
+Backend proof:
 
 ```bash
-kubectl -n glasslab-v2 exec deploy/glasslab-openclaw -- openclaw channels list
-kubectl -n glasslab-v2 exec deploy/glasslab-openclaw -- openclaw channels status
-kubectl -n glasslab-v2 logs deploy/glasslab-openclaw --tail=200 | grep -i whatsapp
+kubectl -n glasslab-v2 logs deploy/glasslab-workflow-api --since=5m | tail -n 200
+kubectl -n glasslab-v2 logs deploy/glasslab-whatsapp-gateway --since=5m | tail -n 200
 ```
 
-Success indicators:
-- `channels list` shows WhatsApp configured
-- `channels status` reports gateway reachable
-- logs show the WhatsApp listener connected without repeated auth failures
+Success condition:
 
-Current caution from the 2026-03-24 Mac cutover:
-
-- the runtime and persisted credentials may still be present even when the current backend has not been revalidated end-to-end
-- treat a configured WhatsApp channel as insufficient proof by itself
-- after any inference-backend change, require a fresh `channels status` success and a real round-trip message before calling the channel live again
-
-9. Send the first test message from the linked WhatsApp account to itself.
-
-Recommended first message:
-- `!status`
-
-Recommended deterministic happy-path checks:
-- `!start replicate DreamSim visual similarity metric with PyTorch and timm`
-- `!run`
-- `!next`
-- `!compare`
-
-Optional backend-backed messages:
-- `Create the validation run.`
-- `What was the last validation run?`
-- `Summarize the last validation run.`
-
-10. Verify the operator reply in the same WhatsApp chat and confirm backend proof in `workflow-api` logs.
-
-For the workflow-family read path:
-
-```bash
-kubectl -n glasslab-v2 logs deploy/glasslab-workflow-api --since=5m | grep 'GET /workflow-families'
-```
-
-For the validation run create path:
-
-```bash
-kubectl -n glasslab-v2 logs deploy/glasslab-workflow-api --since=5m | grep 'POST /runs'
-```
-
-For the validation run retrieval path:
-
-```bash
-kubectl -n glasslab-v2 logs deploy/glasslab-workflow-api --since=5m | grep '/runs/'
-```
-
-Expected response shape:
-- deterministic command turns should come back from the repo-owned path:
-  `whatsapp-gateway -> research-ingress -> research-command-router -> workflow-api`
-- they should not require OpenClaw to interpret the command turn itself
-- the backend proof is in `workflow-api` logs, not in the WhatsApp message itself
-
-11. If the runtime changes again later, re-export and restart before retesting.
-
-```bash
-./scripts/export-openclaw-config.sh
-kubectl -n glasslab-v2 rollout restart deploy/glasslab-openclaw
-```
-
-12. Roll back or disable the channel validation path if needed.
-
-```bash
-kubectl -n glasslab-v2 exec deploy/glasslab-openclaw -- \
-  openclaw channels logout --channel whatsapp --account default || true
-kubectl -n glasslab-v2 scale deploy/glasslab-openclaw --replicas=0
-```
-
-If you want the gateway to stay up but remove the linked chat session only:
-
-```bash
-kubectl -n glasslab-v2 exec deploy/glasslab-openclaw -- \
-  rm -rf /var/lib/openclaw/state/credentials/whatsapp/default
-kubectl -n glasslab-v2 rollout restart deploy/glasslab-openclaw
-```
-
-Operational caveat:
-- `/var/lib/openclaw/state` now uses a retained local PV/PVC on `node01`
-- replacing the pod no longer removes the linked WhatsApp credentials
-- this is still local-node durability, not shared-storage failover
+- the turn is handled by the repo-owned path
+- no OpenClaw object is involved
+- the response text comes back directly from the deterministic backend chain

@@ -6,12 +6,10 @@ Glasslab v2 is live, but its durable-storage story is still in the bring-up phas
 
 - the cluster has no `StorageClass`
 - `glasslab-v2` now has explicit PVCs for `Postgres` and `MinIO`
-- `glasslab-v2` now has an explicit PVC for OpenClaw writable state
 - the cluster now also has a tracked NFS-backed RWX path for shared datasets and artifacts
 - `workflow-api` session and stage metadata now live in Postgres rather than the JSON store on the artifacts share
 - Postgres uses a static local PV/PVC on `node01`
 - MinIO uses a static local PV/PVC on `node01`
-- OpenClaw writable state uses a static local PV/PVC on `node01`
 - NATS uses an explicit static local PV/PVC on `node05`
 
 This means the current live path is partially durable:
@@ -19,7 +17,6 @@ This means the current live path is partially durable:
 - `Postgres`: durable on local disk
 - `workflow-api` records: durable through Postgres
 - `MinIO`: durable on local disk
-- OpenClaw writable state: durable on local disk
 - `NATS`: durable on local disk
 
 Live placement reference from the 2026-03-19 validation:
@@ -27,7 +24,6 @@ Live placement reference from the 2026-03-19 validation:
 - `workflow-api` is now validated live on pull-based scheduling and is currently running on `node05`
 - `Postgres` on `node01`
 - `MinIO` on `node01`
-- `OpenClaw` on `node01`
 - `NATS` on `node05`
 
 Reference:
@@ -48,7 +44,6 @@ Current committed first step:
 - `kubeadm/glasslab-v2/storage/10-static-local-pv.yaml` binds:
   - `glasslab-postgres-data` to `/var/lib/glasslab-v2/postgres` on `node01`
   - `glasslab-minio-data` to `/var/lib/glasslab-v2/minio` on `node01`
-  - `glasslab-openclaw-state` to `/var/lib/glasslab-v2/openclaw-state` on `node01`
   - `glasslab-nats-data` to `/var/lib/glasslab-v2/nats` on `node05`
 - `kubeadm/glasslab-v2/storage/20-nfs-static-pv.yaml` binds:
   - `glasslab-shared-datasets` to `192.168.1.207:/volume1/backup/glasslab-v2/shared-datasets`
@@ -76,8 +71,6 @@ Future storage placeholders live under `kubeadm/glasslab-v2/storage/`.
 ### Ephemeral is acceptable for now
 
 - `workflow-api`: stateless deployment with private GHCR image pulls via `glasslab-ghcr-pull`
-- OpenClaw runtime bundle: generated from ConfigMap
-- OpenClaw tmp/state: acceptable as ephemeral for first validation
 - NATS: single-instance JetStream on retained local storage on `node05`
 
 ### Artifact direction
@@ -122,7 +115,6 @@ Good initial fits:
 
 - shared datasets
 - shared artifacts
-- optional durable OpenClaw state later
 
 Less attractive first fits:
 
