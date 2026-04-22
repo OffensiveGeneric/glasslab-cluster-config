@@ -4,6 +4,7 @@ Store non-committed local v2 secret manifests here.
 
 Recommended local files:
 - `10-postgres.local.yaml`
+- `15-workflow-api.local.yaml`
 - `20-minio.local.yaml`
 - `30-openclaw.local.yaml`
 

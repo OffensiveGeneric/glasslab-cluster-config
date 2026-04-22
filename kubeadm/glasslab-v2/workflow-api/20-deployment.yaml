@@ -25,6 +25,13 @@ spec:
           envFrom:
             - configMapRef:
                 name: glasslab-v2-workflow-api-config
+          env:
+            - name: GLASSLAB_WORKFLOW_API_STORE_POSTGRES_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: glasslab-v2-workflow-api
+                  key: GLASSLAB_WORKFLOW_API_STORE_POSTGRES_DSN
+                  optional: true
           ports:
             - containerPort: 8080
               name: http
