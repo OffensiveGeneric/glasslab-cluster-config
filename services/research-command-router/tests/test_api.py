@@ -12,14 +12,13 @@ def test_help_command_returns_local_text() -> None:
     assert payload["forward_to_openclaw"] is False
     assert "session = one research workspace" in payload["response_text"]
     assert "campaign = the autoresearch loop inside a session" in payload["response_text"]
-    assert "!new-session <goal>" in payload["response_text"]
-    assert "!add-url <url>" in payload["response_text"]
-    assert "!add-dataset <uri>" in payload["response_text"]
-    assert "!datasets" in payload["response_text"]
-    assert "!use-dataset <dataset_id>" in payload["response_text"]
-    assert "!search <topic>" in payload["response_text"]
+    assert "!new <goal>" in payload["response_text"]
+    assert "!add <thing>" in payload["response_text"]
+    assert "!plan" in payload["response_text"]
+    assert "!check" in payload["response_text"]
+    assert "!decide <keep|discard|revise>" in payload["response_text"]
     assert "Legacy/debug commands still available:" in payload["response_text"]
-    assert "!next-paper" not in payload["response_text"]
+    assert "!next-paper" in payload["response_text"]
 
 
 def test_research_command_calls_start_endpoint() -> None:
@@ -70,27 +69,24 @@ def test_search_command_alias_calls_start_endpoint() -> None:
     assert len(calls) == 1
 
 
-def test_start_command_alias_calls_start_endpoint() -> None:
+def test_start_command_alias_creates_session() -> None:
     calls: list[tuple[str, str, dict | None]] = []
 
     def fake_requester(settings, path, method="GET", body=None):
         calls.append((path, method, body))
-        assert path == "/research-sessions/start-literature-search"
+        assert path == "/research-sessions"
         assert method == "POST"
         return (
             f"{settings.workflow_api_url}{path}",
-            {
-                "session": {"title": "Artist Similarity"},
-                "paper_intake_queue": {"candidates": [], "coverage_summary": {"mode": "external"}},
-            },
+            {"session_id": "session-123", "title": "Artist Similarity"},
         )
 
     client = TestClient(create_app(settings=Settings(), requester=fake_requester))
     response = client.post("/dispatch", json={"message": "!start artist similarity metric learning"})
     assert response.status_code == 200
     payload = response.json()
-    assert payload["command"] == "start"
-    assert "Started internet-backed literature search" in payload["response_text"]
+    assert payload["command"] == "new"
+    assert "Created research session" in payload["response_text"]
     assert len(calls) == 1
 
 
@@ -110,9 +106,28 @@ def test_new_session_command_creates_session_without_literature_search() -> None
     response = client.post("/dispatch", json={"message": "!new-session artist similarity metric learning"})
     assert response.status_code == 200
     payload = response.json()
-    assert payload["command"] == "new-session"
+    assert payload["command"] == "new"
     assert "Created research session" in payload["response_text"]
     assert calls[0][0] == "/research-sessions"
+
+
+def test_add_command_routes_to_generic_intake_endpoint() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {"record_type": "dataset", "dataset": {"name": "WikiArt", "uri": "https://www.wikiart.org/"}, "current_plan_status": "needs_plan"},
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!add dataset: https://www.wikiart.org/"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["command"] == "add"
+    assert calls[0][0] == "/research-sessions/latest/intake"
+    assert calls[0][2]["dataset_uri"] == "https://www.wikiart.org/"
 
 
 def test_more_papers_prefers_external_search() -> None:
@@ -382,6 +397,26 @@ def test_preflight_command_bootstraps_design_before_fetching_preflight() -> None
     assert calls[2][0] == "/research-sessions/session-123/execution-preflight"
 
 
+def test_check_command_reads_current_plan_preflight() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {"workflow_id": "gpu-experiment", "blocking_issues": [], "warnings": ["ok"]},
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!check"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["command"] == "check"
+    assert calls == [
+        ("/research-sessions/latest/preflight/current-plan", "GET", None),
+    ]
+
+
 def test_interpret_command_routes_to_transition() -> None:
     calls: list[tuple[str, str, dict | None]] = []
 
@@ -424,7 +459,7 @@ def test_autoresearch_summary_command_routes_to_summary_endpoint() -> None:
     assert calls[1][0] == "/research-sessions/session-123/autoresearch-summary"
 
 
-def test_status_command_adds_campaign_summary_when_present() -> None:
+def test_state_command_adds_campaign_summary_when_present() -> None:
     calls: list[tuple[str, str, dict | None]] = []
 
     def fake_requester(settings, path, method="GET", body=None):
@@ -444,16 +479,16 @@ def test_status_command_adds_campaign_summary_when_present() -> None:
         )
 
     client = TestClient(create_app(settings=Settings(), requester=fake_requester))
-    response = client.post("/dispatch", json={"message": "!status"})
+    response = client.post("/dispatch", json={"message": "!state"})
     assert response.status_code == 200
     payload = response.json()
-    assert payload["command"] == "status"
+    assert payload["command"] == "state"
     assert "Active dataset: WikiArt." in payload["response_text"]
     assert "Campaign status: active with 2 iteration(s)." in payload["response_text"]
     assert "Active session 'DreamSim'." in payload["response_text"]
 
 
-def test_status_uses_pinned_session_context_when_provided() -> None:
+def test_state_uses_pinned_session_context_when_provided() -> None:
     calls: list[tuple[str, str, dict | None]] = []
 
     def fake_requester(settings, path, method="GET", body=None):
@@ -472,10 +507,10 @@ def test_status_uses_pinned_session_context_when_provided() -> None:
         )
 
     client = TestClient(create_app(settings=Settings(), requester=fake_requester))
-    response = client.post("/dispatch", json={"message": "!status", "session_id": "session-123"})
+    response = client.post("/dispatch", json={"message": "!state", "session_id": "session-123"})
     assert response.status_code == 200
     assert calls[0][0] == "/research-sessions/session-123/context"
-    assert response.json()["command"] == "status"
+    assert response.json()["command"] == "state"
 
 
 def test_compare_command_returns_helpful_text_without_campaign() -> None:
@@ -497,7 +532,7 @@ def test_compare_command_returns_helpful_text_without_campaign() -> None:
     ]
 
 
-def test_status_mentions_missing_campaign_when_none_exists() -> None:
+def test_state_mentions_missing_campaign_when_none_exists() -> None:
     def fake_requester(settings, path, method="GET", body=None):
         if path == "/research-sessions/latest/context":
             return (
@@ -511,10 +546,38 @@ def test_status_mentions_missing_campaign_when_none_exists() -> None:
         raise HTTPException(status_code=404, detail="autoresearch campaign not found")
 
     client = TestClient(create_app(settings=Settings(), requester=fake_requester))
-    response = client.post("/dispatch", json={"message": "!status"})
+    response = client.post("/dispatch", json={"message": "!state"})
     assert response.status_code == 200
     payload = response.json()
     assert "No autoresearch campaign yet." in payload["response_text"]
+
+
+def test_decide_command_routes_to_current_decision_endpoint() -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_requester(settings, path, method="GET", body=None):
+        calls.append((path, method, body))
+        return (
+            f"{settings.workflow_api_url}{path}",
+            {"operation": {"operation_id": "op-123"}},
+        )
+
+    client = TestClient(create_app(settings=Settings(), requester=fake_requester))
+    response = client.post("/dispatch", json={"message": "!decide keep use the DreamSim baseline"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["command"] == "decide"
+    assert calls == [
+        (
+            "/research-sessions/latest/decisions/current",
+            "POST",
+            {
+                "decision": "keep",
+                "note": "use the DreamSim baseline",
+                "submitted_by": "research-command-router",
+            },
+        ),
+    ]
 
 
 def test_next_command_bootstraps_campaign_and_launches_batch() -> None:

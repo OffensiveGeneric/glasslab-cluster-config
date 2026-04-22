@@ -1,81 +1,181 @@
 # Canonical Stack 2026-04
 
-This note is the short answer to a recurring repo problem: the system does not
-need less architecture. It needs fewer competing architectures.
+This document is the current source of truth for what Glasslab is.
 
-## Primary
+It is intentionally narrower than older research-assistant and literature-first notes.
 
-- one control plane:
-  - `workflow-api`
-- one deterministic operator command path:
-  - `whatsapp-gateway -> research-ingress -> research-command-router -> workflow-api`
-- one metadata store:
-  - `Postgres`
-- one artifact/file plane:
-  - `NFS` and `MinIO`
-- one image distribution path:
-  - `GHCR`
-- one bounded model-serving lane for the stage agents:
-  - exo OpenAI-compatible endpoint on `.21`
-- one admin/apply host for live validation:
-  - `.44`
+## Product shape
 
-## Secondary
+Glasslab is a runner-first research system.
 
-- `OpenClaw`
-  - optional conversational surface
-  - not part of the deterministic command path
-  - should not be treated as a co-equal orchestrator for `!start`, `!status`,
-    `!run`, `!next`, or `!compare`
+Its job is to:
 
-## Legacy / Reference
+* keep a bounded research session
+* turn the current session into a reviewable experiment plan
+* launch approved runs
+* compare results
+* record decisions
+* propose the next bounded mutation
 
-- manual `ctr import` image distribution
-  - break-glass only
-- JSON-on-artifacts-share as a long-term metadata system of record
-  - convenient during bootstrap
-  - not the target end state
-- older Ollama-specific bounded agent paths
-  - superseded by the exo-backed bounded inference lane
+It is not primarily:
 
-## Practical simplification rules
+* a literature-search product
+* a general chat agent
+* an autonomous scientist
+* an OpenClaw-centered orchestration system
 
-1. Backend-owned command turns stay deterministic.
-   - `!start`, `!status`, `!run`, `!next`, and `!compare` should execute through
-     the repo-owned command path with no OpenClaw dependency on the command turn.
+## Canonical control path
 
-2. Postgres owns records; file stores own files.
-   - session and stage metadata should converge toward `Postgres`
-   - `NFS` and `MinIO` should carry blobs, artifacts, reports, and source
-     documents
+The canonical command path is:
 
-3. Keep internal services private.
-   - `workflow-api`, `Postgres`, `NATS`, and `MinIO` stay `ClusterIP`
-   - expose only genuinely human-facing surfaces
+* `whatsapp-gateway`
+* `research-ingress`
+* `research-command-router`
+* `workflow-api`
 
-4. Treat `.44` as four separate responsibilities, not one embarrassment.
-   - admin workstation
-   - runtime export/apply host
-   - secret source of truth
-   - image fallback
+This path owns the primary command loop.
 
-5. Do not add async/event machinery just to make the stack look modern.
-   - `NATS` should be used where durable decoupling buys something concrete
-   - not as architecture cosplay
+The primary loop is:
 
-## Bounded agent inference stance
+* `!new`
+* `!state`
+* `!add`
+* `!plan`
+* `!check`
+* `!run`
+* `!compare`
+* `!decide`
+* `!next`
 
-The bounded `intake`, `interpretation`, `design`, and `assessment` lanes should
-share one coherent backend story.
+Legacy aliases may continue to exist, but they are not the product center.
 
-Current canonical choice:
+## Canonical backend control plane
 
-- provider type:
-  - `openai-compatible`
-- serving endpoint:
-  - exo on `.21`
-- default model:
-  - `mlx-community/Qwen3-Coder-Next-4bit`
+The canonical control plane is:
 
-This keeps the deterministic WhatsApp command path separate from the model lane
-while reducing the number of inference stacks the repo has to reason about.
+* `workflow-api`
+
+`workflow-api` owns:
+
+* session records
+* source intake records
+* design drafts
+* run creation
+* autoresearch campaign transitions
+* evaluator/report handoff
+
+## Canonical data ownership
+
+### Metadata and records
+
+Target system of record:
+
+* `Postgres`
+
+This includes:
+
+* sessions
+* stage records
+* source metadata
+* designs
+* runs
+* decisions
+* campaign state
+
+### Files and objects
+
+Target file/object plane:
+
+* shared filesystem and/or MinIO
+
+This includes:
+
+* source documents
+* artifacts
+* logs
+* reports
+* notebooks
+
+## Canonical infrastructure posture
+
+### Cluster services
+
+Keep private by default:
+
+* `workflow-api`
+* `Postgres`
+* `NATS`
+* `MinIO API`
+
+Use `ClusterIP` by default.
+
+### Human-facing surfaces
+
+Keep exactly one primary command surface.
+
+Current primary command surface:
+
+* repo-owned WhatsApp/control shell through `whatsapp-gateway`
+
+Optional secondary conversational surface:
+
+* OpenClaw
+
+OpenClaw is not required for primary command turns.
+
+## Canonical deployment posture
+
+### Image path
+
+Normal path:
+
+* private GHCR pull
+
+Break-glass only:
+
+* local image import
+
+### Admin/apply host
+
+For now, `.44` remains:
+
+* canonical apply host
+* validation host
+* local secret source of truth
+
+That is an operational constraint, not a product identity.
+
+## Canonical product language
+
+Use this language in current-state docs:
+
+* session
+* source intake
+* plan
+* preflight
+* run
+* compare
+* decide
+* next bounded variant
+
+Avoid centering current docs on:
+
+* literature pipeline
+* general research assistant
+* OpenClaw operator shell
+* multi-agent orchestration
+
+## Primary success condition
+
+A user should be able to:
+
+1. create or resume a session
+2. add a little evidence or context
+3. generate a bounded current plan
+4. check readiness
+5. launch a run
+6. compare the result
+7. record a decision
+8. launch the next bounded mutation
+
+without depending on OpenClaw or broad literature search.

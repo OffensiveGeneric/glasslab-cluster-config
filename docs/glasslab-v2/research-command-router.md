@@ -7,11 +7,15 @@ directly.
 
 Current commands:
 
-- `!start <topic>`
-- `!status`
+- `!new <goal>`
+- `!state`
+- `!add <thing>`
+- `!plan`
+- `!check`
 - `!run`
-- `!next`
 - `!compare`
+- `!decide <keep|discard|revise>`
+- `!next`
 - `!research <topic>`
 - `!more-papers`
 - `!next-paper`
@@ -23,8 +27,12 @@ Current commands:
 
 Recommended primary runner flow:
 
-- `!start <topic>`
+- `!new <goal>`
+- `!add <thing>`
+- `!plan`
+- `!check`
 - `!run`
+- `!decide <keep|discard|revise>`
 - `!next`
 - `!compare`
 
@@ -35,8 +43,12 @@ Current deterministic happy-path ownership:
 - `research-command-router` owns command matching and dispatch
 - `workflow-api` owns the backend transitions for the primary five commands
 
-For `!start`, `!status`, `!run`, `!next`, and `!compare`, the command turn does
-not depend on OpenClaw.
+For the primary commands, the command turn does not depend on OpenClaw.
+
+Compatibility aliases still exist:
+
+- `!start -> !new`
+- `!status -> !state`
 
 The older granular commands remain available for debugging and operator control.
 

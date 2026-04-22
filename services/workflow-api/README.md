@@ -16,7 +16,8 @@ Current architectural reality:
 - sessions are becoming the primary product object
 - skills/stages mutate session-owned state
 - workflow families are increasingly execution templates, not the whole ontology
-- mutating `latest` routes are still present for operator convenience, but should not be treated as the durable primary contract for automation
+- mutating `latest` routes are still present for compatibility, but should not
+  be treated as the durable primary contract for operator automation
 
 What is committed here:
 
@@ -56,12 +57,15 @@ Current durability warning:
 - the store backend is now explicit:
   - `GLASSLAB_WORKFLOW_API_STORE_BACKEND=memory`
   - `GLASSLAB_WORKFLOW_API_STORE_BACKEND=json`
+  - `GLASSLAB_WORKFLOW_API_STORE_BACKEND=postgres`
 - in-memory mode is still valid for tests and short-lived local iteration
 - `GLASSLAB_WORKFLOW_API_ALLOW_INMEMORY_STORE=false` now fails closed at settings load instead of silently booting on ephemeral state
 - the bounded durable backend is JSON-file based via `GLASSLAB_WORKFLOW_API_STORE_JSON_PATH`
-- live-oriented configs should select `json` explicitly and mount the JSON path on durable storage
-- session and stage metadata are still not in Postgres yet, so this is a bounded durability step rather than the final persistence architecture
-- artifact files and source-document blobs may be durable, but the coordinating metadata currently is not
+- Postgres-backed durability is now supported via `GLASSLAB_WORKFLOW_API_STORE_POSTGRES_DSN`
+- live-oriented configs should select `postgres` when the database path is ready
+- artifact files and source-document blobs still belong on shared storage and/or MinIO
+- one-shot import helper for the existing JSON store:
+  - `services/workflow-api/scripts/import-json-store-to-postgres.py`
 
 Current execution prerequisites:
 
@@ -109,7 +113,22 @@ first config surfaces now reserved are:
 - `GLASSLAB_WORKFLOW_API_INTERPRETATION_AGENT_URL`
 - `GLASSLAB_WORKFLOW_API_INTERPRETATION_AGENT_TIMEOUT_SECONDS`
 
-Recent paper-intake endpoints:
+Primary session-oriented operator endpoints:
+
+- `POST /research-sessions`
+- `GET /research-sessions/{session_id}/context`
+- `POST /research-sessions/{session_id}/intake`
+- `POST /research-sessions/{session_id}/transitions/prepare-current-plan`
+- `GET /research-sessions/{session_id}/preflight/current-plan`
+- `POST /research-sessions/{session_id}/transitions/run-happy-path`
+- `GET /research-sessions/{session_id}/autoresearch-model-comparison`
+- `POST /research-sessions/{session_id}/decisions/current`
+- `POST /research-sessions/{session_id}/transitions/advance-autoresearch`
+
+Compatibility aliases remain available under `/research-sessions/latest/...`, but
+the primary product story should be explicit session id or sender-pinned session.
+
+Supporting paper/source-intake endpoints:
 
 - `POST /research-sessions`
 - `GET /research-sessions`

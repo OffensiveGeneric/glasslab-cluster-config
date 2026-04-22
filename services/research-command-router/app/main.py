@@ -107,16 +107,22 @@ def _parse_command(message: str) -> tuple[str, str] | None:
         return None
     lowered = text.lower()
     prefixes = [
-        ("!new-session", "new-session"),
-        ("new-session:", "new-session"),
-        ("!start", "start"),
-        ("start:", "start"),
+        ("!new-session", "new"),
+        ("new-session:", "new"),
+        ("!new", "new"),
+        ("new:", "new"),
+        ("!start", "new"),
+        ("start:", "new"),
         ("!research", "research"),
         ("research:", "research"),
         ("!search", "search"),
         ("search:", "search"),
-        ("!status", "status"),
-        ("status:", "status"),
+        ("!status", "state"),
+        ("status:", "state"),
+        ("!state", "state"),
+        ("state:", "state"),
+        ("!add", "add"),
+        ("add:", "add"),
         ("!more-papers", "more-papers"),
         ("papers:", "more-papers"),
         ("!next-paper", "next-paper"),
@@ -137,8 +143,12 @@ def _parse_command(message: str) -> tuple[str, str] | None:
         ("session:", "session"),
         ("!interpret", "interpret"),
         ("interpret:", "interpret"),
+        ("!plan", "plan"),
+        ("plan:", "plan"),
         ("!design", "design"),
         ("design:", "design"),
+        ("!check", "check"),
+        ("check:", "check"),
         ("!preflight", "preflight"),
         ("preflight:", "preflight"),
         ("!run", "run"),
@@ -165,6 +175,8 @@ def _parse_command(message: str) -> tuple[str, str] | None:
         ("model-comparison:", "model-comparison"),
         ("!compare", "compare"),
         ("compare:", "compare"),
+        ("!decide", "decide"),
+        ("decide:", "decide"),
         ("!next", "next"),
         ("next:", "next"),
         ("!note", "note"),
@@ -188,41 +200,40 @@ def _help_text() -> str:
     return "\n".join(
         [
             "Glasslab runner flow:",
-            "1. !new-session <goal> creates a blank workspace without literature search.",
-            "2. !add-pdf [url] ingests a PDF source into the active workspace.",
-            "   !add-url <url> ingests a webpage source into the active workspace.",
-            "3. !add-dataset <uri> registers and attaches a dataset to the active workspace.",
-            "   !datasets lists attached datasets. !use-dataset <id> switches the active one.",
-            "4. !run prepares interpretation/design and launches the first bounded run.",
-            "5. !next advances the active autoresearch campaign by deciding finished runs and launching the next batch.",
-            "6. !compare summarizes the active campaign and best current method.",
-            "7. !status shows the current workspace, active dataset, and campaign state.",
+            "1. !new <goal> creates a pinned research session.",
+            "2. !add <url|note: ...|dataset: ...|baseline: ...> records one useful input.",
+            "3. !plan prepares the current bounded design draft.",
+            "4. !check runs preflight for the current plan.",
+            "5. !run launches the current approved design.",
+            "6. !compare summarizes the current results.",
+            "7. !decide <keep|discard|revise> records the current judgment.",
+            "8. !next advances to the next bounded variant.",
             "",
             "Core commands:",
-            "!new-session <goal>",
-            "!add-pdf [url]",
-            "!add-url <url>",
-            "!add-dataset <uri>",
-            "!datasets",
-            "!use-dataset <dataset_id>",
-            "!start <topic>",
-            "!search <topic>",
+            "!new <goal>",
+            "!state",
+            "!add <thing>",
+            "!plan",
+            "!check",
             "!run",
-            "!next",
             "!compare",
-            "!status",
+            "!decide <keep|discard|revise>",
+            "!next",
             "",
             "Terms:",
             "session = one research workspace for one problem",
             "campaign = the autoresearch loop inside a session",
             "iteration = one candidate method/run inside a campaign",
             "",
-            "Use !start or !search when you want internet/paper search.",
-            "Use !new-session + !add-pdf or !add-url when you already have the source.",
-            "Use !add-dataset before !run when the experiment needs an explicit dataset.",
+            "Compatibility aliases:",
+            "!start -> !new",
+            "!status -> !state",
+            "",
+            "Use !research or !search only when you intentionally want literature search.",
+            "Use !add note: ..., !add dataset: ..., or !add baseline: ... to add structured context.",
             "",
             "Legacy/debug commands still available:",
-            "!research !search !more-papers !add-paper !session !interpret !design !preflight",
+            "!research !search !more-papers !next-paper !add-paper !session !interpret !design !preflight",
             "!start-autoresearch !draft-methodologies !draft-notebook !refine-notebook",
             "!launch-iteration !launch-batch !decide-batch !decide-latest !autoresearch !model-comparison",
             "!note <text>",
@@ -339,11 +350,11 @@ def _dispatch(
             response_text=_help_text(),
         )
 
-    if command == "new-session":
+    if command == "new":
         if len(argument) < 12:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="!new-session needs a concrete goal after the command",
+                detail="!new needs a concrete goal after the command",
             )
         endpoint, payload = requester(
             settings,
@@ -361,7 +372,7 @@ def _dispatch(
             command=command,
             response_text=(
                 f"Created research session '{payload.get('title', 'untitled')}'. "
-                "You can now add a PDF directly with !add-pdf <url>."
+                "Next step: add one useful source, note, dataset, or baseline with !add."
             ),
             workflow_api_endpoint=endpoint,
             payload=payload,
@@ -605,7 +616,7 @@ def _dispatch(
             payload=payload,
         )
 
-    if command in {"status", "session"}:
+    if command in {"state", "session"}:
         endpoint, payload = scoped_requester(settings, "/research-sessions/latest/context")
         session = payload.get("session") or {}
         queue = payload.get("paper_intake_queue") or {}
@@ -635,6 +646,51 @@ def _dispatch(
             if not _is_missing_campaign_error(exc):
                 raise
             response_text += " No autoresearch campaign yet."
+        return DispatchResponse(
+            matched=True,
+            forward_to_openclaw=False,
+            command=command,
+            response_text=response_text,
+            workflow_api_endpoint=endpoint,
+            payload=payload,
+        )
+
+    if command == "add":
+        if not argument:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="!add needs a URL or a typed prefix like note:, dataset:, or baseline:",
+            )
+        lowered_argument = argument.lower()
+        body: dict[str, Any]
+        if lowered_argument.startswith("note:"):
+            body = {"note": argument.split(":", 1)[1].strip(), "submitted_by": submitted_by}
+        elif lowered_argument.startswith("dataset:"):
+            body = {"dataset_uri": argument.split(":", 1)[1].strip(), "submitted_by": submitted_by}
+        elif lowered_argument.startswith("baseline:"):
+            body = {"baseline_name": argument.split(":", 1)[1].strip(), "submitted_by": submitted_by}
+        elif argument.startswith("http"):
+            body = {"source_url": argument, "submitted_by": submitted_by}
+        else:
+            body = {"note": argument, "submitted_by": submitted_by}
+
+        endpoint, payload = scoped_requester(
+            settings,
+            "/research-sessions/latest/intake",
+            method="POST",
+            body=body,
+        )
+        record_type = payload.get("record_type", "entry")
+        if record_type == "dataset":
+            dataset = payload.get("dataset") or {}
+            response_text = f"Attached dataset '{dataset.get('name', dataset.get('uri', 'dataset'))}' to the current session."
+        elif record_type == "source_document":
+            document = payload.get("source_document") or {}
+            response_text = f"Attached source '{document.get('title', document.get('source_url', 'source'))}' to the current session."
+        else:
+            response_text = f"Recorded {record_type.replace('_', ' ')} '{payload.get('recorded_value', '')}' in the current session."
+        if payload.get("current_plan_status"):
+            response_text += f" Current plan status: {payload.get('current_plan_status')}."
         return DispatchResponse(
             matched=True,
             forward_to_openclaw=False,
@@ -682,6 +738,25 @@ def _dispatch(
             payload=payload,
         )
 
+    if command == "plan":
+        endpoint, payload = scoped_requester(
+            settings,
+            "/research-sessions/latest/transitions/prepare-current-plan",
+            method="POST",
+        )
+        response_text = (
+            f"Prepared plan '{payload.get('design_id', 'n/a')}'. "
+            f"Workflow: {payload.get('workflow_id', 'n/a')} ({payload.get('status', 'unknown')})."
+        )
+        return DispatchResponse(
+            matched=True,
+            forward_to_openclaw=False,
+            command=command,
+            response_text=response_text,
+            workflow_api_endpoint=endpoint,
+            payload=payload,
+        )
+
     if command == "preflight":
         _context_endpoint, _context_payload, session_id = _get_latest_session_id(
             settings, scoped_requester, pinned_session_id
@@ -699,6 +774,26 @@ def _dispatch(
         warnings = payload.get("warnings") or []
         response_text = (
             f"Execution preflight for workflow '{payload.get('workflow_id', 'n/a')}' "
+            f"has {len(issues)} blocking issue(s) and {len(warnings)} warning(s)."
+        )
+        return DispatchResponse(
+            matched=True,
+            forward_to_openclaw=False,
+            command=command,
+            response_text=response_text,
+            workflow_api_endpoint=endpoint,
+            payload=payload,
+        )
+
+    if command == "check":
+        endpoint, payload = scoped_requester(
+            settings,
+            "/research-sessions/latest/preflight/current-plan",
+        )
+        issues = payload.get("blocking_issues") or []
+        warnings = payload.get("warnings") or []
+        response_text = (
+            f"Preflight for workflow '{payload.get('workflow_id', 'n/a')}' "
             f"has {len(issues)} blocking issue(s) and {len(warnings)} warning(s)."
         )
         return DispatchResponse(
@@ -968,6 +1063,32 @@ def _dispatch(
                 f"Drafted {drafted_count} methodology variant(s), recorded {decisions} "
                 f"completed decision(s), and launched {launches} next iteration(s)."
             ),
+            workflow_api_endpoint=endpoint,
+            payload=payload,
+        )
+
+    if command == "decide":
+        decision_parts = argument.split(None, 1)
+        if not decision_parts or decision_parts[0] not in {"keep", "discard", "revise"}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="!decide needs one of: keep, discard, revise",
+            )
+        endpoint, payload = scoped_requester(
+            settings,
+            "/research-sessions/latest/decisions/current",
+            method="POST",
+            body={
+                "decision": decision_parts[0],
+                "note": decision_parts[1] if len(decision_parts) > 1 else None,
+                "submitted_by": submitted_by,
+            },
+        )
+        return DispatchResponse(
+            matched=True,
+            forward_to_openclaw=False,
+            command=command,
+            response_text=f"Recorded decision '{decision_parts[0]}' for the current session state.",
             workflow_api_endpoint=endpoint,
             payload=payload,
         )

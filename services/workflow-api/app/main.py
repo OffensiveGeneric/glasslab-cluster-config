@@ -117,7 +117,11 @@ from .schemas import (
     ResearchSessionNextCommandResponse,
     ResearchSessionRecord,
     ResearchSessionRunCommandResponse,
+    SessionDecisionRequest,
+    SessionDecisionResponse,
     SessionDatasetAttachRequest,
+    SessionIntakeRequest,
+    SessionIntakeResponse,
     ReplicabilityAssessmentRecord,
     RunArtifactsResponse,
     RunCreateRequest,
@@ -1097,6 +1101,7 @@ def create_app(
         store = create_run_store(
             settings.store_backend,
             state_path=settings.store_json_path,
+            postgres_dsn=settings.store_postgres_dsn,
         )
     submitter = submitter or create_job_submitter(settings)
 
@@ -1116,6 +1121,7 @@ def create_app(
             'build_source_label': settings.build_source_label,
             'workflow_count': len(registry.list_workflows()),
             'store_backend': settings.store_backend,
+            'store_target': settings.store_postgres_dsn if settings.store_backend == 'postgres' else settings.store_json_path,
         }
 
     def resolve_latest_session_id(session_id: str) -> str:
@@ -1190,6 +1196,96 @@ def create_app(
     @app.post('/research-sessions/latest/datasets/attach', response_model=DatasetRecord)
     def attach_existing_dataset_to_latest_session(request: SessionDatasetAttachRequest) -> DatasetRecord:
         return attach_existing_dataset_to_session('latest', request)
+
+    @app.post('/research-sessions/{session_id}/intake', response_model=SessionIntakeResponse)
+    def create_session_intake_entry(session_id: str, request: SessionIntakeRequest) -> SessionIntakeResponse:
+        session_id = resolve_latest_session_id(session_id)
+        session = get_required_research_session(store, session_id)
+
+        provided = [
+            name
+            for name, value in {
+                'source_url': request.source_url,
+                'document_url': request.document_url,
+                'note': request.note,
+                'dataset_uri': request.dataset_uri,
+                'baseline_name': request.baseline_name,
+            }.items()
+            if value
+        ]
+        if len(provided) != 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail='exactly one of source_url, document_url, note, dataset_uri, or baseline_name must be provided',
+            )
+
+        current_plan_status = None
+        current_design = store.get_design_draft(session.latest_design_id or '')
+        if current_design is not None:
+            current_plan_status = current_design.status
+
+        if request.source_url or request.document_url:
+            source_url = request.source_url or request.document_url
+            document = ingest_source_document(
+                source_url or '',
+                submitted_by=request.submitted_by or session.submitted_by,
+                settings=settings,
+                store=store,
+                session_id=session_id,
+            )
+            updated_session = touch_research_session(store, session_id, latest_document_id=document.document_id) or session
+            return SessionIntakeResponse(
+                session=updated_session,
+                record_type='source_document',
+                source_document=document,
+                current_plan_status=current_plan_status,
+            )
+
+        if request.dataset_uri:
+            dataset = build_dataset_record(
+                DatasetCreateRequest(
+                    uri=request.dataset_uri,
+                    submitted_by=request.submitted_by or session.submitted_by,
+                ),
+                settings,
+            )
+            store.save_dataset_record(dataset)
+            updated_session = attach_dataset_to_session(store, session_id, dataset)
+            return SessionIntakeResponse(
+                session=updated_session,
+                record_type='dataset',
+                dataset=dataset,
+                current_plan_status='needs_plan',
+            )
+
+        if request.note:
+            updated_session = append_research_session_memory(
+                store,
+                session_id,
+                working_note=request.note,
+            )
+            return SessionIntakeResponse(
+                session=updated_session,
+                record_type='note',
+                recorded_value=request.note,
+                current_plan_status=current_plan_status,
+            )
+
+        updated_session = append_research_session_memory(
+            store,
+            session_id,
+            working_note=f'baseline: {request.baseline_name}',
+        )
+        return SessionIntakeResponse(
+            session=updated_session,
+            record_type='baseline',
+            recorded_value=request.baseline_name,
+            current_plan_status=current_plan_status,
+        )
+
+    @app.post('/research-sessions/latest/intake', response_model=SessionIntakeResponse)
+    def create_latest_session_intake_entry(request: SessionIntakeRequest) -> SessionIntakeResponse:
+        return create_session_intake_entry('latest', request)
 
     @app.post('/intakes', response_model=IntakeRecord, status_code=status.HTTP_201_CREATED)
     def create_intake(request: IntakeCreateRequest) -> IntakeRecord:
@@ -1541,6 +1637,22 @@ def create_app(
         return create_design_draft_for_intake(intake, interpretation=interpretation)
 
     @app.post(
+        '/research-sessions/{session_id}/transitions/prepare-current-plan',
+        response_model=DesignDraftRecord,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def transition_prepare_current_plan(session_id: str) -> DesignDraftRecord:
+        return apply_session_design_skill(session_id)
+
+    @app.post(
+        '/research-sessions/latest/transitions/prepare-current-plan',
+        response_model=DesignDraftRecord,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def transition_prepare_latest_current_plan() -> DesignDraftRecord:
+        return apply_latest_session_design_skill()
+
+    @app.post(
         '/research-sessions/{session_id}/transitions/run-happy-path',
         response_model=ResearchSessionRunCommandResponse,
         status_code=status.HTTP_201_CREATED,
@@ -1626,6 +1738,48 @@ def create_app(
     def get_session_design(session_id: str) -> DesignDraftRecord:
         session_id = resolve_latest_session_id(session_id)
         return get_required_session_latest_design(store, session_id)
+
+    @app.get('/research-sessions/{session_id}/preflight/current-plan', response_model=ExecutionPreflightResult)
+    def get_session_current_plan_preflight(session_id: str) -> ExecutionPreflightResult:
+        session_id = resolve_latest_session_id(session_id)
+        design = get_required_session_latest_design(store, session_id)
+        workflow = registry.get_workflow(design.workflow_id)
+        if workflow is None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='workflow registry entry not found')
+        return build_execution_preflight_result(workflow, settings)
+
+    @app.get('/research-sessions/latest/preflight/current-plan', response_model=ExecutionPreflightResult)
+    def get_latest_current_plan_preflight() -> ExecutionPreflightResult:
+        session = store.get_latest_research_session()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='no research session has been created yet')
+        return get_session_current_plan_preflight(session.session_id)
+
+    @app.post('/research-sessions/{session_id}/decisions/current', response_model=SessionDecisionResponse)
+    def record_session_current_decision(session_id: str, request: SessionDecisionRequest) -> SessionDecisionResponse:
+        session_id = resolve_latest_session_id(session_id)
+        session = get_required_research_session(store, session_id)
+        decision_text = request.decision
+        if request.note:
+            decision_text = f'{decision_text}: {request.note}'
+        updated_session = append_research_session_memory(
+            store,
+            session_id,
+            decision=decision_text,
+        )
+        operation = record_operation(
+            store,
+            operation_type='session-decision',
+            started_at=datetime.now(timezone.utc),
+            status='completed',
+            session_id=session.session_id,
+            result_detail=f"recorded decision '{request.decision}'",
+        )
+        return SessionDecisionResponse(session=updated_session, operation=operation)
+
+    @app.post('/research-sessions/latest/decisions/current', response_model=SessionDecisionResponse)
+    def record_latest_session_current_decision(request: SessionDecisionRequest) -> SessionDecisionResponse:
+        return record_session_current_decision('latest', request)
 
     @app.post('/design-drafts/latest/review', response_model=DesignDraftRecord)
     def review_latest_design_draft(request: DesignDraftReviewRequest) -> DesignDraftRecord:

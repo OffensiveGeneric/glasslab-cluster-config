@@ -205,6 +205,59 @@ class ResearchSessionMemoryAppendRequest(BaseModel):
         return cleaned
 
 
+class SessionIntakeRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    source_url: str | None = None
+    document_url: str | None = None
+    note: str | None = None
+    dataset_uri: str | None = None
+    baseline_name: str | None = None
+    submitted_by: str | None = None
+
+    @field_validator('source_url', 'document_url', 'note', 'dataset_uri', 'baseline_name')
+    @classmethod
+    def validate_optional_session_intake_values(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = ' '.join(value.split()).strip()
+        return cleaned or None
+
+
+class SessionIntakeResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    session: ResearchSessionRecord
+    record_type: Literal['source_document', 'dataset', 'note', 'baseline']
+    source_document: SourceDocumentRecord | None = None
+    dataset: DatasetRecord | None = None
+    recorded_value: str | None = None
+    current_plan_status: str | None = None
+
+
+class SessionDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    decision: Literal['keep', 'discard', 'revise']
+    note: str | None = None
+    submitted_by: str | None = None
+
+    @field_validator('note')
+    @classmethod
+    def validate_optional_decision_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = ' '.join(value.split()).strip()
+        return cleaned or None
+
+
+class SessionDecisionResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    session: ResearchSessionRecord
+    operation: OperationRecord
+
+
 class ResearchProblemRecord(BaseModel):
     model_config = ConfigDict(extra='forbid')
 

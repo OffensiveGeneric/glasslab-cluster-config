@@ -1,6 +1,7 @@
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,6 +10,7 @@ for module_name in list(sys.modules):
         del sys.modules[module_name]
 
 from app.config import Settings
+import app.persistence as persistence_module
 from app.persistence import JsonFileRunStore, create_run_store
 from app.schemas import (
     OperationRecord,
@@ -125,3 +127,71 @@ def test_json_store_persists_session_and_stage_metadata_across_restart(tmp_path:
     assert reloaded.get_source_document(document.document_id) == document
     assert reloaded.get_latest_operation() == operation
     assert reloaded.list_executions(schedule_id='schedule-1') == [execution]
+
+
+def test_postgres_store_requires_dsn() -> None:
+    with pytest.raises(ValueError, match='non-empty store_postgres_dsn'):
+        Settings(
+            registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+            store_backend='postgres',
+            store_postgres_dsn='   ',
+        )
+
+
+def test_postgres_store_round_trips_through_psycopg_adapter(monkeypatch) -> None:
+    state: dict[str, object] = {}
+
+    class FakeCursor:
+        def __init__(self) -> None:
+            self._row = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, query, params=None):
+            if 'SELECT payload' in query:
+                payload = state.get('payload')
+                self._row = (payload,) if payload is not None else None
+            elif 'INSERT INTO workflow_state' in query:
+                state['payload'] = params[1]
+
+        def fetchone(self):
+            return self._row
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def cursor(self):
+            return FakeCursor()
+
+        def commit(self):
+            return None
+
+    fake_psycopg = SimpleNamespace(connect=lambda dsn: FakeConnection())
+    monkeypatch.setattr(persistence_module, '_import_psycopg', lambda: fake_psycopg)
+
+    now = datetime(2026, 4, 22, 12, 0, tzinfo=timezone.utc)
+    store = create_run_store('postgres', postgres_dsn='postgresql://test')
+    session = ResearchSessionRecord(
+        session_id='session-1',
+        created_at=now,
+        updated_at=now,
+        status='active',
+        title='Postgres durability',
+        goal_statement='Persist workflow metadata in Postgres instead of the artifacts share.',
+        priorities=['durability'],
+        submitted_by='glasslab-operator',
+    )
+    store.save_research_session(session)
+
+    reloaded = create_run_store('postgres', postgres_dsn='postgresql://test')
+    reloaded_session = reloaded.get_latest_research_session()
+    assert reloaded_session is not None
+    assert reloaded_session.session_id == session.session_id

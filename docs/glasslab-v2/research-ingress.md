@@ -30,11 +30,15 @@ Current behavior:
 
 Deterministic happy-path boundary for the primary runner loop:
 
-- `!start`
-- `!status`
+- `!new`
+- `!state`
+- `!add`
+- `!plan`
+- `!check`
 - `!run`
-- `!next`
 - `!compare`
+- `!decide`
+- `!next`
 
 These five commands now execute through:
 
@@ -75,11 +79,15 @@ Examples:
 
 Important deterministic commands currently covered by the repo-owned ingress path:
 
-- `!start <topic>`
-- `!status`
+- `!new <goal>`
+- `!state`
+- `!add <thing>`
+- `!plan`
+- `!check`
 - `!run`
-- `!next`
 - `!compare`
+- `!decide <keep|discard|revise>`
+- `!next`
 - `!research <topic>`
 - `!more-papers`
 - `!next-paper`
@@ -137,18 +145,26 @@ Operational note from the 2026-04-03 live validation:
 
 Current backend-owned one-shot transitions:
 
-- `!start` -> `POST /research-sessions/start-literature-search`
-- `!status` -> `GET /research-sessions/latest/context` plus
-  `GET /research-sessions/latest/autoresearch-summary` when a campaign exists
-- `!run` -> `POST /research-sessions/latest/transitions/run-happy-path`
-- `!next` -> `POST /research-sessions/latest/transitions/advance-autoresearch`
-- `!compare` -> `GET /research-sessions/latest/autoresearch-model-comparison`
+- `!new` -> `POST /research-sessions`
+- `!state` -> `GET /research-sessions/{session_id}/context` plus
+  `GET /research-sessions/{session_id}/autoresearch-summary` when a campaign exists
+- `!add` -> `POST /research-sessions/{session_id}/intake`
+- `!plan` -> `POST /research-sessions/{session_id}/transitions/prepare-current-plan`
+- `!check` -> `GET /research-sessions/{session_id}/preflight/current-plan`
+- `!run` -> `POST /research-sessions/{session_id}/transitions/run-happy-path`
+- `!compare` -> `GET /research-sessions/{session_id}/autoresearch-model-comparison`
+- `!decide` -> `POST /research-sessions/{session_id}/decisions/current`
+- `!next` -> `POST /research-sessions/{session_id}/transitions/advance-autoresearch`
 
 Primary runner-first sequence:
 
 ```text
-!start replicate DreamSim visual similarity metric with PyTorch and timm
+!new replicate DreamSim visual similarity metric with PyTorch and timm
+!add baseline: DreamSim
+!plan
+!check
 !run
+!decide keep
 !next
 !compare
 ```

@@ -220,6 +220,102 @@ def test_json_store_persists_intake_across_restart(tmp_path) -> None:
     assert latest.json()['intake_id'] == intake_id
 
 
+def test_session_intake_endpoint_accepts_note_dataset_and_source(monkeypatch) -> None:
+    client = build_client()
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Keep a single bounded session and add structured context.'},
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    note = client.post(
+        f'/research-sessions/{session_id}/intake',
+        json={'note': 'keep timm backbones only'},
+    )
+    assert note.status_code == 200
+    assert note.json()['record_type'] == 'note'
+    assert note.json()['recorded_value'] == 'keep timm backbones only'
+
+    dataset = client.post(
+        f'/research-sessions/{session_id}/intake',
+        json={'dataset_uri': 's3://datasets/paintings/v1'},
+    )
+    assert dataset.status_code == 200
+    assert dataset.json()['record_type'] == 'dataset'
+    assert dataset.json()['dataset']['uri'] == 's3://datasets/paintings/v1'
+
+    monkeypatch.setattr(
+        source_documents,
+        'fetch_source_document_bytes',
+        lambda source_url: (b'<html><title>Paper</title><body>bounded source</body></html>', 'text/html'),
+    )
+    monkeypatch.setattr(
+        source_documents,
+        'persist_source_document_bytes',
+        lambda **kwargs: 'file:///tmp/source.html',
+    )
+    monkeypatch.setattr(main_module, 'ingest_source_document', source_documents.ingest_source_document)
+
+    source = client.post(
+        f'/research-sessions/{session_id}/intake',
+        json={'source_url': 'https://example.org/paper.html'},
+    )
+    assert source.status_code == 200
+    assert source.json()['record_type'] == 'source_document'
+    assert source.json()['source_document']['source_url'] == 'https://example.org/paper.html'
+
+
+def test_prepare_current_plan_and_current_preflight_aliases() -> None:
+    client = build_client()
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Benchmark bounded Titanic baselines in one current plan.'},
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    intake = client.post(
+        f'/research-sessions/{session_id}/intakes',
+        json={
+            'raw_request': 'Benchmark approved Titanic baselines and compare one small bounded variant.',
+            'source_refs': ['https://example.org/titanic-note'],
+            'notes': ['Current-plan alias regression test.'],
+        },
+    )
+    assert intake.status_code == 201
+
+    plan = client.post(f'/research-sessions/{session_id}/transitions/prepare-current-plan')
+    assert plan.status_code == 201
+    assert plan.json()['design_id']
+
+    check = client.get(f'/research-sessions/{session_id}/preflight/current-plan')
+    assert check.status_code == 200
+    assert 'ready' in check.json()
+
+
+def test_current_decision_endpoint_persists_operation_and_session_log() -> None:
+    client = build_client()
+
+    session = client.post(
+        '/research-sessions',
+        json={'goal_statement': 'Record a bounded human decision for the current session.'},
+    )
+    assert session.status_code == 201
+    session_id = session.json()['session_id']
+
+    decide = client.post(
+        f'/research-sessions/{session_id}/decisions/current',
+        json={'decision': 'keep', 'note': 'use the stronger baseline next'},
+    )
+    assert decide.status_code == 200
+    payload = decide.json()
+    assert payload['operation']['operation_type'] == 'session-decision'
+    assert "keep: use the stronger baseline next" in payload['session']['decision_log']
+
+
 def test_import_and_query_technique_catalog() -> None:
     client = build_client()
 

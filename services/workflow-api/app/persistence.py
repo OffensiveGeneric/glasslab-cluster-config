@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import json
 from pathlib import Path
+from types import ModuleType
 from threading import Lock
 from typing import Any, TypeVar
 
@@ -31,6 +32,12 @@ from .schemas import (
 )
 
 ModelT = TypeVar('ModelT')
+
+
+def _import_psycopg() -> ModuleType:
+    import psycopg
+
+    return psycopg
 
 
 class RunStore(ABC):
@@ -890,11 +897,267 @@ class JsonFileRunStore(InMemoryRunStore):
         self._flush()
 
 
-def create_run_store(store_backend: str, *, state_path: str | Path | None = None) -> RunStore:
+class PostgresRunStore(InMemoryRunStore):
+    def __init__(self, dsn: str) -> None:
+        self._dsn = dsn
+        super().__init__()
+        self._ensure_schema()
+        self._load()
+
+    def _connect(self):
+        psycopg = _import_psycopg()
+        return psycopg.connect(self._dsn)
+
+    def _ensure_schema(self) -> None:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    '''
+                    CREATE TABLE IF NOT EXISTS workflow_state (
+                        store_key TEXT PRIMARY KEY,
+                        payload JSONB NOT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    '''
+                )
+            conn.commit()
+
+    def _load(self) -> None:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    'SELECT payload FROM workflow_state WHERE store_key = %s',
+                    ('default',),
+                )
+                row = cur.fetchone()
+        if not row:
+            return
+        payload = row[0]
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+        with self._lock:
+            self._datasets = _parse_record_map(payload.get('datasets', {}), DatasetRecord)
+            self._technique_catalog = _parse_record_map(payload.get('technique_catalog', {}), TechniqueCatalogRecord)
+            self._methodology_drafts = _parse_record_map(payload.get('methodology_drafts', {}), MethodologyDraftRecord)
+            self._latest_methodology_draft_id = payload.get('latest_methodology_draft_id')
+            self._autoresearch_campaigns = _parse_record_map(
+                payload.get('autoresearch_campaigns', {}),
+                AutoresearchCampaignRecord,
+            )
+            self._latest_autoresearch_campaign_id = payload.get('latest_autoresearch_campaign_id')
+            self._autoresearch_iterations = _parse_record_map(
+                payload.get('autoresearch_iterations', {}),
+                AutoresearchIterationRecord,
+            )
+            self._latest_autoresearch_iteration_id = payload.get('latest_autoresearch_iteration_id')
+            self._autoresearch_decisions = _parse_record_map(
+                payload.get('autoresearch_decisions', {}),
+                AutoresearchDecisionRecord,
+            )
+            self._latest_autoresearch_decision_id = payload.get('latest_autoresearch_decision_id')
+            self._research_sessions = _parse_record_map(
+                payload.get('research_sessions', {}),
+                ResearchSessionRecord,
+            )
+            self._latest_research_session_id = payload.get('latest_research_session_id')
+            self._intakes = _parse_record_map(payload.get('intakes', {}), IntakeRecord)
+            self._latest_intake_id = payload.get('latest_intake_id')
+            self._interpretations = _parse_record_map(payload.get('interpretations', {}), InterpretationRecord)
+            self._latest_interpretation_id = payload.get('latest_interpretation_id')
+            self._replicability_assessments = _parse_record_map(
+                payload.get('replicability_assessments', {}),
+                ReplicabilityAssessmentRecord,
+            )
+            self._latest_replicability_assessment_id = payload.get('latest_replicability_assessment_id')
+            self._design_drafts = _parse_record_map(payload.get('design_drafts', {}), DesignDraftRecord)
+            self._latest_design_draft_id = payload.get('latest_design_draft_id')
+            self._research_problems = _parse_record_map(payload.get('research_problems', {}), ResearchProblemRecord)
+            self._latest_research_problem_id = payload.get('latest_research_problem_id')
+            self._paper_intake_queues = _parse_record_map(
+                payload.get('paper_intake_queues', {}),
+                PaperIntakeQueueRecord,
+            )
+            self._latest_paper_intake_queue_id = payload.get('latest_paper_intake_queue_id')
+            self._source_documents = _parse_record_map(payload.get('source_documents', {}), SourceDocumentRecord)
+            self._latest_source_document_id = payload.get('latest_source_document_id')
+            self._runs = _parse_record_map(payload.get('runs', {}), RunRecord)
+            self._latest_run_id = payload.get('latest_run_id')
+            self._schedules = _parse_record_map(payload.get('schedules', {}), ScheduledOperationRecord)
+            self._executions = _parse_record_map(payload.get('executions', {}), ScheduledExecutionRecord)
+            self._artifacts = _parse_artifacts_map(payload.get('artifacts', {}))
+            self._logs = _parse_logs_map(payload.get('logs', {}))
+            self._operations = _parse_record_map(payload.get('operations', {}), OperationRecord)
+            self._latest_operation_id = payload.get('latest_operation_id')
+
+    def _flush(self) -> None:
+        with self._lock:
+            payload = {
+                'datasets': {key: record.model_dump(mode='json') for key, record in self._datasets.items()},
+                'technique_catalog': {
+                    key: record.model_dump(mode='json') for key, record in self._technique_catalog.items()
+                },
+                'methodology_drafts': {
+                    key: record.model_dump(mode='json') for key, record in self._methodology_drafts.items()
+                },
+                'latest_methodology_draft_id': self._latest_methodology_draft_id,
+                'autoresearch_campaigns': {
+                    key: record.model_dump(mode='json') for key, record in self._autoresearch_campaigns.items()
+                },
+                'latest_autoresearch_campaign_id': self._latest_autoresearch_campaign_id,
+                'autoresearch_iterations': {
+                    key: record.model_dump(mode='json') for key, record in self._autoresearch_iterations.items()
+                },
+                'latest_autoresearch_iteration_id': self._latest_autoresearch_iteration_id,
+                'autoresearch_decisions': {
+                    key: record.model_dump(mode='json') for key, record in self._autoresearch_decisions.items()
+                },
+                'latest_autoresearch_decision_id': self._latest_autoresearch_decision_id,
+                'research_sessions': {
+                    key: record.model_dump(mode='json') for key, record in self._research_sessions.items()
+                },
+                'latest_research_session_id': self._latest_research_session_id,
+                'intakes': {key: record.model_dump(mode='json') for key, record in self._intakes.items()},
+                'latest_intake_id': self._latest_intake_id,
+                'interpretations': {
+                    key: record.model_dump(mode='json') for key, record in self._interpretations.items()
+                },
+                'latest_interpretation_id': self._latest_interpretation_id,
+                'replicability_assessments': {
+                    key: record.model_dump(mode='json') for key, record in self._replicability_assessments.items()
+                },
+                'latest_replicability_assessment_id': self._latest_replicability_assessment_id,
+                'design_drafts': {key: record.model_dump(mode='json') for key, record in self._design_drafts.items()},
+                'latest_design_draft_id': self._latest_design_draft_id,
+                'research_problems': {
+                    key: record.model_dump(mode='json') for key, record in self._research_problems.items()
+                },
+                'latest_research_problem_id': self._latest_research_problem_id,
+                'paper_intake_queues': {
+                    key: record.model_dump(mode='json') for key, record in self._paper_intake_queues.items()
+                },
+                'latest_paper_intake_queue_id': self._latest_paper_intake_queue_id,
+                'source_documents': {
+                    key: record.model_dump(mode='json') for key, record in self._source_documents.items()
+                },
+                'latest_source_document_id': self._latest_source_document_id,
+                'runs': {key: record.model_dump(mode='json') for key, record in self._runs.items()},
+                'latest_run_id': self._latest_run_id,
+                'schedules': {key: record.model_dump(mode='json') for key, record in self._schedules.items()},
+                'executions': {key: record.model_dump(mode='json') for key, record in self._executions.items()},
+                'artifacts': {key: record.model_dump(mode='json') for key, record in self._artifacts.items()},
+                'logs': {key: [entry.model_dump(mode='json') for entry in entries] for key, entries in self._logs.items()},
+                'operations': {key: record.model_dump(mode='json') for key, record in self._operations.items()},
+                'latest_operation_id': self._latest_operation_id,
+            }
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    '''
+                    INSERT INTO workflow_state (store_key, payload, updated_at)
+                    VALUES (%s, %s::jsonb, NOW())
+                    ON CONFLICT (store_key) DO UPDATE
+                    SET payload = EXCLUDED.payload,
+                        updated_at = EXCLUDED.updated_at
+                    ''',
+                    ('default', json.dumps(payload)),
+                )
+            conn.commit()
+
+    def save_research_session(self, record: ResearchSessionRecord) -> None:
+        super().save_research_session(record)
+        self._flush()
+
+    def save_dataset_record(self, record: DatasetRecord) -> None:
+        super().save_dataset_record(record)
+        self._flush()
+
+    def save_technique_catalog_record(self, record: TechniqueCatalogRecord) -> None:
+        super().save_technique_catalog_record(record)
+        self._flush()
+
+    def save_methodology_draft(self, record: MethodologyDraftRecord) -> None:
+        super().save_methodology_draft(record)
+        self._flush()
+
+    def save_autoresearch_campaign(self, record: AutoresearchCampaignRecord) -> None:
+        super().save_autoresearch_campaign(record)
+        self._flush()
+
+    def save_autoresearch_iteration(self, record: AutoresearchIterationRecord) -> None:
+        super().save_autoresearch_iteration(record)
+        self._flush()
+
+    def save_autoresearch_decision(self, record: AutoresearchDecisionRecord) -> None:
+        super().save_autoresearch_decision(record)
+        self._flush()
+
+    def save_intake(self, record: IntakeRecord) -> None:
+        super().save_intake(record)
+        self._flush()
+
+    def save_design_draft(self, record: DesignDraftRecord) -> None:
+        super().save_design_draft(record)
+        self._flush()
+
+    def save_interpretation(self, record: InterpretationRecord) -> None:
+        super().save_interpretation(record)
+        self._flush()
+
+    def save_replicability_assessment(self, record: ReplicabilityAssessmentRecord) -> None:
+        super().save_replicability_assessment(record)
+        self._flush()
+
+    def save_run(self, record: RunRecord) -> None:
+        super().save_run(record)
+        self._flush()
+
+    def save_research_problem(self, record: ResearchProblemRecord) -> None:
+        super().save_research_problem(record)
+        self._flush()
+
+    def save_paper_intake_queue(self, record: PaperIntakeQueueRecord) -> None:
+        super().save_paper_intake_queue(record)
+        self._flush()
+
+    def save_source_document(self, record: SourceDocumentRecord) -> None:
+        super().save_source_document(record)
+        self._flush()
+
+    def save_schedule(self, record: ScheduledOperationRecord) -> None:
+        super().save_schedule(record)
+        self._flush()
+
+    def save_execution(self, record: ScheduledExecutionRecord) -> None:
+        super().save_execution(record)
+        self._flush()
+
+    def save_artifacts(self, run_id: str, artifacts: ArtifactsIndex) -> None:
+        super().save_artifacts(run_id, artifacts)
+        self._flush()
+
+    def append_log(self, run_id: str, entry: LogEntry) -> None:
+        super().append_log(run_id, entry)
+        self._flush()
+
+    def save_operation(self, record: OperationRecord) -> None:
+        super().save_operation(record)
+        self._flush()
+
+
+def create_run_store(
+    store_backend: str,
+    *,
+    state_path: str | Path | None = None,
+    postgres_dsn: str | None = None,
+) -> RunStore:
     if store_backend == 'memory':
         return InMemoryRunStore()
     if store_backend == 'json':
         if state_path is None:
             raise ValueError('json store backend requires state_path')
         return JsonFileRunStore(state_path)
+    if store_backend == 'postgres':
+        if not postgres_dsn:
+            raise ValueError('postgres store backend requires postgres_dsn')
+        return PostgresRunStore(postgres_dsn)
     raise ValueError(f'unsupported store backend: {store_backend}')

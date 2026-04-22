@@ -25,9 +25,10 @@ class Settings(BaseSettings):
     build_source_label: str = 'unspecified'
     log_level: str = 'INFO'
     registry_dir: str = str(DEFAULT_REGISTRY_DIR)
-    store_backend: Literal['memory', 'json'] = 'memory'
+    store_backend: Literal['memory', 'json', 'postgres'] = 'memory'
     allow_inmemory_store: bool = True
     store_json_path: str = '/mnt/artifacts/workflow-api/state/run-store.json'
+    store_postgres_dsn: str | None = None
     runner_namespace: str = 'glasslab-v2'
     default_submitted_by: str = 'glasslab-operator'
     job_submission_mode: Literal['null', 'kubernetes'] = 'null'
@@ -88,6 +89,8 @@ class Settings(BaseSettings):
             )
         if self.store_backend == 'json' and not self.store_json_path.strip():
             raise ValueError('json store backend requires a non-empty store_json_path')
+        if self.store_backend == 'postgres' and not (self.store_postgres_dsn or '').strip():
+            raise ValueError('postgres store backend requires a non-empty store_postgres_dsn')
         return self
 
 
