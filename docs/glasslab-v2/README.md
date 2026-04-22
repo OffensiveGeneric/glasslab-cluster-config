@@ -88,6 +88,7 @@ Canonical planning and architecture:
 - `reporting-close-criteria.md`: when the deterministic reporting issue should be considered materially resolved
 - `reporting-implementation-checklist.md`: concrete wiring checklist for the deterministic reporter path
 - `resume-next-session-2026-03-24.md`: concise checkpoint for resuming after the `qwen3:30b` pull and Mac-native tool evaluation
+- `canonical-stack-2026-04.md`: one-page primary/secondary/legacy view of the current stack so the repo stops carrying overlapping control stories
 - `qwen-fit-for-stage-agents.md`: where the current local Qwen path is useful for backend agents and where it is not
 - `approval-tier-unattended-ops-plan.md`: concrete plan for unattended digests and approved reruns behind approval tiers
 - `workflow-api-schedules.md`: current stored schedule endpoints for digests and approved reruns

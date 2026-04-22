@@ -21,21 +21,13 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - name: GLASSLAB_INTERPRETATION_AGENT_PROVIDER_API
-              value: ollama
+              value: openai-compatible
             - name: GLASSLAB_INTERPRETATION_AGENT_PROVIDER_BASE_URL
-              value: http://192.168.1.23:11434
+              value: http://192.168.1.21:52415
             - name: GLASSLAB_INTERPRETATION_AGENT_MODEL
-              value: qwen3:30b
+              value: mlx-community/Qwen3-Coder-Next-4bit
             - name: GLASSLAB_INTERPRETATION_AGENT_TIMEOUT_SECONDS
-              value: "45"
-            - name: GLASSLAB_INTERPRETATION_AGENT_FALLBACK_PROVIDER_API
-              value: ollama
-            - name: GLASSLAB_INTERPRETATION_AGENT_FALLBACK_PROVIDER_BASE_URL
-              value: http://192.168.1.12:11434
-            - name: GLASSLAB_INTERPRETATION_AGENT_FALLBACK_MODEL
-              value: qwen3:14b
-            - name: GLASSLAB_INTERPRETATION_AGENT_FALLBACK_TIMEOUT_SECONDS
-              value: "30"
+              value: "120"
           ports:
             - containerPort: 8091
               name: http

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import os
 from pathlib import Path
 import re
 from urllib.parse import urlparse
@@ -30,10 +31,11 @@ SERVICE_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SEED_MANIFEST = SERVICE_ROOT / 'seeds' / 'glasslab_paper_harvester_seed_manifest.yaml'
 
 MODEL_BACKEND = ModelBackendMetadata(
-    provider='ollama',
-    base_url='http://192.168.1.23:11434',
-    model='qwen3:30b',
-    timeout_seconds=30.0,
+    provider=os.getenv('GLASSLAB_INTAKE_AGENT_PROVIDER_API', 'openai-compatible').strip() or 'openai-compatible',
+    base_url=os.getenv('GLASSLAB_INTAKE_AGENT_PROVIDER_BASE_URL', 'http://192.168.1.21:52415').strip(),
+    model=os.getenv('GLASSLAB_INTAKE_AGENT_MODEL', 'mlx-community/Qwen3-Coder-Next-4bit').strip()
+    or 'mlx-community/Qwen3-Coder-Next-4bit',
+    timeout_seconds=float(os.getenv('GLASSLAB_INTAKE_AGENT_TIMEOUT_SECONDS', '120').strip() or '120'),
 )
 
 

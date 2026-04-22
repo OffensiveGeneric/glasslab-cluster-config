@@ -68,7 +68,9 @@ def test_healthz() -> None:
     client = TestClient(app)
     response = client.get('/healthz')
     assert response.status_code == 200
-    assert response.json()['model_backend']['model'] == 'qwen3:30b'
+    payload = response.json()
+    assert payload['model_backend']['model'] == 'mlx-community/Qwen3-Coder-Next-4bit'
+    assert payload['model_backend']['provider'] == 'openai-compatible'
 
 
 def test_build_design_draft() -> None:

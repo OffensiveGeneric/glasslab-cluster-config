@@ -100,9 +100,9 @@ Response shape:
     ]
   },
   "model_backend": {
-    "provider": "ollama",
-    "base_url": "http://192.168.1.23:11434",
-    "model": "qwen3:30b"
+    "provider": "openai-compatible",
+    "base_url": "http://192.168.1.21:52415",
+    "model": "mlx-community/Qwen3-Coder-Next-4bit"
   }
 }
 ```
@@ -139,14 +139,15 @@ The agent service should not store durable state.
 
 The service should call external Mac-hosted inference, not host the model itself in the first pass.
 
-Preferred backend order:
+Current canonical backend:
 
-1. `.23` with the larger reasoning model for interpretation-quality work
-2. `.12` with `qwen3:14b` as fallback for lower-latency bounded drafts
+1. `.21` exo OpenAI-compatible endpoint
+2. model: `mlx-community/Qwen3-Coder-Next-4bit`
+3. deterministic scaffold fallback inside the service if the model lane fails
 
 This keeps:
 
-- stronger models on the Macs
+- one bounded model-serving lane for stage agents
 - bounded backend logic in-cluster
 - cluster GPU free for later experiments
 
@@ -158,11 +159,14 @@ reason about fetched paper content, not only URLs and operator notes.
 
 For the interpretation-agent service:
 
-- `GLASSLAB_INTERPRETATION_PROVIDER_BASE_URL`
-- `GLASSLAB_INTERPRETATION_PROVIDER_API`
-- `GLASSLAB_INTERPRETATION_MODEL`
-- `GLASSLAB_INTERPRETATION_TIMEOUT_SECONDS`
-- `GLASSLAB_INTERPRETATION_FALLBACK_MODE`
+- `GLASSLAB_INTERPRETATION_AGENT_PROVIDER_BASE_URL`
+- `GLASSLAB_INTERPRETATION_AGENT_PROVIDER_API`
+- `GLASSLAB_INTERPRETATION_AGENT_MODEL`
+- `GLASSLAB_INTERPRETATION_AGENT_TIMEOUT_SECONDS`
+- `GLASSLAB_INTERPRETATION_AGENT_FALLBACK_PROVIDER_BASE_URL`
+- `GLASSLAB_INTERPRETATION_AGENT_FALLBACK_PROVIDER_API`
+- `GLASSLAB_INTERPRETATION_AGENT_FALLBACK_MODEL`
+- `GLASSLAB_INTERPRETATION_AGENT_FALLBACK_TIMEOUT_SECONDS`
 
 For `workflow-api`:
 

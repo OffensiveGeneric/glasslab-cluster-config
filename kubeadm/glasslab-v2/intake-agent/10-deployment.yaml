@@ -19,6 +19,15 @@ spec:
         - name: intake-agent
           image: ghcr.io/offensivegeneric/glasslab-intake-agent:0.1.0
           imagePullPolicy: IfNotPresent
+          env:
+            - name: GLASSLAB_INTAKE_AGENT_PROVIDER_API
+              value: openai-compatible
+            - name: GLASSLAB_INTAKE_AGENT_PROVIDER_BASE_URL
+              value: http://192.168.1.21:52415
+            - name: GLASSLAB_INTAKE_AGENT_MODEL
+              value: mlx-community/Qwen3-Coder-Next-4bit
+            - name: GLASSLAB_INTAKE_AGENT_TIMEOUT_SECONDS
+              value: "120"
           ports:
             - containerPort: 8090
               name: http

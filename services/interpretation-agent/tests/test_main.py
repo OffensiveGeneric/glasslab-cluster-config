@@ -59,7 +59,7 @@ def test_healthz() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload['status'] == 'ok'
-    assert payload['model_backend']['model'] == 'qwen3:30b'
+    assert payload['model_backend']['model'] == 'mlx-community/Qwen3-Coder-Next-4bit'
 
 
 def test_build_interpretation_draft_prefers_matching_candidates() -> None:
@@ -93,17 +93,27 @@ def test_interpret_intake_endpoint_returns_bounded_draft_shape(monkeypatch) -> N
     assert payload['draft']['literature_state_summary'].startswith('Current bounded literature view:')
     assert 'research_gaps' in payload['draft']
     assert payload['draft']['bounded_experiment_ideas']
-    assert payload['model_backend']['provider'] == 'ollama'
+    assert payload['model_backend']['provider'] == 'openai-compatible'
     assert payload['warnings'] == ['stubbed interpretation backend']
 
 
 def test_interpretation_agent_uses_fallback_backend(monkeypatch) -> None:
     request = build_request()
     calls: list[str] = []
+    monkeypatch.setattr(
+        main_module,
+        'FALLBACK_BACKEND',
+        main_module.ProviderConfig(
+            provider='openai-compatible',
+            base_url='http://192.168.1.22:52415',
+            model='mlx-community/Qwen3-Coder-Next-4bit',
+            timeout_seconds=60.0,
+        ),
+    )
 
     def fake_call_backend(req, backend):
         calls.append(backend.base_url)
-        if backend.base_url.endswith('.23:11434'):
+        if backend.base_url.endswith('.21:52415'):
             raise ValueError('primary unavailable')
         draft = build_interpretation_draft(req)
         draft.extracted_method_summary = 'Fallback model interpretation.'
@@ -113,8 +123,8 @@ def test_interpretation_agent_uses_fallback_backend(monkeypatch) -> None:
     draft, backend, warnings = interpret_with_backends(request)
 
     assert draft.extracted_method_summary == 'Fallback model interpretation.'
-    assert backend.base_url == 'http://192.168.1.12:11434'
-    assert calls == ['http://192.168.1.23:11434', 'http://192.168.1.12:11434']
+    assert backend.base_url == 'http://192.168.1.22:52415'
+    assert calls == ['http://192.168.1.21:52415', 'http://192.168.1.22:52415']
     assert 'used fallback interpretation backend' in warnings
 
 
@@ -128,5 +138,5 @@ def test_interpretation_agent_falls_back_to_deterministic_scaffold(monkeypatch) 
     draft, backend, warnings = interpret_with_backends(request)
 
     assert draft.candidate_workflow_families[0] == 'generic-tabular-benchmark'
-    assert backend.base_url == 'http://192.168.1.23:11434'
+    assert backend.base_url == 'http://192.168.1.21:52415'
     assert any('all model backends failed' in warning for warning in warnings)

@@ -15,12 +15,12 @@ The intended caller is `workflow-api`, not OpenClaw directly.
 
 ## Current Scope
 
-Current implementation is a bounded Ollama-backed service:
+Current implementation is a bounded exo-backed service:
 
 - `GET /healthz`
 - `POST /interpret-intake`
-- primary bounded interpretation against `.23` `qwen3:30b`
-- fallback bounded interpretation against `.12` `qwen3:14b`
+- primary bounded interpretation against `.21` exo OpenAI-compatible chat
+- default model `mlx-community/Qwen3-Coder-Next-4bit`
 - deterministic bounded draft fallback if both backends fail
 - accepts `document_refs` from `workflow-api` so stored source-document context
   can be threaded into model-backed interpretation

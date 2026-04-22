@@ -46,21 +46,34 @@ class ProviderConfig:
 
     @property
     def chat_url(self) -> str:
+        if self.provider in {'openai-compatible', 'openai', 'exo'}:
+            return self.base_url.rstrip('/') + '/v1/chat/completions'
         return self.base_url.rstrip('/') + '/api/chat'
 
 
 PRIMARY_BACKEND = ProviderConfig(
-    provider=os.getenv('GLASSLAB_INTERPRETATION_AGENT_PROVIDER_API', 'ollama').strip() or 'ollama',
-    base_url=os.getenv('GLASSLAB_INTERPRETATION_AGENT_PROVIDER_BASE_URL', 'http://192.168.1.23:11434').strip(),
-    model=os.getenv('GLASSLAB_INTERPRETATION_AGENT_MODEL', 'qwen3:30b').strip() or 'qwen3:30b',
-    timeout_seconds=float(os.getenv('GLASSLAB_INTERPRETATION_AGENT_TIMEOUT_SECONDS', '45').strip() or '45'),
+    provider=os.getenv('GLASSLAB_INTERPRETATION_AGENT_PROVIDER_API', 'openai-compatible').strip()
+    or 'openai-compatible',
+    base_url=os.getenv('GLASSLAB_INTERPRETATION_AGENT_PROVIDER_BASE_URL', 'http://192.168.1.21:52415').strip(),
+    model=os.getenv('GLASSLAB_INTERPRETATION_AGENT_MODEL', 'mlx-community/Qwen3-Coder-Next-4bit').strip()
+    or 'mlx-community/Qwen3-Coder-Next-4bit',
+    timeout_seconds=float(os.getenv('GLASSLAB_INTERPRETATION_AGENT_TIMEOUT_SECONDS', '120').strip() or '120'),
 )
 
-FALLBACK_BACKEND = ProviderConfig(
-    provider=os.getenv('GLASSLAB_INTERPRETATION_AGENT_FALLBACK_PROVIDER_API', 'ollama').strip() or 'ollama',
-    base_url=os.getenv('GLASSLAB_INTERPRETATION_AGENT_FALLBACK_PROVIDER_BASE_URL', 'http://192.168.1.12:11434').strip(),
-    model=os.getenv('GLASSLAB_INTERPRETATION_AGENT_FALLBACK_MODEL', 'qwen3:14b').strip() or 'qwen3:14b',
-    timeout_seconds=float(os.getenv('GLASSLAB_INTERPRETATION_AGENT_FALLBACK_TIMEOUT_SECONDS', '30').strip() or '30'),
+_fallback_base_url = os.getenv('GLASSLAB_INTERPRETATION_AGENT_FALLBACK_PROVIDER_BASE_URL', '').strip()
+FALLBACK_BACKEND = (
+    ProviderConfig(
+        provider=os.getenv('GLASSLAB_INTERPRETATION_AGENT_FALLBACK_PROVIDER_API', 'openai-compatible').strip()
+        or 'openai-compatible',
+        base_url=_fallback_base_url,
+        model=os.getenv('GLASSLAB_INTERPRETATION_AGENT_FALLBACK_MODEL', PRIMARY_BACKEND.model).strip()
+        or PRIMARY_BACKEND.model,
+        timeout_seconds=float(
+            os.getenv('GLASSLAB_INTERPRETATION_AGENT_FALLBACK_TIMEOUT_SECONDS', '60').strip() or '60'
+        ),
+    )
+    if _fallback_base_url
+    else None
 )
 
 MODEL_BACKEND = PRIMARY_BACKEND.metadata()
@@ -400,7 +413,6 @@ def build_prompt_payload(request: InterpretationRequest, deterministic_draft: In
     return {
         'model': '',
         'stream': False,
-        'format': 'json',
         'messages': [
             {'role': 'system', 'content': SYSTEM_PROMPT},
             {'role': 'user', 'content': json.dumps(user_payload, ensure_ascii=True)},
@@ -467,16 +479,27 @@ def normalize_model_draft(raw_draft: dict[str, Any], request: InterpretationRequ
     return InterpretationDraft(**payload)
 
 
-def parse_chat_response(body: dict[str, Any], request: InterpretationRequest) -> InterpretationDraft:
-    message = body.get('message')
-    if not isinstance(message, dict):
-        raise ValueError('ollama response missing message object')
-    content = message.get('content')
-    if not isinstance(content, str) or not content.strip():
-        raise ValueError('ollama response missing message content')
+def parse_chat_response(body: dict[str, Any], request: InterpretationRequest, backend: ProviderConfig) -> InterpretationDraft:
+    if backend.provider in {'openai-compatible', 'openai', 'exo'}:
+        choices = body.get('choices')
+        if not isinstance(choices, list) or not choices:
+            raise ValueError('openai-compatible response missing choices')
+        message = choices[0].get('message')
+        if not isinstance(message, dict):
+            raise ValueError('openai-compatible response missing message object')
+        content = message.get('content')
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError('openai-compatible response missing message content')
+    else:
+        message = body.get('message')
+        if not isinstance(message, dict):
+            raise ValueError('ollama response missing message object')
+        content = message.get('content')
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError('ollama response missing message content')
     raw = json.loads(content)
     if not isinstance(raw, dict):
-        raise ValueError('ollama response did not return a JSON object')
+        raise ValueError('model response did not return a JSON object')
     return normalize_model_draft(raw, request)
 
 
@@ -484,6 +507,12 @@ def call_backend(request: InterpretationRequest, backend: ProviderConfig) -> Int
     deterministic_draft = build_interpretation_draft(request)
     payload = build_prompt_payload(request, deterministic_draft)
     payload['model'] = backend.model
+    if backend.provider in {'openai-compatible', 'openai', 'exo'}:
+        payload.pop('options', None)
+        payload['temperature'] = 0.1
+        payload['response_format'] = {'type': 'json_object'}
+    else:
+        payload['format'] = 'json'
     request_obj = urllib_request.Request(
         backend.chat_url,
         data=json.dumps(payload).encode('utf-8'),
@@ -492,7 +521,7 @@ def call_backend(request: InterpretationRequest, backend: ProviderConfig) -> Int
     )
     with urllib_request.urlopen(request_obj, timeout=backend.timeout_seconds) as response:
         body = json.loads(response.read().decode('utf-8'))
-    return parse_chat_response(body, request)
+    return parse_chat_response(body, request, backend)
 
 
 def interpret_with_backends(request: InterpretationRequest) -> tuple[InterpretationDraft, ModelBackendMetadata, list[str]]:
@@ -503,12 +532,13 @@ def interpret_with_backends(request: InterpretationRequest) -> tuple[Interpretat
     except (urllib_error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
         warnings.append(f'primary interpretation backend failed: {exc}')
 
-    try:
-        draft = call_backend(request, FALLBACK_BACKEND)
-        warnings.append('used fallback interpretation backend')
-        return draft, FALLBACK_BACKEND.metadata(), warnings
-    except (urllib_error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
-        warnings.append(f'fallback interpretation backend failed: {exc}')
+    if FALLBACK_BACKEND is not None:
+        try:
+            draft = call_backend(request, FALLBACK_BACKEND)
+            warnings.append('used fallback interpretation backend')
+            return draft, FALLBACK_BACKEND.metadata(), warnings
+        except (urllib_error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+            warnings.append(f'fallback interpretation backend failed: {exc}')
 
     warnings.append('all model backends failed; using deterministic interpretation scaffold')
     return build_interpretation_draft(request), PRIMARY_BACKEND.metadata(), warnings

@@ -19,6 +19,15 @@ spec:
         - name: assessment-agent
           image: ghcr.io/offensivegeneric/glasslab-assessment-agent:0.1.0
           imagePullPolicy: IfNotPresent
+          env:
+            - name: GLASSLAB_ASSESSMENT_AGENT_PROVIDER_API
+              value: openai-compatible
+            - name: GLASSLAB_ASSESSMENT_AGENT_PROVIDER_BASE_URL
+              value: http://192.168.1.21:52415
+            - name: GLASSLAB_ASSESSMENT_AGENT_MODEL
+              value: mlx-community/Qwen3-Coder-Next-4bit
+            - name: GLASSLAB_ASSESSMENT_AGENT_TIMEOUT_SECONDS
+              value: "120"
           ports:
             - containerPort: 8092
               name: http

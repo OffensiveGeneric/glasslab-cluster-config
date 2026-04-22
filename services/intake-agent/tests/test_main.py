@@ -53,7 +53,8 @@ def test_healthz() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload['status'] == 'ok'
-    assert payload['model_backend']['model'] == 'qwen3:30b'
+    assert payload['model_backend']['model'] == 'mlx-community/Qwen3-Coder-Next-4bit'
+    assert payload['model_backend']['provider'] == 'openai-compatible'
     assert payload['approved_sources']['manifest_name'] == 'glasslab_paper_harvester_seed_manifest'
     assert payload['approved_sources']['venue_count'] == 9
 
