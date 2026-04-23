@@ -1,0 +1,56 @@
+name: Create Release
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v0.1.0)'
+        required: true
+        default: 'v0.1.0'
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "tag=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get commit message
+        id: commit
+        run: |
+          echo "message=$(git log -1 --pretty=%s)" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: actions/create-release@v4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          release_name: Release ${{ steps.version.outputs.tag }}
+          body: |
+            ## Changes
+            
+            ${{ steps.commit.outputs.message }}
+            
+            ## Images
+            - ghcr.io/${{ github.repository }}/glasslab-workflow-api:${{ steps.version.outputs.tag }}
+            - ghcr.io/${{ github.repository }}/glasslab-whatsapp-gateway:${{ steps.version.outputs.tag }}
+            - ghcr.io/${{ github.repository }}/glasslab-gpu-experiment-runner:${{ steps.version.outputs.tag }}
+          draft: false
+          prerelease: false
