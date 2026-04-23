@@ -14,7 +14,7 @@
   "allowed_models": [
     "config-driven"
   ],
-  "runner_image": "ghcr.io/offensivegeneric/glasslab-metric-search:928f3be",
+  "runner_image": "ghcr.io/offensivegeneric/glasslab-metric-search:83ba4b0",
   "evaluator_type": "art-retrieval-v1",
   "expected_artifacts": {
     "required": [

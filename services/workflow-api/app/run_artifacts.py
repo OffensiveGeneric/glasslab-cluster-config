@@ -31,7 +31,12 @@ def load_status_from_disk(settings: Settings, run_id: str) -> RunStatus | None:
     if not path.exists():
         return None
     payload = json.loads(path.read_text())
-    return RunStatus.model_validate(payload)
+    payload.setdefault('run_id', run_id)
+    payload.setdefault('updated_at', datetime.now(timezone.utc).isoformat())
+    try:
+        return RunStatus.model_validate(payload)
+    except Exception:
+        return None
 
 
 def build_artifacts_from_directory(settings: Settings, run_id: str) -> ArtifactsIndex | None:
