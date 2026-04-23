@@ -1,0 +1,125 @@
+name: Validate Kubernetes Configs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - kubeadm/glasslab-v2/**/*.yaml
+      - .github/workflows/validate-k8s.yml
+  workflow_dispatch:
+
+jobs:
+  validate-k8s-configs:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate K8s manifests
+        run: |
+          python << 'PYEOF'
+          import yaml
+          import os
+          
+          print("Validating Kubernetes manifests:")
+          
+          k8s_dir = 'kubeadm/glasslab-v2'
+          manifests = []
+          errors = []
+          
+          for root, dirs, files in os.walk(k8s_dir):
+              dirs[:] = [d for d in dirs if not d.startswith('.')]
+              for f in files:
+                  if f.endswith(('.yaml', '.yml')):
+                      filepath = os.path.join(root, f)
+                      try:
+                          with open(filepath) as fp:
+                              doc = yaml.safe_load(fp)
+                              
+                              if doc and 'kind' in doc:
+                                  kind = doc['kind']
+                                  name = doc['metadata'].get('name', 'unnamed')
+                                  ns = doc['metadata'].get('namespace', 'default')
+                                  manifests.append((kind, name, ns, filepath))
+                      except Exception as e:
+                          errors.append((filepath, str(e)))
+                          print(f"  ✗ {filepath}: {e}")
+          
+          print(f"\n✓ Validated {len(manifests)} K8s resources:")
+          
+          # Group by kind
+          by_kind = {}
+          for kind, name, ns, filepath in manifests:
+              if kind not in by_kind:
+                  by_kind[kind] = []
+              by_kind[kind].append((name, ns))
+          
+          for kind in sorted(by_kind.keys()):
+              print(f"\n  {kind} ({len(by_kind[kind])}):")
+              for name, ns in sorted(by_kind[kind]):
+                  print(f"    - {name} (ns: {ns})")
+          
+          if errors:
+              print(f"\n✗ {len(errors)} errors")
+              exit(1)
+          else:
+              print(f"\n✓ All K8s manifests valid")
+          PYEOF
+
+      - name: Check resource definitions
+        run: |
+          python << 'PYEOF'
+          import yaml
+          import os
+          
+          print("Resource definitions:")
+          
+          resources = {
+              'Deployment': [],
+              'Service': [],
+              'Job': [],
+              'ConfigMap': [],
+              'Secret': [],
+              'Namespace': [],
+              'Role': [],
+              'RoleBinding': [],
+              'PersistentVolumeClaim': [],
+          }
+          
+          for root, dirs, files in os.walk('kubeadm/glasslab-v2'):
+              dirs[:] = [d for d in dirs if not d.startswith('.')]
+              for f in files:
+                  if f.endswith(('.yaml', '.yml')):
+                      filepath = os.path.join(root, f)
+                      try:
+                          with open(filepath) as fp:
+                              doc = yaml.safe_load(fp)
+                              if doc and 'kind' in doc:
+                                  kind = doc['kind']
+                                  name = doc['metadata'].get('name', 'unnamed')
+                                  if kind in resources:
+                                      resources[kind].append((name, filepath))
+                      except:
+                          pass
+          
+          for kind in sorted(resources.keys()):
+              print(f"\n  {kind} ({len(resources[kind])}):")
+              for name, filepath in sorted(resources[kind]):
+                  print(f"    - {name}")
+          PYEOF
+
+      - name: Upload K8s validation results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: k8s-validation-results
+          path: |
+            k8s-validation-results.xml
+            results/
+          retention-days: 7
