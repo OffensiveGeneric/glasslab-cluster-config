@@ -3,9 +3,11 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
 from services.common.schemas import Metrics, RunManifest, RunStatus
 
+from .art_retrieval_v1 import write_art_retrieval_outputs
 from .models import ComparedRun, ComparisonResult, RankedRun
 
 
@@ -90,7 +92,12 @@ def render_summary(result: ComparisonResult) -> str:
     return '\n'.join(lines)
 
 
-def write_outputs(bundle_dirs: list[Path], output_dir: Path) -> ComparisonResult:
+def write_outputs(bundle_dirs: list[Path], output_dir: Path, evaluator_type: str | None = None) -> ComparisonResult:
+    """Write comparison outputs, dispatching to evaluator_type-specific logic."""
+    if evaluator_type == 'art-retrieval-v1':
+        return write_art_retrieval_outputs(bundle_dirs, output_dir)
+    
+    # Default: use tabular metric-max comparison
     result = compare_bundles(bundle_dirs)
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / 'comparison.json').write_text(json.dumps(result.model_dump(mode='json'), indent=2) + '\n')

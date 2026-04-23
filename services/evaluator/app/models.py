@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -15,6 +16,7 @@ class ComparedRun(BaseModel):
     primary_metric_value: float | None = None
     primary_metric_direction: str | None = None
     runtime_seconds: float | None = None
+    art_retrieval_output: dict[str, Any] | None = None  # art-retrieval specific comparison output
 
 
 class RankedRun(BaseModel):
