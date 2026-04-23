@@ -1,0 +1,127 @@
+name: Test GPU Workflow Execution
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - services/workflow-registry/definitions/**/*
+      - kubeadm/glasslab-v2/jobs/**/*
+      - .github/workflows/test-gpu-workflow.yml
+  workflow_dispatch:
+
+jobs:
+  test-gpu-workflow-execution:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Test GPU workflow definitions
+        run: |
+          python << 'PYEOF'
+          import json
+          import os
+          
+          workflow_dir = 'services/workflow-registry/definitions'
+          workflows = [f for f in os.listdir(workflow_dir) if f.endswith('.json')]
+          
+          print(f"Found {len(workflows)} workflow definitions:")
+          
+          gpu_workflows = []
+          
+          for workflow_file in workflows:
+              filepath = os.path.join(workflow_dir, workflow_file)
+              with open(filepath) as f:
+                  workflow = json.load(f)
+              
+              workflow_id = workflow.get('workflow_id', 'unknown')
+              display_name = workflow.get('display_name', 'unnamed')
+              resource_profile = workflow.get('resource_profile', {})
+              node_selector = resource_profile.get('node_selector', {})
+              
+              is_gpu = any('gpu' in str(v).lower() for v in node_selector.values())
+              
+              status = "✓" if is_gpu else "•"
+              print(f"  {status} {workflow_id}: {display_name}")
+              
+              if is_gpu:
+                  gpu_workflows.append(workflow_id)
+          
+          print(f"\nGPU workflows ({len(gpu_workflows)}):")
+          for w in gpu_workflows:
+              print(f"  - {w}")
+          PYEOF
+
+      - name: Validate GPU job templates
+        run: |
+          python << 'PYEOF'
+          import yaml
+          import os
+          
+          job_dir = 'kubeadm/glasslab-v2/jobs'
+          jobs = [f for f in os.listdir(job_dir) if f.endswith('.yaml')]
+          
+          print(f"Found {len(jobs)} job definitions:")
+          
+          for job_file in jobs:
+              filepath = os.path.join(job_dir, job_file)
+              with open(filepath) as f:
+                  job = yaml.safe_load(f)
+              
+              job_name = job.get('metadata', {}).get('name', 'unnamed')
+              spec = job.get('spec', {})
+              
+              print(f"  ✓ {job_name}")
+              
+              # Check for GPU resources
+              template_spec = spec.get('template', {}).get('spec', {})
+              container = template_spec.get('containers', [{}])[0]
+              resources = container.get('resources', {})
+              
+              if 'requests' in resources:
+                  if 'nvidia.com/gpu' in resources['requests']:
+                      print(f"    GPU request: {resources['requests']['nvidia.com/gpu']}")
+          
+          print(f"\nTotal jobs: {len(jobs)}")
+          PYEOF
+
+      - name: Test GPU node selectors
+        run: |
+          python << 'PYEOF'
+          import yaml
+          
+          # Check node01
+          with open('kubeadm/glasslab-v2/node01/10-node-labels.yaml') as f:
+              node = yaml.safe_load(f)
+          
+          print(f"Node: {node['metadata']['name']}")
+          
+          labels = node['metadata'].get('labels', {})
+          
+          print("Node labels:")
+          for k, v in sorted(labels.items()):
+              if 'gpu' in k.lower() or 'node' in k.lower():
+                  print(f"  {k}: {v}")
+          
+          # Check for GPU-related labels
+          gpu_labels = [k for k in labels.keys() if 'gpu' in k.lower()]
+          print(f"\nGPU-related labels: {len(gpu_labels)}")
+          for label in gpu_labels:
+              print(f"  - {label}")
+          PYEOF
+
+      - name: Upload GPU workflow test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpu-workflow-test-results
+          path: |
+            gpu-workflow-test-results.xml
+            results/
+          retention-days: 7
