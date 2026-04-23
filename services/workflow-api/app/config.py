@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     runner_job_ttl_seconds: int = 86400
     dataset_pvc_name: str = 'glasslab-shared-datasets'
     dataset_mount_path: str = '/mnt/datasets'
+    dataset_bucket: str = 'glasslab-datasets'
     artifacts_pvc_name: str = 'glasslab-shared-artifacts'
     artifacts_mount_path: str = '/mnt/artifacts'
     image_pull_secret_name: str = 'glasslab-ghcr-pull'

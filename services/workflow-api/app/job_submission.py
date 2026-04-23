@@ -105,12 +105,15 @@ def _build_runner_spec(manifest: RunManifest) -> dict:
         if not dataset_uri:
             raise ValueError('literature-to-experiment requires dataset_uri for runner submission')
 
+        # Resolve dataset_uri to actual path
+        resolved_dataset_uri = resolve_dataset_uri(dataset_uri, settings)
+
         return {
             'pipeline': 'literature_to_experiment',
-            'dataset': dataset_uri,
+            'dataset': resolved_dataset_uri,
             'paper_id': paper_id,
             'source_notes': source_notes,
-            'dataset_uri': dataset_uri,
+            'dataset_uri': resolved_dataset_uri,
             'models': manifest.requested_models,
             'feature_profile': 'basic',
             'resource_profile': manifest.resource_profile,
@@ -137,10 +140,13 @@ def _build_runner_spec(manifest: RunManifest) -> dict:
         if not training_notes:
             raise ValueError('gpu-experiment requires training_notes for runner submission')
 
+        # Resolve dataset_uri to actual path
+        resolved_dataset_uri = resolve_dataset_uri(dataset_uri, settings)
+
         return {
             'pipeline': 'gpu_experiment',
-            'dataset': dataset_uri,
-            'dataset_uri': dataset_uri,
+            'dataset': resolved_dataset_uri,
+            'dataset_uri': resolved_dataset_uri,
             'model_family': model_family,
             'training_notes': training_notes,
             'evaluation_target': evaluation_target,
@@ -163,6 +169,30 @@ def _build_runner_spec(manifest: RunManifest) -> dict:
 
 def _is_generic_experiment_manifest(manifest: RunManifest) -> bool:
     return bool(manifest.experiment_type or manifest.workload_id or manifest.entrypoint)
+
+
+def resolve_dataset_uri(dataset_uri: str, settings: Settings) -> str:
+    """Resolve a dataset URI to its actual path, handling placeholders."""
+    if dataset_uri.startswith('s3://placeholder/'):
+        # Placeholder URIs need to be resolved to actual datasets
+        placeholder_name = dataset_uri.replace('s3://placeholder/', '')
+        # Map common dataset placeholders to actual paths
+        dataset_mapping = {
+            'train_uri': f'{settings.dataset_mount_path}/titanic/train.csv',
+            'test_uri': f'{settings.dataset_mount_path}/titanic/test.csv',
+            'validation_uri': f'{settings.dataset_mount_path}/titanic/validation.csv',
+            'dataset_uri': f'{settings.dataset_mount_path}/titanic/train.csv',
+            'repository_url': 'https://github.com/OffensiveGeneric/glasslab-cluster-config',
+        }
+        return dataset_mapping.get(placeholder_name, f'{settings.dataset_mount_path}/unknown/{placeholder_name}')
+    elif dataset_uri.startswith('s3://datasets/'):
+        # Convert MinIO-style dataset URIs to local paths
+        # e.g., s3://datasets/titanic/train.csv -> /mnt/datasets/titanic/train.csv
+        path = dataset_uri.replace('s3://datasets/', '')
+        return f'{settings.dataset_mount_path}/{path}'
+    else:
+        # Already a local path or non-placeholder URI
+        return dataset_uri
 
 
 def validate_workflow_submission_support(workflow: Any) -> list[str]:
@@ -242,6 +272,12 @@ class KubernetesJobSubmitter(JobSubmitter):
         ]
 
         if _is_generic_experiment_manifest(manifest):
+            # Resolve dataset bindings URIs
+            resolved_dataset_bindings = {}
+            if manifest.dataset_bindings:
+                for binding_name, dataset_uri in manifest.dataset_bindings.items():
+                    resolved_dataset_bindings[binding_name] = resolve_dataset_uri(str(dataset_uri), self.settings)
+            
             env.extend(
                 [
                     self.client.V1EnvVar(
@@ -250,7 +286,7 @@ class KubernetesJobSubmitter(JobSubmitter):
                     ),
                     self.client.V1EnvVar(
                         name='GLASSLAB_GENERIC_DATASET_BINDINGS_JSON',
-                        value=json.dumps(manifest.dataset_bindings, sort_keys=True),
+                        value=json.dumps(resolved_dataset_bindings or {}, sort_keys=True),
                     ),
                     self.client.V1EnvVar(
                         name='GLASSLAB_GENERIC_BUDGET_JSON',
