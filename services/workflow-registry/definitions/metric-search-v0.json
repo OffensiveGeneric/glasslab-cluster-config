@@ -68,12 +68,9 @@
   "workload_id": "metric-search-v0",
   "schema_ref": "glasslab-metric-search RunSpec v0",
   "default_entrypoint": [
-    "python3",
-    "scripts/run_experiment.py",
-    "--config",
-    "configs/search_spaces/art_metric_baseline.yaml",
-    "--output-dir",
-    "/mnt/artifacts/metric-search"
+    "sh",
+    "-lc",
+    "python3 scripts/run_experiment.py --config configs/search_spaces/art_metric_baseline.yaml --output-dir /mnt/artifacts/$GLASSLAB_RUNNER_EXPERIMENT_ID"
   ],
   "allow_custom_image": true,
   "allow_custom_entrypoint": true,
