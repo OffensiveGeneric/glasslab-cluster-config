@@ -1,0 +1,123 @@
+name: Verify OpenClaw Deprecation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - services/openclaw/**/*
+      - .github/workflows/verify-openclaw.yml
+  workflow_dispatch:
+
+jobs:
+  verify-openclaw-deprecation:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify OpenClaw removal
+        run: |
+          python << 'PYEOF'
+          import os
+          
+          openclaw_paths = [
+              'services/openclaw',
+              'scripts/openclaw*',
+              'docs/openclaw*',
+              'kubeadm/glasslab-v2/openclaw',
+          ]
+          
+          print("Checking for OpenClaw artifacts:")
+          
+          removed = []
+          missing = []
+          
+          # Check if openclaw directory exists
+          if os.path.exists('services/openclaw'):
+              print("  ✗ services/openclaw still exists")
+              removed.append('services/openclaw')
+          else:
+              print("  ✓ services/openclaw removed")
+          
+          # Check if openclaw scripts exist
+          if os.path.exists('scripts/openclaw'):
+              print("  ✗ scripts/openclaw still exists")
+          else:
+              print("  ✓ scripts/openclaw removed")
+          
+          # Check if openclaw docs exist
+          openclaw_docs = [f for f in os.listdir('docs') if 'openclaw' in f.lower()]
+          if openclaw_docs:
+              print(f"  ✗ OpenClaw docs still exist: {openclaw_docs}")
+          else:
+              print("  ✓ OpenClaw docs removed")
+          
+          print("\nDeprecation complete!")
+          PYEOF
+
+      - name: Verify WhatsApp gateway replacement
+        run: |
+          python << 'PYEOF'
+          import os
+          
+          print("Checking WhatsApp gateway implementation:")
+          
+          gateway_files = [
+              'services/whatsapp-gateway/app/main.py',
+              'services/whatsapp-gateway/tests/test_api.py',
+              'kubeadm/glasslab-v2/whatsapp-gateway/10-namespace.yaml',
+              'kubeadm/glasslab-v2/whatsapp-gateway/20-deployment.yaml',
+              'docs/glasslab-v2/custom-chat-shell-plan.md',
+          ]
+          
+          for filepath in gateway_files:
+              if os.path.exists(filepath):
+                  print(f"  ✓ {filepath}")
+              else:
+                  print(f"  ✗ {filepath} missing")
+          
+          # Check for OpenClaw references
+          import subprocess
+          result = subprocess.run(
+              ['grep', '-r', 'openclaw', '--include=*.py', '--include=*.yaml', '.'],
+              capture_output=True,
+              text=True
+          )
+          
+          if result.returncode == 0 and 'openclaw' in result.stdout.lower():
+              print("\n  ⚠ OpenClaw references still found:")
+              print(result.stdout)
+          else:
+              print("\n  ✓ No OpenClaw references found")
+          PYEOF
+
+      - name: Verify custom chat shell
+        run: |
+          python << 'PYEOF'
+          import os
+          
+          print("Checking custom chat shell implementation:")
+          
+          custom_shell_files = [
+              'docs/glasslab-v2/custom-chat-shell-plan.md',
+              'docs/glasslab-v2/live-state-2026-04-05.md',
+              'scripts/whatsapp-gateway-cli.sh',
+          ]
+          
+          for filepath in custom_shell_files:
+              if os.path.exists(filepath):
+                  print(f"  ✓ {filepath}")
+              else:
+                  print(f"  ⚠ {filepath} missing")
+          PYEOF
+
+      - name: Upload verification results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: openclaw-verification-results
+          path: |
+            openclaw-verification-results.xml
+            results/
+          retention-days: 7
