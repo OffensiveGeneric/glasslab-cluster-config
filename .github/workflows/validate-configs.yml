@@ -1,0 +1,102 @@
+name: Validate YAML and Configs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/*.yaml'
+      - '**/*.yml'
+      - .github/workflows/validate-configs.yml
+  workflow_dispatch:
+
+jobs:
+  validate-all-yaml:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate all YAML files
+        run: |
+          python << 'PYEOF'
+          import yaml
+          import os
+          from pathlib import Path
+          
+          yaml_files = []
+          errors = []
+          
+          for root, dirs, files in os.walk('.'):
+              # Skip hidden directories
+              dirs[:] = [d for d in dirs if not d.startswith('.')]
+              
+              for f in files:
+                  if f.endswith(('.yaml', '.yml')):
+                      filepath = os.path.join(root, f)
+                      try:
+                          with open(filepath) as fp:
+                              list(yaml.safe_load_all(fp))
+                          yaml_files.append(filepath)
+                      except yaml.YAMLError as e:
+                          errors.append((filepath, str(e)))
+                          print(f"✗ {filepath}: {e}")
+                      except Exception as e:
+                          errors.append((filepath, str(e)))
+                          print(f"✗ {filepath}: {e}")
+          
+          print(f"\n✓ Validated {len(yaml_files)} YAML files")
+          
+          if errors:
+              print(f"\n✗ {len(errors)} errors found:")
+              exit(1)
+          else:
+              print("✓ All YAML files valid")
+          PYEOF
+
+      - name: Validate JSON files
+        run: |
+          python << 'PYEOF'
+          import json
+          import os
+          
+          json_files = []
+          errors = []
+          
+          for root, dirs, files in os.walk('.'):
+              dirs[:] = [d for d in dirs if not d.startswith('.')]
+              
+              for f in files:
+                  if f.endswith('.json'):
+                      filepath = os.path.join(root, f)
+                      try:
+                          with open(filepath) as fp:
+                              json.load(fp)
+                          json_files.append(filepath)
+                      except json.JSONDecodeError as e:
+                          errors.append((filepath, str(e)))
+                          print(f"✗ {filepath}: {e}")
+          
+          print(f"\n✓ Validated {len(json_files)} JSON files")
+          
+          if errors:
+              print(f"\n✗ {len(errors)} errors found:")
+              exit(1)
+          else:
+              print("✓ All JSON files valid")
+          PYEOF
+
+      - name: Upload validation results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: yaml-validation-results
+          path: |
+            yaml-validation-results.xml
+            results/
+          retention-days: 7
