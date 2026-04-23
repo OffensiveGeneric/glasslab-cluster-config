@@ -77,6 +77,7 @@ from .stage_inference import (
 from .session_helpers import (
     attach_dataset_to_session,
     append_research_session_memory,
+    build_intake_request_from_problem_candidate,
     build_research_problem_request_from_session,
     build_research_session_context,
     build_research_session_literature_digest,
@@ -135,6 +136,7 @@ from .schemas import (
     WorkflowFamilySummary,
 )
 from .validation import validate_run_request
+from .transition_routes import register_transitions_routes
 
 UNRESOLVED_PREFIX = 'UNRESOLVED_'
 LOGGER = logging.getLogger(__name__)
@@ -2044,6 +2046,13 @@ def create_app(
         store=store,
         submitter=submitter,
         create_run_record=lambda *args, **kwargs: create_run_record(*args, **kwargs),
+    )
+    register_transitions_routes(
+        app,
+        settings=settings,
+        registry=registry,
+        store=store,
+        create_run_record_impl=lambda *args, **kwargs: create_run_record(*args, **kwargs),
     )
     register_autoresearch_routes(
         app,
