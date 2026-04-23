@@ -57,6 +57,7 @@ These are analysis/reference documents, not current product contracts:
 - `generic-experiment-gap-audit-2026-04.md`
 - `workload-registry-evolution-notes-2026-04.md`
 - `reference/glasslab-workload-contract-v0.md`
+- `opencode-storage-cleanup-handoff-2026-04.md`
 
 ## Current Operator / Infrastructure References
 
