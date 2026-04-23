@@ -4,8 +4,57 @@ import argparse
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
-from services.common.schemas import Metrics, RunManifest
+
+def _read_from_path_or_uri(path_or_uri: str) -> str:
+    parsed = urlparse(path_or_uri)
+    if parsed.scheme == 's3':
+        try:
+            from minio import Minio
+        except ImportError as exc:
+            raise RuntimeError('minio package is required for S3/MinIO URIs') from exc
+        bucket = parsed.netloc
+        key = parsed.path.lstrip('/')
+        client = Minio(
+            'glasslab-minio.glasslab-v2.svc.cluster.local:9000',
+            access_key=None,
+            secret_key=None,
+            secure=False,
+        )
+        obj = client.get_object(bucket, key)
+        try:
+            return obj.read().decode('utf-8')
+        finally:
+            obj.close()
+            obj.release_ram()
+    else:
+        return Path(path_or_uri).read_text()
+
+
+def _write_to_path_or_uri(path_or_uri: str, content: str) -> None:
+    parsed = urlparse(path_or_uri)
+    if parsed.scheme == 's3':
+        try:
+            from minio import Minio
+        except ImportError as exc:
+            raise RuntimeError('minio package is required for S3/MinIO URIs') from exc
+        bucket = parsed.netloc
+        key = parsed.path.lstrip('/')
+        client = Minio(
+            'glasslab-minio.glasslab-v2.svc.cluster.local:9000',
+            access_key=None,
+            secret_key=None,
+            secure=False,
+        )
+        from io import BytesIO
+        if not client.bucket_exists(bucket):
+            client.make_bucket(bucket)
+        client.put_object(bucket, key, BytesIO(content.encode('utf-8')), length=len(content.encode('utf-8')))
+    else:
+        p = Path(path_or_uri)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content)
 
 
 def render_report(manifest: RunManifest, metrics: Metrics, evaluator_output: dict[str, Any] | None = None) -> str:
@@ -47,17 +96,16 @@ def render_report(manifest: RunManifest, metrics: Metrics, evaluator_output: dic
 
 
 def write_report(
-    manifest_path: Path,
-    metrics_path: Path,
-    output_path: Path,
-    evaluator_path: Path | None = None,
+    manifest_path: str,
+    metrics_path: str,
+    output_path: str,
+    evaluator_path: str | None = None,
 ) -> str:
-    manifest = RunManifest.model_validate_json(manifest_path.read_text())
-    metrics = Metrics.model_validate_json(metrics_path.read_text())
-    evaluator_output = json.loads(evaluator_path.read_text()) if evaluator_path else None
+    manifest = RunManifest.model_validate_json(_read_from_path_or_uri(manifest_path))
+    metrics = Metrics.model_validate_json(_read_from_path_or_uri(metrics_path))
+    evaluator_output = json.loads(_read_from_path_or_uri(evaluator_path)) if evaluator_path else None
     report = render_report(manifest, metrics, evaluator_output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(report + '\n')
+    _write_to_path_or_uri(output_path, report + '\n')
     return report
 
 
@@ -70,10 +118,10 @@ def main() -> int:
     args = parser.parse_args()
 
     write_report(
-        manifest_path=Path(args.manifest),
-        metrics_path=Path(args.metrics),
-        output_path=Path(args.output),
-        evaluator_path=Path(args.evaluator) if args.evaluator else None,
+        manifest_path=args.manifest,
+        metrics_path=args.metrics,
+        output_path=args.output,
+        evaluator_path=args.evaluator if args.evaluator else None,
     )
     return 0
 

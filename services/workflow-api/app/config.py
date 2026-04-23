@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     ranker_timeout_seconds: float = 15.0
     ranker_min_top_score: float = 0.75
     ranker_min_score_gap: float = 0.10
-    source_document_storage_mode: Literal['filesystem', 'minio'] = 'filesystem'
+    source_document_storage_mode: Literal['filesystem', 'minio'] = 'minio'
     source_document_storage_dir: str = '/mnt/artifacts/source-documents'
     source_document_bucket: str = 'research-sources'
     minio_endpoint: str = 'glasslab-minio.glasslab-v2.svc.cluster.local:9000'

@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     )
     manifest_json: str = ''
     dataset_root: str = '/mnt/datasets/titanic'
-    artifacts_root: str = '/mnt/artifacts'
+    artifacts_root: str = 's3://glasslab-artifacts'
     validation_size: float = 0.25
     random_state: int = 42
     log_level: str = 'INFO'
