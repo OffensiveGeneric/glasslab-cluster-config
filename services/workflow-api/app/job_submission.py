@@ -172,27 +172,14 @@ def _is_generic_experiment_manifest(manifest: RunManifest) -> bool:
 
 
 def resolve_dataset_uri(dataset_uri: str, settings: Settings) -> str:
-    """Resolve a dataset URI to its actual path, handling placeholders."""
-    if dataset_uri.startswith('s3://placeholder/'):
-        # Placeholder URIs need to be resolved to actual datasets
-        placeholder_name = dataset_uri.replace('s3://placeholder/', '')
-        # Map common dataset placeholders to actual paths
-        dataset_mapping = {
-            'train_uri': f'{settings.dataset_mount_path}/titanic/train.csv',
-            'test_uri': f'{settings.dataset_mount_path}/titanic/test.csv',
-            'validation_uri': f'{settings.dataset_mount_path}/titanic/validation.csv',
-            'dataset_uri': f'{settings.dataset_mount_path}/titanic/train.csv',
-            'repository_url': 'https://github.com/OffensiveGeneric/glasslab-cluster-config',
-        }
-        return dataset_mapping.get(placeholder_name, f'{settings.dataset_mount_path}/unknown/{placeholder_name}')
-    elif dataset_uri.startswith('s3://datasets/'):
-        # Convert MinIO-style dataset URIs to local paths
-        # e.g., s3://datasets/titanic/train.csv -> /mnt/datasets/titanic/train.csv
-        path = dataset_uri.replace('s3://datasets/', '')
+    """Resolve dataset aliases that are backed by the mounted dataset plane."""
+    if dataset_uri.startswith('s3://datasets/'):
+        path = dataset_uri.removeprefix('s3://datasets/')
         return f'{settings.dataset_mount_path}/{path}'
-    else:
-        # Already a local path or non-placeholder URI
-        return dataset_uri
+    if dataset_uri.startswith('s3://glasslab-datasets/'):
+        path = dataset_uri.removeprefix('s3://glasslab-datasets/')
+        return f'{settings.dataset_mount_path}/{path}'
+    return dataset_uri
 
 
 def validate_workflow_submission_support(workflow: Any) -> list[str]:

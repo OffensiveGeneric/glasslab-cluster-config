@@ -54,7 +54,7 @@ def test_write_report_includes_required_sections(tmp_path) -> None:
     manifest_path, metrics_path, evaluator_path = write_inputs(tmp_path)
     output_path = tmp_path / 'report.md'
 
-    report = write_report(str(manifest_path), str(metrics_path), str(output_path), str(evaluator_path))
+    report = write_report(manifest_path, metrics_path, output_path, evaluator_path)
 
     assert '## Objective' in report
     assert '## Workflows Run' in report
@@ -62,4 +62,4 @@ def test_write_report_includes_required_sections(tmp_path) -> None:
     assert '## Caveats' in report
     assert '## Next Recommended Steps' in report
     assert 'Evaluator selected best run' in report
-    assert Path(str(output_path)).read_text().startswith('# Glasslab Run Memo')
+    assert output_path.read_text().startswith('# Glasslab Run Memo')

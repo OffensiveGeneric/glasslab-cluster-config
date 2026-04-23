@@ -66,8 +66,7 @@ def auto_resolve_pipeline_design_inputs(
             else:
                 dataset_uri = 's3://datasets/paper-derived/train.csv'
                 review_notes.append('Auto-resolved literature dataset_uri to bounded paper-derived dataset placeholder.')
-        # Resolve to actual path
-        resolved_inputs['dataset_uri'] = resolve_dataset_uri(dataset_uri, request_settings if 'request_settings' in locals() else Settings())
+        resolved_inputs['dataset_uri'] = resolve_dataset_uri(dataset_uri, Settings())
     elif design.workflow_id == 'replication-lite':
         repository_url = resolve_replication_repository_url(intake)
         if repository_url:
@@ -79,8 +78,7 @@ def auto_resolve_pipeline_design_inputs(
         else:
             resolved_inputs['dataset_uri'] = 's3://datasets/replication-lite/input.csv'
             review_notes.append('Auto-resolved replication dataset_uri to bounded default input.')
-        # Resolve to actual path
-        resolved_inputs['dataset_uri'] = resolve_dataset_uri(resolved_inputs['dataset_uri'], settings if 'settings' in locals() else Settings())
+        resolved_inputs['dataset_uri'] = resolve_dataset_uri(resolved_inputs['dataset_uri'], Settings())
         if interpretation.evaluation_targets:
             resolved_inputs['evaluation_target'] = interpretation.evaluation_targets[0]
             review_notes.append('Auto-resolved evaluation_target from interpretation output.')

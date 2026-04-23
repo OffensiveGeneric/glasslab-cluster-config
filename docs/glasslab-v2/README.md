@@ -32,6 +32,7 @@ These remain current and useful after the cleanup pass:
 - `generic-experiment-contract.md`
 - `generic-experiment-implementation-plan.md`
 - `artifact-contract.md`
+- `storage-contract-2026-04.md`
 - `comparison-record-contract.md`
 - `near-term-byte-plane-decision.md`
 - `stateful-object-inventory-2026-04.md`
@@ -46,6 +47,16 @@ These remain current and useful after the cleanup pass:
 - `workflow-api-schedules.md`
 - `schedule-worker-plan.md`
 - `interpretation-agent-service.md`
+
+## Audit And Migration References
+
+These are analysis/reference documents, not current product contracts:
+
+- `artifact-contract-audit-2026-04.md`
+- `doc-contradictions-2026-04.md`
+- `generic-experiment-gap-audit-2026-04.md`
+- `workload-registry-evolution-notes-2026-04.md`
+- `reference/glasslab-workload-contract-v0.md`
 
 ## Current Operator / Infrastructure References
 
