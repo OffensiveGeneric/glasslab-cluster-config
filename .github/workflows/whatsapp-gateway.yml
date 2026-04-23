@@ -1,0 +1,64 @@
+name: Build and Deploy WhatsApp Gateway
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - services/whatsapp-gateway/**/*
+      - .github/workflows/whatsapp-gateway.yml
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/glasslab-whatsapp-gateway
+          tags: |
+            type=raw,value={{shortCommit}}
+            type=raw,value=latest
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: services/whatsapp-gateway
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GLASSLAB_GIT_SHA=${{ github.sha }}
+            GLASSLAB_BUILD_SOURCE=github:${{ github.run_id }}
+
+      - name: Update deployment image tag
+        run: |
+          sed -i "s|ghcr.io/offensivegeneric/glasslab-whatsapp-gateway:.*|ghcr.io/${{ github.repository }}/glasslab-whatsapp-gateway:${{ github.sha }}|g" kubeadm/glasslab-v2/whatsapp-gateway/20-deployment.yaml
+          git config --global user.name "glasslab"
+          git config --global user.email "glasslab@glasslab.org"
+          git add kubeadm/glasslab-v2/whatsapp-gateway/20-deployment.yaml
+          git commit -m "chore: update whatsapp-gateway image to ${{ github.sha }}"
+          git push
+
+      - name: Deploy to cluster
+        run: |
+          echo "Deployment to cluster would happen here"
+          echo "Image: ghcr.io/${{ github.repository }}/glasslab-whatsapp-gateway:${{ github.sha }}"
+          echo "Commit: ${{ github.sha }}"
