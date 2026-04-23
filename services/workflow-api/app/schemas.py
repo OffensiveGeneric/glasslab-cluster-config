@@ -765,6 +765,33 @@ class OperationRecord(BaseModel):
     error_detail: str | None = None
 
 
+class ComparisonRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    comparison_id: str
+    created_at: datetime
+    updated_at: datetime
+    status: Literal['pending', 'completed', 'failed']
+    comparison_type: str
+    evaluator_type: str
+    session_id: str | None = None
+    campaign_id: str | None = None
+    workload_id: str | None = None
+    workflow_id: str | None = None
+    run_ids: list[str] = Field(default_factory=list)
+    baseline_run_id: str | None = None
+    candidate_run_ids: list[str] = Field(default_factory=list)
+    summary_metrics: dict[str, Any] = Field(default_factory=dict)
+    artifact_refs: dict[str, str] = Field(default_factory=dict)
+    notes: list[str] = Field(default_factory=list)
+
+    @field_validator('run_ids', 'candidate_run_ids', 'notes')
+    @classmethod
+    def validate_unique_non_empty_strings(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value if item.strip()]
+        return list(dict.fromkeys(cleaned))
+
+
 class ValidationIssue(BaseModel):
     model_config = ConfigDict(extra='forbid')
 

@@ -13,6 +13,7 @@ from app.config import Settings
 import app.persistence as persistence_module
 from app.persistence import JsonFileRunStore, create_run_store
 from app.schemas import (
+    ComparisonRecord,
     OperationRecord,
     PaperIntakeQueueRecord,
     ResearchProblemRecord,
@@ -129,6 +130,46 @@ def test_json_store_persists_session_and_stage_metadata_across_restart(tmp_path:
     assert reloaded.list_executions(schedule_id='schedule-1') == [execution]
 
 
+def test_json_store_persists_comparison_records_across_restart(tmp_path: Path) -> None:
+    state_path = tmp_path / 'run-store.json'
+    now = datetime(2026, 4, 22, 16, 0, tzinfo=timezone.utc)
+
+    store = JsonFileRunStore(state_path)
+    comparison = ComparisonRecord(
+        comparison_id='cmp-1',
+        created_at=now,
+        updated_at=now,
+        status='completed',
+        comparison_type='model-selection',
+        evaluator_type='art_retrieval_v1',
+        session_id='session-1',
+        campaign_id='campaign-1',
+        workload_id='metric-search-v0',
+        run_ids=['run-a', 'run-b'],
+        baseline_run_id='run-a',
+        candidate_run_ids=['run-b'],
+        summary_metrics={
+            'primary_metric_name': 'retrieval_recall_at_10',
+            'baseline_value': 0.71,
+            'candidate_value': 0.76,
+            'delta': 0.05,
+            'comparable': True,
+        },
+        artifact_refs={
+            'comparison_json': 's3://artifacts/cmp-1/comparison.json',
+            'summary_md': 's3://artifacts/cmp-1/summary.md',
+        },
+        notes=['bounded two-run comparison'],
+    )
+
+    store.save_comparison(comparison)
+    reloaded = create_run_store('json', state_path=state_path)
+
+    assert reloaded.get_comparison('cmp-1') == comparison
+    assert reloaded.get_latest_comparison() == comparison
+    assert reloaded.list_comparisons(session_id='session-1') == [comparison]
+
+
 def test_postgres_store_requires_dsn() -> None:
     with pytest.raises(ValueError, match='non-empty store_postgres_dsn'):
         Settings(
@@ -195,3 +236,66 @@ def test_postgres_store_round_trips_through_psycopg_adapter(monkeypatch) -> None
     reloaded_session = reloaded.get_latest_research_session()
     assert reloaded_session is not None
     assert reloaded_session.session_id == session.session_id
+
+
+def test_postgres_store_round_trips_comparison_records(monkeypatch) -> None:
+    state: dict[str, object] = {}
+
+    class FakeCursor:
+        def __init__(self) -> None:
+            self._row = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, query, params=None):
+            if 'SELECT payload' in query:
+                payload = state.get('payload')
+                self._row = (payload,) if payload is not None else None
+            elif 'INSERT INTO workflow_state' in query:
+                state['payload'] = params[1]
+
+        def fetchone(self):
+            return self._row
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def cursor(self):
+            return FakeCursor()
+
+        def commit(self):
+            return None
+
+    fake_psycopg = SimpleNamespace(connect=lambda dsn: FakeConnection())
+    monkeypatch.setattr(persistence_module, '_import_psycopg', lambda: fake_psycopg)
+
+    now = datetime(2026, 4, 22, 18, 0, tzinfo=timezone.utc)
+    store = create_run_store('postgres', postgres_dsn='postgresql://test')
+    comparison = ComparisonRecord(
+        comparison_id='cmp-1',
+        created_at=now,
+        updated_at=now,
+        status='completed',
+        comparison_type='model-selection',
+        evaluator_type='art_retrieval_v1',
+        session_id='session-1',
+        run_ids=['run-a', 'run-b'],
+        baseline_run_id='run-a',
+        candidate_run_ids=['run-b'],
+        summary_metrics={'delta': 0.05, 'comparable': True},
+        artifact_refs={'comparison_json': 's3://artifacts/cmp-1/comparison.json'},
+    )
+
+    store.save_comparison(comparison)
+    reloaded = create_run_store('postgres', postgres_dsn='postgresql://test')
+
+    assert reloaded.get_comparison('cmp-1') == comparison
+    assert reloaded.get_latest_comparison() == comparison
