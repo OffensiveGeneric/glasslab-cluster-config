@@ -1,0 +1,104 @@
+name: Validate Documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/**/*
+      - .github/workflows/validate-docs.yml
+  workflow_dispatch:
+
+jobs:
+  validate-docs:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate docs structure
+        run: |
+          python << 'PYEOF'
+          import os
+          
+          docs_dir = 'docs/glasslab-v2'
+          
+          if os.path.exists(docs_dir):
+              docs = [f for f in os.listdir(docs_dir) if f.endswith('.md')]
+              
+              print(f"Documentation ({len(docs)} files):")
+              print("")
+              
+              for doc in sorted(docs):
+                  filepath = os.path.join(docs_dir, doc)
+                  with open(filepath) as f:
+                      content = f.read()
+                  
+                  # Check for required sections
+                  required_sections = ['## ', '### ']
+                  
+                  # Count headings
+                  h1 = content.count('# ') if not content.startswith('# ') else 0
+                  h2 = content.count('## ')
+                  h3 = content.count('### ')
+                  
+                  print(f"{doc}:")
+                  print(f"  H1: {h1}, H2: {h2}, H3: {h3}")
+                  
+                  # Check for common sections
+                  sections = [
+                      ('Goal', '## Goal'),
+                      ('Scope', '## Scope'),
+                      ('Status', '## Status'),
+                      ('Implementation', '## Implementation'),
+                      ('Next Steps', '## Next Steps'),
+                  ]
+                  
+                  for name, pattern in sections:
+                      if pattern in content:
+                          print(f"  ✓ {name}")
+                      else:
+                          print(f"  ⚠ {name} missing")
+          else:
+              print("docs/glasslab-v2 not found")
+          PYEOF
+
+      - name: Check doc consistency
+        run: |
+          python << 'PYEOF'
+          import os
+          
+          print("Documentation consistency checks:")
+          
+          # Check for README files
+          readme_files = []
+          for root, dirs, files in os.walk('.'):
+              dirs[:] = [d for d in dirs if not d.startswith('.')]
+              if 'README.md' in files:
+                  readme_files.append(os.path.join(root, 'README.md'))
+          
+          print(f"README files ({len(readme_files)}):")
+          for f in sorted(readme_files):
+              print(f"  - {f}")
+          
+          # Check for docs in services
+          print("\nService docs:")
+          services_dir = 'services'
+          for service in os.listdir(services_dir):
+              service_dir = os.path.join(services_dir, service)
+              readme = os.path.join(service_dir, 'README.md')
+              if os.path.exists(readme):
+                  print(f"  ✓ {service}/README.md")
+              else:
+                  print(f"  ⚠ {service}/README.md missing")
+          PYEOF
+
+      - name: Upload doc validation results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: doc-validation-results
+          path: |
+            doc-validation-results.xml
+            results/
+          retention-days: 7
