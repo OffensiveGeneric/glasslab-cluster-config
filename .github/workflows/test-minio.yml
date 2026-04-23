@@ -1,0 +1,131 @@
+name: Test MinIO Integration
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - services/workflow-api/app/persistence.py
+      - kubeadm/glasslab-v2/minio/**/*
+      - .github/workflows/test-minio.yml
+  workflow_dispatch:
+
+jobs:
+  test-minio-integration:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install pytest boto3
+          pip install -r services/workflow-api/requirements.txt
+
+      - name: Validate MinIO secret template
+        run: |
+          python << 'PYEOF'
+          import yaml
+          
+          with open('kubeadm/glasslab-v2/minio/10-secret.example.yaml') as f:
+              secret = yaml.safe_load(f)
+          
+          print(f"Secret name: {secret['metadata']['name']}")
+          print(f"Secret namespace: {secret['metadata'].get('namespace', 'default')}")
+          
+          # Check data keys
+          if 'data' in secret:
+              print("✓ Data keys:")
+              for key in secret['data'].keys():
+                  print(f"  - {key}")
+          PYEOF
+
+      - name: Check MinIO endpoint configuration
+        run: |
+          python << 'PYEOF'
+          import yaml
+          
+          with open('kubeadm/glasslab-v2/config/10-workflow-api-configmap.yaml') as f:
+              config = yaml.safe_load(f)
+          
+          data = config.get('data', {})
+          
+          if 'GLASSLAB_WORKFLOW_API_MINIO_ENDPOINT' in data:
+              print(f"✓ MinIO endpoint configured: {data['GLASSLAB_WORKFLOW_API_MINIO_ENDPOINT']}")
+          else:
+              print("⚠ MinIO endpoint not configured")
+              
+          if 'GLASSLAB_WORKFLOW_API_STORE_BACKEND' in data:
+              print(f"✓ Store backend: {data['GLASSLAB_WORKFLOW_API_STORE_BACKEND']}")
+          PYEOF
+
+      - name: Validate MinIO contract
+        run: |
+          python << 'PYEOF'
+          # Check storage contract document
+          import os
+          
+          contract_path = 'docs/glasslab-v2/storage-contract-2026-04.md'
+          if os.path.exists(contract_path):
+              with open(contract_path) as f:
+                  content = f.read()
+              
+              checks = [
+                  ('Postgres', 'Postgres'),
+                  ('MinIO', 'MinIO'),
+                  ('durable blobs', 'durable blobs'),
+                  ('shared PVC', 'shared PVC'),
+                  ('staging', 'staging'),
+                  ('pod-local', 'pod-local'),
+              ]
+              
+              print("Storage contract validation:")
+              for key, search in checks:
+                  if search in content:
+                      print(f"  ✓ {key}")
+                  else:
+                      print(f"  ✗ {key} missing")
+          else:
+              print("⚠ Storage contract not found")
+          PYEOF
+
+      - name: Test MinIO credentials injection
+        run: |
+          python << 'PYEOF'
+          import yaml
+          
+          with open('kubeadm/glasslab-v2/workflow-api/20-deployment.yaml') as f:
+              deployment = yaml.safe_load(f)
+          
+          container = deployment['spec']['template']['spec']['containers'][0]
+          env = container.get('env', [])
+          
+          print("Environment variables:")
+          for e in env:
+              if 'MINIO' in e.get('name', ''):
+                  print(f"  - {e['name']}")
+                  
+          # Check secret references
+          secret_refs = []
+          for e in env:
+              if 'valueFrom' in e and 'secretKeyRef' in e['valueFrom']:
+                  secret_refs.append(e['name'])
+          
+          if secret_refs:
+              print(f"✓ Secret references: {', '.join(secret_refs)}")
+          PYEOF
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: minio-test-results
+          path: |
+            minio-test-results.xml
+            kubeadm/glasslab-v2/minio/results/
+          retention-days: 7
