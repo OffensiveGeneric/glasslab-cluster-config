@@ -13,6 +13,7 @@ from .schemas import (
     AutoresearchCampaignRecord,
     AutoresearchDecisionRecord,
     AutoresearchIterationRecord,
+    ComparisonRecord,
     DatasetRecord,
     DesignDraftRecord,
     IntakeRecord,
@@ -127,6 +128,27 @@ class RunStore(ABC):
 
     @abstractmethod
     def list_autoresearch_decisions(self, campaign_id: str | None = None) -> list[AutoresearchDecisionRecord]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def save_comparison(self, record: ComparisonRecord) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_comparison(self, comparison_id: str) -> ComparisonRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_latest_comparison(self) -> ComparisonRecord | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_comparisons(
+        self,
+        *,
+        session_id: str | None = None,
+        campaign_id: str | None = None,
+    ) -> list[ComparisonRecord]:
         raise NotImplementedError
 
     @abstractmethod
@@ -333,6 +355,8 @@ class InMemoryRunStore(RunStore):
         self._latest_autoresearch_iteration_id: str | None = None
         self._autoresearch_decisions: dict[str, AutoresearchDecisionRecord] = {}
         self._latest_autoresearch_decision_id: str | None = None
+        self._comparisons: dict[str, ComparisonRecord] = {}
+        self._latest_comparison_id: str | None = None
         self._research_sessions: dict[str, ResearchSessionRecord] = {}
         self._latest_research_session_id: str | None = None
         self._intakes: dict[str, IntakeRecord] = {}
@@ -467,6 +491,35 @@ class InMemoryRunStore(RunStore):
     def list_autoresearch_decisions(self, campaign_id: str | None = None) -> list[AutoresearchDecisionRecord]:
         with self._lock:
             records = list(self._autoresearch_decisions.values())
+        if campaign_id is not None:
+            records = [record for record in records if record.campaign_id == campaign_id]
+        return sorted(records, key=lambda record: record.created_at)
+
+    def save_comparison(self, record: ComparisonRecord) -> None:
+        with self._lock:
+            self._comparisons[record.comparison_id] = record
+            self._latest_comparison_id = record.comparison_id
+
+    def get_comparison(self, comparison_id: str) -> ComparisonRecord | None:
+        with self._lock:
+            return self._comparisons.get(comparison_id)
+
+    def get_latest_comparison(self) -> ComparisonRecord | None:
+        with self._lock:
+            if self._latest_comparison_id is None:
+                return None
+            return self._comparisons.get(self._latest_comparison_id)
+
+    def list_comparisons(
+        self,
+        *,
+        session_id: str | None = None,
+        campaign_id: str | None = None,
+    ) -> list[ComparisonRecord]:
+        with self._lock:
+            records = list(self._comparisons.values())
+        if session_id is not None:
+            records = [record for record in records if record.session_id == session_id]
         if campaign_id is not None:
             records = [record for record in records if record.campaign_id == campaign_id]
         return sorted(records, key=lambda record: record.created_at)
@@ -721,6 +774,8 @@ class JsonFileRunStore(InMemoryRunStore):
                 AutoresearchDecisionRecord,
             )
             self._latest_autoresearch_decision_id = payload.get('latest_autoresearch_decision_id')
+            self._comparisons = _parse_record_map(payload.get('comparisons', {}), ComparisonRecord)
+            self._latest_comparison_id = payload.get('latest_comparison_id')
             self._research_sessions = _parse_record_map(
                 payload.get('research_sessions', {}),
                 ResearchSessionRecord,
@@ -780,6 +835,10 @@ class JsonFileRunStore(InMemoryRunStore):
                     key: record.model_dump(mode='json') for key, record in self._autoresearch_decisions.items()
                 },
                 'latest_autoresearch_decision_id': self._latest_autoresearch_decision_id,
+                'comparisons': {
+                    key: record.model_dump(mode='json') for key, record in self._comparisons.items()
+                },
+                'latest_comparison_id': self._latest_comparison_id,
                 'research_sessions': {key: record.model_dump(mode='json') for key, record in self._research_sessions.items()},
                 'latest_research_session_id': self._latest_research_session_id,
                 'intakes': {key: record.model_dump(mode='json') for key, record in self._intakes.items()},
@@ -842,6 +901,10 @@ class JsonFileRunStore(InMemoryRunStore):
 
     def save_autoresearch_decision(self, record: AutoresearchDecisionRecord) -> None:
         super().save_autoresearch_decision(record)
+        self._flush()
+
+    def save_comparison(self, record: ComparisonRecord) -> None:
+        super().save_comparison(record)
         self._flush()
 
     def save_intake(self, record: IntakeRecord) -> None:
@@ -955,6 +1018,8 @@ class PostgresRunStore(InMemoryRunStore):
                 AutoresearchDecisionRecord,
             )
             self._latest_autoresearch_decision_id = payload.get('latest_autoresearch_decision_id')
+            self._comparisons = _parse_record_map(payload.get('comparisons', {}), ComparisonRecord)
+            self._latest_comparison_id = payload.get('latest_comparison_id')
             self._research_sessions = _parse_record_map(
                 payload.get('research_sessions', {}),
                 ResearchSessionRecord,
@@ -1012,6 +1077,10 @@ class PostgresRunStore(InMemoryRunStore):
                     key: record.model_dump(mode='json') for key, record in self._autoresearch_decisions.items()
                 },
                 'latest_autoresearch_decision_id': self._latest_autoresearch_decision_id,
+                'comparisons': {
+                    key: record.model_dump(mode='json') for key, record in self._comparisons.items()
+                },
+                'latest_comparison_id': self._latest_comparison_id,
                 'research_sessions': {
                     key: record.model_dump(mode='json') for key, record in self._research_sessions.items()
                 },
@@ -1089,6 +1158,10 @@ class PostgresRunStore(InMemoryRunStore):
 
     def save_autoresearch_decision(self, record: AutoresearchDecisionRecord) -> None:
         super().save_autoresearch_decision(record)
+        self._flush()
+
+    def save_comparison(self, record: ComparisonRecord) -> None:
+        super().save_comparison(record)
         self._flush()
 
     def save_intake(self, record: IntakeRecord) -> None:

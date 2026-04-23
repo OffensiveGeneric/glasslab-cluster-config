@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from services.common.schemas import ArtifactsIndex, RunManifest, RunStatus
+from services.common.schemas import ArtifactsIndex, ExpectedArtifactsSpec, RunManifest, RunStatus
 
 
 class RunCreateRequest(BaseModel):
@@ -256,6 +256,87 @@ class SessionDecisionResponse(BaseModel):
 
     session: ResearchSessionRecord
     operation: OperationRecord
+
+
+class GenericExperimentRunRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    objective: str = Field(min_length=5)
+    experiment_type: str = Field(min_length=3)
+    workload_id: str = Field(min_length=3)
+    parent_run_id: str | None = None
+    campaign_id: str | None = None
+    image_ref: str | None = None
+    entrypoint: list[str] = Field(default_factory=list)
+    config_payload: dict[str, Any] = Field(default_factory=dict)
+    dataset_bindings: dict[str, str] = Field(default_factory=dict)
+    resources: dict[str, Any] = Field(default_factory=dict)
+    budget: dict[str, Any] = Field(default_factory=dict)
+    artifact_contract: ExpectedArtifactsSpec | None = None
+    metric_contract: dict[str, Any] = Field(default_factory=dict)
+    submitted_by: str | None = None
+    run_priority: Literal['user', 'autonomous'] = 'user'
+    session_id: str | None = None
+
+    @field_validator('entrypoint')
+    @classmethod
+    def validate_entrypoint(cls, value: list[str]) -> list[str]:
+        cleaned = [' '.join(str(item).split()).strip() for item in value]
+        return [item for item in cleaned if item]
+
+    @field_validator('dataset_bindings')
+    @classmethod
+    def validate_dataset_bindings(cls, value: dict[str, str]) -> dict[str, str]:
+        cleaned: dict[str, str] = {}
+        for key, raw in value.items():
+            normalized_key = ' '.join(str(key).split()).strip()
+            normalized_value = ' '.join(str(raw).split()).strip()
+            if normalized_key and normalized_value:
+                cleaned[normalized_key] = normalized_value
+        return cleaned
+
+
+class GenericExperimentResultIngestRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    terminal_status: Literal['succeeded', 'failed', 'rejected']
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    artifact_refs: dict[str, str] = Field(default_factory=dict)
+    runtime: dict[str, Any] = Field(default_factory=dict)
+    detail: str | None = None
+
+    @field_validator('artifact_refs')
+    @classmethod
+    def validate_artifact_refs(cls, value: dict[str, str]) -> dict[str, str]:
+        cleaned: dict[str, str] = {}
+        for key, raw in value.items():
+            normalized_key = ' '.join(str(key).split()).strip()
+            normalized_value = ' '.join(str(raw).split()).strip()
+            if normalized_key and normalized_value:
+                cleaned[normalized_key] = normalized_value
+        return cleaned
+
+
+class GenericExperimentCompareRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    run_ids: list[str] = Field(min_length=2)
+    comparison_type: str = 'generic-experiment'
+    evaluator_type: str | None = None
+    metric_name: str | None = None
+    higher_is_better: bool = True
+    baseline_run_id: str | None = None
+    session_id: str | None = None
+    campaign_id: str | None = None
+    workload_id: str | None = None
+    workflow_id: str | None = None
+    notes: list[str] = Field(default_factory=list)
+
+    @field_validator('run_ids', 'notes')
+    @classmethod
+    def validate_unique_strings(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value if item.strip()]
+        return list(dict.fromkeys(cleaned))
 
 
 class ResearchProblemRecord(BaseModel):
@@ -765,6 +846,33 @@ class OperationRecord(BaseModel):
     error_detail: str | None = None
 
 
+class ComparisonRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    comparison_id: str
+    created_at: datetime
+    updated_at: datetime
+    status: Literal['pending', 'completed', 'failed']
+    comparison_type: str
+    evaluator_type: str
+    session_id: str | None = None
+    campaign_id: str | None = None
+    workload_id: str | None = None
+    workflow_id: str | None = None
+    run_ids: list[str] = Field(default_factory=list)
+    baseline_run_id: str | None = None
+    candidate_run_ids: list[str] = Field(default_factory=list)
+    summary_metrics: dict[str, Any] = Field(default_factory=dict)
+    artifact_refs: dict[str, str] = Field(default_factory=dict)
+    notes: list[str] = Field(default_factory=list)
+
+    @field_validator('run_ids', 'candidate_run_ids', 'notes')
+    @classmethod
+    def validate_unique_non_empty_strings(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value if item.strip()]
+        return list(dict.fromkeys(cleaned))
+
+
 class ValidationIssue(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -832,6 +940,9 @@ class RunRecord(BaseModel):
     run_priority: Literal['user', 'autonomous'] = 'user'
     validation_issues: list[ValidationIssue] = Field(default_factory=list)
     session_id: str | None = None
+    reported_metrics: dict[str, Any] = Field(default_factory=dict)
+    artifact_refs: dict[str, str] = Field(default_factory=dict)
+    runtime_summary: dict[str, Any] = Field(default_factory=dict)
 
 
 class PaperPipelineReportState(BaseModel):

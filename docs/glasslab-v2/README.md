@@ -29,6 +29,12 @@ Short version:
 These remain current and useful after the cleanup pass:
 
 - `overview.md`
+- `generic-experiment-contract.md`
+- `generic-experiment-implementation-plan.md`
+- `artifact-contract.md`
+- `comparison-record-contract.md`
+- `near-term-byte-plane-decision.md`
+- `stateful-object-inventory-2026-04.md`
 - `workflow-registry.md`
 - `services.md`
 - `research-ingress.md`

@@ -1,16 +1,32 @@
 from __future__ import annotations
 
-from typing import Callable
+from datetime import datetime, timezone
+from typing import Any, Callable
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, status
+
+from services.common.schemas import ArtifactIndexEntry, ArtifactsIndex, ExpectedArtifactsSpec, RunManifest, RunStatus
 
 from .config import Settings
 from .execution_preflight import build_execution_preflight_result
 from .job_submission import JobSubmitter
 from .persistence import RunStore
 from .registry import WorkflowRegistry
-from .run_artifacts import load_artifacts_from_disk, load_logs_from_disk, resolve_run_status
-from .schemas import ExecutionPreflightResult, RunArtifactsResponse, RunCreateRequest, RunLogsResponse, RunRecord, WorkflowFamilySummary
+from .run_artifacts import MEDIA_TYPES, load_artifacts_from_disk, load_logs_from_disk, resolve_run_status
+from .schemas import (
+    ComparisonRecord,
+    ExecutionPreflightResult,
+    GenericExperimentCompareRequest,
+    GenericExperimentResultIngestRequest,
+    GenericExperimentRunRequest,
+    LogEntry,
+    RunArtifactsResponse,
+    RunCreateRequest,
+    RunLogsResponse,
+    RunRecord,
+    WorkflowFamilySummary,
+)
 
 
 def register_execution_routes(
@@ -22,6 +38,198 @@ def register_execution_routes(
     submitter: JobSubmitter,
     create_run_record: Callable[..., RunRecord],
 ) -> None:
+    def build_artifact_index(run_id: str, expected_artifacts: ExpectedArtifactsSpec) -> ArtifactsIndex:
+        artifacts: list[ArtifactIndexEntry] = []
+        declared = [(item, True) for item in expected_artifacts.required] + [
+            (item, False) for item in expected_artifacts.optional
+        ]
+        for name, is_required in declared:
+            suffix = '' if name.endswith('/') else name[name.rfind('.'):]
+            artifacts.append(
+                ArtifactIndexEntry(
+                    name=name,
+                    path=f'runs/{run_id}/{name}',
+                    media_type='inode/directory' if name.endswith('/') else MEDIA_TYPES.get(suffix, 'application/octet-stream'),
+                    required=is_required,
+                    description='Declared by workflow registry',
+                )
+            )
+        return ArtifactsIndex(run_id=run_id, artifacts=artifacts)
+
+    def merge_artifact_refs(
+        run_id: str,
+        existing: ArtifactsIndex | None,
+        refs: dict[str, str],
+        expected_artifacts: ExpectedArtifactsSpec,
+    ) -> ArtifactsIndex:
+        base = existing or build_artifact_index(run_id, expected_artifacts)
+        artifact_map = {entry.name: entry for entry in base.artifacts}
+        required_names = set(expected_artifacts.required)
+        for name, path in refs.items():
+            suffix = '' if name.endswith('/') else name[name.rfind('.'):]
+            artifact_map[name] = ArtifactIndexEntry(
+                name=name,
+                path=path,
+                media_type='inode/directory' if name.endswith('/') else MEDIA_TYPES.get(suffix, 'application/octet-stream'),
+                required=name in required_names,
+                description='Reported by generic result ingest',
+            )
+        return ArtifactsIndex(run_id=run_id, artifacts=sorted(artifact_map.values(), key=lambda entry: entry.name))
+
+    def build_generic_run_record(request: GenericExperimentRunRequest) -> RunRecord:
+        workflow = registry.get_workflow(request.workload_id)
+        if workflow is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='workload definition not found')
+        if workflow.experiment_type and workflow.experiment_type != request.experiment_type:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"workload {workflow.workflow_id} requires experiment_type {workflow.experiment_type}",
+            )
+
+        runner_image = request.image_ref or workflow.runner_image
+        entrypoint = request.entrypoint or list(workflow.default_entrypoint or [])
+
+        if request.image_ref and request.image_ref != workflow.runner_image and not workflow.allow_custom_image:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='workload does not allow a custom image_ref')
+        if request.entrypoint and request.entrypoint != list(workflow.default_entrypoint or []) and not workflow.allow_custom_entrypoint:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='workload does not allow a custom entrypoint')
+        if not entrypoint:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='no entrypoint resolved for workload')
+
+        expected_artifacts = request.artifact_contract or workflow.expected_artifacts
+        metric_contract = dict(workflow.metric_contract or {})
+        metric_contract.update(request.metric_contract)
+
+        now = datetime.now(timezone.utc)
+        run_id = uuid4().hex
+        manifest = RunManifest(
+            run_id=run_id,
+            workflow_id=workflow.workflow_id,
+            workflow_family=workflow.workflow_family,
+            display_name=workflow.display_name,
+            objective=request.objective,
+            submitted_by=request.submitted_by or settings.default_submitted_by,
+            submitted_at=now,
+            run_priority=request.run_priority,
+            inputs={
+                'parent_run_id': request.parent_run_id,
+                'campaign_id': request.campaign_id,
+                'resources': request.resources,
+            },
+            requested_models=workflow.allowed_models[:1],
+            resource_profile=workflow.resource_profile.profile_name,
+            resource_requests=workflow.resource_profile.requests,
+            resource_limits=workflow.resource_profile.limits,
+            node_selector=workflow.resource_profile.node_selector,
+            runner_image=runner_image,
+            evaluator_type=workflow.evaluator_type,
+            approval_tier=workflow.approval_tier,
+            expected_artifacts=expected_artifacts.model_dump(mode='json'),
+            experiment_type=request.experiment_type,
+            workload_id=request.workload_id,
+            schema_ref=workflow.schema_ref,
+            entrypoint=entrypoint,
+            config_payload=request.config_payload,
+            dataset_bindings=request.dataset_bindings,
+            budget=request.budget,
+            metric_contract=metric_contract,
+        )
+        status_payload = RunStatus(
+            run_id=run_id,
+            status='accepted',
+            updated_at=now,
+            detail='Generic experiment accepted by workflow-api.',
+        )
+        submission = submitter.submit_run(manifest)
+        record = RunRecord(
+            run_id=run_id,
+            workflow_id=workflow.workflow_id,
+            created_at=now,
+            updated_at=now,
+            manifest=manifest,
+            status=status_payload,
+            job_submission=submission,
+            run_purpose='generic-experiment',
+            run_priority=request.run_priority,
+            session_id=request.session_id,
+        )
+        store.save_run(record)
+        store.save_artifacts(run_id, build_artifact_index(run_id, expected_artifacts))
+        store.append_log(
+            run_id,
+            LogEntry(
+                timestamp=now,
+                level='INFO',
+                message='generic experiment accepted',
+                payload={
+                    'workflow_id': workflow.workflow_id,
+                    'workload_id': request.workload_id,
+                    'job_name': submission.job_name,
+                },
+            ),
+        )
+        return record
+
+    def build_comparison_record(request: GenericExperimentCompareRequest) -> ComparisonRecord:
+        runs: list[RunRecord] = []
+        for run_id in request.run_ids:
+            record = store.get_run(run_id)
+            if record is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'run not found: {run_id}')
+            runs.append(record)
+
+        metric_name = request.metric_name
+        if metric_name is None:
+            common_metrics = None
+            for record in runs:
+                record_metrics = {
+                    key
+                    for key, value in record.reported_metrics.items()
+                    if isinstance(value, (int, float)) and not isinstance(value, bool)
+                }
+                common_metrics = record_metrics if common_metrics is None else (common_metrics & record_metrics)
+            common_metrics = common_metrics or set()
+            if not common_metrics:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='no common numeric metrics available for comparison')
+            metric_name = sorted(common_metrics)[0]
+
+        ranking: list[dict[str, Any]] = []
+        for record in runs:
+            value = record.reported_metrics.get(metric_name)
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f'run {record.run_id} does not have numeric metric {metric_name}',
+                )
+            ranking.append({'run_id': record.run_id, 'value': float(value)})
+        ranking.sort(key=lambda item: item['value'], reverse=request.higher_is_better)
+        best = ranking[0]
+        now = datetime.now(timezone.utc)
+        evaluator_type = request.evaluator_type or runs[0].manifest.evaluator_type
+        return ComparisonRecord(
+            comparison_id=uuid4().hex,
+            created_at=now,
+            updated_at=now,
+            status='completed',
+            comparison_type=request.comparison_type,
+            evaluator_type=evaluator_type,
+            session_id=request.session_id,
+            campaign_id=request.campaign_id,
+            workload_id=request.workload_id or runs[0].manifest.workload_id,
+            workflow_id=request.workflow_id or runs[0].workflow_id,
+            run_ids=[record.run_id for record in runs],
+            baseline_run_id=request.baseline_run_id,
+            candidate_run_ids=[record.run_id for record in runs if record.run_id != request.baseline_run_id],
+            summary_metrics={
+                'metric_name': metric_name,
+                'higher_is_better': request.higher_is_better,
+                'best_run_id': best['run_id'],
+                'best_value': best['value'],
+                'ranking': ranking,
+            },
+            notes=request.notes,
+        )
+
     def enrich_inputs_with_method_context(design) -> dict[str, Any]:
         method_spec = getattr(design, 'method_spec', None)
         inputs = dict(method_spec.execution_inputs) if method_spec is not None else dict(design.declared_inputs)
@@ -164,6 +372,53 @@ def register_execution_routes(
         if workflow is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='workflow not found')
         return build_execution_preflight_result(workflow, settings)
+
+    @app.post('/experiments/runs', response_model=RunRecord, status_code=status.HTTP_201_CREATED)
+    def create_generic_experiment_run(request: GenericExperimentRunRequest) -> RunRecord:
+        return build_generic_run_record(request)
+
+    @app.post('/experiments/runs/{run_id}/results', response_model=RunRecord)
+    def ingest_generic_experiment_results(run_id: str, request: GenericExperimentResultIngestRequest) -> RunRecord:
+        record = store.get_run(run_id)
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='run not found')
+
+        now = datetime.now(timezone.utc)
+        updated = record.model_copy(
+            update={
+                'updated_at': now,
+                'status': RunStatus(
+                    run_id=run_id,
+                    status=request.terminal_status,
+                    updated_at=now,
+                    detail=request.detail or f'Generic result ingest marked run {request.terminal_status}.',
+                ),
+                'reported_metrics': dict(request.metrics),
+                'artifact_refs': {**record.artifact_refs, **request.artifact_refs},
+                'runtime_summary': dict(request.runtime),
+            }
+        )
+        store.save_run(updated)
+
+        expected_artifacts = ExpectedArtifactsSpec.model_validate(record.manifest.expected_artifacts)
+        artifacts = merge_artifact_refs(run_id, store.get_artifacts(run_id), request.artifact_refs, expected_artifacts)
+        store.save_artifacts(run_id, artifacts)
+        store.append_log(
+            run_id,
+            LogEntry(
+                timestamp=now,
+                level='INFO',
+                message='generic experiment results ingested',
+                payload={'terminal_status': request.terminal_status, 'artifact_count': len(request.artifact_refs)},
+            ),
+        )
+        return updated
+
+    @app.post('/experiments/compare', response_model=ComparisonRecord, status_code=status.HTTP_201_CREATED)
+    def compare_generic_experiment_runs(request: GenericExperimentCompareRequest) -> ComparisonRecord:
+        record = build_comparison_record(request)
+        store.save_comparison(record)
+        return record
 
     @app.post('/runs', response_model=RunRecord, status_code=status.HTTP_201_CREATED)
     def create_run(request: RunCreateRequest) -> RunRecord:

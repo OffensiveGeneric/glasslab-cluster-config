@@ -115,7 +115,6 @@ def load_status_from_disk(settings: Settings, run_id: str) -> RunStatus | None:
     payload = json.loads(_read_file(path))
     return RunStatus.model_validate(payload)
 
-
 def build_artifacts_from_directory(settings: Settings, run_id: str) -> ArtifactsIndex | None:
     root = artifact_run_dir(settings, run_id)
     if not _file_exists(root):
