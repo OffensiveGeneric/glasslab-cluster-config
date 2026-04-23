@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -61,6 +61,13 @@ class WorkflowRegistryEntry(BaseModel):
     submission_backend: SubmissionBackend = 'unimplemented'
     execution_blockers: list[str] = Field(default_factory=list)
     runtime_requirements: dict[str, list[str] | int | float | str | bool] = Field(default_factory=dict)
+    experiment_type: str | None = None
+    workload_id: str | None = None
+    schema_ref: str | None = None
+    default_entrypoint: list[str] = Field(default_factory=list)
+    allow_custom_image: bool = False
+    allow_custom_entrypoint: bool = False
+    metric_contract: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator('allowed_models')
     @classmethod
@@ -87,3 +94,9 @@ class WorkflowRegistryEntry(BaseModel):
         if len(deduped) != len(cleaned):
             raise ValueError('execution_blockers must be unique')
         return deduped
+
+    @field_validator('default_entrypoint')
+    @classmethod
+    def validate_default_entrypoint(cls, value: list[str]) -> list[str]:
+        cleaned = [' '.join(str(item).split()).strip() for item in value]
+        return [item for item in cleaned if item]

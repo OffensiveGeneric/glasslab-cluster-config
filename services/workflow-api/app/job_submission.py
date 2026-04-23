@@ -161,6 +161,10 @@ def _build_runner_spec(manifest: RunManifest) -> dict:
     raise ValueError(f'workflow job submission is not implemented yet for {manifest.workflow_id}')
 
 
+def _is_generic_experiment_manifest(manifest: RunManifest) -> bool:
+    return bool(manifest.experiment_type or manifest.workload_id or manifest.entrypoint)
+
+
 def validate_workflow_submission_support(workflow: Any) -> list[str]:
     _, blockers = workflow_submission_ready(workflow)
     if blockers:
@@ -215,7 +219,6 @@ class KubernetesJobSubmitter(JobSubmitter):
         self.core_api = self.client.CoreV1Api()
 
     def submit_run(self, manifest: RunManifest) -> JobSubmissionReceipt:
-        spec = _build_runner_spec(manifest)
         job_name = _build_job_name(manifest)
         labels = {
             'app.kubernetes.io/name': 'glasslab-v2-runner',
@@ -223,24 +226,54 @@ class KubernetesJobSubmitter(JobSubmitter):
             'glasslab.io/workflow-id': _sanitize_label(manifest.workflow_id),
             'glasslab.io/run-priority': manifest.run_priority,
         }
+        if manifest.workload_id:
+            labels['glasslab.io/workload-id'] = _sanitize_label(manifest.workload_id)
 
         priority_class_name = ''
         if manifest.run_priority == 'autonomous':
             priority_class_name = self.settings.autonomous_priority_class_name
         else:
             priority_class_name = self.settings.user_priority_class_name
-
         env = [
             self.client.V1EnvVar(name='GLASSLAB_RUNNER_EXPERIMENT_ID', value=manifest.run_id),
             self.client.V1EnvVar(name='GLASSLAB_RUNNER_TRACE_ID', value=manifest.run_id),
-            self.client.V1EnvVar(name='GLASSLAB_RUNNER_SPEC_JSON', value=json.dumps(spec, sort_keys=True)),
             self.client.V1EnvVar(name='GLASSLAB_RUNNER_MANIFEST_JSON', value=manifest.model_dump_json()),
-            self.client.V1EnvVar(
-                name='GLASSLAB_RUNNER_DATASET_ROOT',
-                value=f"{self.settings.dataset_mount_path}/{spec['dataset']}",
-            ),
             self.client.V1EnvVar(name='GLASSLAB_RUNNER_ARTIFACTS_ROOT', value=self.settings.artifacts_mount_path),
         ]
+
+        if _is_generic_experiment_manifest(manifest):
+            env.extend(
+                [
+                    self.client.V1EnvVar(
+                        name='GLASSLAB_GENERIC_CONFIG_JSON',
+                        value=json.dumps(manifest.config_payload, sort_keys=True),
+                    ),
+                    self.client.V1EnvVar(
+                        name='GLASSLAB_GENERIC_DATASET_BINDINGS_JSON',
+                        value=json.dumps(manifest.dataset_bindings, sort_keys=True),
+                    ),
+                    self.client.V1EnvVar(
+                        name='GLASSLAB_GENERIC_BUDGET_JSON',
+                        value=json.dumps(manifest.budget, sort_keys=True),
+                    ),
+                    self.client.V1EnvVar(
+                        name='GLASSLAB_GENERIC_METRIC_CONTRACT_JSON',
+                        value=json.dumps(manifest.metric_contract, sort_keys=True),
+                    ),
+                    self.client.V1EnvVar(name='GLASSLAB_DATASET_ROOT', value=self.settings.dataset_mount_path),
+                ]
+            )
+        else:
+            spec = _build_runner_spec(manifest)
+            env.extend(
+                [
+                    self.client.V1EnvVar(name='GLASSLAB_RUNNER_SPEC_JSON', value=json.dumps(spec, sort_keys=True)),
+                    self.client.V1EnvVar(
+                        name='GLASSLAB_RUNNER_DATASET_ROOT',
+                        value=f"{self.settings.dataset_mount_path}/{spec['dataset']}",
+                    ),
+                ]
+            )
 
         container = self.client.V1Container(
             name='runner',
@@ -252,6 +285,8 @@ class KubernetesJobSubmitter(JobSubmitter):
                 limits=manifest.resource_limits or None,
             ),
         )
+        if manifest.entrypoint:
+            container.command = manifest.entrypoint
 
         runtime_class_name = None
         requested_gpu = manifest.resource_requests.get('nvidia.com/gpu') or manifest.resource_limits.get('nvidia.com/gpu')

@@ -1,0 +1,84 @@
+{
+  "workflow_id": "metric-search-v0",
+  "display_name": "Metric Search v0",
+  "workflow_family": "generic-experiment",
+  "description": "Run a bounded one-GPU metric-learning search workload from a config-driven image under the generic experiment contract.",
+  "required_inputs": [
+    {
+      "name": "dataset_bindings",
+      "input_type": "artifact_bundle",
+      "required": true,
+      "description": "Resolved dataset bindings for the config-driven metric-search workload."
+    }
+  ],
+  "allowed_models": [
+    "config-driven"
+  ],
+  "runner_image": "ghcr.io/offensivegeneric/glasslab-metric-search:928f3be",
+  "evaluator_type": "art-retrieval-v1",
+  "expected_artifacts": {
+    "required": [
+      "run_manifest.json",
+      "config.json",
+      "metrics.json",
+      "artifacts_index.json",
+      "report.md",
+      "status.json",
+      "logs/"
+    ],
+    "optional": [
+      "comparison.json",
+      "summary.md",
+      "analysis_notebook.ipynb",
+      "checkpoint_manifest.json",
+      "embeddings/",
+      "plots/"
+    ]
+  },
+  "resource_profile": {
+    "profile_name": "gpu-small",
+    "requests": {
+      "cpu": "2",
+      "memory": "4Gi",
+      "nvidia.com/gpu": "1"
+    },
+    "limits": {
+      "cpu": "4",
+      "memory": "8Gi",
+      "nvidia.com/gpu": "1"
+    },
+    "node_selector": {
+      "glasslab.io/gpu-candidate": "true",
+      "glasslab.io/gpu-vendor": "nvidia"
+    }
+  },
+  "approval_tier": "tier-2-approved-execution",
+  "execution_status": "ready",
+  "submission_backend": "kubernetes",
+  "execution_blockers": [],
+  "runtime_requirements": {
+    "gpu": true,
+    "training_stack": ["pytorch"],
+    "required_python_packages": ["torch", "pyyaml"],
+    "modalities": ["computer_vision"],
+    "dataset_layouts": ["manifest", "artifact-bundle", "imagefolder"],
+    "purpose": "config-driven metric-learning search workload"
+  },
+  "experiment_type": "gpu-training-job",
+  "workload_id": "metric-search-v0",
+  "schema_ref": "glasslab-metric-search RunSpec v0",
+  "default_entrypoint": [
+    "python3",
+    "scripts/run_experiment.py",
+    "--config",
+    "configs/search_spaces/art_metric_baseline.yaml",
+    "--output-dir",
+    "/mnt/artifacts/metric-search"
+  ],
+  "allow_custom_image": true,
+  "allow_custom_entrypoint": true,
+  "metric_contract": {
+    "primary_metric": "composite_score",
+    "higher_is_better": true
+  }
+}

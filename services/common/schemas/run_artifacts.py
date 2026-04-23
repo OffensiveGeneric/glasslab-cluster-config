@@ -31,6 +31,14 @@ class RunManifest(BaseModel):
     evaluator_type: str
     approval_tier: str
     expected_artifacts: dict[str, list[str]]
+    experiment_type: str | None = None
+    workload_id: str | None = None
+    schema_ref: str | None = None
+    entrypoint: list[str] = Field(default_factory=list)
+    config_payload: dict[str, Any] = Field(default_factory=dict)
+    dataset_bindings: dict[str, str] = Field(default_factory=dict)
+    budget: dict[str, Any] = Field(default_factory=dict)
+    metric_contract: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator('requested_models')
     @classmethod
@@ -39,6 +47,12 @@ class RunManifest(BaseModel):
         if len(deduped) != len(value):
             raise ValueError('requested_models must be unique')
         return value
+
+    @field_validator('entrypoint')
+    @classmethod
+    def validate_entrypoint(cls, value: list[str]) -> list[str]:
+        cleaned = [' '.join(str(item).split()).strip() for item in value]
+        return [item for item in cleaned if item]
 
 
 class RunStatus(BaseModel):

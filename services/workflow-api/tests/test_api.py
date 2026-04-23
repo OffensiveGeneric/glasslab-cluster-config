@@ -34,7 +34,7 @@ def test_healthz_and_workflow_families() -> None:
 
     health = client.get('/healthz')
     assert health.status_code == 200
-    assert health.json()['workflow_count'] == 4
+    assert health.json()['workflow_count'] == 5
     assert health.json()['store_backend'] == 'memory'
 
     families = client.get('/workflow-families')
@@ -44,16 +44,112 @@ def test_healthz_and_workflow_families() -> None:
         'gpu-experiment',
         'generic-tabular-benchmark',
         'literature-to-experiment',
+        'metric-search-v0',
         'replication-lite',
     }
     by_id = {entry['workflow_id']: entry for entry in payload}
     assert by_id['gpu-experiment']['execution_status'] == 'ready'
     assert by_id['gpu-experiment']['submission_backend'] == 'kubernetes'
     assert by_id['gpu-experiment']['resource_profile'] == 'gpu-small'
+    assert by_id['metric-search-v0']['execution_status'] == 'ready'
+    assert by_id['metric-search-v0']['submission_backend'] == 'kubernetes'
     assert by_id['generic-tabular-benchmark']['execution_status'] == 'ready'
     assert by_id['generic-tabular-benchmark']['submission_backend'] == 'kubernetes'
     assert by_id['replication-lite']['execution_status'] == 'declared_only'
     assert by_id['replication-lite']['submission_backend'] == 'unimplemented'
+
+
+def test_generic_experiment_run_result_ingest_and_compare() -> None:
+    client = build_client()
+
+    create = client.post(
+        '/experiments/runs',
+        json={
+            'objective': 'Run a bounded metric-search smoke job.',
+            'experiment_type': 'gpu-training-job',
+            'workload_id': 'metric-search-v0',
+            'entrypoint': [
+                'python3',
+                'scripts/run_experiment.py',
+                '--config',
+                'configs/search_spaces/art_metric_baseline.yaml',
+                '--output-dir',
+                '/mnt/artifacts/metric-search-smoke',
+            ],
+            'config_payload': {'search_space_id': 'art-metric-baseline'},
+            'dataset_bindings': {'train_uri': 's3://datasets/art/train.parquet'},
+            'budget': {'max_epochs': 1, 'max_wallclock_minutes': 5},
+            'submitted_by': 'test-suite',
+        },
+    )
+    assert create.status_code == 201
+    run_a = create.json()
+    assert run_a['workflow_id'] == 'metric-search-v0'
+    assert run_a['manifest']['experiment_type'] == 'gpu-training-job'
+    assert run_a['manifest']['workload_id'] == 'metric-search-v0'
+    assert run_a['manifest']['entrypoint'][0] == 'python3'
+
+    create_b = client.post(
+        '/experiments/runs',
+        json={
+            'objective': 'Run a second bounded metric-search smoke job.',
+            'experiment_type': 'gpu-training-job',
+            'workload_id': 'metric-search-v0',
+            'entrypoint': [
+                'python3',
+                'scripts/run_experiment.py',
+                '--config',
+                'configs/search_spaces/art_metric_proxy_v0.yaml',
+                '--output-dir',
+                '/mnt/artifacts/metric-search-smoke-b',
+            ],
+            'config_payload': {'search_space_id': 'art-metric-proxy-v0'},
+            'dataset_bindings': {'train_uri': 's3://datasets/art/train.parquet'},
+            'budget': {'max_epochs': 1, 'max_wallclock_minutes': 5},
+            'submitted_by': 'test-suite',
+        },
+    )
+    assert create_b.status_code == 201
+    run_b = create_b.json()
+
+    ingest_a = client.post(
+        f"/experiments/runs/{run_a['run_id']}/results",
+        json={
+            'terminal_status': 'succeeded',
+            'metrics': {'composite_score': 0.61, 'retrieval_recall_at_10': 0.72},
+            'artifact_refs': {'metrics.json': 's3://artifacts/run-a/metrics.json'},
+            'runtime': {'node_name': 'node02'},
+        },
+    )
+    assert ingest_a.status_code == 200
+    assert ingest_a.json()['status']['status'] == 'succeeded'
+    assert ingest_a.json()['reported_metrics']['composite_score'] == 0.61
+
+    ingest_b = client.post(
+        f"/experiments/runs/{run_b['run_id']}/results",
+        json={
+            'terminal_status': 'succeeded',
+            'metrics': {'composite_score': 0.74, 'retrieval_recall_at_10': 0.81},
+            'artifact_refs': {'metrics.json': 's3://artifacts/run-b/metrics.json'},
+            'runtime': {'node_name': 'node04'},
+        },
+    )
+    assert ingest_b.status_code == 200
+
+    compare = client.post(
+        '/experiments/compare',
+        json={
+            'run_ids': [run_a['run_id'], run_b['run_id']],
+            'metric_name': 'composite_score',
+            'higher_is_better': True,
+            'workload_id': 'metric-search-v0',
+        },
+    )
+    assert compare.status_code == 201
+    payload = compare.json()
+    assert payload['workload_id'] == 'metric-search-v0'
+    assert payload['summary_metrics']['metric_name'] == 'composite_score'
+    assert payload['summary_metrics']['best_run_id'] == run_b['run_id']
 
 
 def test_healthz_redacts_postgres_password() -> None:
@@ -911,19 +1007,16 @@ def test_validate_interpretation_agent_draft_does_not_stringify_none_optionals()
 
 
 def test_create_app_rejects_implicit_memory_store_when_disallowed() -> None:
-    settings = Settings(
-        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
-        store_backend='memory',
-        allow_inmemory_store=False,
-    )
-    registry = WorkflowRegistry(settings.registry_dir)
-
     try:
-        create_app(settings=settings, registry=registry)
-    except RuntimeError as exc:
+        Settings(
+            registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+            store_backend='memory',
+            allow_inmemory_store=False,
+        )
+    except Exception as exc:
         assert 'allow_inmemory_store=false' in str(exc)
     else:
-        raise AssertionError('expected create_app to reject implicit in-memory store')
+        raise AssertionError('expected Settings validation to reject implicit in-memory store')
 
 
 def test_create_intake_uses_agent_when_enabled(monkeypatch) -> None:
