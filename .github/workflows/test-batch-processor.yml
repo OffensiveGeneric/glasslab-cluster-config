@@ -1,0 +1,123 @@
+name: Test Batch Processing
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - services/batch-processor/**/*
+      - kubeadm/glasslab-v2/batch-processor/**/*
+      - .github/workflows/test-batch-processor.yml
+  workflow_dispatch:
+
+jobs:
+  test-batch-processor:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Test batch processor structure
+        run: |
+          python << 'PYEOF'
+          import os
+          
+          batch_dir = 'services/batch-processor'
+          
+          if os.path.exists(batch_dir):
+              print(f"Batch processor directory: {batch_dir}")
+              
+              # Check for required files
+              required_files = [
+                  'app/main.py',
+                  'app/batch_runner.py',
+                  'app/batch_scheduler.py',
+                  'tests/test_main.py',
+              ]
+              
+              print("\nRequired files:")
+              for filepath in required_files:
+                  full_path = os.path.join(batch_dir, filepath)
+                  if os.path.exists(full_path):
+                      print(f"  ✓ {filepath}")
+                  else:
+                      print(f"  ✗ {filepath} missing")
+              
+              # List all Python files
+              print("\nPython files:")
+              for root, dirs, files in os.walk(batch_dir):
+                  for f in files:
+                      if f.endswith('.py'):
+                          rel_path = os.path.relpath(os.path.join(root, f), batch_dir)
+                          print(f"  - {rel_path}")
+          else:
+              print("Batch processor directory not found")
+          PYEOF
+
+      - name: Validate batch processing configuration
+        run: |
+          python << 'PYEOF'
+          import yaml
+          
+          # Check batch processor deployment
+          deployment_file = 'kubeadm/glasslab-v2/batch-processor/20-deployment.yaml'
+          
+          if os.path.exists(deployment_file):
+              with open(deployment_file) as f:
+                  deployment = yaml.safe_load(f)
+              
+              print("Batch processor deployment:")
+              print(f"  Name: {deployment['metadata']['name']}")
+              print(f"  Namespace: {deployment['metadata']['namespace']}")
+              
+              # Check container configuration
+              container = deployment['spec']['template']['spec']['containers'][0]
+              print(f"  Image: {container.get('image', 'N/A')}")
+              print(f"  Command: {container.get('command', [])}")
+              
+              # Check resources
+              resources = container.get('resources', {})
+              if resources:
+                  print(f"  CPU: {resources.get('requests', {}).get('cpu', 'N/A')}")
+                  print(f"  Memory: {resources.get('requests', {}).get('memory', 'N/A')}")
+          else:
+              print("Batch processor deployment not found")
+          PYEOF
+
+      - name: Test batch scheduling
+        run: |
+          python << 'PYEOF'
+          import yaml
+          
+          # Check batch scheduler
+          scheduler_file = 'kubeadm/glasslab-v2/batch-processor/10-scheduled-job.yaml'
+          
+          if os.path.exists(scheduler_file):
+              with open(scheduler_file) as f:
+                  scheduler = yaml.safe_load(f)
+              
+              print("Batch scheduler:")
+              print(f"  Name: {scheduler['metadata']['name']}")
+              print(f"  Schedule: {scheduler['spec'].get('schedule', 'N/A')}")
+              
+              # Check template
+              template = scheduler['spec'].get('template', {})
+              print(f"  Template: {template.get('metadata', {}).get('name', 'N/A')}")
+          else:
+              print("Batch scheduler not found (optional)")
+          PYEOF
+
+      - name: Upload batch processor test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: batch-processor-test-results
+          path: |
+            batch-processor-test-results.xml
+            results/
+          retention-days: 7
