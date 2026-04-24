@@ -1,0 +1,40 @@
+workflow_family: cifar100-contrastive
+search_space_id: cifar100-contrastive-v0
+dataset:
+  dataset_id: cifar100-unseen-classes
+  split_version: split-2026-04-a
+  train_seen_uri: s3://datasets/cifar100/train_seen.parquet
+  val_seen_uri: s3://datasets/cifar100/val_seen.parquet
+  test_seen_uri: s3://datasets/cifar100/test_seen.parquet
+  test_unseen_uri: s3://datasets/cifar100/test_unseen.parquet
+resources:
+  gpu_count: 1
+  cpu_count: 8
+  memory_gb: 32
+budget:
+  max_epochs: 25
+  max_wallclock_minutes: 180
+experiment:
+  pipeline: contrastive_learning
+  dataset_uri: s3://datasets/cifar100/
+  model_family: resnet50_contrastive
+  training_notes: Train contrastive representation on CIFAR-100 with 80 seen classes. Use 80% for train-seen, 20% for val-seen.
+  evaluation_target: Contrastive learning evaluation for unseen class generalization
+  validation_strategy: stratified_seen_unseen_split
+  loss_name: contrastive
+  margin: 0.1
+  temperature: 0.1
+  batch_size: 64
+  learning_rate: 0.0001
+  backbone_name: resnet50
+  max_epochs: 25
+search_space:
+  mutable_fields:
+    model_family: [resnet50_contrastive, vit_base_contrastive, convnext_base_contrastive]
+    loss_name: [contrastive, triplet, multi_similarity, proxy_anchor]
+    margin: [0.05, 0.1, 0.2]
+    temperature: [0.05, 0.07, 0.1]
+    batch_size: [32, 64, 96]
+    learning_rate: [0.00005, 0.0001, 0.0003]
+    backbone_name: [resnet50, vit_base_patch16, convnext_base]
+    max_epochs: [20, 25, 30]

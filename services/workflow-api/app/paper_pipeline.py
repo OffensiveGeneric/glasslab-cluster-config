@@ -38,11 +38,12 @@ def resolve_replication_repository_url(intake: IntakeRecord) -> str | None:
     return None
 
 
-def auto_resolve_pipeline_design_inputs(
+def auto_resolve_pipeline_design_inputs_impl(
     design: DesignDraftRecord,
     intake: IntakeRecord,
     interpretation: InterpretationRecord,
     request: FreshPaperPipelineRequest,
+    settings: Settings,
 ) -> tuple[dict[str, Any], list[str]]:
     resolved_inputs: dict[str, Any] = {}
     review_notes: list[str] = []
@@ -66,7 +67,7 @@ def auto_resolve_pipeline_design_inputs(
             else:
                 dataset_uri = 's3://datasets/paper-derived/train.csv'
                 review_notes.append('Auto-resolved literature dataset_uri to bounded paper-derived dataset placeholder.')
-        resolved_inputs['dataset_uri'] = resolve_dataset_uri(dataset_uri, Settings())
+        resolved_inputs['dataset_uri'] = resolve_dataset_uri(dataset_uri, settings)
     elif design.workflow_id == 'replication-lite':
         repository_url = resolve_replication_repository_url(intake)
         if repository_url:
@@ -78,7 +79,7 @@ def auto_resolve_pipeline_design_inputs(
         else:
             resolved_inputs['dataset_uri'] = 's3://datasets/replication-lite/input.csv'
             review_notes.append('Auto-resolved replication dataset_uri to bounded default input.')
-        resolved_inputs['dataset_uri'] = resolve_dataset_uri(resolved_inputs['dataset_uri'], Settings())
+        resolved_inputs['dataset_uri'] = resolve_dataset_uri(resolved_inputs['dataset_uri'], settings)
         if interpretation.evaluation_targets:
             resolved_inputs['evaluation_target'] = interpretation.evaluation_targets[0]
             review_notes.append('Auto-resolved evaluation_target from interpretation output.')

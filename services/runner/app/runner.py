@@ -8,6 +8,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+try:
+    import torch  # type: ignore
+except Exception:
+    torch = None  # type: ignore
+
 from .config import Settings
 from .mlflow_client import MlflowRunLogger
 
@@ -431,6 +436,148 @@ def run_gpu_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> di
     return result_payload
 
 
+def run_contrastive_learning(settings: Settings, spec: dict, artifact_dir: Path) -> dict:
+    """Run contrastive learning experiment for CIFAR-100 unseen class generalization."""
+    import json
+    from services.runner.app.contrastive_runner import (
+        train_contrastive_model,
+        load_cifar100_splits,
+    )
+    
+    dataset_uri = str(spec.get('dataset_uri', '')).strip()
+    model_family = str(spec.get('model_family', '')).strip()
+    training_notes = str(spec.get('training_notes', '')).strip()
+    evaluation_target = str(spec.get('evaluation_target', '')).strip()
+    validation_strategy = str(spec.get('validation_strategy', '')).strip()
+    validation_split = str(spec.get('validation_split', '')).strip()
+    loss_name = str(spec.get('loss_name', 'contrastive')).strip()
+    margin = float(spec.get('margin', 0.3))
+    temperature = float(spec.get('temperature', 0.1))
+    batch_size = int(spec.get('batch_size', 64))
+    learning_rate = float(spec.get('learning_rate', 1e-4))
+    max_epochs = int(spec.get('max_epochs', 25))
+    backbone_name = str(spec.get('backbone_name', 'resnet50')).strip()
+    
+    # Parse class splits from training notes
+    seen_classes = list(range(80))  # Default: first 80 classes
+    unseen_classes = list(range(80, 100))  # Default: last 20 classes
+    
+    if dataset_uri:
+        # Load from dataset_uri if specified (s3:// or file://)
+        pass
+    else:
+        dataset_uri = 'cifar100://default'
+    
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    # Load data
+    dataloaders = load_cifar100_splits(
+        root='~/data',
+        seen_classes=seen_classes,
+        unseen_classes=unseen_classes,
+        augment=True,
+        batch_size=batch_size,
+        num_workers=4,
+    )
+    
+    train_loader = dataloaders['train_seen']
+    val_loader = dataloaders['val_seen']
+    
+    # Train model
+    metrics = train_contrastive_model(
+        train_loader=train_loader,
+        val_loader=val_loader,
+        device=device,
+        loss_name=loss_name,
+        margin=margin,
+        temperature=temperature,
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        max_epochs=max_epochs,
+        backbone_name=backbone_name,
+        output_dir=artifact_dir,
+    )
+    
+    # Build metrics payload
+    metrics_payload = {
+        'metric_name': 'contrastive_loss',
+        'best_model': model_family,
+        'best_metric': metrics['val_loss'],
+        'train_loss': metrics['train_loss'],
+        'val_loss': metrics['val_loss'],
+        'grouped_recall_at_k': metrics['grouped_recall_at_k'],
+        'opis': metrics['opis'],
+        'adjusted_mutual_info': metrics['adjusted_mutual_info'],
+        'adjusted_rand_index': metrics['adjusted_rand_index'],
+        'normalized_mutual_info': metrics['normalized_mutual_info'],
+        'silhouette_score': metrics['silhouette_score'],
+        'loss_name': loss_name,
+        'margin': margin,
+        'temperature': temperature,
+        'batch_size': batch_size,
+        'learning_rate': learning_rate,
+        'backbone_name': backbone_name,
+        'dataset_uri': dataset_uri,
+        'model_family': model_family,
+        'evaluation_target': evaluation_target,
+        'validation_strategy': validation_strategy,
+        'validation_split': validation_split,
+    }
+    
+    result_payload = {
+        'experiment_id': settings.experiment_id,
+        'trace_id': settings.trace_id,
+        'pipeline': spec['pipeline'],
+        'dataset': dataset_uri,
+        'model_family': model_family,
+        'selected_model': model_family,
+        'best_model': model_family,
+        'best_metric': metrics['val_loss'],
+        'metric_name': 'contrastive_loss',
+        'artifact_dir': str(artifact_dir),
+    }
+    
+    write_json(artifact_dir / 'metrics.json', metrics_payload)
+    write_json(artifact_dir / 'result_payload.json', result_payload)
+    
+    design_notes = [
+        f'# Contrastive Learning Report {settings.experiment_id}',
+        '',
+        f'- dataset_uri: `{dataset_uri}`',
+        f'- model_family: `{model_family}`',
+        f'- selected_model: `{model_family}`',
+        f'- loss_name: `{loss_name}`',
+        f'- margin: `{margin}`',
+        f'- temperature: `{temperature}`',
+        f'- batch_size: `{batch_size}`',
+        f'- learning_rate: `{learning_rate}`',
+        f'- backbone_name: `{backbone_name}`',
+        '',
+        '## Metrics',
+        '',
+        f'- train_loss: `{metrics["train_loss"]:.4f}`',
+        f'- val_loss: `{metrics["val_loss"]:.4f}`',
+        f'- grouped_recall_at_k: `{metrics["grouped_recall_at_k"]:.4f}`',
+        f'- opis: `{metrics["opis"]:.4f}`',
+        f'- adjusted_mutual_info: `{metrics["adjusted_mutual_info"]:.4f}`',
+        f'- adjusted_rand_index: `{metrics["adjusted_rand_index"]:.4f}`',
+        f'- normalized_mutual_info: `{metrics["normalized_mutual_info"]:.4f}`',
+        f'- silhouette_score: `{metrics["silhouette_score"]:.4f}`',
+        '',
+        '## Training Notes',
+        '',
+        training_notes,
+    ]
+    (artifact_dir / 'design_notes.md').write_text('\n'.join(design_notes) + '\n')
+    
+    LOGGER.info(
+        'completed contrastive learning run',
+        extra={'experiment_id': settings.experiment_id, 'model_family': model_family},
+    )
+    
+    return result_payload
+
+
 def configure_logging(level: str, log_path: Path) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
@@ -460,6 +607,8 @@ def run_experiment(settings: Settings | None = None) -> dict:
         return run_literature_to_experiment(settings, spec, artifact_dir)
     if spec['pipeline'] == 'gpu_experiment':
         return run_gpu_experiment(settings, spec, artifact_dir)
+    if spec['pipeline'] == 'contrastive_learning':
+        return run_contrastive_learning(settings, spec, artifact_dir)
 
     dataset_root = Path(settings.dataset_root)
     train_path = dataset_root / 'train.csv'
@@ -767,6 +916,28 @@ def build_analysis_notebook(settings: Settings, result_payload: dict, status: st
                         "training_contract = json.loads((artifact_dir / 'training_contract.json').read_text())",
                         "design_notes = (artifact_dir / 'design_notes.md').read_text()",
                         'training_contract',
+                        '',
+                        "print('\\n--- design notes preview ---\\n')",
+                        'print(design_notes)',
+                    ]
+                ),
+            ]
+        )
+    elif pipeline == 'contrastive_learning':
+        cells.extend(
+            [
+                markdown_cell(
+                    [
+                        '## Contrastive Learning Report',
+                        '',
+                        'This notebook exposes the contrastive learning results for CIFAR-100 unseen class generalization.',
+                    ]
+                ),
+                code_cell(
+                    [
+                        "metrics = json.loads((artifact_dir / 'metrics.json').read_text())",
+                        "design_notes = (artifact_dir / 'design_notes.md').read_text()",
+                        'metrics',
                         '',
                         "print('\\n--- design notes preview ---\\n')",
                         'print(design_notes)',

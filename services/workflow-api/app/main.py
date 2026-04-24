@@ -257,8 +257,9 @@ def auto_resolve_pipeline_design_inputs(
     intake: IntakeRecord,
     interpretation: InterpretationRecord,
     request: FreshPaperPipelineRequest,
+    settings: Settings,
 ) -> tuple[dict[str, Any], list[str]]:
-    return auto_resolve_pipeline_design_inputs_impl(design, intake, interpretation, request)
+    return auto_resolve_pipeline_design_inputs_impl(design, intake, interpretation, request, settings)
 
 
 def wait_for_terminal_run_state(
@@ -1911,7 +1912,7 @@ def create_app(
                 source_assessment_id=assessment.assessment_id,
             )
 
-        resolved_inputs, review_notes = auto_resolve_pipeline_design_inputs(design, intake, interpretation, request)
+        resolved_inputs, review_notes = auto_resolve_pipeline_design_inputs(design, intake, interpretation, request, settings)
         if resolved_inputs:
             design = review_design_draft(
                 design,

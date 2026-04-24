@@ -1,0 +1,81 @@
+dataset_id: cifar100-unseen-classes
+description: CIFAR-100 with 80/20 seen/unseen split for contrastive learning generalization study
+split_version: split-2026-04-a
+uri: s3://datasets/cifar100/
+
+splits:
+  train_seen:
+    description: 80 seen classes, 80% of training images per class
+    classes: 80
+    images_per_class: 400
+    total_images: 32000
+    uri: s3://datasets/cifar100/train_seen.parquet
+  val_seen:
+    description: Same 80 classes, 20% of training images per class
+    classes: 80
+    images_per_class: 100
+    total_images: 8000
+    uri: s3://datasets/cifar100/val_seen.parquet
+  test_seen:
+    description: Official CIFAR-100 test images for 80 seen classes
+    classes: 80
+    images_per_class: 100
+    total_images: 8000
+    uri: s3://datasets/cifar100/test_seen.parquet
+  test_unseen:
+    description: Official CIFAR-100 test images for 20 unseen classes
+    classes: 20
+    images_per_class: 100
+    total_images: 2000
+    uri: s3://datasets/cifar100/test_unseen.parquet
+
+seeds:
+  - 42
+  - 123
+  - 456
+  - 789
+  - 1024
+
+class_structure:
+  train_seen_base_classes: 80
+  test_unseen_holdout_classes: 20
+  fine_grained_labels: true
+  coarse_grained_labels: true
+
+augmentation:
+  name: contrastive_cifar100
+  transforms:
+    - name: random_resized_crop
+      params: {size: [32, 32], scale: [0.2, 1.0], ratio: [0.75, 1.333], interpolation: 2}
+    - name: random_horizontal_flip
+      params: {p: 0.5}
+    - name: color_jitter
+      params: {brightness: [0.4, 0.4, 0.4, 0.1], contrast: [0.4, 0.4, 0.4, 0.1], saturation: [0.4, 0.4, 0.4, 0.1], hue: [0.1, 0.1, 0.1, 0.05], p: 0.8}
+    - name: random_grayscale
+      params: {p: 0.2}
+  normalize:
+    mean: [0.5071, 0.4865, 0.4409]
+    std: [0.2673, 0.2564, 0.2762]
+
+evaluation:
+  metrics:
+    - grouped_recall_at_k
+    - opis
+    - adjusted_mutual_info
+    - adjusted_rand_index
+    - normalized_mutual_info
+    - silhouette_score
+  statistical_tests:
+    - 5x2cv_paired_t_test
+    - mcnemars_test
+
+baseline_models:
+  - name: DINO ViT
+    type: self_supervised
+    description: Self-supervised visual transformer baseline
+  - name: ResNet-50
+    type: supervised
+    description: Supervised baseline
+  - name: CLIP
+    type: zero_shot
+    description: Multi-modal foundation model with zero-shot capabilities

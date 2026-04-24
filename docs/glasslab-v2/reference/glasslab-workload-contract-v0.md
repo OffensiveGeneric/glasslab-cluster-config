@@ -178,7 +178,7 @@ Every run **must** produce the following required artifacts:
 |---------|------|-------|
 | Run output directory | `/mnt/artifacts/{run_id}/` | Shared PVC |
 | Source documents | `/mnt/artifacts/source-documents/{document_id}/` | Shared PVC |
-| Workflow API state | `/mnt/artifacts/workflow-api/state/run-store.json` | Shared PVC, fallback to Postgres |
+| Workflow API state | `/mnt/artifacts/workflow-api/state/run-store.json` | JSON store in shared PVC |
 | Evaluator output | `/mnt/artifacts/evaluator/{comparison_id}/` | Per-comparison |
 
 ---
@@ -400,7 +400,7 @@ class ComparisonResult(BaseModel):
 **Failure:** Backend service unavailable
 
 **Behavior:**
-- Workflow API: JSON fallback to Postgres
+- Workflow API: JSON store only
 - Deterministic commands: 400-level errors with clear explanation
 - No "API unreachable" language when backend returns validation error
 
@@ -409,7 +409,7 @@ class ComparisonResult(BaseModel):
 | Tier | Description | Behavior on Violation |
 |------|-------------|----------------------|
 | `tier-1-read-only` | Read-only operations | Reject write attempts |
-| `tier-2-approved-execution` | Pre-approved runs | Reject未经批准 runs |
+| `tier-2-approved-execution` | Pre-approved runs | Reject unapproved runs |
 | `tier-3-human-approval` | Human-in-the-loop | Require explicit human decision |
 
 ### 6.6 Session State Failures

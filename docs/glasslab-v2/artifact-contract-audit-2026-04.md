@@ -244,7 +244,7 @@ Run Directory ({run_id}/)
 |---------|------|-------|
 | Run output directory | `/mnt/artifacts/{run_id}/` | Shared PVC |
 | Source documents | `/mnt/artifacts/source-documents/{document_id}/` | Shared PVC |
-| Workflow API state | `/mnt/artifacts/workflow-api/state/run-store.json` | Shared PVC, fallback to Postgres |
+| Workflow API state | `/mnt/artifacts/workflow-api/state/run-store.json` | JSON store in shared PVC |
 | Evaluator output | `/mnt/artifacts/evaluator/{comparison_id}/` | Per-comparison |
 | Runner logs | `{run_id}/logs/runner.log` | In run directory |
 
