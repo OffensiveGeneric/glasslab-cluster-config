@@ -410,4 +410,3 @@ jobs:
           echo "  1. Deploy GPU runner with contrastive learning support"
           echo "  2. Register CIFAR-100 dataset in workflow-api"
           echo "  3. Run end-to-end via workflow-api /runs endpoint"
-          PYEOF
