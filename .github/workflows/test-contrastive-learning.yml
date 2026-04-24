@@ -295,30 +295,49 @@ jobs:
           with open(config_path) as f:
               config = yaml.safe_load(f)
           
-          # Verify splits
-          assert 'train_seen' in config, "Config must define train_seen split"
-          assert 'val_seen' in config, "Config must define val_seen split"
-          assert 'test_seen' in config, "Config must define test_seen split"
-          assert 'test_unseen' in config, "Config must define test_unseen split"
-          print("✓ All splits defined: train_seen, val_seen, test_seen, test_unseen")
+          # Verify splits (can be top-level or under 'splits' key)
+          if 'splits' in config:
+              splits = config['splits']
+              assert 'train_seen' in splits, "Config must define train_seen split"
+              assert 'val_seen' in splits, "Config must define val_seen split"
+              assert 'test_seen' in splits, "Config must define test_seen split"
+              assert 'test_unseen' in splits, "Config must define test_unseen split"
+              print("✓ All splits defined: train_seen, val_seen, test_seen, test_unseen")
+          else:
+              assert 'train_seen' in config, "Config must define train_seen split"
+              assert 'val_seen' in config, "Config must define val_seen split"
+              assert 'test_seen' in config, "Config must define test_seen split"
+              assert 'test_unseen' in config, "Config must define test_unseen split"
+              print("✓ All splits defined: train_seen, val_seen, test_seen, test_unseen")
           
-          # Verify augmentation
-          assert 'augmentation' in config, "Config must define augmentation pipeline"
-          aug = config['augmentation']
-          assert 'RandomResizedCrop' in str(aug), "Config must include RandomResizedCrop"
-          assert 'ColorJitter' in str(aug), "Config must include ColorJitter"
-          assert 'RandomHorizontalFlip' in str(aug), "Config must include RandomHorizontalFlip"
+          # Verify augmentation (can be top-level or under 'augmentation' key)
+          if 'augmentation' in config:
+              aug = config['augmentation']
+          elif 'augmentations' in config:
+              aug = config['augmentations']
+          else:
+              raise AssertionError("Config must define augmentation pipeline")
+          
+          aug_str = str(aug)
+          assert 'random_resized_crop' in aug_str.lower(), "Config must include RandomResizedCrop"
+          assert 'color_jitter' in aug_str.lower(), "Config must include ColorJitter"
+          assert 'random_horizontal_flip' in aug_str.lower(), "Config must include RandomHorizontalFlip"
           print("✓ Augmentation pipeline: RandomResizedCrop + ColorJitter + RandomHorizontalFlip")
           
-          # Verify metrics
-          assert 'metrics' in config, "Config must define evaluation metrics"
-          metrics = config['metrics']
+          # Verify metrics (can be top-level or under 'evaluation.metrics' key)
+          if 'evaluation' in config and 'metrics' in config['evaluation']:
+              metrics = config['evaluation']['metrics']
+          elif 'metrics' in config:
+              metrics = config['metrics']
+          else:
+              raise AssertionError("Config must define evaluation metrics")
+          
           assert 'grouped_recall_at_k' in metrics, "Config must include Grouped Recall@K"
           assert 'opis' in metrics, "Config must include OPIS"
-          assert 'ami' in metrics, "Config must include AMI"
-          assert 'ari' in metrics, "Config must include ARI"
-          assert 'nmi' in metrics, "Config must include NMI"
-          assert 'silhouette' in metrics, "Config must include Silhouette"
+          assert 'adjusted_mutual_info' in metrics or 'ami' in metrics, "Config must include AMI"
+          assert 'adjusted_rand_index' in metrics or 'ari' in metrics, "Config must include ARI"
+          assert 'normalized_mutual_info' in metrics or 'nmi' in metrics, "Config must include NMI"
+          assert 'silhouette_score' in metrics or 'silhouette' in metrics, "Config must include Silhouette"
           print("✓ Evaluation metrics: grouped_recall_at_k, opis, ami, ari, nmi, silhouette")
           
           print("\n✓ Dataset and search space configs validated")
