@@ -1,0 +1,18 @@
+# Core ML frameworks (CPU versions for CI)
+pandas
+scikit-learn
+joblib
+pydantic-settings
+torch
+torchvision
+timm==1.0.11
+# Deep Metric Learning (DML)
+pytorch-metric-learning==2.6.0
+faiss-cpu==1.8.0
+umap-learn==0.5.1
+mlxtend==0.22.0
+torchcp==1.2.1
+optuna==4.8.0
+# Test dependencies
+pytest
+pytest-mock
