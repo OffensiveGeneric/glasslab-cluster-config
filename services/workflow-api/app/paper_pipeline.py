@@ -88,3 +88,19 @@ def auto_resolve_pipeline_design_inputs_impl(
             review_notes.append('Auto-resolved evaluation_target to bounded baseline comparison default.')
 
     return resolved_inputs, review_notes
+
+
+def auto_resolve_pipeline_design_inputs(
+    design: DesignDraftRecord,
+    intake: IntakeRecord,
+    interpretation: InterpretationRecord,
+    request: FreshPaperPipelineRequest,
+    settings: Settings,
+) -> tuple[dict[str, Any], list[str]]:
+    return auto_resolve_pipeline_design_inputs_impl(
+        design=design,
+        intake=intake,
+        interpretation=interpretation,
+        request=request,
+        settings=settings,
+    )

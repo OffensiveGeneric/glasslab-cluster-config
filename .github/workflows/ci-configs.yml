@@ -1,0 +1,87 @@
+name: CI Configs
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - "kubeadm/**/*.yml"
+      - "kubeadm/**/*.yaml"
+      - "**/*.json"
+      - "**/*.yml"
+      - "**/*.yaml"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - "kubeadm/**/*.yml"
+      - "kubeadm/**/*.yaml"
+      - "**/*.json"
+      - "**/*.yml"
+      - "**/*.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-configs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-configs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate YAML and JSON syntax
+        run: |
+          python <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import yaml
+
+          root = Path(".")
+          yaml_errors = []
+          json_errors = []
+
+          for path in root.rglob("*"):
+            if any(part.startswith(".git") for part in path.parts):
+              continue
+            if path.is_dir():
+              continue
+            if path.suffix.lower() in {".yaml", ".yml"}:
+              try:
+                with path.open() as fh:
+                  list(yaml.safe_load_all(fh))
+              except Exception as exc:
+                yaml_errors.append((str(path), str(exc)))
+            elif path.suffix.lower() == ".json":
+              try:
+                with path.open() as fh:
+                  json.load(fh)
+              except Exception as exc:
+                json_errors.append((str(path), str(exc)))
+
+          if yaml_errors:
+            print("YAML errors:")
+            for path, exc in yaml_errors:
+              print(f"  - {path}: {exc}")
+          if json_errors:
+            print("JSON errors:")
+            for path, exc in json_errors:
+              print(f"  - {path}: {exc}")
+
+          if yaml_errors or json_errors:
+            raise SystemExit(1)
+
+          print("All YAML and JSON files parsed successfully.")
+          PY
+

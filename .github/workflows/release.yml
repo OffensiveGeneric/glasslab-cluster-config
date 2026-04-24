@@ -1,56 +1,67 @@
-name: Create Release
+name: Release
 
 on:
   push:
-    branches: [main]
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Version tag (e.g., v0.1.0)'
+      tag:
+        description: "Version tag to release, for example v0.1.0"
         required: true
-        default: 'v0.1.0'
+        type: string
+      target:
+        description: "Target commit or branch for the release"
+        required: false
+        default: "main"
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   create-release:
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Extract version
-        id: version
+      - name: Resolve release metadata
+        id: meta
         run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            echo "tag=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+            echo "target=${{ inputs.target }}" >> "$GITHUB_OUTPUT"
           else
-            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "target=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Get commit message
-        id: commit
+      - name: Ensure tag exists for manual release
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
-          echo "message=$(git log -1 --pretty=%s)" >> $GITHUB_OUTPUT
+          git fetch --tags --force
+          if ! git rev-parse "${{ steps.meta.outputs.tag }}" >/dev/null 2>&1; then
+            git tag "${{ steps.meta.outputs.tag }}" "${{ steps.meta.outputs.target }}"
+            git push origin "${{ steps.meta.outputs.tag }}"
+          fi
 
-      - name: Create Release
-        uses: actions/create-release@v4
+      - name: Create release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          release_name: Release ${{ steps.version.outputs.tag }}
-          body: |
-            ## Changes
-            
-            ${{ steps.commit.outputs.message }}
-            
-            ## Images
-            - ghcr.io/${{ github.repository }}/glasslab-workflow-api:${{ steps.version.outputs.tag }}
-            - ghcr.io/${{ github.repository }}/glasslab-whatsapp-gateway:${{ steps.version.outputs.tag }}
-            - ghcr.io/${{ github.repository }}/glasslab-gpu-experiment-runner:${{ steps.version.outputs.tag }}
-          draft: false
-          prerelease: false
+        run: |
+          if gh release view "${{ steps.meta.outputs.tag }}" >/dev/null 2>&1; then
+            echo "Release ${{ steps.meta.outputs.tag }} already exists."
+            exit 0
+          fi
+
+          gh release create "${{ steps.meta.outputs.tag }}" \
+            --target "${{ steps.meta.outputs.target }}" \
+            --title "Release ${{ steps.meta.outputs.tag }}" \
+            --generate-notes
