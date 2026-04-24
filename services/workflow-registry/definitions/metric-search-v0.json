@@ -2,13 +2,19 @@
   "workflow_id": "metric-search-v0",
   "display_name": "Metric Search v0",
   "workflow_family": "generic-experiment",
-  "description": "Run a bounded one-GPU metric-learning search workload from a config-driven image under the generic experiment contract.",
+  "description": "Run a bounded one-GPU metric-learning search workload from a config-driven image under the generic experiment contract. Supports contrastive learning for unseen class generalization via CIFAR-100 seen/unseen splits.",
   "required_inputs": [
     {
       "name": "dataset_bindings",
       "input_type": "artifact_bundle",
       "required": true,
       "description": "Resolved dataset bindings for the config-driven metric-search workload."
+    },
+    {
+      "name": "pipeline",
+      "input_type": "parameter_set",
+      "required": false,
+      "description": "Pipeline type: 'contrastive_learning' for unseen class generalization, 'standard_metric' for standard metric learning."
     }
   ],
   "allowed_models": [
@@ -58,11 +64,30 @@
   "execution_blockers": [],
   "runtime_requirements": {
     "gpu": true,
-    "training_stack": ["pytorch"],
-    "required_python_packages": ["torch", "pyyaml"],
+    "training_stack": ["pytorch", "pytorch-metric-learning", "faiss", "umap"],
+    "required_python_packages": ["torch", "pyyaml", "pytorch-metric-learning", "faiss-cpu", "umap-learn", "mlxtend", "torchcp", "optuna"],
     "modalities": ["computer_vision"],
     "dataset_layouts": ["manifest", "artifact-bundle", "imagefolder"],
-    "purpose": "config-driven metric-learning search workload"
+    "purpose": "config-driven metric-learning search workload with contrastive learning support for unseen class generalization"
+  },
+  "pipeline_support": {
+    "contrastive_learning": {
+      "description": "Contrastive representation learning for unseen class generalization on CIFAR-100",
+      "loss_functions": ["supervised_contrastive", "triplet", "n-pair", "multi-similarity"],
+      "mining_strategies": ["random", "hard_negative", "semi_hard_negative"],
+      "augmentations": ["random_resized_crop", "color_jitter", "random_horizontal_flip"],
+      "evaluation_metrics": ["grouped_recall_at_k", "opis", "ami", "ari", "nmi", "silhouette"],
+      "statistical_tests": ["5x2cv_paired_ttest", "mcnemar"],
+      "hpo_strategies": ["random_search", "bayesian_optimization", "asha"]
+    },
+    "standard_metric": {
+      "description": "Standard metric learning with basic loss functions",
+      "loss_functions": ["contrastive", "triplet"],
+      "mining_strategies": ["random"],
+      "augmentations": ["basic"],
+      "evaluation_metrics": ["recall_at_k", "precision_at_k", "accuracy"],
+      "hpo_strategies": ["grid_search", "random_search"]
+    }
   },
   "experiment_type": "gpu-training-job",
   "workload_id": "metric-search-v0",

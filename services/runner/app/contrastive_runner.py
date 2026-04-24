@@ -103,10 +103,10 @@ class TripletLoss(nn.Module):
                     loss += torch.relu(anchor_positive_dist.mean() - semi_hard_negative + self.margin)
                     count += 1
             
-            else:
-                for pos_dist in anchor_positive_dist:
-                    for neg_dist in anchor_negative_dist:
-                        loss += torch.relu(pos_dist - neg_dist + self.margin)
+            else:  # random mining
+                for pos_idx in positive_indices:
+                    for neg_idx in negative_indices:
+                        loss += torch.relu(anchor_dist[pos_idx] - anchor_dist[neg_idx] + self.margin)
                         count += 1
         
         if count == 0:
