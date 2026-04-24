@@ -13,6 +13,7 @@ on:
           - whatsapp-gateway
           - research-ingress
           - research-command-router
+          - runner
       push:
         description: "Push image to GHCR"
         required: true
@@ -62,6 +63,11 @@ jobs:
               echo "context=services/research-command-router" >> "$GITHUB_OUTPUT"
               echo "dockerfile=services/research-command-router/Dockerfile" >> "$GITHUB_OUTPUT"
               echo "image=ghcr.io/${{ github.repository_owner }}/glasslab-research-command-router" >> "$GITHUB_OUTPUT"
+              ;;
+            runner)
+              echo "context=services/runner" >> "$GITHUB_OUTPUT"
+              echo "dockerfile=services/runner/Dockerfile.gpu" >> "$GITHUB_OUTPUT"
+              echo "image=ghcr.io/${{ github.repository_owner }}/glasslab-gpu-experiment-runner" >> "$GITHUB_OUTPUT"
               ;;
             *)
               echo "Unsupported service: ${{ inputs.service }}" >&2
