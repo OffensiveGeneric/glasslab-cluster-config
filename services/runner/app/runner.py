@@ -439,10 +439,16 @@ def run_gpu_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> di
 def run_contrastive_learning(settings: Settings, spec: dict, artifact_dir: Path) -> dict:
     """Run contrastive learning experiment for CIFAR-100 unseen class generalization."""
     import json
+    from pathlib import Path
     from services.runner.app.contrastive_runner import (
         train_contrastive_model,
         load_cifar100_splits,
+        SupervisedContrastiveLoss,
+        TripletLoss,
+        ShadowLoss,
+        L2ANovelClassGenerator,
     )
+    from services.runner.app.config import Settings as RunnerSettings
     
     dataset_uri = str(spec.get('dataset_uri', '')).strip()
     model_family = str(spec.get('model_family', '')).strip()
@@ -483,18 +489,38 @@ def run_contrastive_learning(settings: Settings, spec: dict, artifact_dir: Path)
     train_loader = dataloaders['train_seen']
     val_loader = dataloaders['val_seen']
     
+    # Build run_spec for train_contrastive_model
+    run_spec_config = {
+        'backbone': {'name': backbone_name},
+        'loss': {
+            'name': loss_name,
+            'margin': margin,
+            'temperature': temperature,
+        },
+        'miner': {'name': 'semi_hard' if loss_name == 'triplet' else 'random'},
+        'trainer': {
+            'batch_size': batch_size,
+            'learning_rate': learning_rate,
+        },
+    }
+    
+    run_spec_budget = {
+        'max_epochs': max_epochs,
+    }
+    
+    class MockRunSpec:
+        def __init__(self, config: dict, budget: dict):
+            self.config = config
+            self.budget = budget
+    
+    run_spec = MockRunSpec(run_spec_config, run_spec_budget)
+    
     # Train model
     metrics = train_contrastive_model(
+        run_spec=run_spec,
         train_loader=train_loader,
         val_loader=val_loader,
         device=device,
-        loss_name=loss_name,
-        margin=margin,
-        temperature=temperature,
-        batch_size=batch_size,
-        learning_rate=learning_rate,
-        max_epochs=max_epochs,
-        backbone_name=backbone_name,
         output_dir=artifact_dir,
     )
     
