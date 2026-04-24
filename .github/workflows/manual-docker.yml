@@ -43,31 +43,34 @@ jobs:
       - name: Resolve build settings
         id: meta
         run: |
+          # Convert repository owner to lowercase for GHCR
+          REPO_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          
           case "${{ inputs.service }}" in
             workflow-api)
               echo "context=." >> "$GITHUB_OUTPUT"
               echo "dockerfile=services/workflow-api/Dockerfile" >> "$GITHUB_OUTPUT"
-              echo "image=ghcr.io/${{ github.repository_owner }}/glasslab-workflow-api" >> "$GITHUB_OUTPUT"
+              echo "image=ghcr.io/${REPO_OWNER}/glasslab-workflow-api" >> "$GITHUB_OUTPUT"
               ;;
             whatsapp-gateway)
               echo "context=services/whatsapp-gateway" >> "$GITHUB_OUTPUT"
               echo "dockerfile=services/whatsapp-gateway/Dockerfile" >> "$GITHUB_OUTPUT"
-              echo "image=ghcr.io/${{ github.repository_owner }}/glasslab-whatsapp-gateway" >> "$GITHUB_OUTPUT"
+              echo "image=ghcr.io/${REPO_OWNER}/glasslab-whatsapp-gateway" >> "$GITHUB_OUTPUT"
               ;;
             research-ingress)
               echo "context=services/research-ingress" >> "$GITHUB_OUTPUT"
               echo "dockerfile=services/research-ingress/Dockerfile" >> "$GITHUB_OUTPUT"
-              echo "image=ghcr.io/${{ github.repository_owner }}/glasslab-research-ingress" >> "$GITHUB_OUTPUT"
+              echo "image=ghcr.io/${REPO_OWNER}/glasslab-research-ingress" >> "$GITHUB_OUTPUT"
               ;;
             research-command-router)
               echo "context=services/research-command-router" >> "$GITHUB_OUTPUT"
               echo "dockerfile=services/research-command-router/Dockerfile" >> "$GITHUB_OUTPUT"
-              echo "image=ghcr.io/${{ github.repository_owner }}/glasslab-research-command-router" >> "$GITHUB_OUTPUT"
+              echo "image=ghcr.io/${REPO_OWNER}/glasslab-research-command-router" >> "$GITHUB_OUTPUT"
               ;;
             runner)
               echo "context=services/runner" >> "$GITHUB_OUTPUT"
               echo "dockerfile=services/runner/Dockerfile.gpu" >> "$GITHUB_OUTPUT"
-              echo "image=ghcr.io/${{ github.repository_owner }}/glasslab-gpu-experiment-runner" >> "$GITHUB_OUTPUT"
+              echo "image=ghcr.io/${REPO_OWNER}/glasslab-gpu-experiment-runner" >> "$GITHUB_OUTPUT"
               ;;
             *)
               echo "Unsupported service: ${{ inputs.service }}" >&2
@@ -76,7 +79,8 @@ jobs:
           esac
 
           if [ -n "${{ inputs.tag }}" ]; then
-            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+            TAG=$(echo "${{ inputs.tag }}" | tr '[:upper:]' '[:lower:]')
+            echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           else
             echo "tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           fi
