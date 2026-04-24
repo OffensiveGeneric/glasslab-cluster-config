@@ -1,0 +1,99 @@
+name: Manual Docker Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Service image to build"
+        required: true
+        default: "workflow-api"
+        type: choice
+        options:
+          - workflow-api
+          - whatsapp-gateway
+          - research-ingress
+          - research-command-router
+      push:
+        description: "Push image to GHCR"
+        required: true
+        default: false
+        type: boolean
+      tag:
+        description: "Image tag override"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: manual-docker-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve build settings
+        id: meta
+        run: |
+          case "${{ inputs.service }}" in
+            workflow-api)
+              echo "context=." >> "$GITHUB_OUTPUT"
+              echo "dockerfile=services/workflow-api/Dockerfile" >> "$GITHUB_OUTPUT"
+              echo "image=ghcr.io/${{ github.repository_owner }}/glasslab-workflow-api" >> "$GITHUB_OUTPUT"
+              ;;
+            whatsapp-gateway)
+              echo "context=services/whatsapp-gateway" >> "$GITHUB_OUTPUT"
+              echo "dockerfile=services/whatsapp-gateway/Dockerfile" >> "$GITHUB_OUTPUT"
+              echo "image=ghcr.io/${{ github.repository_owner }}/glasslab-whatsapp-gateway" >> "$GITHUB_OUTPUT"
+              ;;
+            research-ingress)
+              echo "context=services/research-ingress" >> "$GITHUB_OUTPUT"
+              echo "dockerfile=services/research-ingress/Dockerfile" >> "$GITHUB_OUTPUT"
+              echo "image=ghcr.io/${{ github.repository_owner }}/glasslab-research-ingress" >> "$GITHUB_OUTPUT"
+              ;;
+            research-command-router)
+              echo "context=services/research-command-router" >> "$GITHUB_OUTPUT"
+              echo "dockerfile=services/research-command-router/Dockerfile" >> "$GITHUB_OUTPUT"
+              echo "image=ghcr.io/${{ github.repository_owner }}/glasslab-research-command-router" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unsupported service: ${{ inputs.service }}" >&2
+              exit 1
+              ;;
+          esac
+
+          if [ -n "${{ inputs.tag }}" ]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: ${{ inputs.push }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build image
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ steps.meta.outputs.context }}
+          file: ${{ steps.meta.outputs.dockerfile }}
+          push: ${{ inputs.push }}
+          tags: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+          build-args: |
+            GLASSLAB_GIT_SHA=${{ github.sha }}
+            GLASSLAB_BUILD_SOURCE=github:${{ github.run_id }}
+

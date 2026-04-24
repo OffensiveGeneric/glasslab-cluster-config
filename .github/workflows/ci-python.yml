@@ -1,0 +1,114 @@
+name: CI Python
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "services/**/*.py"
+      - "services/**/requirements*.txt"
+      - ".github/workflows/ci-python.yml"
+  push:
+    branches: [main]
+    paths:
+      - "services/**/*.py"
+      - "services/**/requirements*.txt"
+      - ".github/workflows/ci-python.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-python-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Compile Python sources
+        run: |
+          python <<'PY'
+          import py_compile
+          from pathlib import Path
+
+          failures = []
+          for path in Path("services").rglob("*.py"):
+            try:
+              py_compile.compile(str(path), doraise=True)
+            except Exception as exc:
+              failures.append((str(path), str(exc)))
+
+          if failures:
+            for path, exc in failures:
+              print(f"{path}: {exc}")
+            raise SystemExit(1)
+
+          print("All Python files compiled successfully.")
+          PY
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: workflow-api-narrow
+            workdir: services/workflow-api
+            requirements: services/workflow-api/requirements.txt
+            pythonpath: ../..:.
+            tests: tests/test_persistence.py tests/test_run_artifacts.py tests/test_validation.py
+          - name: research-ingress
+            workdir: services/research-ingress
+            requirements: services/research-ingress/requirements.txt
+            pythonpath: .
+            tests: tests/test_api.py
+          - name: research-command-router
+            workdir: services/research-command-router
+            requirements: services/research-command-router/requirements.txt
+            pythonpath: .
+            tests: tests/test_api.py
+          - name: whatsapp-gateway
+            workdir: services/whatsapp-gateway
+            requirements: services/whatsapp-gateway/requirements.txt
+            pythonpath: .
+            tests: tests/test_api.py
+          - name: evaluator
+            workdir: services/evaluator
+            requirements: services/evaluator/requirements.txt
+            pythonpath: .
+            tests: tests/test_main.py
+          - name: reporter
+            workdir: services/reporter
+            requirements: services/reporter/requirements.txt
+            pythonpath: .
+            tests: tests/test_main.py
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r "${{ matrix.requirements }}" pytest httpx
+
+      - name: Run ${{ matrix.name }} tests
+        working-directory: ${{ matrix.workdir }}
+        env:
+          PYTHONPATH: ${{ matrix.pythonpath }}
+        run: |
+          pytest ${{ matrix.tests }} -q

@@ -77,7 +77,6 @@ from .stage_inference import (
 from .session_helpers import (
     attach_dataset_to_session,
     append_research_session_memory,
-    build_intake_request_from_problem_candidate,
     build_research_problem_request_from_session,
     build_research_session_context,
     build_research_session_literature_digest,

@@ -66,6 +66,7 @@ These are still useful operational documents:
 - `state-and-storage-map-2026-03-27.md`
 - `cluster-primitives-gap-audit.md`
 - `image-distribution.md`
+- `github-actions-ci-policy-2026-04.md`
 - `internal-service-exposure.md`
 - `secrets-and-dr.md`
 - `provisioner-dependence-inventory.md`
