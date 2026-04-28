@@ -1,0 +1,32 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: simple-gpu-test
+  namespace: glasslab-v2
+spec:
+  template:
+    spec:
+      containers:
+        - name: simple-test
+          image: ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.7-local
+          command: ["python", "-c", "import torch; import numpy; print('PyTorch version:', torch.__version__); print('NumPy version:', numpy.__version__); print('CUDA available:', torch.cuda.is_available())"]
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+              memory: "4Gi"
+              cpu: "2"
+            requests:
+              memory: "2Gi"
+              cpu: "1"
+          volumeMounts:
+            - name: artifacts
+              mountPath: /mnt/artifacts
+      restartPolicy: Never
+      nodeSelector:
+        glasslab.io/gpu-vendor: nvidia
+      volumes:
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: glasslab-shared-artifacts
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600

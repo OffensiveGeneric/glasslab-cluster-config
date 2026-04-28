@@ -1,0 +1,55 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: metric-search-generic-test
+  namespace: glasslab-v2
+  labels:
+    app: glasslab-metric-search
+spec:
+  template:
+    spec:
+      containers:
+        - name: metric-search
+          image: ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.7-local
+          command: ["python", "scripts/run_experiment.py"]
+          args:
+            - "--config"
+            - "configs/search_spaces/art_metric_baseline.yaml"
+            - "--output-dir"
+            - "/mnt/artifacts/metric-search-test"
+            - "--epochs"
+            - "1"
+            - "--max-train-batches"
+            - "1"
+            - "--max-eval-batches"
+            - "1"
+          env:
+            - name: GLASSLAB_RUNNER_EXPERIMENT_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+              memory: "4Gi"
+              cpu: "2"
+            requests:
+              memory: "2Gi"
+              cpu: "1"
+          volumeMounts:
+            - name: artifacts
+              mountPath: /mnt/artifacts
+            - name: datasets
+              mountPath: /mnt/datasets
+      restartPolicy: Never
+      nodeSelector:
+        glasslab.io/gpu-vendor: nvidia
+      volumes:
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: glasslab-shared-artifacts
+        - name: datasets
+          persistentVolumeClaim:
+            claimName: glasslab-shared-datasets
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 86400
