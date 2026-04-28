@@ -27,3 +27,12 @@ The current tracked shared-storage plan is:
 - export root `/volume1/backup`
 - `glasslab-shared-datasets` backed by `/volume1/backup/glasslab-v2/shared-datasets`
 - `glasslab-shared-artifacts` backed by `/volume1/backup/glasslab-v2/shared-artifacts`
+
+State ownership:
+
+- Postgres owns workflow records and pgvector-backed semantic indexes.
+- The `.207` shared artifacts PVC owns large run outputs, logs, reports,
+  notebooks, source blobs, and other large files.
+- Workload containers should write completed bundles under
+  `/mnt/artifacts/{run_id}`; `workflow-api` stores references and summaries in
+  Postgres.

@@ -30,7 +30,8 @@ What is committed here:
 
 What has been validated live recently:
 
-- JSON-backed durable session metadata on the shared artifacts PVC
+- durable session metadata on the shared artifacts PVC, with Postgres now the
+  committed live target
 - session persistence across `workflow-api` pod restart
 - execution preflight live against the current cluster
 - bounded run submission through the approved workflow path
@@ -60,10 +61,11 @@ Current durability warning:
   - `GLASSLAB_WORKFLOW_API_STORE_BACKEND=postgres`
 - in-memory mode is still valid for tests and short-lived local iteration
 - `GLASSLAB_WORKFLOW_API_ALLOW_INMEMORY_STORE=false` now fails closed at settings load instead of silently booting on ephemeral state
-- the bounded durable backend is JSON-file based via `GLASSLAB_WORKFLOW_API_STORE_JSON_PATH`
-- Postgres-backed durability is now supported via `GLASSLAB_WORKFLOW_API_STORE_POSTGRES_DSN`
-- live-oriented configs should select `postgres` when the database path is ready
-- artifact files and source-document blobs still belong on shared storage and/or MinIO
+- the committed live backend is Postgres via `GLASSLAB_WORKFLOW_API_STORE_POSTGRES_DSN`
+- `GLASSLAB_WORKFLOW_API_STORE_JSON_PATH` is retained as migration/import input only
+- artifact files and source-document blobs belong on the `.207` g-nas shared
+  storage PVCs; Postgres stores references and summaries
+- semantic/vector indexes live in Postgres through pgvector
 - one-shot import helper for the existing JSON store:
   - `services/workflow-api/scripts/import-json-store-to-postgres.py`
 

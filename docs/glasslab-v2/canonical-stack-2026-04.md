@@ -71,6 +71,7 @@ The canonical control plane is:
 Target system of record:
 
 * `Postgres`
+* `Postgres` with pgvector for semantic/vector indexes
 
 This includes:
 
@@ -81,12 +82,15 @@ This includes:
 * runs
 * decisions
 * campaign state
+* embeddings, vector index metadata, and pointers to source/artifact files
 
 ### Files and objects
 
 Target file/object plane:
 
-* shared filesystem and/or MinIO
+* `.207` g-nas shared filesystem through the `glasslab-shared-datasets` and
+  `glasslab-shared-artifacts` PVCs
+* MinIO only where object-style access is deliberately needed
 
 This includes:
 

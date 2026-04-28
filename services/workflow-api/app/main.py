@@ -2053,6 +2053,7 @@ def create_app(
         registry=registry,
         store=store,
         create_run_record_impl=lambda *args, **kwargs: create_run_record(*args, **kwargs),
+        build_research_problem_record_impl=lambda *args, **kwargs: build_research_problem_record(*args, **kwargs),
     )
     register_autoresearch_routes(
         app,

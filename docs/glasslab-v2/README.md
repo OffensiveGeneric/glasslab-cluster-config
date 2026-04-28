@@ -21,8 +21,10 @@ Short version:
 - the primary control path is repo-owned and deterministic
 - `workflow-api` is the control plane
 - there is no supported OpenClaw runtime path in the current product
-- Postgres should own records
-- shared filesystem and/or MinIO should own files
+- Postgres should own records and pgvector-backed semantic indexes
+- `.207` g-nas shared PVCs should own large datasets and artifacts
+- MinIO is optional object-style infrastructure, not the required first landing
+  zone for large artifacts
 
 ## Current Architecture And Implementation Notes
 
@@ -33,6 +35,7 @@ These remain current and useful after the cleanup pass:
 - `generic-experiment-implementation-plan.md`
 - `artifact-contract.md`
 - `storage-contract-2026-04.md`
+- `state-storage-vector-plan-2026-04.md`
 - `comparison-record-contract.md`
 - `near-term-byte-plane-decision.md`
 - `stateful-object-inventory-2026-04.md`

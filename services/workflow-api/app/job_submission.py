@@ -78,7 +78,7 @@ def _build_job_name(manifest: RunManifest) -> str:
     return f"{prefix}-{manifest.run_id[:8]}"[:63]
 
 
-def _build_runner_spec(manifest: RunManifest) -> dict:
+def _build_runner_spec(manifest: RunManifest, settings: Settings) -> dict:
     if manifest.workflow_id == 'generic-tabular-benchmark':
         dataset_name = str(manifest.inputs.get('dataset_name', '')).strip()
         if not dataset_name:
@@ -182,7 +182,7 @@ def resolve_dataset_uri(dataset_uri: str, settings: Settings) -> str:
     return dataset_uri
 
 
-def validate_workflow_submission_support(workflow: Any) -> list[str]:
+def validate_workflow_submission_support(workflow: Any, settings: Settings) -> list[str]:
     _, blockers = workflow_submission_ready(workflow)
     if blockers:
         return blockers
@@ -221,7 +221,7 @@ def validate_workflow_submission_support(workflow: Any) -> list[str]:
             approval_tier=workflow.approval_tier,
             expected_artifacts=workflow.expected_artifacts.model_dump(mode='json'),
         )
-        _build_runner_spec(manifest)
+        _build_runner_spec(manifest, settings)
     except Exception as exc:
         blockers.append(f'workflow submission contract is not implemented: {exc}')
     return blockers
@@ -287,7 +287,7 @@ class KubernetesJobSubmitter(JobSubmitter):
                 ]
             )
         else:
-            spec = _build_runner_spec(manifest)
+            spec = _build_runner_spec(manifest, self.settings)
             env.extend(
                 [
                     self.client.V1EnvVar(name='GLASSLAB_RUNNER_SPEC_JSON', value=json.dumps(spec, sort_keys=True)),

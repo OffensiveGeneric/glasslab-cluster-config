@@ -8,6 +8,8 @@ Glasslab v2 is live, but its durable-storage story is still in the bring-up phas
 - `glasslab-v2` now has explicit PVCs for `Postgres` and `MinIO`
 - the cluster now also has a tracked NFS-backed RWX path for shared datasets and artifacts
 - `workflow-api` session and stage metadata now live in Postgres rather than the JSON store on the artifacts share
+- the Postgres manifest uses a pgvector-capable image so semantic indexes can
+  live beside workflow metadata without introducing a separate vector database
 - Postgres uses a static local PV/PVC on `node01`
 - MinIO uses a static local PV/PVC on `node01`
 - NATS uses an explicit static local PV/PVC on `node05`
@@ -36,7 +38,9 @@ The intended first durable v2 step is:
 
 - keep the cluster-wide default `StorageClass` unset
 - use explicit static local PV/PVC wiring for the first durable v2 services
-- store artifacts in MinIO instead of on per-run PVCs
+- store large artifacts on the `.207` g-nas shared artifacts PVC instead of in
+  Postgres or per-run PVCs
+- use MinIO only where object-style access is deliberately needed
 - revisit a shared CSI-backed default `StorageClass` only after the lab deliberately chooses and operates one
 
 Current committed first step:
@@ -65,7 +69,10 @@ Future storage placeholders live under `kubeadm/glasslab-v2/storage/`.
 ### Durable volumes required
 
 - Postgres: durable PV required before treating run state as persistent
-- MinIO: durable PV required before treating artifacts or reports as persistent
+- shared artifacts PVC on `.207`: required before treating artifacts or reports
+  as persistent
+- MinIO: optional object-store layer, not the required first landing zone for
+  large artifacts
 - optional MLflow: durable PV required if enabled
 
 ### Ephemeral is acceptable for now
@@ -75,7 +82,8 @@ Future storage placeholders live under `kubeadm/glasslab-v2/storage/`.
 
 ### Artifact direction
 
-- workflow outputs should end up in MinIO
+- workflow outputs should end up under `/mnt/artifacts/{run_id}` on the
+  `.207`-backed shared artifacts PVC
 - dataset snapshots may live in MinIO if needed later
 - per-run Kubernetes PVCs are not the intended long-term artifact pattern
 

@@ -1,21 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, status
 
-from services.common.schemas import RunManifest, RunStatus
-
 from .config import Settings
-from .execution_preflight import build_execution_preflight_result
 from .job_submission import create_job_submitter
-from .literature_routes import (
-    build_paper_intake_queue_record,
-    build_research_problem_request_from_session,
-    build_research_problem_record,
-)
 from .persistence import RunStore
 from .registry import WorkflowRegistry
 from .schemas import (
@@ -23,12 +15,9 @@ from .schemas import (
     CreateInterpretationResponse,
     CreateMethodologyDraftRequest,
     CreateMethodologyDraftResponse,
-    DesignDraftRecord,
     IntakeCreateRequest,
     IntakeRecord,
     InterpretationRecord,
-    LiteratureSearchRequest,
-    LiteratureSearchResponse,
     PaperIntakeCandidateRecord,
     PaperIntakeQueueRecord,
     PromotePaperToIntakeRequest,
@@ -91,6 +80,7 @@ from .stage_inference import (
     normalize_unique_strings,
     infer_workflow_candidates,
 )
+from .stage_interpretation import call_interpretation_agent
 
 
 def stage_intake_from_request(
@@ -164,6 +154,7 @@ def register_transitions_routes(
     registry: WorkflowRegistry,
     store: RunStore,
     create_run_record_impl: Callable[..., RunRecord],
+    build_research_problem_record_impl: Callable[..., Any],
 ) -> None:
     @app.post('/transitions/start-literature-search', response_model=StartLiteratureSearchResponse)
     def start_literature_search(request: StartLiteratureSearchRequest) -> StartLiteratureSearchResponse:
@@ -171,7 +162,7 @@ def register_transitions_routes(
         problem_request = build_research_problem_request_from_session(session, settings)
         problem_request.max_candidate_papers = request.max_candidate_papers
         problem_request.priorities = request.priorities or problem_request.priorities
-        problem_record = build_research_problem_record(problem_request, settings, session.session_id)
+        problem_record = build_research_problem_record_impl(problem_request, settings, session.session_id)
         store.save_research_problem(problem_record)
         updated_session = touch_research_session(store, session.session_id, latest_problem_id=problem_record.problem_id)
         
@@ -229,7 +220,7 @@ def register_transitions_routes(
         if workflow is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='preferred workflow not found in registry')
         
-        design_record = build_design_draft(
+        design_record = build_design_draft_impl(
             intake=store.get_intake(interpretation_record.intake_id),
             workflow=workflow,
             submitted_by=interpretation_record.submitted_by,

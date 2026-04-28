@@ -77,7 +77,7 @@ def build_execution_preflight_result(workflow: WorkflowRegistryEntry, settings: 
     if modalities:
         warnings.append('declared workload modalities: ' + ', '.join(str(item) for item in modalities))
 
-    submission_blockers = validate_workflow_submission_support(workflow)
+    submission_blockers = validate_workflow_submission_support(workflow, settings)
     for blocker in submission_blockers:
         if blocker not in blocking_issues:
             blocking_issues.append(blocker)

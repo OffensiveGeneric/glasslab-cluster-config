@@ -7,11 +7,13 @@ MinIO were treated as interchangeable fallback layers.
 
 ## Design Rule
 
-Postgres owns records.
+Postgres owns records and v0 vector indexes.
 
-MinIO owns durable run artifacts and source-document blobs.
+The g-nas export on `.207` owns durable large datasets, run artifacts, reports,
+logs, and source-document blobs through the shared NFS PVCs.
 
-Shared filesystems own datasets and temporary execution staging.
+MinIO is optional object-store infrastructure, not the required first landing
+zone for large Glasslab artifacts.
 
 Pod-local filesystems own scratch only.
 
@@ -26,23 +28,30 @@ state, and no component should treat Postgres as a blob store.
 | Designs, decisions, campaigns | Postgres | none | `workflow-api` |
 | Run records | Postgres | none | `workflow-api` |
 | Comparison records | Postgres | none | `workflow-api` |
-| Dataset files | shared dataset filesystem | later mirrored/indexed in MinIO if useful | operator/dataset sync |
-| Source-document blobs | MinIO | filesystem until credentials and buckets are wired | `workflow-api` |
-| Run artifact bundles | MinIO | shared artifacts PVC staging | workload runner + `workflow-api` |
-| Reports and comparison files | MinIO | shared artifacts PVC staging | reporter/evaluator |
-| Logs | MinIO for durable logs, pod logs for live debugging | shared artifacts PVC staging | runner |
+| Vector/search index entries | Postgres with pgvector | none | `workflow-api` |
+| Dataset files | `.207` g-nas via shared dataset PVC | optional MinIO mirror later | operator/dataset sync |
+| Source-document blobs | `.207` g-nas via shared artifacts PVC | optional MinIO mirror later | `workflow-api` |
+| Run artifact bundles | `.207` g-nas via shared artifacts PVC | none | workload runner + `workflow-api` |
+| Reports and comparison files | `.207` g-nas via shared artifacts PVC | optional MinIO mirror later | reporter/evaluator |
+| Logs | `.207` g-nas for durable logs, pod logs for live debugging | none | runner |
 | Secrets | Kubernetes Secrets plus encrypted `.44` backup | local `.44` manifests | operator |
 | Cache/scratch | pod-local or node-local ephemeral storage | none | individual workload |
 
 ## Buckets
 
-Use a small fixed bucket set.
+Use a small fixed bucket set only when object-style access is needed.
+
+The required large-artifact path is the shared artifacts PVC backed by:
+
+```text
+192.168.1.207:/volume1/backup/glasslab-v2/shared-artifacts
+```
 
 | Bucket | Purpose |
 | --- | --- |
-| `glasslab-run-artifacts` | immutable per-run artifact bundles |
-| `glasslab-source-documents` | fetched PDFs, HTML snapshots, and source blobs |
-| `glasslab-comparisons` | comparison reports, summaries, and evaluator outputs |
+| `glasslab-run-artifacts` | optional mirror for per-run artifact bundles |
+| `glasslab-source-documents` | optional mirror for fetched PDFs, HTML snapshots, and source blobs |
+| `glasslab-comparisons` | optional mirror for comparison reports, summaries, and evaluator outputs |
 
 Do not put workflow/session state in these buckets.
 
@@ -103,7 +112,7 @@ Examples:
 
 ## Near-Term Execution Model
 
-For Kubernetes Jobs, keep the shared artifacts PVC as the staging plane.
+For Kubernetes Jobs, keep the shared artifacts PVC as the durable artifact plane.
 
 The runner writes to:
 
@@ -111,13 +120,10 @@ The runner writes to:
 /mnt/artifacts/{run_id}/
 ```
 
-Then a backend-owned promotion step copies the completed bundle into MinIO and
-records the resulting `s3://` refs in Postgres.
+That path is backed by the `.207` g-nas export. `workflow-api` records the
+resulting file references and summaries in Postgres.
 
-That keeps workload containers simple while making MinIO the canonical durable
-artifact plane.
-
-The promotion step should be idempotent:
+If a later MinIO mirror/promotion step is added, it should be idempotent:
 
 - if the object already exists with the same content, keep it
 - if a required file is missing, fail promotion explicitly
@@ -165,25 +171,25 @@ GLASSLAB_WORKFLOW_API_MINIO_SECRET_KEY
 
 Validate source intake before changing run artifacts.
 
-### Phase 2: Artifact Promotion
+### Phase 2: Artifact Ingest
 
-Add a `workflow-api` artifact promotion helper:
+Add a `workflow-api` artifact ingest helper:
 
 ```text
-POST /experiments/runs/{run_id}/artifacts/promote
+POST /experiments/runs/{run_id}/artifacts/ingest
 ```
 
-The helper reads `/mnt/artifacts/{run_id}/`, uploads required artifacts to
-`glasslab-run-artifacts`, and updates the run record's `artifact_refs`.
+The helper reads `/mnt/artifacts/{run_id}/`, validates required files, and
+updates the run record's `artifact_refs` with shared-artifact paths.
 
 This is preferred over teaching `run_artifacts.py` to read every possible URI.
 
 ### Phase 3: Comparison Promotion
 
-Have evaluator/reporter output comparison files to staging, then promote them to:
+Have evaluator/reporter output comparison files to:
 
 ```text
-s3://glasslab-comparisons/comparisons/{comparison_id}/
+/mnt/artifacts/comparisons/{comparison_id}/
 ```
 
 The `ComparisonRecord` in Postgres stores the refs.
@@ -198,8 +204,8 @@ This is optional. The platform should work with staging plus promotion first.
 ## Migration Rules
 
 - Existing `/mnt/artifacts/{run_id}` bundles remain valid.
-- New records should prefer `s3://` refs after promotion.
-- Reads should prefer Postgres refs first, then fall back to the staging path for
+- New records should prefer shared-artifact refs after ingest.
+- Reads should prefer Postgres refs first, then fall back to the artifact path for
   older runs.
 - JSON workflow state remains backup/import material only.
 
@@ -213,10 +219,10 @@ kubectl -n glasslab-v2 get secret glasslab-v2-minio
 kubectl -n glasslab-v2 exec deploy/glasslab-workflow-api -- sh -lc 'test -d /mnt/artifacts'
 ```
 
-After promotion exists:
+After ingest exists:
 
 ```bash
-curl -fsS -X POST http://127.0.0.1:18081/experiments/runs/{run_id}/artifacts/promote
+curl -fsS -X POST http://127.0.0.1:18081/experiments/runs/{run_id}/artifacts/ingest
 curl -fsS http://127.0.0.1:18081/runs/{run_id}
 ```
 

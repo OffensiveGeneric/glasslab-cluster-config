@@ -68,6 +68,7 @@ class WorkflowRegistryEntry(BaseModel):
     allow_custom_image: bool = False
     allow_custom_entrypoint: bool = False
     metric_contract: dict[str, Any] = Field(default_factory=dict)
+    pipeline_support: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator('allowed_models')
     @classmethod

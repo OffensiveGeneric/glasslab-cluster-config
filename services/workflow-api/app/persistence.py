@@ -983,6 +983,35 @@ class PostgresRunStore(InMemoryRunStore):
                     )
                     '''
                 )
+                cur.execute('CREATE EXTENSION IF NOT EXISTS vector')
+                cur.execute(
+                    '''
+                    CREATE TABLE IF NOT EXISTS vector_index_items (
+                        item_id TEXT PRIMARY KEY,
+                        collection TEXT NOT NULL,
+                        owner_type TEXT NOT NULL,
+                        owner_id TEXT NOT NULL,
+                        text_hash TEXT NOT NULL,
+                        embedding vector(1536),
+                        payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                        artifact_uri TEXT,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    '''
+                )
+                cur.execute(
+                    '''
+                    CREATE INDEX IF NOT EXISTS vector_index_items_owner_idx
+                    ON vector_index_items (owner_type, owner_id)
+                    '''
+                )
+                cur.execute(
+                    '''
+                    CREATE INDEX IF NOT EXISTS vector_index_items_collection_idx
+                    ON vector_index_items (collection)
+                    '''
+                )
             conn.commit()
 
     def _load(self) -> None:
