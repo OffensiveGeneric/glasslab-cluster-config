@@ -1,0 +1,245 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: faiss-integration-test
+  namespace: glasslab-v2
+  labels:
+    app: glasslab-faiss-test
+spec:
+  template:
+    spec:
+      containers:
+        - name: faiss-test
+          image: ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.7-local
+          command: ["python", "/app/faiss_integration_test.py"]
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+              memory: "4Gi"
+              cpu: "2"
+            requests:
+              memory: "2Gi"
+              cpu: "1"
+          volumeMounts:
+            - name: artifacts
+              mountPath: /mnt/artifacts
+            - name: faiss-script
+              mountPath: /app/faiss_integration_test.py
+              subPath: faiss_integration_test.py
+      restartPolicy: Never
+      nodeSelector:
+        glasslab.io/gpu-vendor: nvidia
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: glasslab.io/gpu-candidate
+                    operator: In
+                    values:
+                      - "true"
+      volumes:
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: glasslab-shared-artifacts
+        - name: faiss-script
+          configMap:
+            name: faiss-integration-test-script
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 86400
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: faiss-integration-test-script
+  namespace: glasslab-v2
+data:
+  faiss_integration_test.py: |
+    #!/usr/bin/env python3
+    """
+    FAISS Integration Test for Kubernetes Cluster
+
+    This test verifies that FAISS works correctly without OpenMP deadlock
+    when running on the Kubernetes cluster (Linux platform).
+    """
+
+    import os
+    import sys
+    import subprocess
+    import time
+    import torch
+    import numpy as np
+
+    print(f"Time {time.time()}: Starting FAISS integration test", file=sys.stderr, flush=True)
+    print(f"Time {time.time()}: Platform: {sys.platform}", file=sys.stderr, flush=True)
+
+    # Install FAISS if not already installed
+    try:
+        import faiss
+        print(f"Time {time.time()}: FAISS already installed: {faiss.__version__}", file=sys.stderr, flush=True)
+    except ImportError:
+        print(f"Time {time.time()}: Installing FAISS...", file=sys.stderr, flush=True)
+        subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--no-cache-dir', 'faiss-cpu'])
+        import faiss
+        print(f"Time {time.time()}: FAISS installed successfully: {faiss.__version__}", file=sys.stderr, flush=True)
+
+    # Verify platform detection
+    platform_sysname = os.uname().sysname
+    print(f"Time {time.time()}: os.uname().sysname = {platform_sysname}", file=sys.stderr, flush=True)
+
+    # Test 1: Simple FAISS index creation and search
+    print(f"\nTime {time.time()}: Test 1: Basic FAISS index creation and search", file=sys.stderr, flush=True)
+    try:
+        dimension = 128
+        n_vectors = 1000
+        n_queries = 100
+        k = 10
+        
+        # Generate random data
+        np.random.seed(42)
+        embeddings = np.random.random((n_vectors, dimension)).astype('float32')
+        queries = np.random.random((n_queries, dimension)).astype('float32')
+        
+        print(f"Time {time.time()}: Created {n_vectors} vectors with dimension {dimension}", file=sys.stderr, flush=True)
+        
+        # Build FAISS index
+        index = faiss.IndexFlatL2(dimension)
+        print(f"Time {time.time()}: Created IndexFlatL2", file=sys.stderr, flush=True)
+        
+        start_time = time.time()
+        index.add(embeddings)
+        add_time = time.time() - start_time
+        print(f"Time {time.time()}: Added {n_vectors} vectors in {add_time:.3f}s", file=sys.stderr, flush=True)
+        
+        start_time = time.time()
+        distances, indices = index.search(queries, k)
+        search_time = time.time() - start_time
+        print(f"Time {time.time()}: Searched {n_queries} queries with k={k} in {search_time:.3f}s", file=sys.stderr, flush=True)
+        
+        print(f"Time {time.time()}: Test 1 PASSED - FAISS basic operations work without deadlock", file=sys.stderr, flush=True)
+        
+    except Exception as e:
+        print(f"Time {time.time()}: Test 1 FAILED - {e}", file=sys.stderr, flush=True)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)
+
+    # Test 2: Grouped Recall@K simulation
+    print(f"\nTime {time.time()}: Test 2: Grouped Recall@K simulation", file=sys.stderr, flush=True)
+    try:
+        dimension = 64
+        n_samples = 500
+        n_classes = 20
+        k = 5
+        
+        # Generate embeddings and labels
+        np.random.seed(123)
+        embeddings_np = np.random.random((n_samples, dimension)).astype('float32')
+        labels_np = np.random.randint(0, n_classes, n_samples)
+        
+        print(f"Time {time.time()}: Created {n_samples} samples with {n_classes} classes", file=sys.stderr, flush=True)
+        
+        # Partition into groups
+        unique_labels = np.unique(labels_np)
+        np.random.seed(42)
+        np.random.shuffle(unique_labels)
+        
+        group_size = max(1, len(unique_labels) // 4)
+        groups = [unique_labels[i:i+group_size] for i in range(0, len(unique_labels), group_size)]
+        
+        recalls = []
+        for group_idx, group in enumerate(groups):
+            mask = np.isin(labels_np, group)
+            group_embeddings = embeddings_np[mask]
+            group_labels = labels_np[mask]
+            
+            if len(group_embeddings) == 0:
+                continue
+            
+            # Build FAISS index for this group
+            dim = group_embeddings.shape[1]
+            index = faiss.IndexFlatL2(dim)
+            index.add(group_embeddings)
+            
+            # Search
+            distances, indices = index.search(group_embeddings, k + 1)
+            
+            # Calculate recall
+            recall_count = 0
+            for i in range(len(group_embeddings)):
+                neighbor_labels = group_labels[indices[i][1:k+1]]
+                if group_labels[i] in neighbor_labels:
+                    recall_count += 1
+            
+            recalls.append(recall_count / len(group_embeddings))
+        
+        mean_recall = np.mean(recalls) if recalls else 0.0
+        print(f"Time {time.time()}: Computed grouped_recall_at_k = {mean_recall:.4f}", file=sys.stderr, flush=True)
+        print(f"Time {time.time()}: Test 2 PASSED - Grouped Recall@K completed", file=sys.stderr, flush=True)
+        
+    except Exception as e:
+        print(f"Time {time.time()}: Test 2 FAILED - {e}", file=sys.stderr, flush=True)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)
+
+    # Test 3: Large-scale test
+    print(f"\nTime {time.time()}: Test 3: Large-scale FAISS test", file=sys.stderr, flush=True)
+    try:
+        dimension = 256
+        n_vectors = 10000
+        n_queries = 1000
+        k = 20
+        
+        print(f"Time {time.time()}: Creating large dataset: {n_vectors} vectors", file=sys.stderr, flush=True)
+        
+        np.random.seed(456)
+        embeddings = np.random.random((n_vectors, dimension)).astype('float32')
+        queries = np.random.random((n_queries, dimension)).astype('float32')
+        
+        index = faiss.IndexFlatL2(dimension)
+        index.add(embeddings)
+        
+        for i in range(3):
+            distances, indices = index.search(queries, k)
+            print(f"Time {time.time()}: Search iteration {i+1} completed", file=sys.stderr, flush=True)
+        
+        print(f"Time {time.time()}: Test 3 PASSED - Large-scale test completed", file=sys.stderr, flush=True)
+        
+    except Exception as e:
+        print(f"Time {time.time()}: Test 3 FAILED - {e}", file=sys.stderr, flush=True)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)
+
+    # Test 4: PyTorch integration
+    print(f"\nTime {time.time()}: Test 4: PyTorch integration", file=sys.stderr, flush=True)
+    try:
+        dimension = 128
+        n_samples = 200
+        
+        embeddings_torch = torch.randn(n_samples, dimension)
+        labels_torch = torch.randint(0, 10, (n_samples,))
+        
+        embeddings_np = embeddings_torch.cpu().detach().numpy().astype('float32')
+        labels_np = labels_torch.cpu().detach().numpy()
+        
+        index = faiss.IndexFlatL2(dimension)
+        index.add(embeddings_np)
+        distances, indices = index.search(embeddings_np, 11)
+        
+        print(f"Time {time.time()}: Test 4 PASSED - PyTorch integration works", file=sys.stderr, flush=True)
+        
+    except Exception as e:
+        print(f"Time {time.time()}: Test 4 FAILED - {e}", file=sys.stderr, flush=True)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)
+
+    print(f"\n{'='*60}", file=sys.stderr, flush=True)
+    print(f"Time {time.time()}: ALL TESTS PASSED", file=sys.stderr, flush=True)
+    print(f"Time {time.time()}: Platform: {platform_sysname}", file=sys.stderr, flush=True)
+    print(f"Time {time.time()}: FAISS version: {faiss.__version__}", file=sys.stderr, flush=True)
+    print(f"{'='*60}", file=sys.stderr, flush=True)
+
+    sys.exit(0)

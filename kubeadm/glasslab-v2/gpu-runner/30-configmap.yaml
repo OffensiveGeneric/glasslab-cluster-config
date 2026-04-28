@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: glasslab-v2-runner-config
+  namespace: glasslab-v2
+data:
+  GLASSLAB_RUNNER_MODEL_ID: "mlx-community/Qwen3-Coder-Next-4bit"
+  GLASSLAB_RUNNER_CONTEXT_LENGTH: "262144"
+  GLASSLAB_RUNNER_MAX_TOKENS: "2048"
+  GLASSLAB_RUNNER_TEMPERATURE: "0.7"
+  GLASSLAB_RUNNER_TOP_P: "0.9"
+  GLASSLAB_RUNNER_SHARDING: "Pipeline"
+  GLASSLAB_RUNNER_RUNTIME: "MlxJaccl"
+  GLASSLAB_RUNNER_DATASET: "cifar100"
+  GLASSLAB_RUNNER_SEEN_CLASSES: "80"
+  GLASSLAB_RUNNER_UNSEEN_CLASSES: "20"
+  GLASSLAB_RUNNER_SEEDS: "3,5"
+  GLASSLAB_RUNNER_METRICS: "grouped_recall_at_k,opis,ami,ari,nmi,silhouette"
+  GLASSLAB_RUNNERAugmentation: "RandomResizedCrop+ColorJitter+RandomHorizontalFlip"
