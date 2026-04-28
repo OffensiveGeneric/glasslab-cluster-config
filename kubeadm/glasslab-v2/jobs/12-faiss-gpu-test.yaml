@@ -1,0 +1,25 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: faiss-gpu-test
+  namespace: glasslab-v2
+spec:
+  template:
+    spec:
+      containers:
+        - name: faiss-gpu
+          image: ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.7-local
+          command: ["python", "-c", "import faiss; print(f'FAISS version: {faiss.__version__}'); print(f'Is CPU: {faiss.is_cpu()}'); print(f'Use CUDA: {faiss.use_cuda()}')"]
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+              memory: "4Gi"
+              cpu: "2"
+            requests:
+              memory: "2Gi"
+              cpu: "1"
+      restartPolicy: Never
+      nodeSelector:
+        glasslab.io/gpu-vendor: nvidia
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
