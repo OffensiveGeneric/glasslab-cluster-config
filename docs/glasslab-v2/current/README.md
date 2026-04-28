@@ -6,6 +6,7 @@ historical path that got the repo here.
 ## Read First
 
 - `../canonical-stack-2026-04.md`
+- `../run-fabric-design-2026-04.md`
 - `../command-surface-spec.md`
 - `../router-and-backend-contract.md`
 - `../deprecation-map-2026-04.md`
@@ -13,6 +14,7 @@ historical path that got the repo here.
 ## Current Product / Architecture
 
 - `../overview.md`
+- `../run-fabric-design-2026-04.md`
 - `../bounded-experiment-runner-priority.md`
 - `../runner-first-technique-knowledge-plan.md`
 - `../technique-catalog.md`
