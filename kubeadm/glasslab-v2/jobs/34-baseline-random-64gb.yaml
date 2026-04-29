@@ -1,0 +1,62 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: baseline-random-64gb
+  namespace: glasslab-v2
+  labels:
+    app: glasslab-metric-search
+    baseline-type: random
+    target-node: 64gb
+spec:
+  template:
+    spec:
+      containers:
+        - name: baseline
+          image: ghcr.io/offensivegeneric/glasslab-metric-search:baseline-v1
+          command: ["bash", "-c"]
+          args:
+            - |
+              cd /app
+              python3 /app/scripts/run_baseline.py \
+                --baseline=random \
+                --output-dir=/mnt/artifacts/baselines/random \
+                --max-eval-batches=20 \
+                --db-type=sqlite \
+                --db-path=/mnt/artifacts/baselines/random/embeddings.db
+          env:
+            - name: GLASSLAB_RUNNER_EXPERIMENT_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+              memory: "56Gi"
+              cpu: "4"
+            requests:
+              memory: "48Gi"
+              cpu: "2"
+          volumeMounts:
+            - name: artifacts
+              mountPath: /mnt/artifacts
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: ghcr-secret
+      nodeSelector:
+        glasslab.io/gpu-vendor: nvidia
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - node01
+                      - node02
+      volumes:
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: glasslab-shared-artifacts
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
