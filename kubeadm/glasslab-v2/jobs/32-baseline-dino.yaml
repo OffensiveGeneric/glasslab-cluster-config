@@ -12,12 +12,16 @@ spec:
       containers:
         - name: baseline
           image: ghcr.io/offensivegeneric/glasslab-metric-search:baseline-v1
-          command: ["python3"]
+          command: ["bash", "-c"]
           args:
-            - /app/scripts/run_baseline.py
-            - --baseline=dino
-            - --output-dir=/mnt/artifacts/baselines/dino
-            - --max-eval-batches=50
+            - |
+              cd /app
+              python3 /app/scripts/run_baseline.py \
+                --baseline=dino \
+                --output-dir=/mnt/artifacts/baselines/dino \
+                --max-eval-batches=50 \
+                --db-type=sqlite \
+                --db-path=/mnt/artifacts/baselines/dino/embeddings.db
           env:
             - name: GLASSLAB_RUNNER_EXPERIMENT_ID
               valueFrom:
