@@ -1,0 +1,30 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: prepull-glasslab-metric-search
+  namespace: glasslab-v2
+  labels:
+    app: image-prepull
+spec:
+  template:
+    spec:
+      containers:
+        - name: prepull
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo "Pre-pulling ghcr.io/offensivegeneric/glasslab-metric-search:latest..."
+              docker pull ghcr.io/offensivegeneric/glasslab-metric-search:latest || true
+              echo "Pre-pulling ghcr.io/offensivegeneric/glasslab-metric-search:baseline-v1..."
+              docker pull ghcr.io/offensivegeneric/glasslab-metric-search:baseline-v1 || true
+              echo "Pre-pull complete"
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "1"
+      restartPolicy: Never
+      nodeSelector:
+        glasslab.io/gpu-vendor: nvidia
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600

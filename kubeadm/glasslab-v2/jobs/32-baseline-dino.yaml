@@ -1,0 +1,47 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: baseline-dino
+  namespace: glasslab-v2
+  labels:
+    app: glasslab-metric-search
+    baseline-type: dino
+spec:
+  template:
+    spec:
+      containers:
+        - name: baseline
+          image: ghcr.io/offensivegeneric/glasslab-metric-search:baseline-v1
+          command: ["python3"]
+          args:
+            - /app/scripts/run_baseline.py
+            - --baseline=dino
+            - --output-dir=/mnt/artifacts/baselines/dino
+            - --max-eval-batches=50
+          env:
+            - name: GLASSLAB_RUNNER_EXPERIMENT_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+              memory: "16Gi"
+              cpu: "4"
+            requests:
+              memory: "8Gi"
+              cpu: "2"
+          volumeMounts:
+            - name: artifacts
+              mountPath: /mnt/artifacts
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: ghcr-secret
+      nodeSelector:
+        glasslab.io/gpu-vendor: nvidia
+      volumes:
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: glasslab-shared-artifacts
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
