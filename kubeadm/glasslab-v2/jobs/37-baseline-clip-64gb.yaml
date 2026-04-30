@@ -49,11 +49,14 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
-                  - key: kubernetes.io/hostname
+                  - key: glasslab.io/gpu-vendor
                     operator: In
                     values:
-                      - node01
-                      - node02
+                      - nvidia
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values:
+                      - node04
       volumes:
         - name: artifacts
           persistentVolumeClaim:
