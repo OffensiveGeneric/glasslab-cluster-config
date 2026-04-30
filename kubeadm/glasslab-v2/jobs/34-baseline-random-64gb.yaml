@@ -15,14 +15,12 @@ spec:
           image: ghcr.io/offensivegeneric/glasslab-metric-search:baseline-v1
           command: ["bash", "-c"]
           args:
-            - |
-              cd /app
-              python3 /app/scripts/run_baseline.py \
-                --baseline=random \
-                --output-dir=/mnt/artifacts/baselines/random \
-                --max-eval-batches=20 \
-                --db-type=sqlite \
-                --db-path=/mnt/artifacts/baselines/random/embeddings.db
+             - |
+               cd /app
+               python3 /app/scripts/run_baseline.py \
+                 --baseline=random \
+                 --output-dir=/mnt/artifacts/baselines/random \
+                 --max-eval-batches=20
           env:
             - name: GLASSLAB_RUNNER_EXPERIMENT_ID
               valueFrom:
