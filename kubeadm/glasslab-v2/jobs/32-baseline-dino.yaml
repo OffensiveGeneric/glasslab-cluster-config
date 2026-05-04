@@ -11,7 +11,7 @@ spec:
     spec:
       containers:
         - name: baseline
-          image: ghcr.io/offensivegeneric/glasslab-metric-search:baseline-v1
+          image: ghcr.io/offensivegeneric/glasslab-metric-search:baseline-v9
           command: ["bash", "-c"]
           args:
              - |
@@ -46,5 +46,5 @@ spec:
         - name: artifacts
           persistentVolumeClaim:
             claimName: glasslab-shared-artifacts
-  backoffLimit: 0
+  backoffLimit: 3
   ttlSecondsAfterFinished: 86400
