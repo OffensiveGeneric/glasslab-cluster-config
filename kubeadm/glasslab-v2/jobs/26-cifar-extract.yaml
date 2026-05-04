@@ -10,21 +10,80 @@ spec:
     spec:
       containers:
         - name: cifar-extract
-          image: curlimages/curl:latest
+          image: alpine:3.18
           command: ["/bin/sh", "-c"]
           args:
             - |
-              mkdir -p /mnt/datasets/cifar100
-              cd /mnt/datasets/cifar100
-              tar -xzf cifar-100-python.tar.gz
-              ls -lh cifar-100-python/
-              echo "Extraction complete!"
-          securityContext:
-            runAsUser: 0
+              set -e
+              
+              DATA_DIR="/mnt/datasets/cifar100"
+              CIFAR_DIR="${DATA_DIR}/cifar-100-python"
+              TAR_FILE="${DATA_DIR}/cifar-100-python.tar.gz"
+              
+              # Create directories if they don't exist
+              mkdir -p "${CIFAR_DIR}"
+              
+              # Check if extraction already complete
+              if [ -f "${CIFAR_DIR}/train" ] && [ -f "${CIFAR_DIR}/test" ]; then
+                echo "CIFAR-100 already extracted at ${CIFAR_DIR}"
+                echo "Skipping extraction."
+                echo ""
+                echo "=== Verification ==="
+                find "${DATA_DIR}" -maxdepth 3 -type f | head
+                du -sh "${DATA_DIR}"
+                exit 0
+              fi
+              
+              # Check if tarball exists
+              if [ ! -f "${TAR_FILE}" ]; then
+                echo "ERROR: Tarball not found at ${TAR_FILE}"
+                echo "Please run cifar-download job first."
+                exit 1
+              fi
+              
+              echo "Extracting CIFAR-100 from ${TAR_FILE} to ${CIFAR_DIR}..."
+              
+              # Verify tarball integrity before extracting
+              if ! tar -tzf "${TAR_FILE}" > /dev/null 2>&1; then
+                echo "ERROR: Tarball is corrupt"
+                exit 1
+              fi
+              
+              # Extract
+              tar -xzf "${TAR_FILE}" -C "${CIFAR_DIR}"
+              
+              echo "Extraction complete, verifying files..."
+              
+              # Verify final files
+              if [ ! -d "${CIFAR_DIR}/train" ]; then
+                echo "ERROR: train directory not found"
+                exit 1
+              fi
+              
+              if [ ! -d "${CIFAR_DIR}/test" ]; then
+                echo "ERROR: test directory not found"
+                exit 1
+              fi
+              
+              echo ""
+              echo "=== Verification ==="
+              find "${DATA_DIR}" -maxdepth 3 -type f | head
+              du -sh "${DATA_DIR}"
+              echo ""
+              echo "CIFAR-100 extraction completed successfully!"
       restartPolicy: Never
       volumes:
         - name: datasets
           persistentVolumeClaim:
             claimName: glasslab-shared-datasets
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: glasslab.io/gpu-vendor
+                    operator: In
+                    values:
+                      - nvidia
   backoffLimit: 3
   ttlSecondsAfterFinished: 86400

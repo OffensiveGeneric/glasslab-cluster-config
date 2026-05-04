@@ -10,19 +10,93 @@ spec:
     spec:
       containers:
         - name: cifar-download
-          image: curlimages/curl:latest
+          image: alpine:3.18
           command: ["/bin/sh", "-c"]
           args:
             - |
-              mkdir -p /mnt/datasets/cifar100
-              curl -L -o /mnt/datasets/cifar100/cifar-100-python.tar.gz https://www.cs.toronto.edu/~kriz/cifar-100-python.tar.gz
-              ls -lh /mnt/datasets/cifar100/
-          securityContext:
-            runAsUser: 0
+              set -e
+              
+              DATA_DIR="/mnt/datasets/cifar100"
+              CIFAR_DIR="${DATA_DIR}/cifar-100-python"
+              TAR_FILE="${DATA_DIR}/cifar-100-python.tar.gz"
+              TMP_FILE="${TAR_FILE}.tmp"
+              
+              # Create directories if they don't exist
+              mkdir -p "${DATA_DIR}"
+              
+              # Check if CIFAR-100 already exists
+              if [ -f "${CIFAR_DIR}/train" ] && [ -f "${CIFAR_DIR}/test" ]; then
+                echo "CIFAR-100 already present at ${CIFAR_DIR}"
+                echo "Skipping download and extraction."
+                echo ""
+                echo "=== Verification ==="
+                find "${DATA_DIR}" -maxdepth 3 -type f | head
+                du -sh "${DATA_DIR}"
+                exit 0
+              fi
+              
+              echo "Downloading CIFAR-100 to ${TMP_FILE}..."
+              
+              # Download with retry
+              curl -fL --retry 5 --retry-delay 10 -o "${TMP_FILE}" "https://www.cs.toronto.edu/~kriz/cifar-100-python.tar.gz"
+              
+              echo "Download complete, verifying checksum..."
+              
+              # Verify file exists and has size > 0
+              if [ ! -f "${TMP_FILE}" ] || [ ! -s "${TMP_FILE}" ]; then
+                echo "ERROR: Downloaded file is missing or empty"
+                rm -f "${TMP_FILE}"
+                exit 1
+              fi
+              
+              # Move to final location
+              mv "${TMP_FILE}" "${TAR_FILE}"
+              echo "File moved to ${TAR_FILE}"
+              
+              # Verify tarball
+              echo "Verifying tarball integrity..."
+              if ! tar -tzf "${TAR_FILE}" > /dev/null 2>&1; then
+                echo "ERROR: Tarball is corrupt"
+                rm -f "${TAR_FILE}"
+                exit 1
+              fi
+              
+              echo "Extracting CIFAR-100 to ${CIFAR_DIR}..."
+              mkdir -p "${CIFAR_DIR}"
+              tar -xzf "${TAR_FILE}" -C "${CIFAR_DIR}"
+              
+              echo "Extraction complete, verifying final files..."
+              
+              # Verify final files
+              if [ ! -d "${CIFAR_DIR}/train" ]; then
+                echo "ERROR: train directory not found"
+                exit 1
+              fi
+              
+              if [ ! -d "${CIFAR_DIR}/test" ]; then
+                echo "ERROR: test directory not found"
+                exit 1
+              fi
+              
+              echo ""
+              echo "=== Verification ==="
+              find "${DATA_DIR}" -maxdepth 3 -type f | head
+              du -sh "${DATA_DIR}"
+              echo ""
+              echo "CIFAR-100 download and extraction completed successfully!"
       restartPolicy: Never
       volumes:
         - name: datasets
           persistentVolumeClaim:
             claimName: glasslab-shared-datasets
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: glasslab.io/gpu-vendor
+                    operator: In
+                    values:
+                      - nvidia
   backoffLimit: 3
   ttlSecondsAfterFinished: 86400

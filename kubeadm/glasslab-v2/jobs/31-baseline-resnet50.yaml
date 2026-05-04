@@ -11,21 +11,26 @@ spec:
     spec:
       containers:
         - name: baseline
-          image: ghcr.io/offensivegeneric/glasslab-metric-search:baseline-v9
-          command: ["bash", "-c"]
-          args:
-             - |
-               cd /app
-               python3 /app/scripts/run_baseline.py \
-                 --baseline=resnet50 \
-                 --output-dir=/mnt/artifacts/baselines/resnet50 \
-                 --max-eval-batches=20 \
-                 --run-shuffled
+          image: ghcr.io/offensivegeneric/glasslab-metric-search:fdbff3f
           env:
             - name: GLASSLAB_RUNNER_EXPERIMENT_ID
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            - name: GLASSLAB_IMAGE_COMMIT
+              value: "fdbff3f"
+          command: ["bash", "-c"]
+          args:
+            - |
+              cd /app
+              python3 /app/scripts/run_baseline.py \
+                --baseline=resnet50 \
+                --output-dir=/mnt/artifacts/baselines/resnet50/${GLASSLAB_RUNNER_EXPERIMENT_ID} \
+                --max-eval-batches=20 \
+                --run-shuffled
+              echo "Output dir: /mnt/artifacts/baselines/resnet50/${GLASSLAB_RUNNER_EXPERIMENT_ID}"
+              ls -lh "/mnt/artifacts/baselines/resnet50/${GLASSLAB_RUNNER_EXPERIMENT_ID}" || true
+              test -f "/mnt/artifacts/baselines/resnet50/${GLASSLAB_RUNNER_EXPERIMENT_ID}/metrics.json" && echo "metrics.json found" || echo "ERROR: metrics.json not found"
           resources:
             limits:
               nvidia.com/gpu: 1
