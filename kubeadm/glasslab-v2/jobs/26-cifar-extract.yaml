@@ -1,0 +1,30 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cifar-extract
+  namespace: glasslab-v2
+  labels:
+    app: cifar-extract
+spec:
+  template:
+    spec:
+      containers:
+        - name: cifar-extract
+          image: curlimages/curl:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              mkdir -p /mnt/datasets/cifar100
+              cd /mnt/datasets/cifar100
+              tar -xzf cifar-100-python.tar.gz
+              ls -lh cifar-100-python/
+              echo "Extraction complete!"
+          securityContext:
+            runAsUser: 0
+      restartPolicy: Never
+      volumes:
+        - name: datasets
+          persistentVolumeClaim:
+            claimName: glasslab-shared-datasets
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400

@@ -1,0 +1,28 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cifar-download
+  namespace: glasslab-v2
+  labels:
+    app: cifar-download
+spec:
+  template:
+    spec:
+      containers:
+        - name: cifar-download
+          image: curlimages/curl:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              mkdir -p /mnt/datasets/cifar100
+              curl -L -o /mnt/datasets/cifar100/cifar-100-python.tar.gz https://www.cs.toronto.edu/~kriz/cifar-100-python.tar.gz
+              ls -lh /mnt/datasets/cifar100/
+          securityContext:
+            runAsUser: 0
+      restartPolicy: Never
+      volumes:
+        - name: datasets
+          persistentVolumeClaim:
+            claimName: glasslab-shared-datasets
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400
