@@ -38,6 +38,8 @@ spec:
           volumeMounts:
             - name: artifacts
               mountPath: /mnt/artifacts
+            - name: datasets
+              mountPath: /mnt/datasets
       restartPolicy: Never
       imagePullSecrets:
         - name: ghcr-secret
@@ -47,5 +49,8 @@ spec:
         - name: artifacts
           persistentVolumeClaim:
             claimName: glasslab-shared-artifacts
+        - name: datasets
+          persistentVolumeClaim:
+            claimName: glasslab-shared-datasets
   backoffLimit: 3
   ttlSecondsAfterFinished: 86400
