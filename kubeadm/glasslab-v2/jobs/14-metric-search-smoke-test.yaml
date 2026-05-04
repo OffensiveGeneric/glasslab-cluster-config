@@ -8,14 +8,14 @@ spec:
     spec:
       containers:
         - name: metric-search
-          image: ghcr.io/offensivegeneric/glasslab-metric-search:fdbff3f
+          image: ghcr.io/offensivegeneric/glasslab-metric-search:a809cf27ef849a71348c03ec01d0457bfbebd49f
           env:
             - name: GLASSLAB_RUNNER_EXPERIMENT_ID
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
             - name: GLASSLAB_IMAGE_COMMIT
-              value: "fdbff3f"
+              value: "a809cf27ef849a71348c03ec01d0457bfbebd49f"
           command: ["bash", "-c"]
           args:
             - |
