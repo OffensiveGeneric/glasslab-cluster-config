@@ -29,7 +29,7 @@ spec:
                 --max-eval-batches=20
               echo "Output dir: /mnt/artifacts/baselines/clip/${GLASSLAB_RUNNER_EXPERIMENT_ID}"
               ls -lh "/mnt/artifacts/baselines/clip/${GLASSLAB_RUNNER_EXPERIMENT_ID}" || true
-              test -f "/mnt/artifacts/baselines/clip/${GLASSLAB_RUNNER_EXPERIMENT_ID}/frozen_clip_metrics.json" && echo "metrics.json found" || echo "ERROR: metrics.json not found"
+              test -f "/mnt/artifacts/baselines/clip/${GLASSLAB_RUNNER_EXPERIMENT_ID}/clip_metrics.json" && echo "metrics.json found" || echo "ERROR: metrics.json not found"
           resources:
             limits:
               nvidia.com/gpu: 1
