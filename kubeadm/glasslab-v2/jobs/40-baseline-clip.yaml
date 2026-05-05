@@ -11,14 +11,14 @@ spec:
     spec:
       containers:
         - name: baseline
-          image: ghcr.io/offensivegeneric/glasslab-metric-search:03f7062
+          image: ghcr.io/offensivegeneric/glasslab-metric-search:81a0266
           env:
             - name: GLASSLAB_RUNNER_EXPERIMENT_ID
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
             - name: GLASSLAB_IMAGE_COMMIT
-              value: "03f7062"
+              value: "81a0266"
           command: ["bash", "-c"]
           args:
             - |
