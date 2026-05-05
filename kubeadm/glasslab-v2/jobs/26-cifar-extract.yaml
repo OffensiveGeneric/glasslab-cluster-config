@@ -14,25 +14,25 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
-              set -e
-              
-              DATA_DIR="/mnt/datasets/cifar100"
-              CIFAR_DIR="${DATA_DIR}/cifar-100-python"
-              TAR_FILE="${DATA_DIR}/cifar-100-python.tar.gz"
-              
-              # Create directories if they don't exist
-              mkdir -p "${CIFAR_DIR}"
-              
-              # Check if extraction already complete
-              if [ -f "${CIFAR_DIR}/train" ] && [ -f "${CIFAR_DIR}/test" ]; then
-                echo "CIFAR-100 already extracted at ${CIFAR_DIR}"
-                echo "Skipping extraction."
-                echo ""
-                echo "=== Verification ==="
-                find "${DATA_DIR}" -maxdepth 3 -type f | head
-                du -sh "${DATA_DIR}"
-                exit 0
-              fi
+               set -e
+               
+               DATA_DIR="/mnt/datasets/cifar100"
+               CIFAR_DIR="${DATA_DIR}/cifar-100-python"
+               TAR_FILE="${DATA_DIR}/cifar-100-python.tar.gz"
+               
+               # Create directories if they don't exist
+               mkdir -p "${CIFAR_DIR}"
+               
+               # Check if extraction already complete
+               if [ -f "${CIFAR_DIR}/train/meta" ] && [ -f "${CIFAR_DIR}/test" ]; then
+                 echo "CIFAR-100 already extracted at ${CIFAR_DIR}"
+                 echo "Skipping extraction."
+                 echo ""
+                 echo "=== Verification ==="
+                 find "${DATA_DIR}" -maxdepth 3 -type f | head
+                 du -sh "${DATA_DIR}"
+                 exit 0
+               fi
               
               # Check if tarball exists
               if [ ! -f "${TAR_FILE}" ]; then
@@ -54,16 +54,16 @@ spec:
               
               echo "Extraction complete, verifying files..."
               
-              # Verify final files
-              if [ ! -d "${CIFAR_DIR}/train" ]; then
-                echo "ERROR: train directory not found"
-                exit 1
-              fi
-              
-              if [ ! -d "${CIFAR_DIR}/test" ]; then
-                echo "ERROR: test directory not found"
-                exit 1
-              fi
+               # Verify final files
+               if [ ! -f "${CIFAR_DIR}/train/meta" ]; then
+                 echo "ERROR: train/meta file not found"
+                 exit 1
+               fi
+               
+               if [ ! -f "${CIFAR_DIR}/test" ]; then
+                 echo "ERROR: test file not found"
+                 exit 1
+               fi
               
               echo ""
               echo "=== Verification ==="
