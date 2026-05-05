@@ -1,0 +1,65 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: baseline-resnet50
+  namespace: glasslab-v2
+  labels:
+    app: glasslab-metric-search
+    baseline-type: resnet50
+spec:
+  template:
+    spec:
+      containers:
+        - name: baseline
+          image: ghcr.io/offensivegeneric/glasslab-metric-search:03f7062
+          env:
+            - name: GLASSLAB_RUNNER_EXPERIMENT_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: GLASSLAB_IMAGE_COMMIT
+              value: "03f7062"
+          command: ["bash", "-c"]
+          args:
+            - |
+              cd /app
+              python3 /app/scripts/run_baseline.py \
+                --baseline=frozen_resnet50 \
+                --output-dir=/mnt/artifacts/baselines/resnet50/${GLASSLAB_RUNNER_EXPERIMENT_ID} \
+                --max-eval-batches=20
+              echo "Output dir: /mnt/artifacts/baselines/resnet50/${GLASSLAB_RUNNER_EXPERIMENT_ID}"
+              ls -lh "/mnt/artifacts/baselines/resnet50/${GLASSLAB_RUNNER_EXPERIMENT_ID}" || true
+              test -f "/mnt/artifacts/baselines/resnet50/${GLASSLAB_RUNNER_EXPERIMENT_ID}/metrics.json" && echo "metrics.json found" || echo "ERROR: metrics.json not found"
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+              memory: "32Gi"
+              cpu: "4"
+            requests:
+              memory: "16Gi"
+              cpu: "2"
+          volumeMounts:
+            - name: artifacts
+              mountPath: /mnt/artifacts
+            - name: datasets
+              mountPath: /mnt/datasets
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: ghcr-secret
+      nodeSelector:
+        glasslab.io/gpu-vendor: nvidia
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    baseline-type: resnet50
+                topologyKey: kubernetes.io/hostname
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
