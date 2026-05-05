@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: metric-search-generic-test
+  name: metric-search-runtime-deps
   namespace: glasslab-v2
   labels:
     app: glasslab-metric-search
@@ -10,12 +10,14 @@ spec:
     spec:
       containers:
         - name: metric-search
-          image: ghcr.io/offensivegeneric/glasslab-metric-search:latest
+          image: python:3.11-slim
           command: ["bash", "-c"]
           args:
             - |
-              pip install --no-cache-dir pyyaml && \
-              sed -i 's/art_retrieval_v1/cifar_contrastive_v1/' /app/configs/search_spaces/art_metric_baseline.yaml && \
+              apt-get update && apt-get install -y git
+              pip install torch torchvision faiss-cpu PyYAML timm optuna scikit-learn pytorch-metric-learning mlxtend umap-learn syne-tune "ray[tune]" transformers
+              git clone https://github.com/OffensiveGeneric/glasslab-metric-search.git /app
+              sed -i 's/art_retrieval_v1/cifar_contrastive_v1/' /app/configs/search_spaces/art_metric_baseline.yaml
               python3 /app/scripts/run_experiment.py \
                 --config /app/configs/search_spaces/art_metric_baseline.yaml \
                 --output-dir /mnt/artifacts/metric-search-test \
@@ -30,11 +32,11 @@ spec:
           resources:
             limits:
               nvidia.com/gpu: 1
-              memory: "4Gi"
-              cpu: "2"
+              memory: "16Gi"
+              cpu: "4"
             requests:
-              memory: "2Gi"
-              cpu: "1"
+              memory: "8Gi"
+              cpu: "2"
           volumeMounts:
             - name: artifacts
               mountPath: /mnt/artifacts
@@ -52,5 +54,8 @@ spec:
         - name: datasets
           persistentVolumeClaim:
             claimName: glasslab-shared-datasets
+        - name: dml-project
+          hostPath:
+            path: /Users/glasslab/dml-project
   backoffLimit: 1
   ttlSecondsAfterFinished: 86400

@@ -1,0 +1,50 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: baseline-resnet50
+  namespace: glasslab-v2
+  labels:
+    app: glasslab-metric-search
+    baseline-type: resnet50
+spec:
+  template:
+    spec:
+      containers:
+        - name: baseline
+          image: ghcr.io/offensivegeneric/glasslab-metric-search:baseline-v6
+          command: ["bash", "-c"]
+          args:
+             - |
+               cd /app
+               python3 /app/scripts/run_baseline.py \
+                 --baseline=resnet50 \
+                 --output-dir=/mnt/artifacts/baselines/resnet50 \
+                 --max-eval-batches=20 \
+                 --run-shuffled
+          env:
+            - name: GLASSLAB_RUNNER_EXPERIMENT_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+              memory: "32Gi"
+              cpu: "4"
+            requests:
+              memory: "16Gi"
+              cpu: "2"
+          volumeMounts:
+            - name: artifacts
+              mountPath: /mnt/artifacts
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: ghcr-secret
+      nodeSelector:
+        glasslab.io/gpu-vendor: nvidia
+      volumes:
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: glasslab-shared-artifacts
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400

@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: metric-search-generic-test
+  name: metric-search-test-v2
   namespace: glasslab-v2
   labels:
     app: glasslab-metric-search
@@ -15,9 +15,9 @@ spec:
           args:
             - |
               pip install --no-cache-dir pyyaml && \
-              sed -i 's/art_retrieval_v1/cifar_contrastive_v1/' /app/configs/search_spaces/art_metric_baseline.yaml && \
-              python3 /app/scripts/run_experiment.py \
-                --config /app/configs/search_spaces/art_metric_baseline.yaml \
+              sed -i 's/art_retrieval_v1/cifar_contrastive_v1/' configs/search_spaces/art_metric_baseline.yaml && \
+              python3 scripts/run_experiment.py \
+                --config configs/search_spaces/art_metric_baseline.yaml \
                 --output-dir /mnt/artifacts/metric-search-test \
                 --epochs 1 \
                 --max-train-batches 1 \

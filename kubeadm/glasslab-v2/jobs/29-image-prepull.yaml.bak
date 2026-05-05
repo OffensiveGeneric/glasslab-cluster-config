@@ -18,8 +18,8 @@ spec:
                docker pull ghcr.io/offensivegeneric/glasslab-metric-search:latest || true
                echo "Pre-pulling ghcr.io/offensivegeneric/glasslab-metric-search:baseline-v1..."
                docker pull ghcr.io/offensivegeneric/glasslab-metric-search:baseline-v1 || true
-               echo "Pre-pulling ghcr.io/offensivegeneric/glasslab-metric-search:baseline-v8..."
-               docker pull ghcr.io/offensivegeneric/glasslab-metric-search:baseline-v8 || true
+               echo "Pre-pulling ghcr.io/offensivegeneric/glasslab-metric-search:baseline-v7..."
+               docker pull ghcr.io/offensivegeneric/glasslab-metric-search:baseline-v7 || true
                echo "Pre-pull complete"
           resources:
             requests:

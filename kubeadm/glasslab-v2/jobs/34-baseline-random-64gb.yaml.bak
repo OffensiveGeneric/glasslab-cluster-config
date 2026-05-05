@@ -12,26 +12,20 @@ spec:
     spec:
       containers:
         - name: baseline
-          image: ghcr.io/offensivegeneric/glasslab-metric-search:03f7062
+          image: ghcr.io/offensivegeneric/glasslab-metric-search:baseline-v8
+          command: ["bash", "-c"]
+          args:
+             - |
+               cd /app
+               python3 /app/scripts/run_baseline.py \
+                 --baseline=random \
+                 --output-dir=/mnt/artifacts/baselines/random \
+                 --max-eval-batches=20
           env:
             - name: GLASSLAB_RUNNER_EXPERIMENT_ID
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
-            - name: GLASSLAB_IMAGE_COMMIT
-              value: "03f7062"
-          command: ["bash", "-c"]
-          args:
-            - |
-              cd /app
-              python3 /app/scripts/run_baseline.py \
-                --baseline=random \
-                --output-dir=/mnt/artifacts/baselines/random-64gb/${GLASSLAB_RUNNER_EXPERIMENT_ID} \
-                --max-eval-batches=20 \
-                --run-shuffled
-              echo "Output dir: /mnt/artifacts/baselines/random-64gb/${GLASSLAB_RUNNER_EXPERIMENT_ID}"
-              ls -lh "/mnt/artifacts/baselines/random-64gb/${GLASSLAB_RUNNER_EXPERIMENT_ID}" || true
-              test -f "/mnt/artifacts/baselines/random-64gb/${GLASSLAB_RUNNER_EXPERIMENT_ID}/metrics.json" && echo "metrics.json found" || echo "ERROR: metrics.json not found"
           resources:
             limits:
               nvidia.com/gpu: 1
@@ -43,8 +37,6 @@ spec:
           volumeMounts:
             - name: artifacts
               mountPath: /mnt/artifacts
-            - name: datasets
-              mountPath: /mnt/datasets
       restartPolicy: Never
       imagePullSecrets:
         - name: ghcr-secret
@@ -67,8 +59,5 @@ spec:
         - name: artifacts
           persistentVolumeClaim:
             claimName: glasslab-shared-artifacts
-        - name: datasets
-          persistentVolumeClaim:
-            claimName: glasslab-shared-datasets
-  backoffLimit: 3
+  backoffLimit: 0
   ttlSecondsAfterFinished: 86400

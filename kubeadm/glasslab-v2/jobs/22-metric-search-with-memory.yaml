@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: metric-search-generic-test
+  name: metric-search-with-memory
   namespace: glasslab-v2
   labels:
     app: glasslab-metric-search
@@ -14,7 +14,7 @@ spec:
           command: ["bash", "-c"]
           args:
             - |
-              pip install --no-cache-dir pyyaml && \
+              pip install --no-cache-dir PyYAML timm optuna scikit-learn pytorch-metric-learning mlxtend umap-learn faiss-cpu syne-tune "ray[tune]" transformers && \
               sed -i 's/art_retrieval_v1/cifar_contrastive_v1/' /app/configs/search_spaces/art_metric_baseline.yaml && \
               python3 /app/scripts/run_experiment.py \
                 --config /app/configs/search_spaces/art_metric_baseline.yaml \
@@ -30,10 +30,10 @@ spec:
           resources:
             limits:
               nvidia.com/gpu: 1
-              memory: "4Gi"
+              memory: "8Gi"
               cpu: "2"
             requests:
-              memory: "2Gi"
+              memory: "4Gi"
               cpu: "1"
           volumeMounts:
             - name: artifacts

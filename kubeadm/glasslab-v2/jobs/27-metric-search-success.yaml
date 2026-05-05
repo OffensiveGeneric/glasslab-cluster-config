@@ -1,43 +1,42 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: baseline-clip
+  name: metric-search-success
   namespace: glasslab-v2
   labels:
     app: glasslab-metric-search
-    baseline-type: clip
 spec:
   template:
     spec:
       containers:
-        - name: baseline
-          image: ghcr.io/offensivegeneric/glasslab-metric-search:03f7062
+        - name: metric-search
+          image: python:3.11-slim
+          command: ["bash", "-c"]
+          args:
+            - |
+              apt-get update && apt-get install -y git
+              pip install torch torchvision faiss-cpu PyYAML timm optuna scikit-learn pytorch-metric-learning mlxtend umap-learn syne-tune "ray[tune]" transformers
+              git clone https://github.com/OffensiveGeneric/glasslab-metric-search.git /app
+              cd /app
+              sed -i 's/art_retrieval_v1/cifar_contrastive_v1/' /app/configs/search_spaces/art_metric_baseline.yaml
+              python3 /app/scripts/run_experiment.py \
+                --config /app/configs/search_spaces/art_metric_baseline.yaml \
+                --output-dir /mnt/artifacts/metric-search-test \
+                --epochs 1 \
+                --max-train-batches 1 \
+                --max-eval-batches 1
           env:
             - name: GLASSLAB_RUNNER_EXPERIMENT_ID
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
-            - name: GLASSLAB_IMAGE_COMMIT
-              value: "03f7062"
-          command: ["bash", "-c"]
-          args:
-            - |
-              cd /app
-              python3 /app/scripts/run_baseline.py \
-                --baseline=clip \
-                --output-dir=/mnt/artifacts/baselines/clip/${GLASSLAB_RUNNER_EXPERIMENT_ID} \
-                --max-eval-batches=20 \
-                --run-shuffled
-              echo "Output dir: /mnt/artifacts/baselines/clip/${GLASSLAB_RUNNER_EXPERIMENT_ID}"
-              ls -lh "/mnt/artifacts/baselines/clip/${GLASSLAB_RUNNER_EXPERIMENT_ID}" || true
-              test -f "/mnt/artifacts/baselines/clip/${GLASSLAB_RUNNER_EXPERIMENT_ID}/metrics.json" && echo "metrics.json found" || echo "ERROR: metrics.json not found"
           resources:
             limits:
               nvidia.com/gpu: 1
-              memory: "32Gi"
+              memory: "16Gi"
               cpu: "4"
             requests:
-              memory: "16Gi"
+              memory: "8Gi"
               cpu: "2"
           volumeMounts:
             - name: artifacts
@@ -56,5 +55,5 @@ spec:
         - name: datasets
           persistentVolumeClaim:
             claimName: glasslab-shared-datasets
-  backoffLimit: 3
+  backoffLimit: 0
   ttlSecondsAfterFinished: 86400
