@@ -24,7 +24,7 @@ spec:
             - |
               cd /app
               python3 /app/scripts/run_baseline.py \
-                --baseline=frozen_clip \
+                --baseline=clip \
                 --output-dir=/mnt/artifacts/baselines/clip/${GLASSLAB_RUNNER_EXPERIMENT_ID} \
                 --max-eval-batches=20
               echo "Output dir: /mnt/artifacts/baselines/clip/${GLASSLAB_RUNNER_EXPERIMENT_ID}"
