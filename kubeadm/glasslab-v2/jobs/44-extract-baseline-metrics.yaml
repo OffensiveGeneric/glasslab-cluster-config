@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: extract-baseline-metrics
+  namespace: glasslab-v2
+spec:
+  containers:
+    - name: extract
+      image: ubuntu:22.04
+      command: ["sleep", "3600"]
+      volumeMounts:
+        - name: artifacts
+          mountPath: /mnt/artifacts
+  restartPolicy: Never
+  nodeSelector:
+    glasslab.io/gpu-vendor: nvidia
+  volumes:
+    - name: artifacts
+      persistentVolumeClaim:
+        claimName: glasslab-shared-artifacts

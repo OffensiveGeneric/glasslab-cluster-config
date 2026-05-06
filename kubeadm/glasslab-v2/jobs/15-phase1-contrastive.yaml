@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: metric-search-smoke-test
+  name: phase1-triplet
   namespace: glasslab-v2
 spec:
   template:
@@ -22,22 +22,22 @@ spec:
               cd /app
               python3 scripts/run_experiment.py \
                 --config configs/search_spaces/cifar100_contrastive_v0.yaml \
-                --output-dir /mnt/artifacts/smoke-test-run-${GLASSLAB_RUNNER_EXPERIMENT_ID} \
-                --epochs 1 \
-                --max-train-batches 1 \
-                --max-eval-batches 8 \
+                --output-dir /mnt/artifacts/phase1-triplet-${GLASSLAB_RUNNER_EXPERIMENT_ID} \
+                --epochs 3 \
+                --max-train-batches 10 \
+                --max-eval-batches 16 \
                 --backbone resnet18 \
-                --loss contrastive
-              echo "Output dir: /mnt/artifacts/smoke-test-run-${GLASSLAB_RUNNER_EXPERIMENT_ID}"
-              ls -lh "/mnt/artifacts/smoke-test-run-${GLASSLAB_RUNNER_EXPERIMENT_ID}" || true
-              test -f "/mnt/artifacts/smoke-test-run-${GLASSLAB_RUNNER_EXPERIMENT_ID}/metrics.json" && echo "metrics.json found" || echo "ERROR: metrics.json not found"
+                --loss triplet
+              echo "Output dir: /mnt/artifacts/phase1-contrastive-${GLASSLAB_RUNNER_EXPERIMENT_ID}"
+              ls -lh "/mnt/artifacts/phase1-contrastive-${GLASSLAB_RUNNER_EXPERIMENT_ID}" || true
+              test -f "/mnt/artifacts/phase1-contrastive-${GLASSLAB_RUNNER_EXPERIMENT_ID}/metrics.json" && echo "metrics.json found" || echo "ERROR: metrics.json not found"
           resources:
             limits:
               nvidia.com/gpu: 1
-              memory: "8Gi"
+              memory: "16Gi"
               cpu: "2"
             requests:
-              memory: "4Gi"
+              memory: "8Gi"
               cpu: "1"
           volumeMounts:
             - name: artifacts
