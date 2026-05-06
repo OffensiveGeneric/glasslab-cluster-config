@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: debug-baseline-clip
+  namespace: glasslab-v2
+spec:
+  containers:
+    - name: debug
+      image: ghcr.io/offensivegeneric/glasslab-metric-search:81a0266
+      command: ["sleep", "86400"]
+      volumeMounts:
+        - name: artifacts
+          mountPath: /mnt/artifacts
+  restartPolicy: Never
+  nodeSelector:
+    glasslab.io/gpu-vendor: nvidia
+  volumes:
+    - name: artifacts
+      persistentVolumeClaim:
+        claimName: glasslab-shared-artifacts
