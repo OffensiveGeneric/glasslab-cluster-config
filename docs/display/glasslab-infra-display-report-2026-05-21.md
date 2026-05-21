@@ -1,119 +1,100 @@
-# Glasslab Infra Display Report: 2026-05-21
+# Glasslab Infra And Workflow Display Report
 
 This report is meant to feed a physical wall display or generated network
-diagram for Glasslab.
+diagram for Glasslab. The focus is the intended system shape: machines,
+services, data paths, and research workflows.
 
-It records the state observed from the lab laptop at `192.168.1.36` on
-2026-05-21 during recovery from a UPS/power failure. It deliberately separates
-observed reachability from repo-declared intended roles.
+## Display Goal
 
-Under normal lab operation, the expectation is that the PXE/provisioner host,
-the Kubernetes control plane, all Kubernetes workers, the Mac service hosts,
-the NAS, and the projector endpoint are up together. Temporary red/down states
-in this document reflect the power recovery window, not the intended steady
-state of Glasslab.
+The diagram should make Glasslab legible as a workflow platform rather than a
+pile of machines.
 
-## Observed Now
+The central story is:
 
-Observed from the lab LAN:
+1. an operator or researcher starts a bounded research session
+2. Glasslab turns that session into an explicit plan
+3. the plan is checked against available data, compute, and workflow rules
+4. approved work runs as Kubernetes Jobs or Mac-hosted model calls
+5. artifacts, metrics, comparisons, and reports return to the session
+6. the next bounded experiment variant is proposed from the recorded evidence
 
-| IP | Name | Observed state | Role |
+## Main Workflow Loop
+
+| Stage | User-facing idea | Owning component | Output |
 | --- | --- | --- | --- |
-| `192.168.1.100` | lab gateway | reachable | default route for lab LAN |
-| `192.168.1.2` | `projector-san` | reachable | OptiPlex 990 projector machine, Xubuntu GUI, `lightdm` active |
-| `192.168.1.12` | Mac service host | reachable by ping | documented OpenClaw/chat/ranker host |
-| `192.168.1.19` | exo worker Mac | reachable by ping | documented exo worker, SSH key not accepted from this laptop during this check |
-| `192.168.1.21` | `CS60138N73111` | reachable by SSH | exo master Mac, Ollama host |
-| `192.168.1.23` | `CS60140N7311` | reachable by SSH | heavier Mac inference host |
-| `192.168.1.207` | g-nas | reachable | NFS/shared storage target |
-| `192.168.1.44` | `glasslab-PXE-01` | reachable by SSH after power returned | PXE/provisioner/canonical apply host |
-| `192.168.1.47` | `node05` | reachable by ping from `.44` | Kubernetes worker in repo docs |
-| `192.168.1.48` | `node01` | reachable by ping from `.44` | Kubernetes worker in repo docs |
-| `192.168.1.49` | `cp01` | not reachable during latest check | Kubernetes control plane in repo docs |
-| `192.168.1.50` | `node03` | not reachable during latest check | Kubernetes worker in repo docs |
-| `192.168.1.51` | `node04` | reachable by ping from `.44` | Kubernetes worker in repo docs |
-| `192.168.1.11` | `node02` | reachable by ping from `.44` | Kubernetes GPU worker in repo docs |
+| Intake | add a research goal, note, paper, or dataset | `whatsapp-gateway`, `research-ingress` | normalized request |
+| Route | decide which deterministic command applies | `research-command-router` | backend action |
+| Session | preserve state and current research context | `workflow-api`, Postgres | durable session record |
+| Plan | create a bounded experiment or analysis plan | `workflow-api`, stage agents | reviewable plan |
+| Check | validate inputs, resources, and workflow readiness | `workflow-api` | preflight result |
+| Run | launch approved work | Kubernetes Jobs | run bundle |
+| Store | persist source and run artifacts | g-nas NFS, MinIO where needed | artifact references |
+| Compare | evaluate multiple completed runs | evaluator / workflow-api | comparison record |
+| Report | produce a readable result memo | reporter / workflow-api | Markdown report |
+| Decide | record the operator decision and next variant | workflow-api | next bounded mutation |
 
-Implication:
-
-- `.44` is back online after the UPS event, but the control plane at `.49` was
-  still not reachable during the latest check.
-- `kubectl` could not validate the live cluster because the API server endpoint
-  is `https://192.168.1.49:6443`.
-- The current physical display should show this as a power-recovery state: the
-  expected normal state is fully up, but cluster validation is blocked until
-  `cp01` returns.
-- The projector machine itself is up and suitable as the wall-display endpoint.
-
-## Normal Expected State
-
-In the usual Glasslab state, these components should all be up:
-
-| Plane | Expected state |
-| --- | --- |
-| PXE/provisioner | `.44` reachable by SSH, nginx/TFTP/dnsmasq available for PXE, canonical checkout present |
-| Kubernetes control plane | `.49` reachable, API server listening on `:6443`, `kubectl` from `.44` works |
-| Kubernetes workers | `.48`, `.11`, `.50`, `.51`, and `.47` reachable and `Ready` |
-| Storage | `.207` reachable and NFS-backed shared dataset/artifact PVCs available |
-| Mac service hosts | `.12`, `.19`, `.21`, and `.23` reachable for model/exo/helper services |
-| Physical display | `.2` reachable with GUI display active |
-
-## Current Display Endpoint
-
-| Field | Value |
-| --- | --- |
-| IP | `192.168.1.2` |
-| Hostname | `projector-san` |
-| OS role | Xubuntu projector/display machine |
-| Network | `eno1`, `192.168.1.2/24` |
-| GUI state | `lightdm` active |
-| Existing display asset | `/home/glasslab/Pictures/glasslab-network-topology.svg` |
-
-## Intended Infra Roles From Repo
+## Physical And Service Topology
 
 | IP | Name | Intended role |
 | --- | --- | --- |
 | `192.168.1.44` | `glasslab-PXE-01` | PXE, TFTP, HTTP provisioning, bastion, Ansible, kubectl, canonical repo checkout |
 | `192.168.1.49` | `cp01` | Kubernetes control plane |
-| `192.168.1.48` | `node01` | Kubernetes worker, documented GPU candidate |
-| `192.168.1.11` | `node02` | Kubernetes worker, documented RTX A4000 GPU host |
+| `192.168.1.48` | `node01` | Kubernetes worker and GPU candidate |
+| `192.168.1.11` | `node02` | Kubernetes worker with RTX A4000 GPU |
 | `192.168.1.50` | `node03` | Kubernetes worker |
-| `192.168.1.51` | `node04` | Kubernetes worker, documented GTX 1060 GPU host |
-| `192.168.1.47` | `node05` | Kubernetes worker, documented landing area for several v2 services |
+| `192.168.1.51` | `node04` | Kubernetes worker with GTX 1060 GPU |
+| `192.168.1.47` | `node05` | Kubernetes worker and service landing area |
 | `192.168.1.207` | g-nas | NFS target for shared datasets and artifacts |
-| `192.168.1.12` | Mac service host | documented OpenClaw/chat/ranker host |
-| `192.168.1.21` | Mac service host | exo master and Ollama host |
+| `192.168.1.2` | `projector-san` | physical display endpoint |
+| `192.168.1.12` | Mac service host | chat/ranker/coding-model target |
 | `192.168.1.19` | Mac service host | exo worker |
-| `192.168.1.23` | Mac service host | heavier inference host |
+| `192.168.1.21` | `CS60138N73111` | exo master and Ollama host |
+| `192.168.1.23` | `CS60140N7311` | heavier Mac inference host |
 
-## Intended Service Map From Repo
+## Core Glasslab Services
 
-The repo currently defines the primary v2 command path as:
-
-1. `whatsapp-gateway`
-2. `research-ingress`
-3. `research-command-router`
-4. `workflow-api`
-5. Kubernetes Jobs, artifacts, evaluation, reports
-
-Repo-declared service relationships:
-
-| Service | Namespace / host | Repo-declared role |
+| Service | Placement | Role in workflow |
 | --- | --- | --- |
-| `glasslab-whatsapp-gateway` | `glasslab-v2` | WhatsApp/control-shell ingress |
-| `glasslab-research-ingress` | `glasslab-v2` | command normalization and intake boundary |
-| `glasslab-research-command-router` | `glasslab-v2` | deterministic command router |
-| `glasslab-workflow-api` | `glasslab-v2`, pinned to `node05` in manifests | session state, run planning, job submission, artifact handoff |
-| `glasslab-postgres` | `glasslab-v2` | durable workflow state |
-| `glasslab-minio` | `glasslab-v2` | object-style artifact/source storage where needed |
-| `glasslab-nats` | `glasslab-v2`, pinned to `node05` in manifests | event/message substrate |
-| `glasslab-interpretation-agent` | `glasslab-v2` | interpretation-stage helper, configured against `.21` Ollama endpoint |
-| `glasslab-intake-agent` | `glasslab-v2` | intake helper, currently disabled in workflow-api config |
-| `glasslab-assessment-agent` | `glasslab-v2` | assessment helper, currently disabled in workflow-api config |
-| `glasslab-design-agent` | `glasslab-v2` | design helper, currently disabled in workflow-api config |
-| `.12` Ollama | `192.168.1.12:11434` | coding notebook model target in workflow-api config |
-| `.12` ranker | `192.168.1.12:8181` | ranker target in workflow-api config, ranker currently disabled |
-| `.207` NFS | `192.168.1.207` | `glasslab-shared-datasets` and `glasslab-shared-artifacts` backing store |
+| `glasslab-whatsapp-gateway` | `glasslab-v2` | receives operator messages and provider webhook events |
+| `glasslab-research-ingress` | `glasslab-v2` | normalizes command and intake payloads |
+| `glasslab-research-command-router` | `glasslab-v2` | maps user commands to deterministic backend actions |
+| `glasslab-workflow-api` | `glasslab-v2` | owns sessions, plans, run creation, job submission, decisions, and artifact references |
+| `glasslab-postgres` | `glasslab-v2` | durable workflow/session/state records |
+| `glasslab-minio` | `glasslab-v2` | object-style source and artifact storage where useful |
+| `glasslab-nats` | `glasslab-v2` | event/message substrate for asynchronous workflows |
+| `glasslab-interpretation-agent` | `glasslab-v2` | interpretation-stage helper |
+| `glasslab-intake-agent` | `glasslab-v2` | future structured intake helper |
+| `glasslab-assessment-agent` | `glasslab-v2` | future assessment helper |
+| `glasslab-design-agent` | `glasslab-v2` | future design-draft helper |
+| `.12` Ollama | `192.168.1.12:11434` | coding notebook / bounded model target |
+| `.12` ranker | `192.168.1.12:8181` | workflow-family ranking target when enabled |
+| `.207` NFS | `192.168.1.207` | shared datasets and artifact persistence |
+
+## Workflow Families To Show
+
+The display should leave room for multiple workflow families, not only one
+current experiment.
+
+| Workflow family | Purpose | Execution shape |
+| --- | --- | --- |
+| `metric-search-v0` | metric-learning and representation-search experiments | GPU Kubernetes Job |
+| validation run | small platform smoke and contract validation | bounded Kubernetes Job |
+| literature/source intake | source collection and metadata normalization | workflow-api plus intake helpers |
+| interpretation | turn sources or run outputs into structured claims | workflow-api plus model helper |
+| reporting | make a deterministic human-readable memo | reporter / workflow-api |
+| comparison | compare multiple completed run bundles | evaluator / workflow-api |
+
+## Data And Artifact Paths
+
+| Data class | Preferred home | Notes |
+| --- | --- | --- |
+| session records | Postgres | durable command and workflow state |
+| source metadata | Postgres | paper/source records and provenance |
+| source files | g-nas NFS or MinIO | PDFs, datasets, images, notebooks |
+| run artifacts | g-nas NFS artifact PVC | run bundles under `/mnt/artifacts` |
+| object-style payloads | MinIO | used when S3-style access is useful |
+| model caches | local machine storage | keep performance-sensitive caches near compute |
+| repo and manifests | `.44` plus GitHub | `.44` is the canonical live apply host |
 
 ## Diagram Source
 
@@ -121,55 +102,47 @@ Use this Mermaid block as the source for an image generator or diagram renderer.
 
 ```mermaid
 flowchart LR
-  operator[Operator phone / WhatsApp] --> wg[whatsapp-gateway]
-  wg --> ingress[research-ingress]
+  researcher[Researcher / operator] --> channel[WhatsApp or operator shell]
+  channel --> gateway[whatsapp-gateway]
+  gateway --> ingress[research-ingress]
   ingress --> router[research-command-router]
   router --> api[workflow-api]
-  api --> pg[(Postgres)]
-  api --> minio[(MinIO)]
-  api --> nats[(NATS)]
-  api --> jobs[Kubernetes Jobs]
-  jobs --> datasets[(NFS datasets PVC<br/>192.168.1.207)]
-  jobs --> artifacts[(NFS artifacts PVC<br/>192.168.1.207)]
-  api -. coding notebook .-> mac12[192.168.1.12<br/>Ollama qwen2.5-coder:14b]
+
+  api --> session[(Postgres<br/>sessions, plans, decisions)]
+  api --> preflight[preflight / workflow validation]
+  preflight --> job[Kubernetes Job]
+  job --> gpu[GPU workers<br/>node01 node02 node04]
+  job --> datasets[(shared datasets<br/>g-nas 192.168.1.207)]
+  job --> artifacts[(shared artifacts<br/>g-nas 192.168.1.207)]
+  artifacts --> evaluator[evaluator / comparison]
+  artifacts --> reporter[reporter / memo]
+  evaluator --> api
+  reporter --> api
+  api --> next[next bounded variant]
+
+  api -. model helper .-> mac12[192.168.1.12<br/>Ollama/ranker]
   api -. interpretation .-> mac21[192.168.1.21<br/>Ollama/exo master]
-  api -. heavier inference .-> mac23[192.168.1.23<br/>Mac inference host]
+  api -. larger model .-> mac23[192.168.1.23<br/>inference host]
 
-  subgraph LabLAN[Lab LAN 192.168.1.0/24]
-    gateway[192.168.1.100<br/>gateway]
-    projector[192.168.1.2<br/>projector-san<br/>display endpoint]
-    provisioner[192.168.1.44<br/>glasslab-PXE-01<br/>PXE + kubectl + canonical repo<br/>OBSERVED BACK UP]
-    nas[192.168.1.207<br/>g-nas NFS<br/>OBSERVED UP]
+  subgraph Provisioning[Provisioning and admin]
+    pxe[192.168.1.44<br/>PXE + Ansible + kubectl + canonical repo]
+    cp[192.168.1.49<br/>Kubernetes control plane]
   end
 
-  subgraph Kubernetes[Documented Kubernetes plane<br/>power recovery in progress 2026-05-21]
-    cp01[192.168.1.49 cp01<br/>control plane<br/>latest check: down]
-    node01[192.168.1.48 node01<br/>worker/GPU candidate<br/>latest check: up]
-    node02[192.168.1.11 node02<br/>worker RTX A4000<br/>latest check: up]
-    node03[192.168.1.50 node03<br/>worker<br/>latest check: down]
-    node04[192.168.1.51 node04<br/>worker GTX 1060<br/>latest check: up]
-    node05[192.168.1.47 node05<br/>worker/service landing area<br/>latest check: up]
-  end
+  pxe --> cp
+  cp --> job
 
-  subgraph Macs[Mac service hosts]
-    mac12
-    mac19[192.168.1.19<br/>exo worker]
-    mac21
-    mac23
-  end
-
-  provisioner -. manages .-> Kubernetes
-  Kubernetes --> nas
-  projector -. displays .-> LabLAN
+  projector[192.168.1.2<br/>physical display] -. shows .-> channel
 ```
 
 ## Visual Encoding Recommendation
 
 For a physical wall diagram:
 
-- green: observed reachable now
-- red: observed unreachable now
-- amber: reachable but not fully validated
-- blue: intended Kubernetes/service control path
-- purple: external Mac model-service hosts
-- gray dashed border: repo-declared but not live-validated
+- blue: command/control path
+- green: durable state and artifacts
+- purple: Mac-hosted model helpers
+- orange: Kubernetes execution
+- gray: provisioning/admin infrastructure
+- red accent only for warnings or known gaps, not for normal machine roles
+
