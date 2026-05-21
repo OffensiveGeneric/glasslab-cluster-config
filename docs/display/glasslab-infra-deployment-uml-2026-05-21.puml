@@ -1,0 +1,84 @@
+@startuml
+title Glasslab Infrastructure - UML Deployment View
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam linetype ortho
+
+actor "Researcher /\nOperator" as operator
+node "projector-san\n192.168.1.2" as projector <<display>>
+
+node "glasslab-PXE-01\n192.168.1.44" as pxe <<provisioner>> {
+  artifact "PXE/iPXE\nTFTP + HTTP" as pxe_assets
+  artifact "Ansible + kubectl" as admin_tools
+  artifact "canonical repo\ncluster-config" as repo
+}
+
+node "cp01\n192.168.1.49" as cp01 <<control plane>> {
+  component "kube-apiserver" as apiserver
+  component "etcd" as etcd
+  component "scheduler/controller" as sched
+}
+
+node "Kubernetes workers" as k8s <<cluster>> {
+  node "node01\n192.168.1.48\nGPU worker" as node01
+  node "node02\n192.168.1.11\nRTX A4000" as node02
+  node "node03\n192.168.1.50\nworker" as node03
+  node "node04\n192.168.1.51\nGTX 1060" as node04
+  node "node05\n192.168.1.47\nservice landing" as node05
+}
+
+node "glasslab-v2 namespace" as v2 <<namespace>> {
+  component "whatsapp-gateway" as whatsapp
+  component "research-ingress" as ingress
+  component "research-command-router" as router
+  component "workflow-api" as workflow
+  database "Postgres\nsessions/plans/runs" as postgres
+  database "MinIO\nobject artifacts" as minio
+  queue "NATS\nevents" as nats
+  component "stage agents\nintake/design/assessment/interpretation" as agents
+}
+
+database "g-nas\n192.168.1.207\nNFS datasets + artifacts" as gnas
+
+node "Mac model helpers" as macs <<external compute>> {
+  node ".12\nOllama/ranker" as mac12
+  node ".19\nexo worker" as mac19
+  node ".21\nexo master + Ollama" as mac21
+  node ".23\nlarger inference host" as mac23
+}
+
+operator --> whatsapp : chat command
+operator --> projector : reads/traces diagram
+projector ..> repo : displays exported docs
+
+pxe_assets --> cp01 : PXE/local boot support
+admin_tools --> apiserver : kubectl
+repo --> admin_tools : manifests/runbooks
+
+apiserver --> k8s : schedules pods/jobs
+whatsapp --> ingress : normalized intake
+ingress --> router : command envelope
+router --> workflow : deterministic action
+workflow --> postgres : session/run state
+workflow --> minio : object payloads
+workflow --> nats : async events
+workflow --> agents : stage requests
+workflow --> apiserver : Kubernetes Job
+node01 --> gnas : datasets/artifacts
+node02 --> gnas : datasets/artifacts
+node04 --> gnas : datasets/artifacts
+workflow ..> mac12 : model helper
+workflow ..> mac21 : model helper
+workflow ..> mac23 : model helper
+mac21 .. mac19 : exo distributed run
+
+legend right
+  UML stereotype key:
+  <<provisioner>> PXE/admin/source of live apply
+  <<control plane>> Kubernetes API and state
+  <<cluster>> schedulable Linux compute
+  <<namespace>> Glasslab workflow services
+  <<external compute>> Mac-hosted model services
+  <<display>> physical wall/projection endpoint
+endlegend
+@enduml

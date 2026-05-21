@@ -1,0 +1,167 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title desc">
+  <title id="title">Glasslab UML Infrastructure And Workflow Display</title>
+  <desc id="desc">A projection-ready UML-style infrastructure and activity workflow diagram for Glasslab.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f7f8fa; }
+      .title { font: 700 38px Arial, sans-serif; fill: #142033; }
+      .subtitle { font: 400 18px Arial, sans-serif; fill: #4a5568; }
+      .panel-title { font: 700 25px Arial, sans-serif; fill: #172033; }
+      .label { font: 700 17px Arial, sans-serif; fill: #162033; }
+      .small { font: 400 14px Arial, sans-serif; fill: #27364a; }
+      .tiny { font: 400 12px Arial, sans-serif; fill: #3f4d61; }
+      .stereo { font: 400 12px Arial, sans-serif; fill: #59677a; }
+      .box { fill: #ffffff; stroke: #26364d; stroke-width: 2; rx: 0; ry: 0; }
+      .node { fill: #eef4fb; stroke: #26364d; stroke-width: 2; rx: 0; ry: 0; }
+      .control { fill: #e9f1ff; stroke: #23558f; stroke-width: 2; }
+      .compute { fill: #fff2df; stroke: #a05a00; stroke-width: 2; }
+      .storage { fill: #e8f6ef; stroke: #1f6f4a; stroke-width: 2; }
+      .mac { fill: #f2ecff; stroke: #6346a6; stroke-width: 2; }
+      .display { fill: #f3f4f6; stroke: #5b6472; stroke-width: 2; }
+      .activity { fill: #ffffff; stroke: #25344b; stroke-width: 2; rx: 22; ry: 22; }
+      .decision { fill: #fff8e8; stroke: #9c6a00; stroke-width: 2; }
+      .arrow { stroke: #223047; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+      .dash { stroke: #6a54a3; stroke-width: 2.2; fill: none; stroke-dasharray: 8 6; marker-end: url(#arrowPurple); }
+      .storage-line { stroke: #1f6f4a; stroke-width: 2.5; fill: none; marker-end: url(#arrowGreen); }
+      .swim { fill: #ffffff; stroke: #c4ccd8; stroke-width: 1.5; }
+      .swim-title { font: 700 15px Arial, sans-serif; fill: #26364d; }
+    </style>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#223047"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#1f6f4a"/>
+    </marker>
+    <marker id="arrowPurple" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#6a54a3"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1920" height="1080"/>
+  <text class="title" x="50" y="62">Glasslab: Infrastructure Deployment + Research Workflow</text>
+  <text class="subtitle" x="52" y="92">Projection view for tracing on the whiteboard. Left: UML deployment topology. Right: UML activity flow.</text>
+
+  <rect class="box" x="40" y="120" width="1125" height="900"/>
+  <text class="panel-title" x="70" y="160">UML Deployment View</text>
+  <text class="subtitle" x="70" y="185">Machines, services, storage, and the command path.</text>
+
+  <rect class="display" x="72" y="230" width="185" height="86"/>
+  <text class="stereo" x="100" y="252">&lt;&lt;display&gt;&gt;</text>
+  <text class="label" x="98" y="276">projector-san</text>
+  <text class="small" x="112" y="299">192.168.1.2</text>
+
+  <rect class="node" x="310" y="215" width="225" height="140"/>
+  <text class="stereo" x="382" y="239">&lt;&lt;provisioner&gt;&gt;</text>
+  <text class="label" x="354" y="265">glasslab-PXE-01</text>
+  <text class="small" x="374" y="287">192.168.1.44</text>
+  <text class="tiny" x="332" y="316">PXE / TFTP / HTTP</text>
+  <text class="tiny" x="332" y="336">Ansible + kubectl + repo</text>
+
+  <rect class="control" x="620" y="215" width="230" height="140"/>
+  <text class="stereo" x="690" y="239">&lt;&lt;control plane&gt;&gt;</text>
+  <text class="label" x="708" y="265">cp01</text>
+  <text class="small" x="688" y="287">192.168.1.49</text>
+  <text class="tiny" x="648" y="316">kube-apiserver / etcd</text>
+  <text class="tiny" x="648" y="336">scheduler + controller</text>
+
+  <rect class="compute" x="80" y="425" width="500" height="255"/>
+  <text class="stereo" x="274" y="449">&lt;&lt;cluster&gt;&gt;</text>
+  <text class="label" x="246" y="475">Kubernetes workers</text>
+  <rect class="box" x="105" y="500" width="140" height="60"/><text class="small" x="126" y="524">node01 .48</text><text class="tiny" x="129" y="546">GPU worker</text>
+  <rect class="box" x="260" y="500" width="140" height="60"/><text class="small" x="281" y="524">node02 .11</text><text class="tiny" x="281" y="546">RTX A4000</text>
+  <rect class="box" x="415" y="500" width="140" height="60"/><text class="small" x="436" y="524">node03 .50</text><text class="tiny" x="462" y="546">worker</text>
+  <rect class="box" x="180" y="590" width="140" height="60"/><text class="small" x="201" y="614">node04 .51</text><text class="tiny" x="204" y="636">GTX 1060</text>
+  <rect class="box" x="335" y="590" width="140" height="60"/><text class="small" x="356" y="614">node05 .47</text><text class="tiny" x="360" y="636">services</text>
+
+  <rect class="control" x="660" y="435" width="460" height="280"/>
+  <text class="stereo" x="815" y="459">&lt;&lt;namespace&gt;&gt;</text>
+  <text class="label" x="805" y="485">glasslab-v2</text>
+  <rect class="box" x="690" y="515" width="120" height="54"/><text class="tiny" x="706" y="537">whatsapp</text><text class="tiny" x="707" y="553">gateway</text>
+  <rect class="box" x="835" y="515" width="120" height="54"/><text class="tiny" x="854" y="537">research</text><text class="tiny" x="864" y="553">ingress</text>
+  <rect class="box" x="980" y="515" width="110" height="54"/><text class="tiny" x="1001" y="537">command</text><text class="tiny" x="1010" y="553">router</text>
+  <rect class="box" x="765" y="615" width="160" height="62"/><text class="small" x="803" y="640">workflow-api</text><text class="tiny" x="794" y="660">sessions / jobs</text>
+  <rect class="storage" x="955" y="603" width="125" height="42"/><text class="tiny" x="994" y="627">Postgres</text>
+  <rect class="storage" x="955" y="655" width="125" height="42"/><text class="tiny" x="1000" y="679">MinIO</text>
+  <rect class="box" x="690" y="615" width="55" height="62"/><text class="tiny" x="704" y="641">NATS</text><text class="tiny" x="705" y="658">bus</text>
+
+  <rect class="storage" x="210" y="745" width="250" height="95"/>
+  <text class="stereo" x="285" y="769">&lt;&lt;storage&gt;&gt;</text>
+  <text class="label" x="284" y="795">g-nas NFS</text>
+  <text class="small" x="274" y="818">192.168.1.207</text>
+
+  <rect class="mac" x="535" y="775" width="575" height="145"/>
+  <text class="stereo" x="744" y="799">&lt;&lt;external compute&gt;&gt;</text>
+  <text class="label" x="750" y="825">Mac model helpers</text>
+  <text class="small" x="575" y="858">.12 Ollama/ranker</text>
+  <text class="small" x="760" y="858">.19 exo worker</text>
+  <text class="small" x="930" y="858">.21 exo master</text>
+  <text class="small" x="725" y="890">.23 larger inference host</text>
+
+  <path class="arrow" d="M257 270 H310"/>
+  <path class="arrow" d="M535 285 H620"/>
+  <path class="arrow" d="M735 355 V425"/>
+  <path class="arrow" d="M620 545 H580"/>
+  <path class="arrow" d="M810 542 H835"/>
+  <path class="arrow" d="M955 542 H980"/>
+  <path class="arrow" d="M1035 569 V615 H925"/>
+  <path class="storage-line" d="M845 677 V745 H460"/>
+  <path class="storage-line" d="M580 592 H660"/>
+  <path class="dash" d="M845 677 V775"/>
+  <path class="arrow" d="M735 355 C720 385 715 405 715 435"/>
+
+  <text class="tiny" x="272" y="262">reads</text>
+  <text class="tiny" x="552" y="276">admin / PXE</text>
+  <text class="tiny" x="747" y="395">API schedules</text>
+  <text class="tiny" x="590" y="585">Jobs</text>
+  <text class="tiny" x="472" y="733">artifacts + datasets</text>
+  <text class="tiny" x="865" y="760">model calls</text>
+
+  <rect class="box" x="1195" y="120" width="685" height="900"/>
+  <text class="panel-title" x="1225" y="160">UML Activity View</text>
+  <text class="subtitle" x="1225" y="185">How a bounded research workflow moves through the system.</text>
+
+  <rect class="swim" x="1230" y="220" width="155" height="735"/><text class="swim-title" x="1270" y="247">Operator</text>
+  <rect class="swim" x="1385" y="220" width="155" height="735"/><text class="swim-title" x="1402" y="247">Ingress / Route</text>
+  <rect class="swim" x="1540" y="220" width="170" height="735"/><text class="swim-title" x="1583" y="247">Workflow API</text>
+  <rect class="swim" x="1710" y="220" width="135" height="735"/><text class="swim-title" x="1737" y="247">Execution</text>
+
+  <circle cx="1307" cy="287" r="14" fill="#25344b"/>
+  <rect class="activity" x="1247" y="330" width="120" height="58"/><text class="tiny" x="1272" y="353">Submit goal,</text><text class="tiny" x="1264" y="371">source, or data</text>
+  <rect class="activity" x="1400" y="330" width="125" height="58"/><text class="tiny" x="1423" y="353">Normalize</text><text class="tiny" x="1430" y="371">request</text>
+  <rect class="activity" x="1400" y="430" width="125" height="58"/><text class="tiny" x="1427" y="453">Route to</text><text class="tiny" x="1417" y="471">backend action</text>
+  <rect class="activity" x="1560" y="430" width="130" height="58"/><text class="tiny" x="1583" y="453">Create or</text><text class="tiny" x="1578" y="471">update session</text>
+  <rect class="activity" x="1560" y="530" width="130" height="58"/><text class="tiny" x="1585" y="553">Build plan</text><text class="tiny" x="1577" y="571">and preflight</text>
+  <polygon class="decision" points="1625,635 1690,680 1625,725 1560,680"/>
+  <text class="tiny" x="1598" y="676">Preflight</text><text class="tiny" x="1609" y="693">passes?</text>
+  <rect class="activity" x="1725" y="650" width="105" height="58"/><text class="tiny" x="1744" y="673">Launch job</text><text class="tiny" x="1747" y="691">or model</text>
+  <rect class="activity" x="1725" y="760" width="105" height="58"/><text class="tiny" x="1751" y="783">Write</text><text class="tiny" x="1740" y="801">run bundle</text>
+  <rect class="activity" x="1560" y="760" width="130" height="58"/><text class="tiny" x="1582" y="783">Compare and</text><text class="tiny" x="1594" y="801">report</text>
+  <rect class="activity" x="1247" y="760" width="120" height="58"/><text class="tiny" x="1278" y="783">Review</text><text class="tiny" x="1277" y="801">evidence</text>
+  <polygon class="decision" points="1307,855 1362,895 1307,935 1252,895"/>
+  <text class="tiny" x="1281" y="891">Continue</text><text class="tiny" x="1284" y="908">variant?</text>
+  <rect class="activity" x="1560" y="865" width="130" height="58"/><text class="tiny" x="1578" y="888">Record decision</text><text class="tiny" x="1575" y="906">next mutation</text>
+  <circle cx="1780" cy="900" r="15" fill="#ffffff" stroke="#25344b" stroke-width="3"/><circle cx="1780" cy="900" r="8" fill="#25344b"/>
+
+  <path class="arrow" d="M1307 301 V330"/>
+  <path class="arrow" d="M1367 359 H1400"/>
+  <path class="arrow" d="M1463 388 V430"/>
+  <path class="arrow" d="M1525 459 H1560"/>
+  <path class="arrow" d="M1625 488 V530"/>
+  <path class="arrow" d="M1625 588 V635"/>
+  <path class="arrow" d="M1690 680 H1725"/>
+  <path class="arrow" d="M1778 708 V760"/>
+  <path class="arrow" d="M1725 789 H1690"/>
+  <path class="arrow" d="M1560 789 H1367"/>
+  <path class="arrow" d="M1307 818 V855"/>
+  <path class="arrow" d="M1362 895 H1560"/>
+  <path class="arrow" d="M1690 895 H1765"/>
+  <path class="arrow" d="M1560 680 H1495 V910 H1252"/>
+  <text class="tiny" x="1697" y="670">yes</text>
+  <text class="tiny" x="1498" y="672">no: return issue</text>
+  <text class="tiny" x="1395" y="884">yes</text>
+  <text class="tiny" x="1700" y="884">no</text>
+
+  <rect class="box" x="52" y="945" width="1080" height="52"/>
+  <text class="tiny" x="70" y="968">Trace order: operator command -> ingress/router -> workflow-api -> job/model -> storage -> compare/report -> operator decision -> next bounded variant.</text>
+  <text class="tiny" x="70" y="988">UML sources: glasslab-infra-deployment-uml-2026-05-21.puml and glasslab-workflow-activity-uml-2026-05-21.puml.</text>
+</svg>

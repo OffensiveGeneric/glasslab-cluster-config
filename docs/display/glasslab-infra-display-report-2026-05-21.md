@@ -96,9 +96,24 @@ current experiment.
 | model caches | local machine storage | keep performance-sensitive caches near compute |
 | repo and manifests | `.44` plus GitHub | `.44` is the canonical live apply host |
 
-## Diagram Source
+## UML Display Sources
 
-Use this Mermaid block as the source for an image generator or diagram renderer.
+The projection-ready view is:
+
+- `docs/display/glasslab-uml-display-2026-05-21.svg`
+
+The UML source diagrams are:
+
+- `docs/display/glasslab-infra-deployment-uml-2026-05-21.puml`
+- `docs/display/glasslab-workflow-activity-uml-2026-05-21.puml`
+
+The deployment diagram keeps the network graph visible. The activity diagram
+adds the workflow path that can be traced on the whiteboard beneath the
+projector.
+
+## Legacy Mermaid Source
+
+This Mermaid block is retained as a lightweight renderer-friendly source.
 
 ```mermaid
 flowchart LR
@@ -145,4 +160,3 @@ For a physical wall diagram:
 - orange: Kubernetes execution
 - gray: provisioning/admin infrastructure
 - red accent only for warnings or known gaps, not for normal machine roles
-

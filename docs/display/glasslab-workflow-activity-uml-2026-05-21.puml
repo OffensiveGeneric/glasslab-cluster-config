@@ -1,0 +1,67 @@
+@startuml
+title Glasslab Research Workflow - UML Activity View
+skinparam shadowing false
+skinparam linetype ortho
+
+start
+
+partition "Operator" {
+  :Submit research goal,\nsource, dataset, or command;
+}
+
+partition "Ingress And Routing" {
+  :Receive through WhatsApp\nor operator shell;
+  :Normalize request;
+  :Route to deterministic\nworkflow action;
+}
+
+partition "Workflow API" {
+  :Create or update session;
+  :Select workflow family;
+  :Build bounded plan;
+  :Validate inputs, policy,\nresources, and contracts;
+}
+
+if (Preflight passes?) then (yes)
+  partition "Execution" {
+    :Create run manifest\nand run spec;
+    :Launch Kubernetes Job\nor model-helper call;
+    :Run workload;
+  }
+
+  partition "Storage" {
+    :Write run bundle;
+    :Persist metrics,\nlogs, artifacts, and state;
+  }
+
+  partition "Evaluation And Reporting" {
+    :Compare against baselines\nor prior runs;
+    :Generate report memo;
+  }
+
+  partition "Operator" {
+    :Review evidence;
+  }
+
+  if (Continue iteration?) then (yes)
+    partition "Workflow API" {
+      :Record decision;
+      :Propose next bounded variant;
+    }
+    partition "Operator" {
+      :Submit next approved variant;
+    }
+  else (no)
+    partition "Workflow API" {
+      :Close or park session;
+    }
+  endif
+else (no)
+  partition "Workflow API" {
+    :Record validation failure;
+    :Return missing input,\nresource, or policy issue;
+  }
+endif
+
+stop
+@enduml
