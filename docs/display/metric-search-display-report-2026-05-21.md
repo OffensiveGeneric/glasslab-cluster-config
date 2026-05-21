@@ -10,6 +10,15 @@ The metric-search repo observed on this laptop is:
 - commit: `7c47fb1`
 - working tree: untracked `.codex` and `scripts/inspect_run_metrics.py`
 
+Operational note for 2026-05-21:
+
+- the lab was in UPS/power-failure recovery during this documentation pass
+- metric-search normally expects the Glasslab Kubernetes plane and GPU workers
+  to be up
+- at the latest infra check, `.44` was back but `cp01` was still down, so new
+  metric-search Kubernetes jobs could not be validated until the API server
+  returned
+
 ## Project Purpose
 
 `glasslab-metric-search` is the workload-side project for contrastive
@@ -156,4 +165,3 @@ For the metric-search diagram:
 - purple: GPU execution
 - gray: artifact and dataset storage
 - red badge: evaluation protocol caveat
-

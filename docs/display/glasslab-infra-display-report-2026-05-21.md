@@ -4,8 +4,14 @@ This report is meant to feed a physical wall display or generated network
 diagram for Glasslab.
 
 It records the state observed from the lab laptop at `192.168.1.36` on
-2026-05-21. It deliberately separates observed reachability from repo-declared
-intended roles.
+2026-05-21 during recovery from a UPS/power failure. It deliberately separates
+observed reachability from repo-declared intended roles.
+
+Under normal lab operation, the expectation is that the PXE/provisioner host,
+the Kubernetes control plane, all Kubernetes workers, the Mac service hosts,
+the NAS, and the projector endpoint are up together. Temporary red/down states
+in this document reflect the power recovery window, not the intended steady
+state of Glasslab.
 
 ## Observed Now
 
@@ -15,26 +21,42 @@ Observed from the lab LAN:
 | --- | --- | --- | --- |
 | `192.168.1.100` | lab gateway | reachable | default route for lab LAN |
 | `192.168.1.2` | `projector-san` | reachable | OptiPlex 990 projector machine, Xubuntu GUI, `lightdm` active |
-| `192.168.1.12` | Mac service host | reachable by ping | documented OpenClaw/chat/ranker host, SSH key not accepted from this laptop during this check |
+| `192.168.1.12` | Mac service host | reachable by ping | documented OpenClaw/chat/ranker host |
 | `192.168.1.19` | exo worker Mac | reachable by ping | documented exo worker, SSH key not accepted from this laptop during this check |
 | `192.168.1.21` | `CS60138N73111` | reachable by SSH | exo master Mac, Ollama host |
 | `192.168.1.23` | `CS60140N7311` | reachable by SSH | heavier Mac inference host |
 | `192.168.1.207` | g-nas | reachable | NFS/shared storage target |
-| `192.168.1.44` | `glasslab-PXE-01` | unreachable | PXE/provisioner/canonical apply host |
-| `192.168.1.47` | `node05` | unreachable | Kubernetes worker in repo docs |
-| `192.168.1.48` | `node01` | unreachable | Kubernetes worker in repo docs |
-| `192.168.1.49` | `cp01` | unreachable | Kubernetes control plane in repo docs |
-| `192.168.1.50` | `node03` | unreachable | Kubernetes worker in repo docs |
-| `192.168.1.51` | `node04` | unreachable | Kubernetes worker in repo docs |
-| `192.168.1.11` | `node02` | unreachable | Kubernetes GPU worker in repo docs |
+| `192.168.1.44` | `glasslab-PXE-01` | reachable by SSH after power returned | PXE/provisioner/canonical apply host |
+| `192.168.1.47` | `node05` | reachable by ping from `.44` | Kubernetes worker in repo docs |
+| `192.168.1.48` | `node01` | reachable by ping from `.44` | Kubernetes worker in repo docs |
+| `192.168.1.49` | `cp01` | not reachable during latest check | Kubernetes control plane in repo docs |
+| `192.168.1.50` | `node03` | not reachable during latest check | Kubernetes worker in repo docs |
+| `192.168.1.51` | `node04` | reachable by ping from `.44` | Kubernetes worker in repo docs |
+| `192.168.1.11` | `node02` | reachable by ping from `.44` | Kubernetes GPU worker in repo docs |
 
 Implication:
 
-- The live Kubernetes cluster could not be validated from `.44` because `.44`
-  is currently unreachable from both the lab laptop and the public bastion path.
-- The current physical display should show the Kubernetes/PXE plane as
-  `down/unverified`, not as healthy.
+- `.44` is back online after the UPS event, but the control plane at `.49` was
+  still not reachable during the latest check.
+- `kubectl` could not validate the live cluster because the API server endpoint
+  is `https://192.168.1.49:6443`.
+- The current physical display should show this as a power-recovery state: the
+  expected normal state is fully up, but cluster validation is blocked until
+  `cp01` returns.
 - The projector machine itself is up and suitable as the wall-display endpoint.
+
+## Normal Expected State
+
+In the usual Glasslab state, these components should all be up:
+
+| Plane | Expected state |
+| --- | --- |
+| PXE/provisioner | `.44` reachable by SSH, nginx/TFTP/dnsmasq available for PXE, canonical checkout present |
+| Kubernetes control plane | `.49` reachable, API server listening on `:6443`, `kubectl` from `.44` works |
+| Kubernetes workers | `.48`, `.11`, `.50`, `.51`, and `.47` reachable and `Ready` |
+| Storage | `.207` reachable and NFS-backed shared dataset/artifact PVCs available |
+| Mac service hosts | `.12`, `.19`, `.21`, and `.23` reachable for model/exo/helper services |
+| Physical display | `.2` reachable with GUI display active |
 
 ## Current Display Endpoint
 
@@ -116,17 +138,17 @@ flowchart LR
   subgraph LabLAN[Lab LAN 192.168.1.0/24]
     gateway[192.168.1.100<br/>gateway]
     projector[192.168.1.2<br/>projector-san<br/>display endpoint]
-    provisioner[192.168.1.44<br/>glasslab-PXE-01<br/>PXE + kubectl + canonical repo<br/>OBSERVED DOWN]
+    provisioner[192.168.1.44<br/>glasslab-PXE-01<br/>PXE + kubectl + canonical repo<br/>OBSERVED BACK UP]
     nas[192.168.1.207<br/>g-nas NFS<br/>OBSERVED UP]
   end
 
-  subgraph Kubernetes[Documented Kubernetes plane<br/>OBSERVED DOWN/UNVERIFIED 2026-05-21]
-    cp01[192.168.1.49 cp01<br/>control plane]
-    node01[192.168.1.48 node01<br/>worker/GPU candidate]
-    node02[192.168.1.11 node02<br/>worker RTX A4000]
-    node03[192.168.1.50 node03<br/>worker]
-    node04[192.168.1.51 node04<br/>worker GTX 1060]
-    node05[192.168.1.47 node05<br/>worker/service landing area]
+  subgraph Kubernetes[Documented Kubernetes plane<br/>power recovery in progress 2026-05-21]
+    cp01[192.168.1.49 cp01<br/>control plane<br/>latest check: down]
+    node01[192.168.1.48 node01<br/>worker/GPU candidate<br/>latest check: up]
+    node02[192.168.1.11 node02<br/>worker RTX A4000<br/>latest check: up]
+    node03[192.168.1.50 node03<br/>worker<br/>latest check: down]
+    node04[192.168.1.51 node04<br/>worker GTX 1060<br/>latest check: up]
+    node05[192.168.1.47 node05<br/>worker/service landing area<br/>latest check: up]
   end
 
   subgraph Macs[Mac service hosts]
@@ -151,4 +173,3 @@ For a physical wall diagram:
 - blue: intended Kubernetes/service control path
 - purple: external Mac model-service hosts
 - gray dashed border: repo-declared but not live-validated
-
