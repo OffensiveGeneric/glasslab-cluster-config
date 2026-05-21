@@ -133,6 +133,7 @@
   <rect class="activity" x="1560" y="530" width="130" height="58"/><text class="tiny" x="1585" y="553">Build plan</text><text class="tiny" x="1577" y="571">and preflight</text>
   <polygon class="decision" points="1625,635 1690,680 1625,725 1560,680"/>
   <text class="tiny" x="1598" y="676">Preflight</text><text class="tiny" x="1609" y="693">passes?</text>
+  <rect class="activity" x="1400" y="650" width="125" height="58"/><text class="tiny" x="1424" y="673">Return issue</text><text class="tiny" x="1424" y="691">for revision</text>
   <rect class="activity" x="1725" y="650" width="105" height="58"/><text class="tiny" x="1744" y="673">Launch job</text><text class="tiny" x="1747" y="691">or model</text>
   <rect class="activity" x="1725" y="760" width="105" height="58"/><text class="tiny" x="1751" y="783">Write</text><text class="tiny" x="1740" y="801">run bundle</text>
   <rect class="activity" x="1560" y="760" width="130" height="58"/><text class="tiny" x="1582" y="783">Compare and</text><text class="tiny" x="1594" y="801">report</text>
@@ -155,9 +156,9 @@
   <path class="arrow" d="M1307 818 V855"/>
   <path class="arrow" d="M1362 895 H1560"/>
   <path class="arrow" d="M1690 895 H1765"/>
-  <path class="arrow" d="M1560 680 H1495 V910 H1252"/>
+  <path class="arrow" d="M1560 680 H1525"/>
   <text class="tiny" x="1697" y="670">yes</text>
-  <text class="tiny" x="1498" y="672">no: return issue</text>
+  <text class="tiny" x="1528" y="670">no</text>
   <text class="tiny" x="1395" y="884">yes</text>
   <text class="tiny" x="1700" y="884">no</text>
 
