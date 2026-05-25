@@ -1,0 +1,6 @@
+kubernetes_node_role: worker
+expected_interface: eno1
+gpu_candidate: true
+gpu_vendor: nvidia
+gpu_model_hint: rtx-3080-10gb
+gpu_driver_package_override: nvidia-driver-535
