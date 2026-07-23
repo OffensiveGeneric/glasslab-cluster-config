@@ -10,6 +10,7 @@ Read it in this order.
 These files define the current product shape and should be read first:
 
 - `canonical-stack-2026-04.md`
+- `system-map-2026-07.md`
 - `run-fabric-design-2026-04.md`
 - `command-surface-spec.md`
 - `router-and-backend-contract.md`
@@ -32,6 +33,7 @@ Short version:
 These remain current and useful after the cleanup pass:
 
 - `overview.md`
+- `system-map-2026-07.md`
 - `run-fabric-design-2026-04.md`
 - `generic-experiment-contract.md`
 - `generic-experiment-implementation-plan.md`

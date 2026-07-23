@@ -6,6 +6,7 @@ historical path that got the repo here.
 ## Read First
 
 - `../canonical-stack-2026-04.md`
+- `../system-map-2026-07.md`
 - `../run-fabric-design-2026-04.md`
 - `../learning-task-flow.md`
 - `../local-model-command-surface.md`
@@ -18,6 +19,7 @@ historical path that got the repo here.
 ## Current Product / Architecture
 
 - `../overview.md`
+- `../system-map-2026-07.md`
 - `../learning-task-flow.md`
 - `../local-model-command-surface.md`
 - `../run-fabric-design-2026-04.md`
