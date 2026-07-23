@@ -113,7 +113,6 @@ def test_json_store_persists_session_and_stage_metadata_across_restart(tmp_path:
     )
     investigation = InvestigationRecord(
         investigation_id='investigation-1',
-        session_id=session.session_id,
         created_at=now,
         updated_at=now,
         status='planning',
@@ -256,7 +255,6 @@ def test_postgres_store_round_trips_through_psycopg_adapter(monkeypatch) -> None
     )
     investigation = InvestigationRecord(
         investigation_id='investigation-1',
-        session_id=session.session_id,
         created_at=now,
         updated_at=now,
         status='planning',

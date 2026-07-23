@@ -2,7 +2,7 @@
 
 Glasslab v2 is the backend-owned research workflow layer for the lab.
 
-It exists to turn session state into bounded, reviewable, repeatable
+It exists to turn investigation state into bounded, reviewable, repeatable
 experiments.
 
 ## Mental Model
@@ -16,36 +16,40 @@ Read the product as:
 
 That means:
 
-- investigations hold the question, hypotheses, approvals, runs, and claims
-- underlying sessions hold working operator and intake state
-- source intake enriches the session
-- a current plan is derived from the session
+- investigations hold the question, hypotheses, immutable execution-graph plans,
+  approvals, runs, and claims
+- source and dataset integrations produce digest-pinned plan inputs
 - preflight decides whether that plan is runnable
 - explicit approval freezes the runnable plan before launch
-- runs are launched through approved workflow families
-- claims cite exact ingested run artifacts
+- runs are launched through approved registry workloads
+- claims cite exact verified artifact bytes by SHA-256
 - comparison and decision drive the next mutation
+
+Research sessions, intake pipelines, and design drafts are compatibility
+features. Investigation execution does not depend on them.
 
 ## Primary Product Loop
 
 The intended loop is:
 
-`investigation -> intake -> plan -> preflight -> approve -> run -> evidence -> claim -> next`
+`investigation -> hypothesis -> execution graph -> preflight -> approve -> runs -> verified evidence -> claim -> next`
 
 Compatibility aliases and older debug flows still exist, but they are not the
 product center.
 
 The first current implementation of this aggregate is documented in
-[investigation-api-v0.md](investigation-api-v0.md).
+[investigation-api-v1.md](investigation-api-v1.md).
 
 ## Command Surface
 
-The canonical command path is:
+The canonical interactive path is:
 
-- `whatsapp-gateway`
-- `research-ingress`
-- `research-command-router`
+- `OpenCode`
+- exo's OpenAI-compatible endpoint
+- repo-owned tools
 - `workflow-api`
+
+WhatsApp, research ingress, and the command router are optional adapters.
 
 Primary commands:
 
@@ -75,14 +79,14 @@ The control plane.
 Owns:
 
 - investigations and plan-approval snapshots
-- sessions
-- source intake records
-- design drafts
+- immutable execution-graph plans
 - run creation
 - evidence-backed claims
-- autoresearch transitions
 - execution preflight
 - evaluator/report handoff
+
+It also still hosts compatibility sessions, source intake records, design
+drafts, and autoresearch transitions while those callers migrate.
 
 ### `workflow-registry`
 

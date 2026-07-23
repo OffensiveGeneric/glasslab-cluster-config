@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -13,7 +14,13 @@ from .execution_preflight import build_execution_preflight_result
 from .job_submission import JobSubmitter
 from .persistence import RunStore
 from .registry import WorkflowRegistry
-from .run_artifacts import MEDIA_TYPES, load_artifacts_from_disk, load_logs_from_disk, resolve_run_status
+from .run_artifacts import (
+    MEDIA_TYPES,
+    load_artifacts_from_disk,
+    load_logs_from_disk,
+    load_terminal_bundle,
+    resolve_run_status,
+)
 from .schemas import (
     ComparisonRecord,
     ExecutionPreflightResult,
@@ -37,7 +44,7 @@ def register_execution_routes(
     store: RunStore,
     submitter: JobSubmitter,
     create_run_record: Callable[..., RunRecord],
-) -> None:
+) -> Callable[..., RunRecord]:
     def build_artifact_index(run_id: str, expected_artifacts: ExpectedArtifactsSpec) -> ArtifactsIndex:
         artifacts: list[ArtifactIndexEntry] = []
         declared = [(item, True) for item in expected_artifacts.required] + [
@@ -76,7 +83,15 @@ def register_execution_routes(
             )
         return ArtifactsIndex(run_id=run_id, artifacts=sorted(artifact_map.values(), key=lambda entry: entry.name))
 
-    def build_generic_run_record(request: GenericExperimentRunRequest) -> RunRecord:
+    def build_generic_run_record(
+        request: GenericExperimentRunRequest,
+        *,
+        investigation_id: str | None = None,
+        source_plan_id: str | None = None,
+        source_approval_id: str | None = None,
+        source_execution_id: str | None = None,
+        plan_sha256: str | None = None,
+    ) -> RunRecord:
         workflow = registry.get_workflow(request.workload_id)
         if workflow is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='workload definition not found')
@@ -84,6 +99,25 @@ def register_execution_routes(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"workload {workflow.workflow_id} requires experiment_type {workflow.experiment_type}",
+            )
+        if (
+            workflow.schema_ref == 'glasslab-investigation-workspace-v1'
+            and not all(
+                [
+                    investigation_id,
+                    source_plan_id,
+                    source_approval_id,
+                    source_execution_id,
+                    plan_sha256,
+                ]
+            )
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    'research workspace runs require an approved investigation '
+                    'plan execution'
+                ),
             )
 
         runner_image = request.image_ref or workflow.runner_image
@@ -96,9 +130,43 @@ def register_execution_routes(
         if not entrypoint:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='no entrypoint resolved for workload')
 
-        expected_artifacts = request.artifact_contract or workflow.expected_artifacts
+        if request.artifact_contract is None:
+            expected_artifacts = workflow.expected_artifacts
+        else:
+            required = list(
+                dict.fromkeys(
+                    [
+                        *workflow.expected_artifacts.required,
+                        *request.artifact_contract.required,
+                    ]
+                )
+            )
+            optional = [
+                name
+                for name in dict.fromkeys(
+                    [
+                        *workflow.expected_artifacts.optional,
+                        *request.artifact_contract.optional,
+                    ]
+                )
+                if name not in required
+            ]
+            expected_artifacts = ExpectedArtifactsSpec(
+                required=required,
+                optional=optional,
+            )
         metric_contract = dict(workflow.metric_contract or {})
         metric_contract.update(request.metric_contract)
+        max_wallclock_minutes = request.budget.get('max_wallclock_minutes')
+        if (
+            not isinstance(max_wallclock_minutes, int)
+            or isinstance(max_wallclock_minutes, bool)
+            or max_wallclock_minutes < 1
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail='budget.max_wallclock_minutes is required and must be a positive integer',
+            )
 
         now = datetime.now(timezone.utc)
         run_id = uuid4().hex
@@ -152,6 +220,11 @@ def register_execution_routes(
             run_purpose='generic-experiment',
             run_priority=request.run_priority,
             session_id=request.session_id,
+            investigation_id=investigation_id,
+            source_plan_id=source_plan_id,
+            source_approval_id=source_approval_id,
+            source_execution_id=source_execution_id,
+            plan_sha256=plan_sha256,
         )
         store.save_run(record)
         store.save_artifacts(run_id, build_artifact_index(run_id, expected_artifacts))
@@ -387,6 +460,24 @@ def register_execution_routes(
         if record is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='run not found')
 
+        expected_artifacts = ExpectedArtifactsSpec.model_validate(record.manifest.expected_artifacts)
+        reported_artifact_refs = {
+            **record.artifact_refs,
+            **request.artifact_refs,
+        }
+        if request.terminal_status == 'succeeded':
+            missing_required = sorted(
+                set(expected_artifacts.required) - set(reported_artifact_refs)
+            )
+            if missing_required:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        'message': 'successful result is missing required artifacts',
+                        'missing_artifacts': missing_required,
+                    },
+                )
+
         now = datetime.now(timezone.utc)
         updated = record.model_copy(
             update={
@@ -398,13 +489,12 @@ def register_execution_routes(
                     detail=request.detail or f'Generic result ingest marked run {request.terminal_status}.',
                 ),
                 'reported_metrics': dict(request.metrics),
-                'artifact_refs': {**record.artifact_refs, **request.artifact_refs},
+                'artifact_refs': reported_artifact_refs,
                 'runtime_summary': dict(request.runtime),
             }
         )
         store.save_run(updated)
 
-        expected_artifacts = ExpectedArtifactsSpec.model_validate(record.manifest.expected_artifacts)
         artifacts = merge_artifact_refs(run_id, store.get_artifacts(run_id), request.artifact_refs, expected_artifacts)
         store.save_artifacts(run_id, artifacts)
         store.append_log(
@@ -559,6 +649,49 @@ def register_execution_routes(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='artifacts not found')
         return RunArtifactsResponse(run_id=run_id, artifacts=artifacts)
 
+    @app.post('/runs/{run_id}/artifacts/ingest', response_model=RunRecord)
+    def ingest_run_artifact_bundle(run_id: str) -> RunRecord:
+        record = store.get_run(run_id)
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='run not found')
+        if record.artifact_bundle_verified:
+            return record
+        try:
+            terminal_status, metrics, artifact_refs, artifacts = load_terminal_bundle(
+                settings,
+                record,
+            )
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(exc),
+            ) from exc
+
+        updated = record.model_copy(
+            update={
+                'updated_at': terminal_status.updated_at,
+                'status': terminal_status,
+                'reported_metrics': metrics,
+                'artifact_refs': artifact_refs,
+                'artifact_bundle_verified': True,
+            }
+        )
+        store.save_run(updated)
+        store.save_artifacts(run_id, artifacts)
+        store.append_log(
+            run_id,
+            LogEntry(
+                timestamp=terminal_status.updated_at,
+                level='INFO',
+                message='terminal artifact bundle ingested',
+                payload={
+                    'terminal_status': terminal_status.status,
+                    'artifact_count': len(artifact_refs),
+                },
+            ),
+        )
+        return updated
+
     @app.get('/runs/{run_id}/logs', response_model=RunLogsResponse)
     def get_run_logs(run_id: str) -> RunLogsResponse:
         record = store.get_run(run_id)
@@ -568,3 +701,5 @@ def register_execution_routes(
         if not logs:
             logs = submitter.get_live_logs(record) or store.get_logs(run_id)
         return RunLogsResponse(run_id=run_id, logs=logs)
+
+    return build_generic_run_record

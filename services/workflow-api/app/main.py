@@ -2086,20 +2086,20 @@ def create_app(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='operation not found')
         return record
 
-    register_investigation_routes(
-        app,
-        settings=settings,
-        store=store,
-        build_research_session_record=lambda *args, **kwargs: build_research_session_record(*args, **kwargs),
-        launch_design_run=lambda *args, **kwargs: launch_design_run(*args, **kwargs),
-    )
-    register_execution_routes(
+    launch_generic_experiment_run = register_execution_routes(
         app,
         settings=settings,
         registry=registry,
         store=store,
         submitter=submitter,
         create_run_record=lambda *args, **kwargs: create_run_record(*args, **kwargs),
+    )
+    register_investigation_routes(
+        app,
+        settings=settings,
+        registry=registry,
+        store=store,
+        launch_experiment_run=launch_generic_experiment_run,
     )
     register_transitions_routes(
         app,

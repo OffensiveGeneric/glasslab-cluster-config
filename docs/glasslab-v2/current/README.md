@@ -9,7 +9,7 @@ historical path that got the repo here.
 - `../system-map-2026-07.md`
 - `../run-fabric-design-2026-04.md`
 - `../learning-task-flow.md`
-- `../investigation-api-v0.md`
+- `../investigation-api-v1.md`
 - `../local-model-command-surface.md`
 - `../deprecated-api-surface-2026-07.md`
 - `../ci-policy-2026-07.md`
@@ -22,7 +22,7 @@ historical path that got the repo here.
 - `../overview.md`
 - `../system-map-2026-07.md`
 - `../learning-task-flow.md`
-- `../investigation-api-v0.md`
+- `../investigation-api-v1.md`
 - `../local-model-command-surface.md`
 - `../run-fabric-design-2026-04.md`
 - `../bounded-experiment-runner-priority.md`

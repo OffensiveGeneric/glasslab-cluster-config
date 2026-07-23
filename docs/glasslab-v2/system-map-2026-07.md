@@ -36,8 +36,9 @@ The primary product aggregate is:
 
 ```text
 investigation
-  -> research session working context
-  -> approved design snapshot
+  -> hypotheses
+  -> immutable execution-graph plans
+  -> approved plan snapshot
   -> runs
   -> evidence-backed claims
 ```
@@ -45,7 +46,7 @@ investigation
 The first current API contract for that aggregate is:
 
 ```text
-docs/glasslab-v2/investigation-api-v0.md
+docs/glasslab-v2/investigation-api-v1.md
 ```
 
 The primary registry is:
@@ -63,8 +64,10 @@ Postgres in namespace glasslab-v2
 The primary learning-task contract is:
 
 ```text
-POST /experiments/runs
-workload_id = metric-search-v0 or another registry-backed workload
+POST /investigations/{investigation_id}/plans
+POST /investigations/{investigation_id}/plan-approvals
+POST /investigations/{investigation_id}/runs
+workload_id = research-workspace-cpu-v1 or another registry-backed workload
 ```
 
 ## Source Of Truth By Concern
@@ -90,6 +93,7 @@ These should remain in the default docs, default CI, and normal operator path.
 | --- | --- | --- |
 | workflow-api | `services/workflow-api/` | Investigations, plan approvals, run records, validation, submission, evidence links, and comparison endpoints. |
 | workflow-registry | `services/workflow-registry/` | Approved workload definitions. |
+| research workspace runner | `services/research-workspace-runner/` | Digest verification and bounded execution for agent-generated CPU research code. |
 | Postgres | `kubeadm/glasslab-v2/postgres/` | Durable records. |
 | MinIO | `kubeadm/glasslab-v2/minio/` | Object-style infrastructure; useful, but not the whole state model. |
 | NATS | `kubeadm/glasslab-v2/nats/` | Event/service primitive for bounded agents. |

@@ -106,6 +106,13 @@ run_workflow_api_tests() {
       tests/test_validation.py \
       -q
   )
+  (
+    cd services/research-workspace-runner
+    PYTHONPATH=. pytest \
+      -p no:cacheprovider \
+      tests/test_runner.py \
+      -q
+  )
 }
 
 case "$MODE" in

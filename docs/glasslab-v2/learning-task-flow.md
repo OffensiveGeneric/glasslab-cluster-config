@@ -61,7 +61,7 @@ Kubernetes Job and a durable record.
 
 At the product layer, an investigation now binds the question and hypotheses to
 an immutable plan approval, the resulting runs, and evidence-backed claims. See
-[Investigation API v0](investigation-api-v0.md).
+[Investigation API v1](investigation-api-v1.md).
 
 ### 3. Scientific workload repositories
 
@@ -88,40 +88,45 @@ It should not own:
 
 ## Current Supported Lane
 
-For a learning task, the supported lane is:
+For a novel investigation, the supported lane is:
 
 ```text
-operator or command surface
+researcher or OpenCode
         |
         v
-workflow-api
+investigation + digest-pinned execution graph
         |
-        | validates workload_id against workflow-registry
+        | explicit plan approval
         v
-metric-search-v0 registry definition
+research-workspace-cpu-v1 registry definition
         |
         | creates one Kubernetes Job
         v
-GPU runner pod
+CPU workspace runner pod
         |
-        | runs workload entrypoint from glasslab-metric-search image
+        | verifies task/source digests and executes one command
         v
 /mnt/artifacts/{run_id}/
         |
-        | metrics and artifact refs are ingested
+        | complete terminal bundle is ingested
         v
-workflow-api run record + evaluator/autoresearch comparison
+investigation run lineage + evidence-backed claims
 ```
 
-The important contract is the generic experiment run:
+The important investigation contracts are:
 
-- endpoint: `POST /experiments/runs`
-- `experiment_type`: `gpu-training-job`
-- `workload_id`: `metric-search-v0`
-- config: supplied as `config_payload`
-- datasets: supplied as `dataset_bindings`
-- budget: supplied explicitly
-- metrics: interpreted through `metric_contract`
+- `POST /investigations/{investigation_id}/plans`
+- `POST /investigations/{investigation_id}/plan-approvals`
+- `POST /investigations/{investigation_id}/runs`
+- `experiment_type`: `research-workspace-job`
+- `workload_id`: `research-workspace-cpu-v1`
+- task, source, and dataset inputs: immutable URI plus SHA-256
+- budget, outputs, and evaluator: explicit parts of the frozen plan
+
+`POST /experiments/runs` remains the lower-level generic run primitive.
+
+For the specialized metric-learning workload, `metric-search-v0` remains a
+direct GPU lane:
 
 The current helper for this lane is:
 
@@ -130,7 +135,7 @@ The current helper for this lane is:
 ```
 
 It is intentionally a thin wrapper around `POST /experiments/runs`, not a
-second execution path.
+second scheduler.
 
 `workflow-api` then creates a Kubernetes Job using
 `services/workflow-api/app/job_submission.py`.

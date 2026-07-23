@@ -77,22 +77,18 @@ There is no supported OpenClaw path in the current product.
 The intended primary loop is:
 
 ```text
-!new <goal>
-!add <source|note|dataset|baseline>
-!plan
-!check
-!run
-!compare
-!decide <keep|discard|revise>
-!next
+question
+  -> hypotheses
+  -> immutable execution-graph plan
+  -> explicit approval
+  -> dependency-checked bounded runs
+  -> verified evidence bundles
+  -> claim and next experiment
 ```
 
-Compatibility aliases may still exist:
-
-- `!start`
-- `!status`
-
-But the docs should teach the newer session/plan-oriented loop.
+OpenCode is the primary interactive surface. WhatsApp commands and
+research-session routes remain compatibility adapters; they are not the
+investigation data model.
 
 ## Start Here
 
@@ -103,7 +99,7 @@ If you want the current source of truth:
 - [docs/glasslab-v2/canonical-stack-2026-04.md](docs/glasslab-v2/canonical-stack-2026-04.md)
 - [docs/glasslab-v2/system-map-2026-07.md](docs/glasslab-v2/system-map-2026-07.md)
 - [docs/glasslab-v2/learning-task-flow.md](docs/glasslab-v2/learning-task-flow.md)
-- [docs/glasslab-v2/investigation-api-v0.md](docs/glasslab-v2/investigation-api-v0.md)
+- [docs/glasslab-v2/investigation-api-v1.md](docs/glasslab-v2/investigation-api-v1.md)
 - [docs/glasslab-v2/local-model-command-surface.md](docs/glasslab-v2/local-model-command-surface.md)
 - [docs/glasslab-v2/deprecated-api-surface-2026-07.md](docs/glasslab-v2/deprecated-api-surface-2026-07.md)
 - [docs/glasslab-v2/ci-policy-2026-07.md](docs/glasslab-v2/ci-policy-2026-07.md)

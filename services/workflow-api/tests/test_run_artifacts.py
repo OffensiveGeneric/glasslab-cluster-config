@@ -8,6 +8,7 @@ from app.run_artifacts import (
     load_artifacts_from_disk,
     load_logs_from_disk,
     load_status_from_disk,
+    load_terminal_bundle,
     parse_log_line,
     resolve_run_status,
 )
@@ -128,3 +129,96 @@ def test_parse_log_line_and_resolve_run_status_prefers_disk(tmp_path) -> None:
     )
     resolved = resolve_run_status(record, settings, FakeSubmitter())
     assert resolved.status == 'succeeded'
+
+
+def test_load_terminal_bundle_requires_real_complete_artifacts(tmp_path) -> None:
+    settings = build_settings(tmp_path)
+    run_id = 'run-bundle'
+    record = build_run_record(
+        run_id,
+        RunStatus(
+            run_id=run_id,
+            status='running',
+            updated_at=datetime(2026, 3, 26, 11, 59, tzinfo=timezone.utc),
+        ),
+    )
+    required = [
+        'run_manifest.json',
+        'config.json',
+        'metrics.json',
+        'artifacts_index.json',
+        'report.md',
+        'status.json',
+        'logs/',
+    ]
+    record = record.model_copy(
+        update={
+            'manifest': record.manifest.model_copy(
+                update={'expected_artifacts': {'required': required, 'optional': []}}
+            )
+        }
+    )
+    run_dir = artifact_run_dir(settings, run_id)
+    (run_dir / 'logs').mkdir(parents=True)
+    for name in ['run_manifest.json', 'config.json', 'artifacts_index.json']:
+        (run_dir / name).write_text('{}')
+    (run_dir / 'metrics.json').write_text('{"rubric_score": 92}')
+    (run_dir / 'report.md').write_text('# Report\n')
+    (run_dir / 'status.json').write_text('{"status":"succeeded"}')
+    (run_dir / 'logs' / 'runner.log').write_text('complete\n')
+
+    status, metrics, refs, artifacts = load_terminal_bundle(settings, record)
+
+    assert status.status == 'succeeded'
+    assert metrics['rubric_score'] == 92
+    assert refs['report.md'] == f'artifacts/{run_id}/report.md'
+    report_entry = next(
+        entry for entry in artifacts.artifacts if entry.name == 'report.md'
+    )
+    assert report_entry.sha256 is not None
+    assert len(report_entry.sha256) == 64
+    assert any(entry.name == 'artifacts_index.json' for entry in artifacts.artifacts)
+
+    (run_dir / 'report.md').unlink()
+    try:
+        load_terminal_bundle(settings, record)
+    except ValueError as exc:
+        assert 'report.md' in str(exc)
+    else:
+        raise AssertionError('missing required report must reject successful ingestion')
+
+
+def test_terminal_bundle_rejects_symlink_artifact(tmp_path) -> None:
+    settings = build_settings(tmp_path)
+    run_id = 'run-symlink'
+    record = build_run_record(
+        run_id,
+        RunStatus(
+            run_id=run_id,
+            status='running',
+            updated_at=datetime(2026, 3, 26, 11, 59, tzinfo=timezone.utc),
+        ),
+    )
+    record = record.model_copy(
+        update={
+            'manifest': record.manifest.model_copy(
+                update={
+                    'expected_artifacts': {
+                        'required': ['status.json', 'report.md'],
+                        'optional': [],
+                    }
+                }
+            )
+        }
+    )
+    run_dir = artifact_run_dir(settings, run_id)
+    run_dir.mkdir(parents=True)
+    (run_dir / 'status.json').write_text('{"status":"succeeded"}')
+    (run_dir / 'report.md').symlink_to('/etc/hosts')
+
+    try:
+        load_terminal_bundle(settings, record)
+    except ValueError as exc:
+        assert 'report.md' in str(exc)
+    else:
+        raise AssertionError('symlink artifact must reject successful ingestion')

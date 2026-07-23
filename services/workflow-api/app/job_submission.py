@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 import json
+from pathlib import Path, PurePosixPath
 import re
 
 from typing import Any
@@ -171,6 +172,106 @@ def _is_generic_experiment_manifest(manifest: RunManifest) -> bool:
     return bool(manifest.experiment_type or manifest.workload_id or manifest.entrypoint)
 
 
+def _active_deadline_seconds(manifest: RunManifest) -> int | None:
+    raw_minutes = manifest.budget.get('max_wallclock_minutes')
+    if raw_minutes is None:
+        return None
+    if (
+        not isinstance(raw_minutes, int)
+        or isinstance(raw_minutes, bool)
+        or raw_minutes < 1
+    ):
+        raise ValueError('budget.max_wallclock_minutes must be a positive integer')
+    return raw_minutes * 60
+
+
+def _is_research_workspace_manifest(manifest: RunManifest) -> bool:
+    return manifest.schema_ref == 'glasslab-investigation-workspace-v1'
+
+
+def _asset_volume_subpath(uri: str) -> tuple[str, str]:
+    if uri.startswith(('s3://datasets/', 's3://glasslab-datasets/')):
+        volume_name = 'dataset-volume'
+        relative = (
+            uri.removeprefix('s3://datasets/')
+            if uri.startswith('s3://datasets/')
+            else uri.removeprefix('s3://glasslab-datasets/')
+        )
+    elif uri.startswith('s3://artifacts/'):
+        volume_name = 'artifacts-volume'
+        relative = uri.removeprefix('s3://artifacts/')
+    else:
+        raise ValueError(
+            'research workspace assets must use an approved data or artifact URI'
+        )
+    path = PurePosixPath(relative)
+    if (
+        not relative
+        or path.as_posix() == '.'
+        or path.is_absolute()
+        or '..' in path.parts
+    ):
+        raise ValueError(f'research workspace asset URI has an invalid path: {uri}')
+    return volume_name, path.as_posix()
+
+
+def _research_workspace_asset_locations(
+    manifest: RunManifest,
+) -> list[tuple[str, str]]:
+    workspace = manifest.config_payload.get('workspace')
+    if not isinstance(workspace, dict):
+        raise ValueError('research workspace manifest is missing workspace config')
+    references: list[Any] = [
+        workspace.get('task_bundle'),
+        workspace.get('source_bundle'),
+    ]
+    dataset_contracts = manifest.config_payload.get('dataset_contracts', [])
+    if not isinstance(dataset_contracts, list):
+        raise ValueError('research workspace dataset_contracts must be a list')
+    references.extend(
+        contract.get('asset')
+        for contract in dataset_contracts
+        if isinstance(contract, dict)
+    )
+    locations: list[tuple[str, str]] = []
+    for reference in references:
+        if not isinstance(reference, dict):
+            raise ValueError('research workspace asset reference is missing')
+        uri = str(reference.get('uri', '')).strip()
+        locations.append(_asset_volume_subpath(uri))
+    return list(dict.fromkeys(locations))
+
+
+def _research_workspace_volume_mount_specs(
+    manifest: RunManifest,
+    settings: Settings,
+) -> list[dict[str, str | bool]]:
+    input_mounts: list[dict[str, str | bool]] = []
+    for volume_name, subpath in _research_workspace_asset_locations(manifest):
+        mount_root = (
+            settings.dataset_mount_path
+            if volume_name == 'dataset-volume'
+            else settings.artifacts_mount_path
+        )
+        input_mounts.append(
+            {
+                'name': volume_name,
+                'mount_path': f'{mount_root}/{subpath}',
+                'sub_path': subpath,
+                'read_only': True,
+            }
+        )
+    return [
+        *input_mounts,
+        {
+            'name': 'artifacts-volume',
+            'mount_path': f'{settings.artifacts_mount_path}/{manifest.run_id}',
+            'sub_path': manifest.run_id,
+            'read_only': False,
+        },
+    ]
+
+
 def resolve_dataset_uri(dataset_uri: str, settings: Settings) -> str:
     """Resolve dataset aliases that are backed by the mounted dataset plane."""
     if dataset_uri.startswith('s3://datasets/'):
@@ -179,12 +280,19 @@ def resolve_dataset_uri(dataset_uri: str, settings: Settings) -> str:
     if dataset_uri.startswith('s3://glasslab-datasets/'):
         path = dataset_uri.removeprefix('s3://glasslab-datasets/')
         return f'{settings.dataset_mount_path}/{path}'
+    if dataset_uri.startswith('s3://artifacts/'):
+        path = dataset_uri.removeprefix('s3://artifacts/')
+        return f'{settings.artifacts_mount_path}/{path}'
     return dataset_uri
 
 
 def validate_workflow_submission_support(workflow: Any, settings: Settings) -> list[str]:
     _, blockers = workflow_submission_ready(workflow)
     if blockers:
+        return blockers
+    if getattr(workflow, 'experiment_type', None):
+        if not list(getattr(workflow, 'default_entrypoint', []) or []):
+            blockers.append('generic workload is missing a default_entrypoint')
         return blockers
 
     placeholder_inputs: dict[str, Any] = {}
@@ -245,6 +353,11 @@ class KubernetesJobSubmitter(JobSubmitter):
         }
         if manifest.workload_id:
             labels['glasslab.io/workload-id'] = _sanitize_label(manifest.workload_id)
+        workspace_config = manifest.config_payload.get('workspace')
+        if isinstance(workspace_config, dict):
+            network_policy = str(workspace_config.get('network_policy', '')).strip()
+            if network_policy:
+                labels['glasslab.io/network-policy'] = _sanitize_label(network_policy)
 
         priority_class_name = ''
         if manifest.run_priority == 'autonomous':
@@ -307,9 +420,15 @@ class KubernetesJobSubmitter(JobSubmitter):
                 requests=manifest.resource_requests or None,
                 limits=manifest.resource_limits or None,
             ),
+            security_context=self.client.V1SecurityContext(
+                allow_privilege_escalation=False,
+                capabilities=self.client.V1Capabilities(drop=['ALL']),
+            ),
         )
         if manifest.entrypoint:
             container.command = manifest.entrypoint
+
+        research_workspace = _is_research_workspace_manifest(manifest)
 
         runtime_class_name = None
         requested_gpu = manifest.resource_requests.get('nvidia.com/gpu') or manifest.resource_limits.get('nvidia.com/gpu')
@@ -319,11 +438,15 @@ class KubernetesJobSubmitter(JobSubmitter):
         pod_spec = self.client.V1PodSpec(
             restart_policy='Never',
             service_account_name=self.settings.runner_service_account_name,
+            automount_service_account_token=False,
             image_pull_secrets=[self.client.V1LocalObjectReference(name=self.settings.image_pull_secret_name)],
             containers=[container],
             priority_class_name=priority_class_name or None,
             runtime_class_name=runtime_class_name,
             node_selector=manifest.node_selector or None,
+            security_context=self.client.V1PodSecurityContext(
+                seccomp_profile=self.client.V1SeccompProfile(type='RuntimeDefault'),
+            ),
             volumes=[
                 self.client.V1Volume(
                     name='dataset-volume',
@@ -340,22 +463,37 @@ class KubernetesJobSubmitter(JobSubmitter):
             ],
         )
 
-        container.volume_mounts = [
-            self.client.V1VolumeMount(
-                name='dataset-volume',
-                mount_path=self.settings.dataset_mount_path,
-                read_only=True,
-            ),
-            self.client.V1VolumeMount(
-                name='artifacts-volume',
-                mount_path=self.settings.artifacts_mount_path,
-            ),
-        ]
+        if research_workspace:
+            artifacts_root = Path(self.settings.artifacts_mount_path)
+            run_artifact_dir = artifacts_root / manifest.run_id
+            if run_artifact_dir.is_symlink():
+                raise ValueError('research workspace artifact directory cannot be a symlink')
+            run_artifact_dir.mkdir(parents=True, exist_ok=True)
+            container.volume_mounts = [
+                self.client.V1VolumeMount(**mount_spec)
+                for mount_spec in _research_workspace_volume_mount_specs(
+                    manifest,
+                    self.settings,
+                )
+            ]
+        else:
+            container.volume_mounts = [
+                self.client.V1VolumeMount(
+                    name='dataset-volume',
+                    mount_path=self.settings.dataset_mount_path,
+                    read_only=True,
+                ),
+                self.client.V1VolumeMount(
+                    name='artifacts-volume',
+                    mount_path=self.settings.artifacts_mount_path,
+                ),
+            ]
 
         job = self.client.V1Job(
             metadata=self.client.V1ObjectMeta(name=job_name, labels=labels),
             spec=self.client.V1JobSpec(
                 backoff_limit=self.settings.runner_backoff_limit,
+                active_deadline_seconds=_active_deadline_seconds(manifest),
                 ttl_seconds_after_finished=self.settings.runner_job_ttl_seconds,
                 template=self.client.V1PodTemplateSpec(
                     metadata=self.client.V1ObjectMeta(labels=labels),
