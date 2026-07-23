@@ -15,6 +15,7 @@ from .registry import WorkflowRegistry
 from .run_artifacts import artifact_run_dir, file_sha256
 from .schemas import (
     GenericExperimentRunRequest,
+    ImmutableAssetReference,
     InvestigationClaimCreateRequest,
     InvestigationClaimRecord,
     InvestigationContextResponse,
@@ -31,6 +32,9 @@ from .schemas import (
     InvestigationRecord,
     InvestigationRunCreateRequest,
     InvestigationRunResponse,
+    InvestigationSubmissionFreezeRequest,
+    InvestigationSubmissionRecord,
+    InvestigationSubmissionSelector,
     RunRecord,
 )
 
@@ -179,6 +183,106 @@ def register_investigation_routes(
             ),
             None,
         )
+
+    def get_verified_artifact(
+        run: RunRecord,
+        artifact_name: str,
+    ) -> tuple[str, str]:
+        if not run.artifact_bundle_verified:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f'run {run.run_id} does not have a verified terminal '
+                    'artifact bundle'
+                ),
+            )
+        artifact_ref = run.artifact_refs.get(artifact_name)
+        if artifact_ref is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f'run {run.run_id} has no ingested artifact named '
+                    f'{artifact_name}'
+                ),
+            )
+        artifact_index = store.get_artifacts(run.run_id)
+        artifact_entry = next(
+            (
+                entry
+                for entry in (artifact_index.artifacts if artifact_index else [])
+                if entry.name == artifact_name
+            ),
+            None,
+        )
+        if artifact_entry is None or artifact_entry.sha256 is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f'run {run.run_id} artifact {artifact_name} '
+                    'does not have a verified content digest'
+                ),
+            )
+        artifact_path = artifact_run_dir(settings, run.run_id) / artifact_name
+        if (
+            artifact_path.is_symlink()
+            or not artifact_path.is_file()
+            or file_sha256(artifact_path) != artifact_entry.sha256
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f'run {run.run_id} artifact {artifact_name} '
+                    'no longer matches its ingested content digest'
+                ),
+            )
+        return artifact_ref, artifact_entry.sha256
+
+    def find_frozen_submission(
+        investigation: InvestigationRecord,
+        approval_id: str,
+        selector: InvestigationSubmissionSelector,
+    ) -> InvestigationSubmissionRecord:
+        matches = [
+            submission
+            for submission in investigation.submissions
+            if (
+                submission.approval_id == approval_id
+                and submission.source_execution_id
+                == selector.source_execution_id
+                and submission.artifact_name == selector.artifact_name
+            )
+        ]
+        if not matches:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    'message': 'execution requires a frozen submission',
+                    'source_execution_id': selector.source_execution_id,
+                    'artifact_name': selector.artifact_name,
+                },
+            )
+        if len(matches) != 1:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail='approval has ambiguous frozen submissions',
+            )
+        submission = matches[0]
+        source_run = store.get_run(submission.source_run_id)
+        if source_run is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail='frozen submission source run no longer exists',
+            )
+        _, current_sha256 = get_verified_artifact(
+            source_run,
+            submission.artifact_name,
+        )
+        if current_sha256 != submission.artifact_sha256:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail='frozen submission content digest no longer matches',
+            )
+        return submission
 
     def validate_plan_hypotheses(
         investigation: InvestigationRecord,
@@ -451,6 +555,137 @@ def register_investigation_routes(
         return updated
 
     @app.post(
+        '/investigations/{investigation_id}/submissions',
+        response_model=InvestigationSubmissionRecord,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def freeze_investigation_submission(
+        investigation_id: str,
+        request: InvestigationSubmissionFreezeRequest,
+    ) -> InvestigationSubmissionRecord:
+        investigation = get_required_investigation(investigation_id)
+        if request.approval_id != investigation.active_plan_approval_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail='submission must be frozen under the active plan approval',
+            )
+        approval = get_approval(investigation, request.approval_id)
+        plan = get_plan(investigation, approval.plan_id)
+        if build_plan_sha256(investigation, plan) != approval.plan_sha256:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail='approved plan snapshot no longer matches the current investigation state',
+            )
+        if request.run_id not in investigation.run_ids:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail='submission source run is not part of this investigation',
+            )
+        run = store.get_run(request.run_id)
+        if run is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail='submission source run not found',
+            )
+        if (
+            run.source_approval_id != approval.approval_id
+            or run.source_execution_id is None
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail='submission source run does not belong to this approval',
+            )
+        source_execution = get_execution(plan, run.source_execution_id)
+        if source_execution.execution_role == 'evaluator':
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail='evaluator output cannot be frozen as a solver submission',
+            )
+        if request.artifact_name not in source_execution.artifact_contract.required:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail='submission artifact was not required by the approved source execution',
+            )
+        planned_consumers = [
+            execution.execution_id
+            for execution in plan.executions
+            if any(
+                selector.source_execution_id == source_execution.execution_id
+                and selector.artifact_name == request.artifact_name
+                for selector in [
+                    *execution.submission_inputs,
+                    *(
+                        [execution.workspace.source_submission]
+                        if execution.workspace.source_submission is not None
+                        else []
+                    ),
+                ]
+            )
+        ]
+        if not planned_consumers:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail='approved plan has no consumer for this submission artifact',
+            )
+        if run.status.status != 'succeeded':
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail='only a successful run can be frozen as a submission',
+            )
+        artifact_ref, artifact_sha256 = get_verified_artifact(
+            run,
+            request.artifact_name,
+        )
+        existing = next(
+            (
+                submission
+                for submission in investigation.submissions
+                if (
+                    submission.approval_id == approval.approval_id
+                    and submission.source_execution_id
+                    == source_execution.execution_id
+                    and submission.artifact_name == request.artifact_name
+                )
+            ),
+            None,
+        )
+        if existing is not None:
+            if (
+                existing.source_run_id == run.run_id
+                and existing.artifact_sha256 == artifact_sha256
+            ):
+                return existing
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    'a different submission is already frozen for this '
+                    'approval and source execution'
+                ),
+            )
+
+        now = datetime.now(timezone.utc)
+        submission = InvestigationSubmissionRecord(
+            submission_id=uuid4().hex,
+            approval_id=approval.approval_id,
+            source_execution_id=source_execution.execution_id,
+            source_run_id=run.run_id,
+            artifact_name=request.artifact_name,
+            artifact_ref=artifact_ref,
+            artifact_sha256=artifact_sha256,
+            frozen_at=now,
+            frozen_by=request.frozen_by or settings.default_submitted_by,
+        )
+        updated = investigation.model_copy(
+            update={
+                'updated_at': now,
+                'status': 'submission_ready',
+                'submissions': [*investigation.submissions, submission],
+            }
+        )
+        store.save_investigation(updated)
+        return submission
+
+    @app.post(
         '/investigations/{investigation_id}/runs',
         response_model=InvestigationRunResponse,
         status_code=status.HTTP_201_CREATED,
@@ -509,28 +744,90 @@ def register_investigation_routes(
             for binding in execution.dataset_bindings
             if execution.data_access_scope in binding.access_scopes
         ]
+        frozen_submissions: list[InvestigationSubmissionRecord] = []
+        workspace_payload = execution.workspace.model_dump(
+            mode='json',
+            exclude_none=True,
+        )
+        source_submission = execution.workspace.source_submission
+        if source_submission is not None:
+            frozen_source = find_frozen_submission(
+                investigation,
+                approval.approval_id,
+                source_submission,
+            )
+            frozen_submissions.append(frozen_source)
+            workspace_payload.pop('source_submission', None)
+            workspace_payload['source_bundle'] = ImmutableAssetReference(
+                uri=(
+                    f's3://artifacts/{frozen_source.source_run_id}/'
+                    f'{frozen_source.artifact_name}'
+                ),
+                sha256=frozen_source.artifact_sha256,
+            ).model_dump(mode='json', exclude_none=True)
+
+        submission_contracts: list[dict[str, Any]] = []
+        resolved_submission_bindings: dict[str, str] = {}
+        for selector in execution.submission_inputs:
+            frozen = find_frozen_submission(
+                investigation,
+                approval.approval_id,
+                selector,
+            )
+            frozen_submissions.append(frozen)
+            asset = ImmutableAssetReference(
+                uri=(
+                    f's3://artifacts/{frozen.source_run_id}/'
+                    f'{frozen.artifact_name}'
+                ),
+                sha256=frozen.artifact_sha256,
+            )
+            submission_contracts.append(
+                {
+                    'name': selector.name,
+                    'asset': asset.model_dump(mode='json', exclude_none=True),
+                    'role': 'input',
+                    'contains_labels': False,
+                    'access_scopes': [execution.data_access_scope],
+                    'frozen_submission_id': frozen.submission_id,
+                }
+            )
+            resolved_submission_bindings[selector.name] = asset.uri
+
+        frozen_submission_ids = list(
+            dict.fromkeys(
+                submission.submission_id
+                for submission in frozen_submissions
+            )
+        )
         run_request = GenericExperimentRunRequest(
             objective=execution.objective,
             experiment_type=execution.experiment_type,
             workload_id=execution.workload_id,
             config_payload={
                 **execution.config_payload,
-                'workspace': execution.workspace.model_dump(mode='json'),
+                'workspace': workspace_payload,
                 'dataset_contracts': [
                     binding.model_dump(mode='json')
                     for binding in visible_bindings
-                ],
+                ]
+                + submission_contracts,
                 'investigation': {
                     'investigation_id': investigation.investigation_id,
                     'plan_id': plan.plan_id,
                     'approval_id': approval.approval_id,
                     'execution_id': execution.execution_id,
+                    'execution_role': execution.execution_role,
                     'plan_sha256': approval.plan_sha256,
+                    'frozen_submission_ids': frozen_submission_ids,
                 },
             },
             dataset_bindings={
-                binding.name: binding.asset.uri
-                for binding in visible_bindings
+                **{
+                    binding.name: binding.asset.uri
+                    for binding in visible_bindings
+                },
+                **resolved_submission_bindings,
             },
             budget=execution.budget.model_dump(mode='json', exclude_none=True),
             artifact_contract=execution.artifact_contract,
@@ -547,12 +844,17 @@ def register_investigation_routes(
             source_approval_id=approval.approval_id,
             source_execution_id=execution.execution_id,
             plan_sha256=approval.plan_sha256,
+            frozen_submission_ids=frozen_submission_ids,
         )
         now = datetime.now(timezone.utc)
         updated = investigation.model_copy(
             update={
                 'updated_at': now,
-                'status': 'running',
+                'status': (
+                    'evaluating'
+                    if execution.execution_role == 'evaluator'
+                    else 'running'
+                ),
                 'run_ids': [*investigation.run_ids, run.run_id],
             }
         )
@@ -643,6 +945,14 @@ def register_investigation_routes(
                     run_approval.plan_snapshot.plan,
                     run.source_execution_id,
                 )
+                if run_execution.execution_role != 'evaluator':
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=(
+                            'supported or refuted claims require evidence from '
+                            'an approved evaluator execution'
+                        ),
+                    )
                 contract_issues = evaluator_contract_issues(
                     run.reported_metrics,
                     run_execution,
@@ -658,62 +968,16 @@ def register_investigation_routes(
                             'issues': contract_issues,
                         },
                     )
-            if not run.artifact_bundle_verified:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=(
-                        f'run {item.run_id} does not have a verified terminal '
-                        'artifact bundle'
-                    ),
-                )
-            artifact_ref = run.artifact_refs.get(item.artifact_name)
-            if artifact_ref is None:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=(
-                        f'run {item.run_id} has no ingested artifact named '
-                        f'{item.artifact_name}'
-                    ),
-                )
-            artifact_index = store.get_artifacts(item.run_id)
-            artifact_entry = next(
-                (
-                    entry
-                    for entry in (artifact_index.artifacts if artifact_index else [])
-                    if entry.name == item.artifact_name
-                ),
-                None,
+            artifact_ref, artifact_sha256 = get_verified_artifact(
+                run,
+                item.artifact_name,
             )
-            if artifact_entry is None or artifact_entry.sha256 is None:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=(
-                        f'run {item.run_id} artifact {item.artifact_name} '
-                        'does not have a verified content digest'
-                    ),
-                )
-            artifact_path = (
-                artifact_run_dir(settings, item.run_id)
-                / item.artifact_name
-            )
-            if (
-                artifact_path.is_symlink()
-                or not artifact_path.is_file()
-                or file_sha256(artifact_path) != artifact_entry.sha256
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=(
-                        f'run {item.run_id} artifact {item.artifact_name} '
-                        'no longer matches its ingested content digest'
-                    ),
-                )
             evidence.append(
                 InvestigationEvidenceReference(
                     run_id=item.run_id,
                     artifact_name=item.artifact_name,
                     artifact_ref=artifact_ref,
-                    artifact_sha256=artifact_entry.sha256,
+                    artifact_sha256=artifact_sha256,
                 )
             )
 

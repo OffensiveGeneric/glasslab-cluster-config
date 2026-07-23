@@ -91,6 +91,7 @@ def register_execution_routes(
         source_approval_id: str | None = None,
         source_execution_id: str | None = None,
         plan_sha256: str | None = None,
+        frozen_submission_ids: list[str] | None = None,
     ) -> RunRecord:
         workflow = registry.get_workflow(request.workload_id)
         if workflow is None:
@@ -225,6 +226,7 @@ def register_execution_routes(
             source_approval_id=source_approval_id,
             source_execution_id=source_execution_id,
             plan_sha256=plan_sha256,
+            frozen_submission_ids=list(frozen_submission_ids or []),
         )
         store.save_run(record)
         store.save_artifacts(run_id, build_artifact_index(run_id, expected_artifacts))
