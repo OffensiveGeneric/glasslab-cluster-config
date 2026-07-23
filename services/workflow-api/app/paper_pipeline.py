@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from .config import Settings
-from .job_submission import resolve_dataset_uri
 from .schemas import DesignDraftRecord, FreshPaperPipelineRequest, IntakeCreateRequest, IntakeRecord, InterpretationRecord
 
 
@@ -67,7 +66,7 @@ def auto_resolve_pipeline_design_inputs_impl(
             else:
                 dataset_uri = 's3://datasets/paper-derived/train.csv'
                 review_notes.append('Auto-resolved literature dataset_uri to bounded paper-derived dataset placeholder.')
-        resolved_inputs['dataset_uri'] = resolve_dataset_uri(dataset_uri, settings)
+        resolved_inputs['dataset_uri'] = dataset_uri
     elif design.workflow_id == 'replication-lite':
         repository_url = resolve_replication_repository_url(intake)
         if repository_url:
@@ -79,7 +78,6 @@ def auto_resolve_pipeline_design_inputs_impl(
         else:
             resolved_inputs['dataset_uri'] = 's3://datasets/replication-lite/input.csv'
             review_notes.append('Auto-resolved replication dataset_uri to bounded default input.')
-        resolved_inputs['dataset_uri'] = resolve_dataset_uri(resolved_inputs['dataset_uri'], settings)
         if interpretation.evaluation_targets:
             resolved_inputs['evaluation_target'] = interpretation.evaluation_targets[0]
             review_notes.append('Auto-resolved evaluation_target from interpretation output.')

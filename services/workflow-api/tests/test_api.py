@@ -13,7 +13,7 @@ from app.config import Settings
 import app.autoresearch as autoresearch_module
 import app.main as main_module
 import app.source_documents as source_documents
-from app.schemas import AutoresearchDecisionRecord, AutoresearchIterationRecord
+from app.schemas import AutoresearchDecisionRecord, AutoresearchIterationRecord, EvaluatorContract
 from app.stage_interpretation import build_interpretation_record_from_agent_draft, validate_interpretation_agent_draft
 from app.main import create_app
 from app.persistence import InMemoryRunStore
@@ -1175,6 +1175,11 @@ def test_create_intake_ignores_ranker_when_scores_are_ambiguous(monkeypatch) -> 
             return json.dumps(self.payload).encode('utf-8')
 
     def fake_urlopen(request_obj, timeout):
+        import json
+        from urllib.error import URLError
+        body = json.loads(request_obj.data.decode('utf-8'))
+        if 'problem_statement' not in body:
+            raise URLError('agent unavailable in test fixture')
         return FakeResponse(
             {
                 'request_id': 'ignored',
@@ -2224,7 +2229,7 @@ def test_approved_rerun_schedule_requires_succeeded_tier_two_run() -> None:
         json={'cron_expr': '15 4 * * *'},
     )
     assert rerun.status_code == 409
-    assert rerun.json()['detail'] == 'latest run must be succeeded before creating an approved rerun schedule'
+    assert rerun.json()['detail'] == 'current run must have status succeeded before creating an approved rerun schedule'
 
 
 def test_create_run_from_latest_ready_design_draft() -> None:
@@ -2593,7 +2598,7 @@ def test_create_run_from_latest_design_draft_blocks_non_ready_design() -> None:
 
     run = client.post('/runs/from-latest-design-draft')
     assert run.status_code == 409
-    assert run.json()['detail'] == 'design draft is not ready_for_run'
+    assert run.json()['detail'] == 'design method_spec is not ready_for_run: dataset_uri is unresolved'
 
 
 def test_create_run_from_reviewed_literature_design_draft() -> None:
@@ -2819,7 +2824,10 @@ def test_create_pipeline_from_research_problem_runs_top_candidate(monkeypatch) -
 
     def fake_urlopen(request_obj, timeout):
         import json
+        from urllib.error import URLError
         body = json.loads(request_obj.data.decode('utf-8'))
+        if 'problem_statement' not in body:
+            raise URLError('agent unavailable in test fixture')
         assert body['problem_statement'].startswith('Find a bounded benchmark')
         return FakeResponse(
             {
@@ -2882,7 +2890,9 @@ def test_create_pipeline_from_research_problem_runs_top_candidate(monkeypatch) -
     payload = response.json()
     assert payload['chosen_paper_id'] == 'mle_bench_arxiv_2024'
     assert payload['selected_tracks'] == ['agent_evaluation']
-    assert payload['pipeline']['run']['run_purpose'] == 'paper-pipeline'
+    assert payload['pipeline']['run'] is None
+    assert payload['pipeline']['next_action'] == 'review-required'
+    assert payload['next_action'] == 'review-required'
     assert payload['pipeline']['intake']['source_refs'][0] == 'https://arxiv.org/abs/2410.07095'
 
 
@@ -3561,7 +3571,9 @@ def test_create_pipeline_from_latest_research_problem(monkeypatch) -> None:
     payload = response.json()
     assert payload['problem_statement'].startswith('Find a bounded benchmark')
     assert payload['chosen_paper_id'] == 'mle_bench_arxiv_2024'
-    assert payload['pipeline']['run']['run_purpose'] == 'paper-pipeline'
+    assert payload['pipeline']['run'] is None
+    assert payload['pipeline']['next_action'] == 'review-required'
+    assert payload['next_action'] == 'review-required'
 
 
 def test_create_and_fetch_paper_intake_queue(monkeypatch) -> None:
@@ -3728,7 +3740,7 @@ def test_stage_next_intake_from_paper_queue(monkeypatch) -> None:
     stage = client.post(f'/paper-intake-queues/{queue_id}/stage-next-intake')
     assert stage.status_code == 201
     intake = stage.json()
-    assert intake['source_refs'][0] == 'https://arxiv.org/pdf/2410.07095.pdf'
+    assert intake['source_refs'][0] == 'https://arxiv.org/abs/2410.07095'
     assert intake['document_refs'] == ['doc-1']
     assert intake['status'] == 'ready_for_design'
 
@@ -4769,7 +4781,7 @@ def test_session_execution_preflight_surfaces_interpretation_runtime_hints() -> 
         fragment in warning
         for warning in payload['warnings']
         for fragment in (
-            'interpretation recommended',
+                'interpretation-recommended',
             'interpretation preferred',
             'interpretation dataset hints:',
             'interpretation evaluation targets:',
@@ -4827,7 +4839,7 @@ def test_session_execution_preflight_flags_overfitting_split_risks() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert any('train_uri and test_uri resolve to the same dataset path' in issue for issue in payload['blocking_issues'])
-    assert any('no explicit validation split or validation strategy is declared' in warning for warning in payload['warnings'])
+    assert any('declared validation split: 0.2' in warning for warning in payload['warnings'])
 
 
 def test_declared_only_workflow_reports_not_executable() -> None:
@@ -4854,7 +4866,7 @@ def test_gpu_workflow_execution_preflight_reports_gpu_contract() -> None:
     payload = response.json()
     assert payload['workflow_id'] == 'gpu-experiment'
     assert payload['resource_profile'] == 'gpu-small'
-    assert payload['runner_image'] == 'ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.4-local'
+    assert payload['runner_image'] == 'ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.7-local'
     assert payload['resource_requests'] == {'cpu': '2', 'memory': '4Gi', 'nvidia.com/gpu': '1'}
     assert payload['resource_limits'] == {'cpu': '4', 'memory': '8Gi', 'nvidia.com/gpu': '1'}
     assert payload['node_selector'] == {
@@ -4972,6 +4984,10 @@ def test_autoresearch_campaign_happy_path(tmp_path) -> None:
             'source_design_id': design_payload['design_id'],
             'objective': 'Compare a small set of approved tabular methodology variants on Titanic.',
             'max_iterations': 2,
+            'evaluator_contract': {
+                'evaluator_type': 'titanic_tabular_v1',
+                'primary_metric': {'name': 'accuracy', 'direction': 'maximize', 'minimum_effect': 0.01},
+            },
         },
     )
     assert campaign.status_code == 201
@@ -5097,6 +5113,10 @@ def test_autoresearch_decision_uses_best_metric_payload(tmp_path) -> None:
             'source_design_id': design_payload['design_id'],
             'objective': 'Compare approved GPU methodology variants.',
             'max_iterations': 2,
+            'evaluator_contract': {
+                'evaluator_type': 'gpu_method_validation_v1',
+                'primary_metric': {'name': 'bounded_method_score', 'direction': 'maximize', 'minimum_effect': 0.01},
+            },
         },
     )
     assert campaign.status_code == 201
@@ -5125,6 +5145,65 @@ def test_autoresearch_decision_uses_best_metric_payload(tmp_path) -> None:
     assert decision_payload['decision']['decision_type'] == 'keep'
     assert decision_payload['iteration']['score_summary']['primary_metric_name'] == 'bounded_method_score'
     assert decision_payload['iteration']['score_summary']['primary_metric_value'] == 0.9375
+
+
+def test_autoresearch_contract_controls_metric_direction_and_selection() -> None:
+    contract = EvaluatorContract(
+        evaluator_type='loss_minimization_v1',
+        primary_metric={'name': 'loss', 'direction': 'minimize', 'minimum_effect': 0.02},
+        guardrails=[{'name': 'effective_rank', 'direction': 'maximize', 'minimum': 64.0, 'required': True}],
+    )
+
+    metric_name, metric_value, metric_source = autoresearch_module._extract_primary_metric(
+        {'accuracy': 0.99, 'loss': 0.30, 'effective_rank': 80.0},
+        contract,
+    )
+    assert metric_name == 'loss'
+    assert metric_value == 0.30
+    assert metric_source == 'evaluator_contract'
+
+    missing_name, missing_value, missing_source = autoresearch_module._extract_primary_metric(
+        {'accuracy': 0.99, 'effective_rank': 80.0},
+        contract,
+    )
+    assert missing_name == 'loss'
+    assert missing_value is None
+    assert missing_source == 'evaluator_contract'
+
+    child_summary = {
+        'run_status': 'succeeded',
+        'primary_metric_name': 'loss',
+        'primary_metric_value': 0.25,
+        'primary_metric_direction': 'minimize',
+        'guardrails': [{'metric_name': 'effective_rank', 'passed': True}],
+    }
+    parent_summary = {
+        'run_status': 'succeeded',
+        'primary_metric_name': 'loss',
+        'primary_metric_value': 0.30,
+        'primary_metric_direction': 'minimize',
+    }
+    comparison = autoresearch_module.build_iteration_comparison(child_summary, parent_summary, evaluator_contract=contract)
+    assert comparison['delta'] == -0.05
+    assert comparison['normalized_delta'] == 0.05
+
+    iteration = AutoresearchIterationRecord(
+        iteration_id='iter-loss',
+        campaign_id='campaign-loss',
+        child_methodology_draft_id='method-loss',
+        run_id='run-loss',
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        status='completed',
+    )
+    decision_type, rationale = autoresearch_module.build_decision(
+        iteration,
+        child_summary,
+        comparison,
+        evaluator_contract=contract,
+    )
+    assert decision_type == 'keep'
+    assert 'minimize contract' in rationale
 
 
 def test_autoresearch_decision_recomputes_stale_escalation(tmp_path) -> None:
@@ -5181,6 +5260,10 @@ def test_autoresearch_decision_recomputes_stale_escalation(tmp_path) -> None:
             'source_design_id': design_payload['design_id'],
             'objective': 'Compare approved GPU methodology variants.',
             'max_iterations': 2,
+            'evaluator_contract': {
+                'evaluator_type': 'gpu_method_validation_v1',
+                'primary_metric': {'name': 'bounded_method_score', 'direction': 'maximize', 'minimum_effect': 0.01},
+            },
         },
     )
     assert campaign.status_code == 201

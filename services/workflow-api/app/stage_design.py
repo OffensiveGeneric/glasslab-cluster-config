@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import logging
+import re
 from typing import Any
 from urllib.parse import urlparse
 from urllib import error as urllib_error
@@ -18,6 +19,16 @@ from .stage_inference import normalize_unique_strings
 
 LOGGER = logging.getLogger(__name__)
 UNRESOLVED_PREFIX = 'UNRESOLVED_'
+
+
+def looks_like_dataset_uri(value: str) -> bool:
+    text = value.strip()
+    lowered = text.lower()
+    if lowered.startswith(('s3://', 'file://', '/mnt/')):
+        return True
+    if not lowered.startswith(('http://', 'https://')):
+        return False
+    return bool(re.search(r'\.(csv|tsv|jsonl|json|parquet|arrow|feather|npy|npz)(?:[?#].*)?$', lowered))
 
 
 def build_replicability_assessment(
@@ -241,17 +252,22 @@ def derive_design_from_intake(intake: IntakeRecord, workflow: WorkflowRegistryEn
 
     explicit_dataset_uri = next(
         (
+            note.split(':', 1)[1].strip()
+            for note in intake.notes
+            if isinstance(note, str) and note.startswith('Dataset URI:')
+        ),
+        None,
+    )
+    concrete_dataset_match = re.search(r'(s3://\S+|file://\S+|/mnt/\S+)', intake.raw_request)
+    if explicit_dataset_uri is None and concrete_dataset_match:
+        explicit_dataset_uri = concrete_dataset_match.group(1).rstrip('.,);')
+    explicit_dataset_uri = explicit_dataset_uri or next(
+        (
             ref
             for ref in intake.source_refs
             if isinstance(ref, str)
             and ref.strip()
-            and (
-                ref.startswith('http://')
-                or ref.startswith('https://')
-                or ref.startswith('s3://')
-                or ref.startswith('file://')
-                or ref.startswith('/mnt/')
-            )
+            and looks_like_dataset_uri(ref)
         ),
         None,
     )

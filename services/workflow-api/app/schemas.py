@@ -576,6 +576,42 @@ class TechniqueKnowledgeRecord(BaseModel):
     source_scope: str = 'paper'
 
 
+class PrimaryMetricContract(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    name: str = Field(min_length=1)
+    direction: Literal['maximize', 'minimize'] = 'maximize'
+    minimum_effect: float = Field(default=0.0, ge=0.0)
+
+
+class GuardrailMetricContract(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    name: str = Field(min_length=1)
+    direction: Literal['maximize', 'minimize'] = 'maximize'
+    minimum: float | None = None
+    maximum: float | None = None
+    required: bool = False
+
+
+class EvaluatorContract(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    evaluator_type: str = Field(default='generic', min_length=1)
+    primary_metric: PrimaryMetricContract | None = None
+    guardrails: list[GuardrailMetricContract] = Field(default_factory=list)
+    uncertainty: dict[str, Any] = Field(default_factory=dict)
+
+
+class BudgetContract(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    budget_mode: Literal['wallclock', 'training_exposure', 'fixed_steps', 'manual'] = 'manual'
+    max_wallclock_minutes: int | None = Field(default=None, ge=1)
+    max_samples_seen: int | None = Field(default=None, ge=1)
+    max_optimizer_steps: int | None = Field(default=None, ge=1)
+
+
 class MethodSpecRecord(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -593,6 +629,8 @@ class MethodSpecRecord(BaseModel):
     resource_profile: str | None = None
     execution_inputs: dict[str, Any] = Field(default_factory=dict)
     mutation_axes: list[str] = Field(default_factory=list)
+    evaluator_contract: EvaluatorContract | None = None
+    budget_contract: BudgetContract | None = None
     run_readiness: Literal['ready', 'needs_review', 'blocked'] = 'needs_review'
     blocking_reasons: list[str] = Field(default_factory=list)
 
@@ -728,6 +766,8 @@ class AutoresearchCampaignRecord(BaseModel):
     max_iterations: int = Field(default=3, ge=1, le=25)
     evaluation_policy: str
     mutation_policy: str
+    evaluator_contract: EvaluatorContract | None = None
+    budget_contract: BudgetContract | None = None
     notes: list[str] = Field(default_factory=list)
 
 
@@ -1146,6 +1186,8 @@ class AutoresearchCampaignCreateRequest(BaseModel):
     max_iterations: int = Field(default=3, ge=1, le=25)
     evaluation_policy: str = 'metrics-first-v1'
     mutation_policy: str = 'methodology-variants-v1'
+    evaluator_contract: EvaluatorContract | None = None
+    budget_contract: BudgetContract | None = None
     notes: list[str] = Field(default_factory=list)
 
     @field_validator('notes')
@@ -1311,23 +1353,6 @@ class ResearchSessionNextCommandResponse(BaseModel):
     drafted_methodology_count: int = 0
     decisions_recorded: int = 0
     launches_started: int = 0
-
-
-class StartLiteratureSearchRequest(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-
-    session_id: str = Field(min_length=1)
-    max_candidate_papers: int = Field(default=3, ge=1, le=25)
-    priorities: list[str] = Field(default_factory=list)
-    submitted_by: str | None = None
-
-
-class StartLiteratureSearchResponse(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-
-    session: ResearchSessionRecord
-    problem_id: str
-    problem_statement: str
 
 
 class PromotePaperToIntakeRequest(BaseModel):

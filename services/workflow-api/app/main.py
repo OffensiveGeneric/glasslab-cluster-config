@@ -29,7 +29,6 @@ from .paper_pipeline import (
 )
 from .persistence import RunStore, create_run_store
 from .registry import WorkflowRegistry
-from .source_documents import build_source_fetch_candidates
 from .schedule_routes import register_schedule_routes
 from .source_documents import ingest_source_document, register_source_document_routes
 from .technique_catalog import register_technique_catalog_routes
@@ -359,10 +358,7 @@ def build_fresh_paper_request_from_problem(
     chosen_paper: ResearchProblemPaperCandidate,
     selected_track_ids: list[str],
 ) -> FreshPaperPipelineRequest:
-    paper_ref = (
-        next(iter(build_source_fetch_candidates(chosen_paper.official_page, chosen_paper.pdf_url)), None)
-        or chosen_paper.paper_id
-    )
+    paper_ref = chosen_paper.official_page or chosen_paper.pdf_url or chosen_paper.paper_id
     notes = [f"Source title: {chosen_paper.title.strip()}"]
     if chosen_paper.abstract_excerpt:
         notes.append(chosen_paper.abstract_excerpt.strip())
@@ -505,10 +501,7 @@ def build_intake_request_from_problem_candidate(
             return
         target.append(value)
 
-    paper_ref = (
-        next(iter(build_source_fetch_candidates(candidate.official_page, candidate.pdf_url)), None)
-        or candidate.paper_id
-    )
+    paper_ref = candidate.official_page or candidate.pdf_url or candidate.paper_id
     manual_source = 'manual' in candidate.tags or 'manual' in candidate.tracks
     notes: list[str] = []
     append_unique_note(notes, f'Source title: {candidate.title.strip()}')
@@ -1087,6 +1080,11 @@ def enrich_run_inputs_with_method_context(design: DesignDraftRecord) -> dict[str
     if method_spec.metrics:
         inputs['technique_metrics'] = list(method_spec.metrics)
     return inputs
+
+
+def filter_run_inputs_for_workflow(inputs: dict[str, Any], workflow: WorkflowRegistryEntry) -> dict[str, Any]:
+    allowed_inputs = {item.name for item in workflow.required_inputs}
+    return {key: value for key, value in inputs.items() if key in allowed_inputs}
 
 
 def resolve_run_requested_models(requested_models: list[str], workflow: WorkflowRegistryEntry) -> list[str]:
@@ -1694,7 +1692,7 @@ def create_app(
         run_request = RunCreateRequest(
             workflow_id=design.workflow_id,
             objective=design.objective,
-            inputs=enrich_run_inputs_with_method_context(design),
+            inputs=filter_run_inputs_for_workflow(enrich_run_inputs_with_method_context(design), workflow),
             models=resolve_run_requested_models(
                 (
                     method_spec.candidate_models

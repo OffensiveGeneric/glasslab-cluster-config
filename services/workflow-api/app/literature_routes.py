@@ -123,7 +123,7 @@ def register_literature_routes(
             chosen_paper_id=chosen_paper.paper_id,
             pipeline=pipeline,
             warnings=warnings,
-            next_action='report-ready' if pipeline.next_action == 'report-ready' else 'pipeline-started',
+            next_action=pipeline.next_action,
         )
 
     @app.post('/research-sessions', response_model=ResearchSessionRecord, status_code=status.HTTP_201_CREATED)
