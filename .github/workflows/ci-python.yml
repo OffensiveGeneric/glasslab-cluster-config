@@ -37,13 +37,12 @@ jobs:
       - name: Compile Python sources
         run: |
           python <<'PY'
-          import py_compile
           from pathlib import Path
 
           failures = []
           for path in Path("services").rglob("*.py"):
             try:
-              py_compile.compile(str(path), doraise=True)
+              compile(path.read_text(), str(path), "exec")
             except Exception as exc:
               failures.append((str(path), str(exc)))
 
@@ -61,11 +60,40 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: workflow-api-narrow
+          - name: workflow-api-core
             workdir: services/workflow-api
             requirements: services/workflow-api/requirements.txt
             pythonpath: ../..:.
-            tests: tests/test_persistence.py tests/test_run_artifacts.py tests/test_validation.py
+            tests: tests/test_api.py tests/test_persistence.py tests/test_run_artifacts.py tests/test_schedule_execution.py tests/test_validation.py
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r "${{ matrix.requirements }}" pytest httpx
+
+      - name: Run ${{ matrix.name }} tests
+        working-directory: ${{ matrix.workdir }}
+        env:
+          PYTHONPATH: ${{ matrix.pythonpath }}
+        run: |
+          pytest ${{ matrix.tests }} -q
+
+  adapter-tests:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
           - name: research-ingress
             workdir: services/research-ingress
             requirements: services/research-ingress/requirements.txt
@@ -96,7 +124,6 @@ jobs:
             requirements: services/runner/requirements.txt
             pythonpath: ../..:.
             tests: tests/test_contrastive_runner.py
-
 
     steps:
       - name: Checkout

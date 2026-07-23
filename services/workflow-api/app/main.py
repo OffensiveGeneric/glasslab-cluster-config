@@ -1299,7 +1299,7 @@ def create_app(
             return SessionIntakeResponse(
                 session=updated_session,
                 record_type='source_document',
-                source_document=document,
+                source_document=document.model_dump(mode='json'),
                 current_plan_status=current_plan_status,
             )
 
@@ -1316,7 +1316,7 @@ def create_app(
             return SessionIntakeResponse(
                 session=updated_session,
                 record_type='dataset',
-                dataset=dataset,
+                dataset=dataset.model_dump(mode='json'),
                 current_plan_status='needs_plan',
             )
 
@@ -1837,7 +1837,7 @@ def create_app(
             session_id=session.session_id,
             result_detail=f"recorded decision '{request.decision}'",
         )
-        return SessionDecisionResponse(session=updated_session, operation=operation)
+        return SessionDecisionResponse(session=updated_session, operation=operation.model_dump(mode='json'))
 
     @app.post('/research-sessions/latest/decisions/current', response_model=SessionDecisionResponse)
     def record_latest_session_current_decision(request: SessionDecisionRequest) -> SessionDecisionResponse:

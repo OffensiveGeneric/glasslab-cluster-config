@@ -10,6 +10,7 @@ historical path that got the repo here.
 - `../learning-task-flow.md`
 - `../local-model-command-surface.md`
 - `../deprecated-api-surface-2026-07.md`
+- `../ci-policy-2026-07.md`
 - `../command-surface-spec.md`
 - `../router-and-backend-contract.md`
 - `../deprecation-map-2026-04.md`

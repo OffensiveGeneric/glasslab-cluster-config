@@ -14,26 +14,26 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
-               set -e
-               
-               DATA_DIR="/mnt/datasets/cifar100"
-               CIFAR_DIR="${DATA_DIR}/cifar-100-python"
-               TAR_FILE="${DATA_DIR}/cifar-100-python.tar.gz"
-               TMP_FILE="${TAR_FILE}.tmp"
-               
-               # Create directories if they don't exist
-               mkdir -p "${DATA_DIR}"
-               
-               # Check if CIFAR-100 already exists
-               if [ -f "${CIFAR_DIR}/train/meta" ] && [ -f "${CIFAR_DIR}/test" ]; then
-                 echo "CIFAR-100 already present at ${CIFAR_DIR}"
-                 echo "Skipping download and extraction."
-                 echo ""
-                 echo "=== Verification ==="
-                 find "${DATA_DIR}" -maxdepth 3 -type f | head
-                 du -sh "${DATA_DIR}"
-                 exit 0
-               fi
+              set -e
+
+              DATA_DIR="/mnt/datasets/cifar100"
+              CIFAR_DIR="${DATA_DIR}/cifar-100-python"
+              TAR_FILE="${DATA_DIR}/cifar-100-python.tar.gz"
+              TMP_FILE="${TAR_FILE}.tmp"
+
+              # Create directories if they don't exist
+              mkdir -p "${DATA_DIR}"
+
+              # Check if CIFAR-100 already exists
+              if [ -f "${CIFAR_DIR}/train/meta" ] && [ -f "${CIFAR_DIR}/test" ]; then
+                echo "CIFAR-100 already present at ${CIFAR_DIR}"
+                echo "Skipping download and extraction."
+                echo ""
+                echo "=== Verification ==="
+                find "${DATA_DIR}" -maxdepth 3 -type f | head
+                du -sh "${DATA_DIR}"
+                exit 0
+              fi
               
               echo "Downloading CIFAR-100 to ${TMP_FILE}..."
               
@@ -67,16 +67,16 @@ spec:
               
               echo "Extraction complete, verifying final files..."
               
-               # Verify final files
-               if [ ! -f "${CIFAR_DIR}/train/meta" ]; then
-                 echo "ERROR: train/meta file not found"
-                 exit 1
-               fi
-               
-               if [ ! -f "${CIFAR_DIR}/test" ]; then
-                 echo "ERROR: test file not found"
-                 exit 1
-               fi
+              # Verify final files
+              if [ ! -f "${CIFAR_DIR}/train/meta" ]; then
+                echo "ERROR: train/meta file not found"
+                exit 1
+              fi
+
+              if [ ! -f "${CIFAR_DIR}/test" ]; then
+                echo "ERROR: test file not found"
+                exit 1
+              fi
               
               echo ""
               echo "=== Verification ==="
