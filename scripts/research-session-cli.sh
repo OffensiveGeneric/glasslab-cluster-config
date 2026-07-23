@@ -13,6 +13,7 @@ usage() {
 Usage:
   research-session-cli.sh start "goal statement"
   research-session-cli.sh new "goal statement"
+  research-session-cli.sh literature-start "goal statement"
   research-session-cli.sh context
   research-session-cli.sh next-paper
   research-session-cli.sh note "text"
@@ -101,24 +102,23 @@ main() {
   start_port_forward
 
   case "$command" in
-    start)
+    start|new)
       local goal="${1:-}"
       [[ -n "$goal" ]] || {
-        printf '[research-session-cli] start requires a goal statement\n' >&2
-        exit 2
-      }
-      api POST /research-sessions/start-literature-search \
-        "{\"goal_statement\":$(json_escape "$goal"),\"priorities\":[],\"submitted_by\":\"research-session-cli\"}" \
-        | pretty_print
-      ;;
-    new)
-      local goal="${1:-}"
-      [[ -n "$goal" ]] || {
-        printf '[research-session-cli] new requires a goal statement\n' >&2
+        printf '[research-session-cli] %s requires a goal statement\n' "$command" >&2
         exit 2
       }
       api POST /research-sessions \
-        "{\"goal_statement\":$(json_escape "$goal"),\"priorities\":[],\"submitted_by\":\"research-session-cli\"}" >/dev/null
+        "{\"goal_statement\":$(json_escape "$goal"),\"priorities\":[],\"submitted_by\":\"research-session-cli\"}" \
+        | pretty_print
+      ;;
+    literature-start)
+      local goal="${1:-}"
+      [[ -n "$goal" ]] || {
+        printf '[research-session-cli] literature-start requires a goal statement\n' >&2
+        exit 2
+      }
+      printf '[research-session-cli] warning: literature-start is deprecated; prefer OpenCode plus direct run scripts\n' >&2
       api POST /research-sessions/start-literature-search \
         "{\"goal_statement\":$(json_escape "$goal"),\"priorities\":[],\"submitted_by\":\"research-session-cli\"}" \
         | pretty_print

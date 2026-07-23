@@ -10,6 +10,7 @@ from urllib import request as urllib_request
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, status
+from fastapi.routing import APIRoute
 
 from services.common.schemas import ArtifactIndexEntry, ArtifactsIndex, RunManifest, RunStatus, WorkflowRegistryEntry
 
@@ -138,6 +139,50 @@ from .transition_routes import register_transitions_routes
 
 UNRESOLVED_PREFIX = 'UNRESOLVED_'
 LOGGER = logging.getLogger(__name__)
+
+
+DEPRECATED_ROUTE_EXACT_PATHS = {
+    '/paper-pipelines/fresh-paper',
+    '/paper-pipelines/from-latest-research-problem',
+    '/paper-pipelines/from-research-problem',
+    '/paper-intake-queues',
+    '/paper-intake-queues/from-research-problem',
+    '/paper-intake-queues/latest',
+    '/paper-intake-queues/{queue_id}',
+    '/paper-intake-queues/{queue_id}/stage-next-intake',
+    '/research-problems',
+    '/research-problems/latest',
+    '/research-sessions/bootstrap',
+    '/research-sessions/bootstrap-status',
+    '/research-sessions/from-latest-research-problem',
+    '/research-sessions/start-literature-search',
+}
+
+DEPRECATED_ROUTE_PATH_PARTS = (
+    '/literature-digest',
+    '/paper-intake-queue',
+    '/paper-intake-queues',
+    '/research-problem',
+    '/research-problems',
+    '/skills/external-literature-search',
+    '/skills/literature-harvest',
+    '/skills/paper-intake',
+)
+
+
+def is_deprecated_route_path(path: str) -> bool:
+    if path in DEPRECATED_ROUTE_EXACT_PATHS:
+        return True
+    return any(part in path for part in DEPRECATED_ROUTE_PATH_PARTS)
+
+
+def mark_deprecated_api_routes(app: FastAPI) -> None:
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        path = getattr(route, 'path_format', route.path)
+        if is_deprecated_route_path(path):
+            route.deprecated = True
 
 
 def log_stage_record_source(stage: str, source: str, record_id: str, **context: str) -> None:
@@ -2071,6 +2116,8 @@ def create_app(
         build_approved_rerun_schedule=lambda *args, **kwargs: build_approved_rerun_schedule(*args, **kwargs),
         execute_due_approved_rerun_schedules=lambda *args, **kwargs: execute_due_approved_rerun_schedules(*args, **kwargs),
     )
+
+    mark_deprecated_api_routes(app)
 
     return app
 

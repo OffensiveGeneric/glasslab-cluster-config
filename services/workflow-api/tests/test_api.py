@@ -59,6 +59,20 @@ def test_healthz_and_workflow_families() -> None:
     assert by_id['replication-lite']['submission_backend'] == 'unimplemented'
 
 
+def test_openapi_marks_literature_session_routes_deprecated() -> None:
+    client = build_client()
+
+    schema = client.get('/openapi.json')
+    assert schema.status_code == 200
+    paths = schema.json()['paths']
+
+    assert paths['/experiments/runs']['post'].get('deprecated') is not True
+    assert paths['/research-sessions/start-literature-search']['post']['deprecated'] is True
+    assert paths['/paper-pipelines/fresh-paper']['post']['deprecated'] is True
+    assert paths['/paper-intake-queues/{queue_id}/stage-next-intake']['post']['deprecated'] is True
+    assert paths['/research-sessions/{session_id}/literature-digest']['get']['deprecated'] is True
+
+
 def test_generic_experiment_run_result_ingest_and_compare() -> None:
     client = build_client()
 

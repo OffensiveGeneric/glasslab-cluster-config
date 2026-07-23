@@ -100,6 +100,7 @@ If you want the current source of truth:
 - [docs/glasslab-v2/canonical-stack-2026-04.md](docs/glasslab-v2/canonical-stack-2026-04.md)
 - [docs/glasslab-v2/learning-task-flow.md](docs/glasslab-v2/learning-task-flow.md)
 - [docs/glasslab-v2/local-model-command-surface.md](docs/glasslab-v2/local-model-command-surface.md)
+- [docs/glasslab-v2/deprecated-api-surface-2026-07.md](docs/glasslab-v2/deprecated-api-surface-2026-07.md)
 - [docs/glasslab-v2/command-surface-spec.md](docs/glasslab-v2/command-surface-spec.md)
 - [docs/glasslab-v2/router-and-backend-contract.md](docs/glasslab-v2/router-and-backend-contract.md)
 - [docs/glasslab-v2/deprecation-map-2026-04.md](docs/glasslab-v2/deprecation-map-2026-04.md)
