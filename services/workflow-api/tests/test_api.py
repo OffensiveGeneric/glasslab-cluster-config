@@ -1,6 +1,7 @@
 import sys
 import json
 from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -22,8 +23,15 @@ from app.registry import WorkflowRegistry
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-def build_client() -> TestClient:
-    settings = Settings(registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'))
+def build_client(artifacts_mount_path: Path | None = None) -> TestClient:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+        **(
+            {'artifacts_mount_path': str(artifacts_mount_path)}
+            if artifacts_mount_path is not None
+            else {}
+        ),
+    )
     registry = WorkflowRegistry(settings.registry_dir)
     store = InMemoryRunStore()
     return TestClient(create_app(settings=settings, registry=registry, store=store))
@@ -34,7 +42,7 @@ def test_healthz_and_workflow_families() -> None:
 
     health = client.get('/healthz')
     assert health.status_code == 200
-    assert health.json()['workflow_count'] == 5
+    assert health.json()['workflow_count'] == 6
     assert health.json()['store_backend'] == 'memory'
 
     families = client.get('/workflow-families')
@@ -46,6 +54,7 @@ def test_healthz_and_workflow_families() -> None:
         'literature-to-experiment',
         'metric-search-v0',
         'replication-lite',
+        'research-workspace-cpu-v1',
     }
     by_id = {entry['workflow_id']: entry for entry in payload}
     assert by_id['gpu-experiment']['execution_status'] == 'ready'
@@ -66,6 +75,7 @@ def test_openapi_marks_literature_session_routes_deprecated() -> None:
     assert schema.status_code == 200
     paths = schema.json()['paths']
 
+    assert paths['/investigations']['post'].get('deprecated') is not True
     assert paths['/experiments/runs']['post'].get('deprecated') is not True
     assert paths['/research-sessions/start-literature-search']['post']['deprecated'] is True
     assert paths['/paper-pipelines/fresh-paper']['post']['deprecated'] is True
@@ -126,12 +136,34 @@ def test_generic_experiment_run_result_ingest_and_compare() -> None:
     assert create_b.status_code == 201
     run_b = create_b.json()
 
+    incomplete_ingest = client.post(
+        f"/experiments/runs/{run_a['run_id']}/results",
+        json={
+            'terminal_status': 'succeeded',
+            'metrics': {'composite_score': 0.61},
+            'artifact_refs': {'metrics.json': 's3://artifacts/run-a/metrics.json'},
+        },
+    )
+    assert incomplete_ingest.status_code == 409
+    assert incomplete_ingest.json()['detail']['message'] == 'successful result is missing required artifacts'
+
     ingest_a = client.post(
         f"/experiments/runs/{run_a['run_id']}/results",
         json={
             'terminal_status': 'succeeded',
             'metrics': {'composite_score': 0.61, 'retrieval_recall_at_10': 0.72},
-            'artifact_refs': {'metrics.json': 's3://artifacts/run-a/metrics.json'},
+            'artifact_refs': {
+                name: f's3://artifacts/run-a/{name}'
+                for name in [
+                    'run_manifest.json',
+                    'config.json',
+                    'metrics.json',
+                    'artifacts_index.json',
+                    'report.md',
+                    'status.json',
+                    'logs/',
+                ]
+            },
             'runtime': {'node_name': 'node02'},
         },
     )
@@ -144,7 +176,18 @@ def test_generic_experiment_run_result_ingest_and_compare() -> None:
         json={
             'terminal_status': 'succeeded',
             'metrics': {'composite_score': 0.74, 'retrieval_recall_at_10': 0.81},
-            'artifact_refs': {'metrics.json': 's3://artifacts/run-b/metrics.json'},
+            'artifact_refs': {
+                name: f's3://artifacts/run-b/{name}'
+                for name in [
+                    'run_manifest.json',
+                    'config.json',
+                    'metrics.json',
+                    'artifacts_index.json',
+                    'report.md',
+                    'status.json',
+                    'logs/',
+                ]
+            },
             'runtime': {'node_name': 'node04'},
         },
     )
@@ -164,6 +207,497 @@ def test_generic_experiment_run_result_ingest_and_compare() -> None:
     assert payload['workload_id'] == 'metric-search-v0'
     assert payload['summary_metrics']['metric_name'] == 'composite_score'
     assert payload['summary_metrics']['best_run_id'] == run_b['run_id']
+
+
+def test_research_workspace_cannot_bypass_investigation_approval() -> None:
+    client = build_client()
+
+    response = client.post(
+        '/experiments/runs',
+        json={
+            'objective': 'Attempt to launch an unapproved research workspace.',
+            'experiment_type': 'research-workspace-job',
+            'workload_id': 'research-workspace-cpu-v1',
+            'budget': {'max_wallclock_minutes': 5},
+        },
+    )
+
+    assert response.status_code == 409
+    assert (
+        response.json()['detail']
+        == 'research workspace runs require an approved investigation plan execution'
+    )
+
+
+def test_confirmatory_investigation_freezes_workspace_plan_launches_run_and_records_claim(
+    tmp_path: Path,
+) -> None:
+    client = build_client(tmp_path)
+
+    create = client.post(
+        '/investigations',
+        json={
+            'title': 'Adult Income investigation',
+            'research_question': 'Can a frozen, leakage-controlled Adult Income workspace outperform the majority baseline?',
+            'research_mode': 'confirmatory',
+            'hypotheses': [
+                'A nonlinear Adult Income model improves held-out ROC-AUC over the linear baseline.'
+            ],
+            'priorities': ['reproducibility', 'bounded execution'],
+            'submitted_by': 'test-researcher',
+        },
+    )
+    assert create.status_code == 201
+    investigation = create.json()
+    investigation_id = investigation['investigation_id']
+    hypothesis_id = investigation['hypotheses'][0]['hypothesis_id']
+    assert investigation['status'] == 'planning'
+    assert 'session_id' not in investigation
+
+    plan = client.post(
+        f'/investigations/{investigation_id}/plans',
+        json={
+            'title': 'Frozen Adult Income CPU workspace',
+            'rationale': 'Use immutable task, source, and dataset bundles under a bounded run.',
+            'hypothesis_ids': [hypothesis_id],
+            'executions': [
+                {
+                    'execution_id': 'adult-train',
+                    'objective': 'Execute the frozen Adult Income analysis and emit a verifiable report bundle.',
+                    'experiment_type': 'research-workspace-job',
+                    'workload_id': 'research-workspace-cpu-v1',
+                    'data_access_scope': 'train',
+                    'workspace': {
+                        'task_bundle': {
+                            'uri': 's3://datasets/benchmarks/adult-income-v1/task.zip',
+                            'sha256': '1' * 64,
+                            'media_type': 'application/zip',
+                        },
+                        'source_bundle': {
+                            'uri': 's3://artifacts/submissions/adult-income-v1/submission.zip',
+                            'sha256': '2' * 64,
+                            'media_type': 'application/zip',
+                        },
+                        'working_directory': 'submission',
+                        'command': ['python3', 'run.py', '--output-dir', '/outputs'],
+                        'output_directory': '/outputs',
+                        'network_policy': 'none',
+                    },
+                    'dataset_bindings': [
+                        {
+                            'name': 'adult_train',
+                            'asset': {
+                                'uri': 's3://datasets/uci-adult/adult.data',
+                                'sha256': '3' * 64,
+                                'media_type': 'text/csv',
+                            },
+                            'role': 'train',
+                            'contains_labels': True,
+                            'access_scopes': ['train', 'validate'],
+                        },
+                        {
+                            'name': 'adult_test',
+                            'asset': {
+                                'uri': 's3://datasets/uci-adult/adult.test',
+                                'sha256': '4' * 64,
+                                'media_type': 'text/csv',
+                            },
+                            'role': 'test',
+                            'contains_labels': True,
+                            'access_scopes': ['evaluate'],
+                        },
+                    ],
+                    'config_payload': {'evaluation_mode': 'benchmark'},
+                    'budget': {
+                        'budget_mode': 'wallclock',
+                        'max_wallclock_minutes': 20,
+                    },
+                    'artifact_contract': {
+                        'required': [
+                            'run_manifest.json',
+                            'config.json',
+                            'metrics.json',
+                            'artifacts_index.json',
+                            'report.md',
+                            'status.json',
+                            'logs/',
+                            'source.zip',
+                        ],
+                        'optional': ['plots/'],
+                    },
+                    'evaluator_contract': {
+                        'evaluator_type': 'rubric-gated-v1',
+                        'primary_metric': {
+                            'name': 'rubric_score',
+                            'direction': 'maximize',
+                            'minimum_effect': 0,
+                        },
+                        'guardrails': [
+                            {
+                                'name': 'integrity_pass',
+                                'direction': 'maximize',
+                                'minimum': 1,
+                                'required': True,
+                            }
+                        ],
+                    },
+                },
+                {
+                    'execution_id': 'adult-evaluate',
+                    'depends_on': ['adult-train'],
+                    'objective': 'Evaluate the frozen Adult Income submission only after training completes.',
+                    'experiment_type': 'research-workspace-job',
+                    'workload_id': 'research-workspace-cpu-v1',
+                    'data_access_scope': 'evaluate',
+                    'workspace': {
+                        'task_bundle': {
+                            'uri': 's3://datasets/benchmarks/adult-income-v1/task.zip',
+                            'sha256': '1' * 64,
+                        },
+                        'source_bundle': {
+                            'uri': 's3://artifacts/evaluators/adult-income-v1/evaluator.zip',
+                            'sha256': '5' * 64,
+                        },
+                        'command': ['python3', 'evaluate.py'],
+                    },
+                    'dataset_bindings': [
+                        {
+                            'name': 'adult_test',
+                            'asset': {
+                                'uri': 's3://datasets/uci-adult/adult.test',
+                                'sha256': '4' * 64,
+                            },
+                            'role': 'test',
+                            'contains_labels': True,
+                            'access_scopes': ['evaluate'],
+                        }
+                    ],
+                    'budget': {
+                        'budget_mode': 'wallclock',
+                        'max_wallclock_minutes': 10,
+                    },
+                    'artifact_contract': {
+                        'required': [
+                            'run_manifest.json',
+                            'config.json',
+                            'metrics.json',
+                            'artifacts_index.json',
+                            'report.md',
+                            'status.json',
+                            'logs/',
+                            'source.zip',
+                        ]
+                    },
+                    'evaluator_contract': {
+                        'evaluator_type': 'rubric-gated-v1',
+                        'primary_metric': {
+                            'name': 'rubric_score',
+                            'direction': 'maximize',
+                        },
+                    },
+                },
+            ],
+            'submitted_by': 'test-researcher',
+        },
+    )
+    assert plan.status_code == 201
+    plan_payload = plan.json()
+    assert plan_payload['revision'] == 1
+    assert plan_payload['executions'][0]['workspace']['source_bundle']['sha256'] == '2' * 64
+
+    approve = client.post(
+        f'/investigations/{investigation_id}/plan-approvals',
+        json={
+            'plan_id': plan_payload['plan_id'],
+            'approved_by': 'test-researcher',
+            'note': 'Freeze task, code, data, environment contract, budget, and evaluator before execution.',
+        },
+    )
+    assert approve.status_code == 200
+    approved = approve.json()
+    approval_id = approved['active_plan_approval_id']
+    assert approved['status'] == 'approved'
+    assert len(approved['plan_approvals']) == 1
+    assert len(approved['plan_approvals'][0]['plan_sha256']) == 64
+    assert approved['plan_approvals'][0]['hypothesis_ids'] == [hypothesis_id]
+    assert (
+        approved['plan_approvals'][0]['plan_snapshot']['plan']['plan_id']
+        == plan_payload['plan_id']
+    )
+
+    approve_again = client.post(
+        f'/investigations/{investigation_id}/plan-approvals',
+        json={'plan_id': plan_payload['plan_id']},
+    )
+    assert approve_again.status_code == 200
+    assert len(approve_again.json()['plan_approvals']) == 1
+
+    frozen_hypothesis = client.post(
+        f'/investigations/{investigation_id}/hypotheses',
+        json={'statement': 'A post-hoc confirmatory hypothesis should not be accepted.'},
+    )
+    assert frozen_hypothesis.status_code == 409
+    assert frozen_hypothesis.json()['detail'] == 'confirmatory hypotheses are frozen after plan approval'
+
+    blocked_evaluation = client.post(
+        f'/investigations/{investigation_id}/runs',
+        json={'approval_id': approval_id, 'execution_id': 'adult-evaluate'},
+    )
+    assert blocked_evaluation.status_code == 409
+    assert blocked_evaluation.json()['detail']['dependencies'] == ['adult-train']
+
+    launch = client.post(
+        f'/investigations/{investigation_id}/runs',
+        json={'approval_id': approval_id, 'execution_id': 'adult-train'},
+    )
+    assert launch.status_code == 201
+    launch_payload = launch.json()
+    run_id = launch_payload['run']['run_id']
+    assert launch_payload['run']['investigation_id'] == investigation_id
+    assert launch_payload['run']['source_plan_id'] == plan_payload['plan_id']
+    assert launch_payload['run']['source_approval_id'] == approval_id
+    assert launch_payload['run']['source_execution_id'] == 'adult-train'
+    assert launch_payload['run']['plan_sha256'] == approved['plan_approvals'][0]['plan_sha256']
+    assert launch_payload['execution']['execution_id'] == 'adult-train'
+    assert launch_payload['run']['manifest']['dataset_bindings'] == {
+        'adult_train': 's3://datasets/uci-adult/adult.data'
+    }
+    assert [
+        contract['name']
+        for contract in launch_payload['run']['manifest']['config_payload']['dataset_contracts']
+    ] == ['adult_train']
+    assert launch_payload['run']['session_id'] is None
+    assert launch_payload['investigation']['run_ids'] == [run_id]
+
+    premature_claim = client.post(
+        f'/investigations/{investigation_id}/claims',
+        json={
+            'statement': 'The nonlinear model is supported as the stronger Adult Income baseline.',
+            'assessment': 'supported',
+            'hypothesis_ids': [hypothesis_id],
+            'evidence': [{'run_id': run_id, 'artifact_name': 'metrics.json'}],
+        },
+    )
+    assert premature_claim.status_code == 409
+    assert premature_claim.json()['detail'] == f'run is not terminal: {run_id}'
+
+    required_artifacts = [
+        'run_manifest.json',
+        'config.json',
+        'metrics.json',
+        'artifacts_index.json',
+        'report.md',
+        'status.json',
+        'logs/',
+        'source.zip',
+    ]
+    run_dir = tmp_path / run_id
+    (run_dir / 'logs').mkdir(parents=True)
+    artifact_contents = {
+        'run_manifest.json': '{}',
+        'config.json': '{}',
+        'metrics.json': '{"rubric_score":88,"integrity_pass":1}',
+        'artifacts_index.json': '{}',
+        'report.md': '# Adult Income report\n',
+        'status.json': '{"status":"succeeded"}',
+        'source.zip': 'frozen source bundle',
+    }
+    for name, content in artifact_contents.items():
+        (run_dir / name).write_text(content)
+    (run_dir / 'logs' / 'runner.log').write_text('workspace complete\n')
+    ingest = client.post(f'/runs/{run_id}/artifacts/ingest')
+    assert ingest.status_code == 200
+    assert ingest.json()['artifact_bundle_verified'] is True
+
+    evaluate = client.post(
+        f'/investigations/{investigation_id}/runs',
+        json={'approval_id': approval_id, 'execution_id': 'adult-evaluate'},
+    )
+    assert evaluate.status_code == 201
+    evaluate_payload = evaluate.json()
+    evaluate_run_id = evaluate_payload['run']['run_id']
+    assert evaluate_payload['run']['source_execution_id'] == 'adult-evaluate'
+    assert evaluate_payload['run']['manifest']['dataset_bindings'] == {
+        'adult_test': 's3://datasets/uci-adult/adult.test'
+    }
+    assert evaluate_payload['investigation']['run_ids'] == [run_id, evaluate_run_id]
+
+    claim = client.post(
+        f'/investigations/{investigation_id}/claims',
+        json={
+            'statement': 'The frozen run supports the nonlinear model as the stronger Adult Income baseline.',
+            'assessment': 'supported',
+            'hypothesis_ids': [hypothesis_id],
+            'evidence': [{'run_id': run_id, 'artifact_name': 'metrics.json'}],
+            'submitted_by': 'test-researcher',
+        },
+    )
+    assert claim.status_code == 201
+    claim_payload = claim.json()
+    assert claim_payload['evidence'] == [
+        {
+            'run_id': run_id,
+            'artifact_name': 'metrics.json',
+            'artifact_ref': f'artifacts/{run_id}/metrics.json',
+            'artifact_sha256': sha256(
+                artifact_contents['metrics.json'].encode()
+            ).hexdigest(),
+        }
+    ]
+
+    (run_dir / 'metrics.json').write_text('{"rubric_score":99,"integrity_pass":1}')
+    drifted_claim = client.post(
+        f'/investigations/{investigation_id}/claims',
+        json={
+            'statement': 'A changed artifact must not support another scientific claim.',
+            'assessment': 'supported',
+            'hypothesis_ids': [hypothesis_id],
+            'evidence': [{'run_id': run_id, 'artifact_name': 'metrics.json'}],
+        },
+    )
+    assert drifted_claim.status_code == 409
+    assert 'no longer matches its ingested content digest' in drifted_claim.json()['detail']
+
+    context = client.get(f'/investigations/{investigation_id}/context')
+    assert context.status_code == 200
+    context_payload = context.json()
+    assert context_payload['investigation']['status'] == 'evaluating'
+    assert context_payload['investigation']['claims'][0]['claim_id'] == claim_payload['claim_id']
+    assert context_payload['current_plan']['plan_id'] == plan_payload['plan_id']
+    assert context_payload['approved_plan']['plan_id'] == plan_payload['plan_id']
+    assert context_payload['runs'][0]['status']['status'] == 'succeeded'
+    assert context_payload['runs'][1]['source_execution_id'] == 'adult-evaluate'
+
+
+def test_investigation_rejects_blank_hypothesis_after_normalization() -> None:
+    client = build_client()
+
+    question_only = client.post(
+        '/investigations',
+        json={
+            'research_question': 'Which testable hypotheses should be considered for this bounded question?',
+            'research_mode': 'exploratory',
+        },
+    )
+    assert question_only.status_code == 201
+    assert question_only.json()['hypotheses'] == []
+    approve_without_hypothesis = client.post(
+        f"/investigations/{question_only.json()['investigation_id']}/plan-approvals",
+        json={'plan_id': 'missing-plan'},
+    )
+    assert approve_without_hypothesis.status_code == 409
+    assert (
+        approve_without_hypothesis.json()['detail']
+        == 'investigation needs at least one hypothesis before plan approval'
+    )
+
+    create = client.post(
+        '/investigations',
+        json={
+            'research_question': 'Does request validation reject a hypothesis that only contains spaces?',
+            'research_mode': 'exploratory',
+            'hypotheses': ['        '],
+        },
+    )
+    assert create.status_code == 422
+
+
+def test_exploratory_hypothesis_change_invalidates_plan_approval() -> None:
+    client = build_client()
+
+    create = client.post(
+        '/investigations',
+        json={
+            'research_question': 'Which bounded analysis plan is most promising for an Adult Income follow-up experiment?',
+            'research_mode': 'exploratory',
+            'hypotheses': [
+                'Tree-based models may outperform the linear Adult Income baseline.'
+            ],
+        },
+    )
+    assert create.status_code == 201
+    investigation = create.json()
+    investigation_id = investigation['investigation_id']
+    hypothesis_id = investigation['hypotheses'][0]['hypothesis_id']
+    plan = client.post(
+        f'/investigations/{investigation_id}/plans',
+        json={
+            'title': 'Exploratory frozen workspace',
+            'rationale': 'Test one immutable analysis workspace before proposing a revision.',
+            'hypothesis_ids': [hypothesis_id],
+            'executions': [{
+                'execution_id': 'explore',
+                'objective': 'Execute one bounded exploratory workspace and preserve its evidence bundle.',
+                'experiment_type': 'research-workspace-job',
+                'workload_id': 'research-workspace-cpu-v1',
+                'data_access_scope': 'solve',
+                'workspace': {
+                    'task_bundle': {
+                        'uri': 's3://datasets/benchmarks/adult-income-v1/task.zip',
+                        'sha256': 'a' * 64,
+                    },
+                    'source_bundle': {
+                        'uri': 's3://artifacts/submissions/adult-income-v1/source.zip',
+                        'sha256': 'b' * 64,
+                    },
+                    'command': ['python3', 'run.py'],
+                },
+                'budget': {
+                    'budget_mode': 'wallclock',
+                    'max_wallclock_minutes': 10,
+                },
+                'artifact_contract': {
+                    'required': [
+                        'run_manifest.json',
+                        'config.json',
+                        'metrics.json',
+                        'artifacts_index.json',
+                        'report.md',
+                        'status.json',
+                        'logs/',
+                        'source.zip',
+                    ]
+                },
+                'evaluator_contract': {
+                    'evaluator_type': 'rubric-gated-v1',
+                    'primary_metric': {
+                        'name': 'rubric_score',
+                        'direction': 'maximize',
+                    },
+                },
+            }],
+        },
+    )
+    assert plan.status_code == 201
+
+    approve = client.post(
+        f'/investigations/{investigation_id}/plan-approvals',
+        json={'plan_id': plan.json()['plan_id']},
+    )
+    assert approve.status_code == 200
+    assert approve.json()['active_plan_approval_id']
+
+    add_hypothesis = client.post(
+        f'/investigations/{investigation_id}/hypotheses',
+        json={
+            'statement': 'Calibration quality may matter more than raw holdout accuracy for the next study.'
+        },
+    )
+    assert add_hypothesis.status_code == 201
+    updated = add_hypothesis.json()
+    assert updated['status'] == 'planning'
+    assert updated['active_plan_approval_id'] is None
+    assert len(updated['plan_approvals']) == 1
+
+    blocked_launch = client.post(
+        f'/investigations/{investigation_id}/runs',
+        json={
+            'approval_id': approve.json()['active_plan_approval_id'],
+            'execution_id': 'explore',
+        },
+    )
+    assert blocked_launch.status_code == 409
+    assert blocked_launch.json()['detail'] == 'investigation has no active plan approval'
 
 
 def test_healthz_redacts_postgres_password() -> None:

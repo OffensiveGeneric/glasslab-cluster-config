@@ -15,6 +15,7 @@ CURRENT_DOCS = [
     Path('docs/glasslab-v2/system-map-2026-07.md'),
     Path('docs/glasslab-v2/ci-policy-2026-07.md'),
     Path('docs/glasslab-v2/learning-task-flow.md'),
+    Path('docs/glasslab-v2/investigation-api-v1.md'),
     Path('docs/glasslab-v2/local-model-command-surface.md'),
     Path('docs/glasslab-v2/deprecated-api-surface-2026-07.md'),
 ]

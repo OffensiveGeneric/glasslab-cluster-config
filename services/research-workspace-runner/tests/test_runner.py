@@ -1,0 +1,198 @@
+from __future__ import annotations
+
+from hashlib import sha256
+import json
+from pathlib import Path
+import sys
+import zipfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from runner import run_from_environment
+
+
+def _zip(path: Path, files: dict[str, str]) -> str:
+    with zipfile.ZipFile(path, 'w') as handle:
+        for name, content in files.items():
+            handle.writestr(name, content)
+    return sha256(path.read_bytes()).hexdigest()
+
+
+def _environment(tmp_path: Path, *, source_digest: str) -> dict[str, str]:
+    dataset_root = tmp_path / 'datasets'
+    artifacts_root = tmp_path / 'artifacts'
+    task_path = dataset_root / 'task.zip'
+    source_path = dataset_root / 'source.zip'
+    task_digest = _zip(task_path, {'problem.md': '# Test problem\n'})
+    if not source_path.exists():
+        raise AssertionError('source fixture must be created first')
+
+    manifest = {
+        'run_id': 'run-1',
+        'budget': {'max_wallclock_minutes': 1},
+        'expected_artifacts': {
+            'required': [
+                'run_manifest.json',
+                'config.json',
+                'metrics.json',
+                'artifacts_index.json',
+                'report.md',
+                'status.json',
+                'logs/',
+                'source.zip',
+            ],
+            'optional': [],
+        },
+    }
+    config = {
+        'workspace': {
+            'task_bundle': {
+                'uri': 's3://datasets/task.zip',
+                'sha256': task_digest,
+            },
+            'source_bundle': {
+                'uri': 's3://datasets/source.zip',
+                'sha256': source_digest,
+            },
+            'working_directory': '.',
+            'command': [sys.executable, 'run.py'],
+            'output_directory': str(tmp_path / 'outputs'),
+        }
+    }
+    return {
+        'GLASSLAB_RUNNER_MANIFEST_JSON': json.dumps(manifest),
+        'GLASSLAB_GENERIC_CONFIG_JSON': json.dumps(config),
+        'GLASSLAB_GENERIC_DATASET_BINDINGS_JSON': '{}',
+        'GLASSLAB_RUNNER_EXPERIMENT_ID': 'run-1',
+        'GLASSLAB_RUNNER_ARTIFACTS_ROOT': str(artifacts_root),
+        'GLASSLAB_DATASET_ROOT': str(dataset_root),
+        'GLASSLAB_WORKSPACE_ROOT': str(tmp_path / 'work'),
+    }
+
+
+def test_verified_workspace_executes_and_writes_complete_bundle(tmp_path: Path) -> None:
+    dataset_root = tmp_path / 'datasets'
+    dataset_root.mkdir(parents=True)
+    source_path = dataset_root / 'source.zip'
+    source_digest = _zip(
+        source_path,
+        {
+            'run.py': (
+                'import json, os\n'
+                'from pathlib import Path\n'
+                'out = Path(os.environ["GLASSLAB_OUTPUT_DIR"])\n'
+                '(out / "metrics.json").write_text(json.dumps({"rubric_score": 91}))\n'
+                '(out / "report.md").write_text("# Verified report\\n")\n'
+            )
+        },
+    )
+
+    result = run_from_environment(_environment(tmp_path, source_digest=source_digest))
+
+    run_root = tmp_path / 'artifacts' / 'run-1'
+    assert result == 0
+    assert json.loads((run_root / 'status.json').read_text())['status'] == 'succeeded'
+    assert json.loads((run_root / 'metrics.json').read_text())['rubric_score'] == 91
+    assert (run_root / 'source.zip').is_file()
+    assert (run_root / 'logs' / 'runner.log').is_file()
+
+
+def test_digest_mismatch_fails_before_workspace_execution(tmp_path: Path) -> None:
+    dataset_root = tmp_path / 'datasets'
+    dataset_root.mkdir(parents=True)
+    source_path = dataset_root / 'source.zip'
+    _zip(source_path, {'run.py': 'raise SystemExit("must not execute")\n'})
+
+    result = run_from_environment(_environment(tmp_path, source_digest='0' * 64))
+
+    run_root = tmp_path / 'artifacts' / 'run-1'
+    assert result == 1
+    status = json.loads((run_root / 'status.json').read_text())
+    assert status['status'] == 'failed'
+    assert 'digest mismatch' in status['detail']
+
+
+def test_dataset_digest_is_verified_before_workspace_execution(tmp_path: Path) -> None:
+    dataset_root = tmp_path / 'datasets'
+    dataset_root.mkdir(parents=True)
+    source_path = dataset_root / 'source.zip'
+    source_digest = _zip(source_path, {'run.py': 'raise SystemExit("must not execute")\n'})
+    dataset_path = dataset_root / 'adult.data'
+    dataset_path.write_text('sample row\n')
+    env = _environment(tmp_path, source_digest=source_digest)
+    config = json.loads(env['GLASSLAB_GENERIC_CONFIG_JSON'])
+    config['dataset_contracts'] = [
+        {
+            'name': 'adult_train',
+            'asset': {
+                'uri': 's3://datasets/adult.data',
+                'sha256': 'f' * 64,
+            },
+        }
+    ]
+    env['GLASSLAB_GENERIC_CONFIG_JSON'] = json.dumps(config)
+    env['GLASSLAB_GENERIC_DATASET_BINDINGS_JSON'] = json.dumps(
+        {'adult_train': str(dataset_path)}
+    )
+
+    result = run_from_environment(env)
+
+    assert result == 1
+    status = json.loads(
+        (tmp_path / 'artifacts' / 'run-1' / 'status.json').read_text()
+    )
+    assert 'dataset digest mismatch for adult_train' in status['detail']
+
+
+def test_symlink_cannot_satisfy_required_workspace_artifact(tmp_path: Path) -> None:
+    dataset_root = tmp_path / 'datasets'
+    dataset_root.mkdir(parents=True)
+    source_path = dataset_root / 'source.zip'
+    source_digest = _zip(
+        source_path,
+        {
+            'run.py': (
+                'import os\n'
+                'from pathlib import Path\n'
+                'out = Path(os.environ["GLASSLAB_OUTPUT_DIR"])\n'
+                '(out / "metrics.json").write_text("{}")\n'
+                '(out / "report.md").symlink_to("/etc/hosts")\n'
+            )
+        },
+    )
+
+    result = run_from_environment(_environment(tmp_path, source_digest=source_digest))
+
+    run_root = tmp_path / 'artifacts' / 'run-1'
+    assert result == 1
+    status = json.loads((run_root / 'status.json').read_text())
+    assert status['status'] == 'failed'
+    assert 'report.md' in status['detail']
+    index = json.loads((run_root / 'artifacts_index.json').read_text())
+    assert all(item['name'] != 'report.md' for item in index['artifacts'])
+
+
+def test_fifo_cannot_satisfy_required_workspace_artifact(tmp_path: Path) -> None:
+    dataset_root = tmp_path / 'datasets'
+    dataset_root.mkdir(parents=True)
+    source_path = dataset_root / 'source.zip'
+    source_digest = _zip(
+        source_path,
+        {
+            'run.py': (
+                'import os\n'
+                'from pathlib import Path\n'
+                'out = Path(os.environ["GLASSLAB_OUTPUT_DIR"])\n'
+                '(out / "metrics.json").write_text("{}")\n'
+                'os.mkfifo(out / "report.md")\n'
+            )
+        },
+    )
+
+    result = run_from_environment(_environment(tmp_path, source_digest=source_digest))
+
+    run_root = tmp_path / 'artifacts' / 'run-1'
+    assert result == 1
+    status = json.loads((run_root / 'status.json').read_text())
+    assert status['status'] == 'failed'
+    assert 'report.md' in status['detail']

@@ -2,44 +2,54 @@
 
 Glasslab v2 is the backend-owned research workflow layer for the lab.
 
-It exists to turn session state into bounded, reviewable, repeatable
+It exists to turn investigation state into bounded, reviewable, repeatable
 experiments.
 
 ## Mental Model
 
 Read the product as:
 
-- session-first
+- investigation-first
 - plan-oriented
 - deterministic at the control boundary
 - bounded at execution time
 
 That means:
 
-- sessions hold durable operator state
-- source intake enriches the session
-- a current plan is derived from the session
+- investigations hold the question, hypotheses, immutable execution-graph plans,
+  approvals, runs, and claims
+- source and dataset integrations produce digest-pinned plan inputs
 - preflight decides whether that plan is runnable
-- runs are launched through approved workflow families
+- explicit approval freezes the runnable plan before launch
+- runs are launched through approved registry workloads
+- claims cite exact verified artifact bytes by SHA-256
 - comparison and decision drive the next mutation
+
+Research sessions, intake pipelines, and design drafts are compatibility
+features. Investigation execution does not depend on them.
 
 ## Primary Product Loop
 
 The intended loop is:
 
-`session -> intake -> plan -> preflight -> run -> compare -> decide -> next`
+`investigation -> hypothesis -> execution graph -> preflight -> approve -> runs -> verified evidence -> claim -> next`
 
 Compatibility aliases and older debug flows still exist, but they are not the
 product center.
 
+The first current implementation of this aggregate is documented in
+[investigation-api-v1.md](investigation-api-v1.md).
+
 ## Command Surface
 
-The canonical command path is:
+The canonical interactive path is:
 
-- `whatsapp-gateway`
-- `research-ingress`
-- `research-command-router`
+- `OpenCode`
+- exo's OpenAI-compatible endpoint
+- repo-owned tools
 - `workflow-api`
+
+WhatsApp, research ingress, and the command router are optional adapters.
 
 Primary commands:
 
@@ -68,13 +78,15 @@ The control plane.
 
 Owns:
 
-- sessions
-- source intake records
-- design drafts
+- investigations and plan-approval snapshots
+- immutable execution-graph plans
 - run creation
-- autoresearch transitions
+- evidence-backed claims
 - execution preflight
 - evaluator/report handoff
+
+It also still hosts compatibility sessions, source intake records, design
+drafts, and autoresearch transitions while those callers migrate.
 
 ### `workflow-registry`
 

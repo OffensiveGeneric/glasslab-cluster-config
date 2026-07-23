@@ -119,6 +119,7 @@ printf '[rollout-workflow-api-live] applying safe workflow-api prerequisites\n'
 kubectl apply -n "$NAMESPACE" -f kubeadm/glasslab-v2/config/10-workflow-api-configmap.yaml
 kubectl apply -n "$NAMESPACE" -f kubeadm/glasslab-v2/workflow-api/10-rbac.yaml
 kubectl apply -n "$NAMESPACE" -f kubeadm/glasslab-v2/workflow-api/30-service.yaml
+kubectl apply -n "$NAMESPACE" -f kubeadm/glasslab-v2/workflow-api/40-workspace-network-policy.yaml
 kubectl apply -n "$NAMESPACE" -f "$LOCAL_SECRET"
 
 printf '[rollout-workflow-api-live] applying deployment and pinning image to %s\n' "$IMAGE_REF"

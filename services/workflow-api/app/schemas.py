@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import PurePosixPath
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from services.common.schemas import ArtifactsIndex, ExpectedArtifactsSpec, RunManifest, RunStatus
 
@@ -983,6 +984,494 @@ class RunRecord(BaseModel):
     reported_metrics: dict[str, Any] = Field(default_factory=dict)
     artifact_refs: dict[str, str] = Field(default_factory=dict)
     runtime_summary: dict[str, Any] = Field(default_factory=dict)
+    investigation_id: str | None = None
+    source_plan_id: str | None = None
+    source_approval_id: str | None = None
+    source_execution_id: str | None = None
+    plan_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+    artifact_bundle_verified: bool = False
+
+
+class InvestigationHypothesisRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    hypothesis_id: str
+    statement: str = Field(min_length=8)
+    created_at: datetime
+    submitted_by: str
+
+
+class ImmutableAssetReference(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    uri: str = Field(min_length=3)
+    sha256: str = Field(min_length=64, max_length=64, pattern=r'^[0-9a-f]{64}$')
+    media_type: str | None = None
+
+    @field_validator('uri')
+    @classmethod
+    def normalize_asset_uri(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError('asset reference values must not be blank')
+        prefixes = (
+            's3://datasets/',
+            's3://glasslab-datasets/',
+            's3://artifacts/',
+        )
+        prefix = next(
+            (candidate for candidate in prefixes if cleaned.startswith(candidate)),
+            None,
+        )
+        if prefix is None:
+            raise ValueError(
+                'immutable investigation assets must use an approved data or '
+                'artifact plane'
+            )
+        relative = cleaned.removeprefix(prefix)
+        path = PurePosixPath(relative)
+        if (
+            not relative
+            or path.as_posix() == '.'
+            or path.is_absolute()
+            or '..' in path.parts
+        ):
+            raise ValueError('immutable investigation asset path is invalid')
+        return cleaned
+
+    @field_validator('media_type')
+    @classmethod
+    def normalize_asset_media_type(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError('asset reference values must not be blank')
+        return cleaned
+
+
+class InvestigationDatasetBinding(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    name: str = Field(min_length=1)
+    asset: ImmutableAssetReference
+    role: Literal['train', 'validation', 'test', 'reference', 'labels', 'input']
+    contains_labels: bool = False
+    access_scopes: list[Literal['solve', 'train', 'validate', 'evaluate']] = Field(
+        default_factory=lambda: ['solve', 'train', 'validate', 'evaluate'],
+        min_length=1,
+    )
+
+    @field_validator('name')
+    @classmethod
+    def normalize_dataset_binding_text(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError('dataset binding values must not be blank')
+        return cleaned
+
+    @field_validator('access_scopes')
+    @classmethod
+    def validate_unique_access_scopes(
+        cls,
+        value: list[Literal['solve', 'train', 'validate', 'evaluate']],
+    ) -> list[Literal['solve', 'train', 'validate', 'evaluate']]:
+        if len(set(value)) != len(value):
+            raise ValueError('dataset access_scopes must be unique')
+        return value
+
+
+class InvestigationWorkspaceSpec(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    task_bundle: ImmutableAssetReference
+    source_bundle: ImmutableAssetReference
+    working_directory: str = '.'
+    command: list[str] = Field(min_length=1)
+    output_directory: Literal['/outputs'] = '/outputs'
+    network_policy: Literal['none', 'approved-egress'] = 'none'
+
+    @field_validator('working_directory')
+    @classmethod
+    def validate_working_directory(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError('working_directory must not be blank')
+        if cleaned.startswith('/'):
+            raise ValueError('working_directory must be relative to the frozen workspace')
+        if '..' in cleaned.split('/'):
+            raise ValueError('working_directory must stay inside the frozen workspace')
+        return cleaned
+
+    @field_validator('command')
+    @classmethod
+    def validate_workspace_command(cls, value: list[str]) -> list[str]:
+        cleaned = [str(item).strip() for item in value]
+        if not cleaned or any(not item for item in cleaned):
+            raise ValueError('workspace command entries must not be blank')
+        return cleaned
+
+
+class InvestigationExecutionSpec(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    execution_id: str = Field(min_length=1)
+    objective: str = Field(min_length=8)
+    experiment_type: str = Field(min_length=3)
+    workload_id: str = Field(min_length=3)
+    data_access_scope: Literal['solve', 'train', 'validate', 'evaluate']
+    depends_on: list[str] = Field(default_factory=list)
+    workspace: InvestigationWorkspaceSpec
+    dataset_bindings: list[InvestigationDatasetBinding] = Field(default_factory=list)
+    config_payload: dict[str, Any] = Field(default_factory=dict)
+    budget: BudgetContract
+    artifact_contract: ExpectedArtifactsSpec
+    evaluator_contract: EvaluatorContract
+
+    @field_validator('execution_id', 'objective', 'experiment_type', 'workload_id')
+    @classmethod
+    def normalize_execution_text(cls, value: str) -> str:
+        cleaned = ' '.join(value.split()).strip()
+        if not cleaned:
+            raise ValueError('execution values must not be blank')
+        return cleaned
+
+    @field_validator('depends_on')
+    @classmethod
+    def validate_unique_dependencies(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value if item.strip()]
+        if len(set(cleaned)) != len(cleaned):
+            raise ValueError('execution depends_on entries must be unique')
+        return cleaned
+
+    @model_validator(mode='after')
+    def validate_execution_contract(self) -> 'InvestigationExecutionSpec':
+        if self.budget.max_wallclock_minutes is None:
+            raise ValueError('budget.max_wallclock_minutes is required for an executable plan')
+        if self.execution_id in self.depends_on:
+            raise ValueError('execution cannot depend on itself')
+        names = [binding.name for binding in self.dataset_bindings]
+        if len(set(names)) != len(names):
+            raise ValueError('dataset binding names must be unique')
+        return self
+
+
+class InvestigationPlanRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    plan_id: str
+    revision: int = Field(ge=1)
+    created_at: datetime
+    submitted_by: str
+    title: str = Field(min_length=3)
+    rationale: str = Field(min_length=8)
+    hypothesis_ids: list[str] = Field(min_length=1)
+    executions: list[InvestigationExecutionSpec] = Field(min_length=1)
+
+    @model_validator(mode='after')
+    def validate_execution_graph(self) -> 'InvestigationPlanRecord':
+        execution_ids = [execution.execution_id for execution in self.executions]
+        if len(set(execution_ids)) != len(execution_ids):
+            raise ValueError('plan execution_ids must be unique')
+        known_ids = set(execution_ids)
+        for execution in self.executions:
+            unknown = sorted(set(execution.depends_on) - known_ids)
+            if unknown:
+                raise ValueError(
+                    f'execution {execution.execution_id} has unknown dependencies: '
+                    + ', '.join(unknown)
+                )
+
+        remaining = {
+            execution.execution_id: set(execution.depends_on)
+            for execution in self.executions
+        }
+        resolved: set[str] = set()
+        while remaining:
+            ready = {
+                execution_id
+                for execution_id, dependencies in remaining.items()
+                if dependencies <= resolved
+            }
+            if not ready:
+                raise ValueError('plan execution dependencies must form an acyclic graph')
+            resolved.update(ready)
+            for execution_id in ready:
+                del remaining[execution_id]
+        return self
+
+
+class InvestigationPlanSnapshot(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    investigation_id: str
+    research_mode: Literal['exploratory', 'confirmatory']
+    research_question: str
+    hypotheses: list[InvestigationHypothesisRecord] = Field(min_length=1)
+    plan: InvestigationPlanRecord
+
+
+class InvestigationPlanApprovalRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    approval_id: str
+    plan_id: str
+    plan_sha256: str = Field(min_length=64, max_length=64)
+    approved_at: datetime
+    approved_by: str
+    hypothesis_ids: list[str] = Field(min_length=1)
+    research_mode: Literal['exploratory', 'confirmatory']
+    plan_snapshot: InvestigationPlanSnapshot
+    note: str | None = None
+
+
+class InvestigationEvidenceReference(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    run_id: str
+    artifact_name: str = Field(min_length=1)
+    artifact_ref: str = Field(min_length=1)
+    artifact_sha256: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r'^[0-9a-f]{64}$',
+    )
+
+
+class InvestigationClaimRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    claim_id: str
+    statement: str = Field(min_length=8)
+    assessment: Literal['supported', 'refuted', 'inconclusive']
+    hypothesis_ids: list[str] = Field(min_length=1)
+    evidence: list[InvestigationEvidenceReference] = Field(min_length=1)
+    created_at: datetime
+    submitted_by: str
+    note: str | None = None
+
+
+class InvestigationCreateRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    title: str | None = None
+    research_question: str = Field(min_length=12)
+    research_mode: Literal['exploratory', 'confirmatory'] = 'exploratory'
+    hypotheses: list[str] = Field(default_factory=list)
+    priorities: list[str] = Field(default_factory=list)
+    submitted_by: str | None = None
+
+    @field_validator('research_question')
+    @classmethod
+    def normalize_research_question(cls, value: str) -> str:
+        cleaned = ' '.join(value.split()).strip()
+        if len(cleaned) < 12:
+            raise ValueError('research_question must be at least 12 characters')
+        return cleaned
+
+    @field_validator('hypotheses')
+    @classmethod
+    def validate_unique_hypotheses(cls, value: list[str]) -> list[str]:
+        if not value:
+            return []
+        cleaned = [' '.join(item.split()).strip() for item in value if item.strip()]
+        if not cleaned:
+            raise ValueError('hypotheses must not contain only blank entries')
+        if any(len(item) < 8 for item in cleaned):
+            raise ValueError('hypotheses must be at least 8 characters')
+        deduped = list(dict.fromkeys(cleaned))
+        if len(deduped) != len(cleaned):
+            raise ValueError('hypotheses entries must be unique')
+        return deduped
+
+    @field_validator('priorities')
+    @classmethod
+    def validate_unique_priorities(cls, value: list[str]) -> list[str]:
+        cleaned = [' '.join(item.split()).strip() for item in value if item.strip()]
+        deduped = list(dict.fromkeys(cleaned))
+        if len(deduped) != len(cleaned):
+            raise ValueError('priorities entries must be unique')
+        return deduped
+
+
+class InvestigationHypothesisCreateRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    statement: str = Field(min_length=8)
+    submitted_by: str | None = None
+
+    @field_validator('statement')
+    @classmethod
+    def normalize_hypothesis_statement(cls, value: str) -> str:
+        cleaned = ' '.join(value.split()).strip()
+        if len(cleaned) < 8:
+            raise ValueError('statement must be at least 8 characters')
+        return cleaned
+
+
+class InvestigationPlanApproveRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    plan_id: str = Field(min_length=1)
+    approved_by: str | None = None
+    note: str | None = None
+
+    @field_validator('note')
+    @classmethod
+    def normalize_approval_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = ' '.join(value.split()).strip()
+        return cleaned or None
+
+
+class InvestigationPlanCreateRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    title: str = Field(min_length=3)
+    rationale: str = Field(min_length=8)
+    hypothesis_ids: list[str] = Field(min_length=1)
+    executions: list[InvestigationExecutionSpec] = Field(min_length=1)
+    submitted_by: str | None = None
+
+    @model_validator(mode='after')
+    def validate_execution_graph(self) -> 'InvestigationPlanCreateRequest':
+        InvestigationPlanRecord(
+            plan_id='validation',
+            revision=1,
+            created_at=datetime.min,
+            submitted_by=self.submitted_by or 'validation',
+            title=self.title,
+            rationale=self.rationale,
+            hypothesis_ids=self.hypothesis_ids,
+            executions=self.executions,
+        )
+        return self
+
+    @field_validator('title', 'rationale')
+    @classmethod
+    def normalize_plan_text(cls, value: str) -> str:
+        cleaned = ' '.join(value.split()).strip()
+        if not cleaned:
+            raise ValueError('plan text must not be blank')
+        return cleaned
+
+    @field_validator('hypothesis_ids')
+    @classmethod
+    def validate_plan_hypothesis_ids(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value if item.strip()]
+        if not cleaned:
+            raise ValueError('at least one hypothesis_id is required')
+        if len(set(cleaned)) != len(cleaned):
+            raise ValueError('hypothesis_ids entries must be unique')
+        return cleaned
+
+
+class InvestigationRunCreateRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    approval_id: str = Field(min_length=1)
+    execution_id: str = Field(min_length=1)
+
+    @field_validator('approval_id', 'execution_id')
+    @classmethod
+    def normalize_run_identifier(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError('approval_id must not be blank')
+        return cleaned
+
+
+class InvestigationEvidenceRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    run_id: str = Field(min_length=1)
+    artifact_name: str = Field(min_length=1)
+
+    @field_validator('run_id', 'artifact_name')
+    @classmethod
+    def normalize_evidence_identifier(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError('evidence identifiers must not be empty')
+        return cleaned
+
+
+class InvestigationClaimCreateRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    statement: str = Field(min_length=8)
+    assessment: Literal['supported', 'refuted', 'inconclusive']
+    hypothesis_ids: list[str] = Field(min_length=1)
+    evidence: list[InvestigationEvidenceRequest] = Field(min_length=1)
+    submitted_by: str | None = None
+    note: str | None = None
+
+    @field_validator('statement')
+    @classmethod
+    def normalize_claim_statement(cls, value: str) -> str:
+        cleaned = ' '.join(value.split()).strip()
+        if len(cleaned) < 8:
+            raise ValueError('statement must be at least 8 characters')
+        return cleaned
+
+    @field_validator('hypothesis_ids')
+    @classmethod
+    def validate_unique_claim_hypotheses(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value if item.strip()]
+        if not cleaned:
+            raise ValueError('at least one hypothesis_id is required')
+        deduped = list(dict.fromkeys(cleaned))
+        if len(deduped) != len(cleaned):
+            raise ValueError('hypothesis_ids entries must be unique')
+        return deduped
+
+    @field_validator('note')
+    @classmethod
+    def normalize_claim_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = ' '.join(value.split()).strip()
+        return cleaned or None
+
+
+class InvestigationRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    investigation_id: str
+    created_at: datetime
+    updated_at: datetime
+    status: Literal['planning', 'approved', 'running', 'evaluating', 'completed', 'paused']
+    title: str
+    research_question: str
+    research_mode: Literal['exploratory', 'confirmatory']
+    priorities: list[str] = Field(default_factory=list)
+    hypotheses: list[InvestigationHypothesisRecord] = Field(default_factory=list)
+    plans: list[InvestigationPlanRecord] = Field(default_factory=list)
+    plan_approvals: list[InvestigationPlanApprovalRecord] = Field(default_factory=list)
+    active_plan_approval_id: str | None = None
+    run_ids: list[str] = Field(default_factory=list)
+    claims: list[InvestigationClaimRecord] = Field(default_factory=list)
+    submitted_by: str
+
+
+class InvestigationRunResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    investigation: InvestigationRecord
+    approval: InvestigationPlanApprovalRecord
+    plan: InvestigationPlanRecord
+    execution: InvestigationExecutionSpec
+    run: RunRecord
+
+
+class InvestigationContextResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    investigation: InvestigationRecord
+    current_plan: InvestigationPlanRecord | None = None
+    approved_plan: InvestigationPlanRecord | None = None
+    runs: list[RunRecord] = Field(default_factory=list)
 
 
 class PaperPipelineReportState(BaseModel):

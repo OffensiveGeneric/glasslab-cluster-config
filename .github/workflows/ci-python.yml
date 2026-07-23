@@ -65,6 +65,11 @@ jobs:
             requirements: services/workflow-api/requirements.txt
             pythonpath: ../..:.
             tests: tests/test_api.py tests/test_persistence.py tests/test_run_artifacts.py tests/test_schedule_execution.py tests/test_validation.py
+          - name: research-workspace-runner
+            workdir: services/research-workspace-runner
+            requirements: services/research-workspace-runner/requirements.txt
+            pythonpath: .
+            tests: tests/test_runner.py
 
     steps:
       - name: Checkout

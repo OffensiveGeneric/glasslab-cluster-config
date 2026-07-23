@@ -1,0 +1,12 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: glasslab-research-workspace-deny-egress
+  namespace: glasslab-v2
+spec:
+  podSelector:
+    matchLabels:
+      glasslab.io/network-policy: none
+  policyTypes:
+    - Egress
+  egress: []
