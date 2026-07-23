@@ -2,6 +2,21 @@
 
 Deployment manifests for the v2 `workflow-api` service live here.
 
+Do not apply this directory wholesale as part of a live rollout. The
+`10-secret.example` file is documentation only; the live DSN secret is an
+ignored `.44`-local file at:
+
+```text
+kubeadm/glasslab-v2/secrets/15-workflow-api.local.yaml
+```
+
+Use the guarded rollout helper from the canonical `.44` checkout instead:
+
+```bash
+cd /home/glasslab/cluster-config
+./scripts/rollout-workflow-api-live.sh --sync
+```
+
 Current prerequisite boundary for execution preflight and run submission:
 
 - shared datasets PVC: `glasslab-shared-datasets`
