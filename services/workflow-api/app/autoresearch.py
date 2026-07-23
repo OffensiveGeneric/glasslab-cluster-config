@@ -18,7 +18,7 @@ from .job_submission import JobSubmitter
 from .persistence import RunStore
 from .registry import WorkflowRegistry
 from .run_artifacts import artifact_run_dir, resolve_run_status
-from .schemas import AutoresearchCampaignCreateRequest, AutoresearchCampaignRecord, AutoresearchCampaignSummaryResponse, AutoresearchDecisionRecord, AutoresearchIterationRecord, AutoresearchSuggestedMutation, DesignDraftRecord, InterpretationRecord, MethodologyDraftRecord, RunCreateRequest, RunRecord
+from .schemas import AutoresearchCampaignCreateRequest, AutoresearchCampaignRecord, AutoresearchCampaignSummaryResponse, AutoresearchDecisionRecord, AutoresearchIterationRecord, AutoresearchSuggestedMutation, DesignDraftRecord, EvaluatorContract, InterpretationRecord, MethodologyDraftRecord, RunCreateRequest, RunRecord
 from .session_helpers import get_required_research_session, touch_research_session
 from .technique_catalog import match_catalog_records_for_intake
 
@@ -68,6 +68,37 @@ def _extract_metric_hints(design: DesignDraftRecord) -> list[str]:
     if not metrics:
         metrics.append('accuracy')
     return _dedupe(metrics)
+
+
+def _metric_direction(metric_name: str) -> str:
+    lowered = metric_name.lower()
+    if lowered in {'loss', 'rmse', 'mae', 'mse', 'error_rate', 'latency', 'peak_vram_gb'} or lowered.endswith('_loss'):
+        return 'minimize'
+    return 'maximize'
+
+
+def _default_evaluator_contract_for_design(design: DesignDraftRecord) -> EvaluatorContract | None:
+    method_spec = design.method_spec
+    if method_spec is not None:
+        if method_spec.evaluator_contract is not None:
+            return method_spec.evaluator_contract
+        metrics = list(method_spec.metrics)
+    else:
+        metrics = []
+    if not metrics:
+        metrics = _extract_metric_hints(design)
+    metrics = _dedupe(metrics)
+    if not metrics:
+        return None
+    primary_metric = metrics[0]
+    return EvaluatorContract(
+        evaluator_type=f'{design.workflow_id}-method-spec-v1',
+        primary_metric={
+            'name': primary_metric,
+            'direction': _metric_direction(primary_metric),
+            'minimum_effect': 0.0,
+        },
+    )
 
 
 def _extract_dataset_hints(design: DesignDraftRecord) -> list[str]:
@@ -353,6 +384,8 @@ def build_autoresearch_campaign(
         max_iterations=request.max_iterations,
         evaluation_policy=request.evaluation_policy,
         mutation_policy=request.mutation_policy,
+        evaluator_contract=request.evaluator_contract,
+        budget_contract=request.budget_contract,
         notes=list(request.notes),
     )
 
@@ -662,21 +695,83 @@ def _load_metrics_payload(settings: Settings, run_id: str) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def _extract_primary_metric(metrics: dict[str, Any]) -> tuple[str | None, float | None]:
+def resolve_evaluator_contract(
+    methodology: MethodologyDraftRecord | None,
+    campaign: AutoresearchCampaignRecord | None = None,
+) -> EvaluatorContract | None:
+    method_spec = methodology.method_spec if methodology is not None else None
+    if method_spec is not None and method_spec.evaluator_contract is not None:
+        return method_spec.evaluator_contract
+    if campaign is not None:
+        return campaign.evaluator_contract
+    return None
+
+
+def _extract_primary_metric(
+    metrics: dict[str, Any],
+    evaluator_contract: EvaluatorContract | None = None,
+) -> tuple[str | None, float | None, str]:
+    if evaluator_contract is not None and evaluator_contract.primary_metric is not None:
+        name = evaluator_contract.primary_metric.name
+        value = metrics.get(name)
+        if isinstance(value, (int, float)):
+            return name, float(value), 'evaluator_contract'
+        metric_name = metrics.get('metric_name')
+        best_metric = metrics.get('best_metric')
+        if metric_name == name and isinstance(best_metric, (int, float)):
+            return name, float(best_metric), 'evaluator_contract'
+        return name, None, 'evaluator_contract'
     metric_name = metrics.get('metric_name')
     best_metric = metrics.get('best_metric')
     if isinstance(metric_name, str) and isinstance(best_metric, (int, float)):
-        return metric_name, float(best_metric)
+        return metric_name, float(best_metric), 'legacy_payload'
     preferred = ['accuracy', 'f1', 'roc_auc', 'precision', 'recall']
     for key in preferred:
         value = metrics.get(key)
         if isinstance(value, (int, float)):
-            return key, float(value)
+            return key, float(value), 'legacy_inferred'
     numeric_items = [(key, float(value)) for key, value in metrics.items() if isinstance(value, (int, float))]
     if not numeric_items:
-        return (None, None)
+        return (None, None, 'unavailable')
     numeric_items.sort(key=lambda item: item[0])
-    return numeric_items[0]
+    metric_name, metric_value = numeric_items[0]
+    return metric_name, metric_value, 'legacy_inferred'
+
+
+def _evaluate_guardrails(
+    metrics: dict[str, Any],
+    evaluator_contract: EvaluatorContract | None,
+) -> list[dict[str, Any]]:
+    if evaluator_contract is None:
+        return []
+    results: list[dict[str, Any]] = []
+    for guardrail in evaluator_contract.guardrails:
+        value = metrics.get(guardrail.name)
+        result: dict[str, Any] = {
+            'metric_name': guardrail.name,
+            'direction': guardrail.direction,
+            'required': guardrail.required,
+            'minimum': guardrail.minimum,
+            'maximum': guardrail.maximum,
+            'value': value if isinstance(value, (int, float, bool)) else None,
+            'passed': True,
+            'detail': 'guardrail satisfied',
+        }
+        if not isinstance(value, (int, float)):
+            result['passed'] = not guardrail.required
+            result['detail'] = 'required guardrail metric missing' if guardrail.required else 'optional guardrail metric missing'
+            results.append(result)
+            continue
+        numeric_value = float(value)
+        result['value'] = numeric_value
+        if guardrail.minimum is not None and numeric_value < guardrail.minimum:
+            result['passed'] = False
+            result['detail'] = f'value is below minimum {guardrail.minimum}'
+        if guardrail.maximum is not None and numeric_value > guardrail.maximum:
+            result['passed'] = False
+            result['detail'] = f'value is above maximum {guardrail.maximum}'
+        results.append(result)
+    return results
 
 
 def summarize_iteration_run(
@@ -684,16 +779,27 @@ def summarize_iteration_run(
     *,
     settings: Settings,
     submitter: JobSubmitter,
+    evaluator_contract: EvaluatorContract | None = None,
 ) -> dict[str, Any]:
     resolved = resolve_run_status(record, settings, submitter)
     metrics = _load_metrics_payload(settings, record.run_id)
-    metric_name, metric_value = _extract_primary_metric(metrics)
+    metric_name, metric_value, metric_source = _extract_primary_metric(metrics, evaluator_contract)
+    direction = (
+        evaluator_contract.primary_metric.direction
+        if evaluator_contract is not None and evaluator_contract.primary_metric is not None
+        else None
+    )
     summary: dict[str, Any] = {
         'run_status': resolved.status,
         'run_detail': resolved.detail,
         'primary_metric_name': metric_name,
         'primary_metric_value': metric_value,
+        'primary_metric_source': metric_source,
+        'primary_metric_direction': direction,
     }
+    if evaluator_contract is not None:
+        summary['evaluator_type'] = evaluator_contract.evaluator_type
+        summary['guardrails'] = _evaluate_guardrails(metrics, evaluator_contract)
     if metrics:
         summary['metrics'] = metrics
     return summary
@@ -702,10 +808,17 @@ def summarize_iteration_run(
 def build_iteration_comparison(
     child_summary: dict[str, Any],
     parent_summary: dict[str, Any] | None,
+    evaluator_contract: EvaluatorContract | None = None,
 ) -> dict[str, Any]:
+    primary_metric = evaluator_contract.primary_metric if evaluator_contract is not None else None
+    direction = primary_metric.direction if primary_metric is not None else child_summary.get('primary_metric_direction')
+    minimum_effect = primary_metric.minimum_effect if primary_metric is not None else 0.0
     comparison: dict[str, Any] = {
         'baseline_available': parent_summary is not None,
         'metric_name': child_summary.get('primary_metric_name'),
+        'direction': direction,
+        'minimum_effect': minimum_effect,
+        'comparable': False,
     }
     if parent_summary is None:
         comparison['detail'] = 'no prior scored baseline is available'
@@ -718,9 +831,13 @@ def build_iteration_comparison(
     if not isinstance(child_value, (int, float)) or not isinstance(parent_value, (int, float)):
         comparison['detail'] = 'numeric metrics unavailable for automatic comparison'
         return comparison
+    raw_delta = float(child_value) - float(parent_value)
+    normalized_delta = raw_delta if direction != 'minimize' else -raw_delta
     comparison['baseline_value'] = parent_value
     comparison['candidate_value'] = child_value
-    comparison['delta'] = round(float(child_value) - float(parent_value), 6)
+    comparison['delta'] = round(raw_delta, 6)
+    comparison['normalized_delta'] = round(normalized_delta, 6)
+    comparison['comparable'] = True
     comparison['detail'] = 'numeric comparison computed'
     return comparison
 
@@ -729,20 +846,33 @@ def build_decision(
     iteration: AutoresearchIterationRecord,
     child_summary: dict[str, Any],
     comparison_summary: dict[str, Any],
+    evaluator_contract: EvaluatorContract | None = None,
 ) -> tuple[str, str]:
     run_status = str(child_summary.get('run_status', 'unknown'))
     if run_status in {'failed', 'rejected'}:
         return ('discard', f'Run ended in terminal failure state: {run_status}.')
-    delta = comparison_summary.get('delta')
+    if evaluator_contract is None or evaluator_contract.primary_metric is None:
+        return ('escalate_for_review', 'Automatic scientific decisions require an approved evaluator contract with a primary metric.')
+    failed_guardrails = [
+        guardrail
+        for guardrail in child_summary.get('guardrails', [])
+        if isinstance(guardrail, dict) and guardrail.get('passed') is False
+    ]
+    if failed_guardrails:
+        names = ', '.join(str(item.get('metric_name')) for item in failed_guardrails[:3])
+        return ('escalate_for_review', f'Candidate violates evaluator guardrail(s): {names}.')
+    delta = comparison_summary.get('normalized_delta')
     metric_name = comparison_summary.get('metric_name')
+    direction = comparison_summary.get('direction') or evaluator_contract.primary_metric.direction
+    minimum_effect = float(comparison_summary.get('minimum_effect') or evaluator_contract.primary_metric.minimum_effect)
     if isinstance(delta, (int, float)) and metric_name:
-        if delta > 0.01:
-            return ('keep', f'Candidate improved {metric_name} by {delta:.4f} over the baseline.')
-        if delta < -0.01:
-            return ('discard', f'Candidate regressed {metric_name} by {abs(delta):.4f} relative to the baseline.')
-        return ('escalate_for_review', f'Candidate changed {metric_name} by {delta:.4f}; review is required.')
+        if delta >= minimum_effect:
+            return ('keep', f'Candidate improved {metric_name} by {delta:.4f} over the baseline under the {direction} contract.')
+        if delta <= -minimum_effect:
+            return ('discard', f'Candidate regressed {metric_name} by {abs(delta):.4f} relative to the baseline under the {direction} contract.')
+        return ('escalate_for_review', f'Candidate changed {metric_name} by {delta:.4f}; minimum effect is {minimum_effect:.4f}.')
     if run_status == 'succeeded' and isinstance(child_summary.get('primary_metric_value'), (int, float)):
-        return ('keep', 'Candidate produced a successful bounded run with scored metrics, but no trusted baseline was available.')
+        return ('keep', 'Candidate produced the first successful bounded run under the approved evaluator contract.')
     return ('escalate_for_review', 'Insufficient evidence for an automatic keep/discard decision.')
 
 
@@ -761,6 +891,7 @@ def build_model_comparison_rows(
         models = draft.candidate_models or draft.architectures or draft.baselines
         metric_name = iteration.score_summary.get('primary_metric_name')
         metric_value = iteration.score_summary.get('primary_metric_value')
+        metric_direction = iteration.score_summary.get('primary_metric_direction')
         metrics_payload = iteration.score_summary.get('metrics', {})
         best_model = metrics_payload.get('best_model') if isinstance(metrics_payload, dict) else None
         technique_components = metrics_payload.get('technique_components') if isinstance(metrics_payload, dict) else None
@@ -774,6 +905,7 @@ def build_model_comparison_rows(
                 'best_model': best_model,
                 'primary_metric_name': metric_name,
                 'primary_metric_value': metric_value,
+                'primary_metric_direction': metric_direction,
                 'technique_components': technique_components if isinstance(technique_components, dict) else {},
                 'readiness_components': readiness_components if isinstance(readiness_components, dict) else {},
                 'decision': decision.decision_type if decision is not None else iteration.decision,
@@ -785,7 +917,11 @@ def build_model_comparison_rows(
     rows.sort(
         key=lambda row: (
             0 if row.get('decision') == 'keep' else 1,
-            -(float(row['primary_metric_value']) if isinstance(row.get('primary_metric_value'), (int, float)) else -1e9),
+            (
+                float(row['primary_metric_value'])
+                if row.get('primary_metric_direction') == 'minimize' and isinstance(row.get('primary_metric_value'), (int, float))
+                else -(float(row['primary_metric_value']) if isinstance(row.get('primary_metric_value'), (int, float)) else -1e9)
+            ),
             row['iteration_id'],
         )
     )
@@ -806,7 +942,13 @@ def refresh_campaign_iterations(
         if run is None:
             refreshed.append(iteration)
             continue
-        score_summary = summarize_iteration_run(run, settings=settings, submitter=submitter)
+        draft = store.get_methodology_draft(iteration.child_methodology_draft_id)
+        score_summary = summarize_iteration_run(
+            run,
+            settings=settings,
+            submitter=submitter,
+            evaluator_contract=resolve_evaluator_contract(draft, campaign),
+        )
         run_status = str(score_summary.get('run_status', 'unknown'))
         next_status = iteration.status
         if iteration.decision is None:
@@ -1408,6 +1550,8 @@ def build_campaign_and_seed(
         source_design_id=design.design_id,
         objective=objective,
     )
+    if campaign.evaluator_contract is None:
+        campaign = campaign.model_copy(update={'evaluator_contract': _default_evaluator_contract_for_design(design)})
     seed = build_seed_methodology_draft(campaign, design, workflow)
     campaign = campaign.model_copy(
         update={

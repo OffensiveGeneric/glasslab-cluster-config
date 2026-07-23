@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import logging
+import re
 from typing import Any
 from urllib.parse import urlparse
 from urllib import error as urllib_error
@@ -239,7 +240,11 @@ def derive_design_from_intake(intake: IntakeRecord, workflow: WorkflowRegistryEn
     declared_inputs: dict[str, Any] = {}
     design_notes: list[str] = []
 
-    explicit_dataset_uri = next(
+    explicit_dataset_uri = None
+    concrete_dataset_match = re.search(r'(s3://\S+|file://\S+|/mnt/\S+)', intake.raw_request)
+    if concrete_dataset_match:
+        explicit_dataset_uri = concrete_dataset_match.group(1).rstrip('.,);')
+    explicit_dataset_uri = explicit_dataset_uri or next(
         (
             ref
             for ref in intake.source_refs

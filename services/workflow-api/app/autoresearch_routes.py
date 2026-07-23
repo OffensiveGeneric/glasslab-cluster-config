@@ -19,6 +19,7 @@ from .autoresearch import (
     get_next_launchable_methodology_draft,
     get_required_campaign,
     methodology_to_run_request,
+    resolve_evaluator_contract,
     summarize_campaign,
     summarize_iteration_run,
     write_autoresearch_notebook_draft,
@@ -77,7 +78,9 @@ def register_autoresearch_routes(
         child_run = store.get_run(iteration.run_id)
         if child_run is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='run not found for iteration')
-        child_summary = summarize_iteration_run(child_run, settings=settings, submitter=submitter)
+        child_draft = store.get_methodology_draft(iteration.child_methodology_draft_id)
+        evaluator_contract = resolve_evaluator_contract(child_draft, campaign)
+        child_summary = summarize_iteration_run(child_run, settings=settings, submitter=submitter, evaluator_contract=evaluator_contract)
         if iteration.decision is not None:
             existing = next(
                 (
@@ -109,9 +112,15 @@ def register_autoresearch_routes(
         if baseline_iteration is not None:
             baseline_run = store.get_run(baseline_iteration.run_id)
             if baseline_run is not None:
-                parent_summary = summarize_iteration_run(baseline_run, settings=settings, submitter=submitter)
-        comparison_summary = build_iteration_comparison(child_summary, parent_summary)
-        decision_type, rationale = build_decision(iteration, child_summary, comparison_summary)
+                baseline_draft = store.get_methodology_draft(baseline_iteration.child_methodology_draft_id)
+                parent_summary = summarize_iteration_run(
+                    baseline_run,
+                    settings=settings,
+                    submitter=submitter,
+                    evaluator_contract=resolve_evaluator_contract(baseline_draft, campaign) or evaluator_contract,
+                )
+        comparison_summary = build_iteration_comparison(child_summary, parent_summary, evaluator_contract=evaluator_contract)
+        decision_type, rationale = build_decision(iteration, child_summary, comparison_summary, evaluator_contract=evaluator_contract)
         decision = AutoresearchDecisionRecord(
             decision_id=uuid4().hex,
             campaign_id=campaign.campaign_id,
@@ -137,7 +146,6 @@ def register_autoresearch_routes(
         )
         store.save_autoresearch_iteration(updated_iteration)
 
-        child_draft = store.get_methodology_draft(iteration.child_methodology_draft_id)
         if child_draft is not None:
             child_draft = child_draft.model_copy(
                 update={
@@ -289,7 +297,12 @@ def register_autoresearch_routes(
             run_purpose='autoresearch-validation',
             session_id=campaign.session_id,
         )
-        score_summary = summarize_iteration_run(run, settings=settings, submitter=submitter)
+        score_summary = summarize_iteration_run(
+            run,
+            settings=settings,
+            submitter=submitter,
+            evaluator_contract=resolve_evaluator_contract(draft, campaign),
+        )
         iteration = AutoresearchIterationRecord(
             iteration_id=uuid4().hex,
             campaign_id=campaign.campaign_id,
@@ -381,7 +394,12 @@ def register_autoresearch_routes(
                 run_purpose='autoresearch-validation',
                 session_id=campaign.session_id,
             )
-            score_summary = summarize_iteration_run(run, settings=settings, submitter=submitter)
+            score_summary = summarize_iteration_run(
+                run,
+                settings=settings,
+                submitter=submitter,
+                evaluator_contract=resolve_evaluator_contract(draft, campaign),
+            )
             iteration = AutoresearchIterationRecord(
                 iteration_id=uuid4().hex,
                 campaign_id=campaign.campaign_id,
@@ -481,7 +499,13 @@ def register_autoresearch_routes(
             run = store.get_run(iteration.run_id)
             if run is None:
                 continue
-            summary = summarize_iteration_run(run, settings=settings, submitter=submitter)
+            draft = store.get_methodology_draft(iteration.child_methodology_draft_id)
+            summary = summarize_iteration_run(
+                run,
+                settings=settings,
+                submitter=submitter,
+                evaluator_contract=resolve_evaluator_contract(draft, campaign),
+            )
             if str(summary.get('run_status')) == 'succeeded' and (
                 iteration.decision is None or (
                     iteration.decision == 'escalate_for_review'

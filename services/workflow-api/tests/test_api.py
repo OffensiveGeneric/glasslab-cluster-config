@@ -13,7 +13,7 @@ from app.config import Settings
 import app.autoresearch as autoresearch_module
 import app.main as main_module
 import app.source_documents as source_documents
-from app.schemas import AutoresearchDecisionRecord, AutoresearchIterationRecord
+from app.schemas import AutoresearchDecisionRecord, AutoresearchIterationRecord, EvaluatorContract
 from app.stage_interpretation import build_interpretation_record_from_agent_draft, validate_interpretation_agent_draft
 from app.main import create_app
 from app.persistence import InMemoryRunStore
@@ -4972,6 +4972,10 @@ def test_autoresearch_campaign_happy_path(tmp_path) -> None:
             'source_design_id': design_payload['design_id'],
             'objective': 'Compare a small set of approved tabular methodology variants on Titanic.',
             'max_iterations': 2,
+            'evaluator_contract': {
+                'evaluator_type': 'titanic_tabular_v1',
+                'primary_metric': {'name': 'accuracy', 'direction': 'maximize', 'minimum_effect': 0.01},
+            },
         },
     )
     assert campaign.status_code == 201
@@ -5097,6 +5101,10 @@ def test_autoresearch_decision_uses_best_metric_payload(tmp_path) -> None:
             'source_design_id': design_payload['design_id'],
             'objective': 'Compare approved GPU methodology variants.',
             'max_iterations': 2,
+            'evaluator_contract': {
+                'evaluator_type': 'gpu_method_validation_v1',
+                'primary_metric': {'name': 'bounded_method_score', 'direction': 'maximize', 'minimum_effect': 0.01},
+            },
         },
     )
     assert campaign.status_code == 201
@@ -5125,6 +5133,65 @@ def test_autoresearch_decision_uses_best_metric_payload(tmp_path) -> None:
     assert decision_payload['decision']['decision_type'] == 'keep'
     assert decision_payload['iteration']['score_summary']['primary_metric_name'] == 'bounded_method_score'
     assert decision_payload['iteration']['score_summary']['primary_metric_value'] == 0.9375
+
+
+def test_autoresearch_contract_controls_metric_direction_and_selection() -> None:
+    contract = EvaluatorContract(
+        evaluator_type='loss_minimization_v1',
+        primary_metric={'name': 'loss', 'direction': 'minimize', 'minimum_effect': 0.02},
+        guardrails=[{'name': 'effective_rank', 'direction': 'maximize', 'minimum': 64.0, 'required': True}],
+    )
+
+    metric_name, metric_value, metric_source = autoresearch_module._extract_primary_metric(
+        {'accuracy': 0.99, 'loss': 0.30, 'effective_rank': 80.0},
+        contract,
+    )
+    assert metric_name == 'loss'
+    assert metric_value == 0.30
+    assert metric_source == 'evaluator_contract'
+
+    missing_name, missing_value, missing_source = autoresearch_module._extract_primary_metric(
+        {'accuracy': 0.99, 'effective_rank': 80.0},
+        contract,
+    )
+    assert missing_name == 'loss'
+    assert missing_value is None
+    assert missing_source == 'evaluator_contract'
+
+    child_summary = {
+        'run_status': 'succeeded',
+        'primary_metric_name': 'loss',
+        'primary_metric_value': 0.25,
+        'primary_metric_direction': 'minimize',
+        'guardrails': [{'metric_name': 'effective_rank', 'passed': True}],
+    }
+    parent_summary = {
+        'run_status': 'succeeded',
+        'primary_metric_name': 'loss',
+        'primary_metric_value': 0.30,
+        'primary_metric_direction': 'minimize',
+    }
+    comparison = autoresearch_module.build_iteration_comparison(child_summary, parent_summary, evaluator_contract=contract)
+    assert comparison['delta'] == -0.05
+    assert comparison['normalized_delta'] == 0.05
+
+    iteration = AutoresearchIterationRecord(
+        iteration_id='iter-loss',
+        campaign_id='campaign-loss',
+        child_methodology_draft_id='method-loss',
+        run_id='run-loss',
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        status='completed',
+    )
+    decision_type, rationale = autoresearch_module.build_decision(
+        iteration,
+        child_summary,
+        comparison,
+        evaluator_contract=contract,
+    )
+    assert decision_type == 'keep'
+    assert 'minimize contract' in rationale
 
 
 def test_autoresearch_decision_recomputes_stale_escalation(tmp_path) -> None:
@@ -5181,6 +5248,10 @@ def test_autoresearch_decision_recomputes_stale_escalation(tmp_path) -> None:
             'source_design_id': design_payload['design_id'],
             'objective': 'Compare approved GPU methodology variants.',
             'max_iterations': 2,
+            'evaluator_contract': {
+                'evaluator_type': 'gpu_method_validation_v1',
+                'primary_metric': {'name': 'bounded_method_score', 'direction': 'maximize', 'minimum_effect': 0.01},
+            },
         },
     )
     assert campaign.status_code == 201
