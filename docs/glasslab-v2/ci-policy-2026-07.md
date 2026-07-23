@@ -18,6 +18,8 @@ Required push coverage:
 - Python syntax across `services/`
 - full `workflow-api` tests
 - current YAML/JSON syntax validation
+- local Markdown link validation for docs changes
+- shell syntax validation for script changes
 
 The current operator path is:
 
@@ -60,6 +62,24 @@ as `*.bak`, `*.bak2`, and `*.bak3`.
 
 Do not reintroduce large inline CI scripts that scan every artifact-shaped file
 without an explicit policy.
+
+## Local Contributor Check
+
+Contributors should run:
+
+```bash
+./scripts/check-before-push.sh
+```
+
+The script mirrors the default CI signal and can be narrowed with:
+
+```bash
+./scripts/check-before-push.sh --docs
+./scripts/check-before-push.sh --configs
+./scripts/check-before-push.sh --python-core
+```
+
+Keep this script small enough that contributors actually run it before pushing.
 
 ## Cleanup Direction
 

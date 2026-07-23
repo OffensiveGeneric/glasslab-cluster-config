@@ -96,6 +96,7 @@ But the docs should teach the newer session/plan-oriented loop.
 
 If you want the current source of truth:
 
+- [CONTRIBUTING.md](CONTRIBUTING.md)
 - [docs/glasslab-v2/current/README.md](docs/glasslab-v2/current/README.md)
 - [docs/glasslab-v2/canonical-stack-2026-04.md](docs/glasslab-v2/canonical-stack-2026-04.md)
 - [docs/glasslab-v2/system-map-2026-07.md](docs/glasslab-v2/system-map-2026-07.md)
