@@ -31,10 +31,11 @@ def build_workspace_execution(
 ) -> dict[str, object]:
     return {
         'execution_id': execution_id,
+        'execution_role': 'experiment',
         'objective': f'Execute the frozen {execution_id} workspace.',
         'experiment_type': 'research-workspace-job',
         'workload_id': 'research-workspace-cpu-v1',
-        'data_access_scope': 'solve',
+        'data_access_scope': 'train',
         'depends_on': depends_on or [],
         'workspace': {
             'task_bundle': {
@@ -151,17 +152,17 @@ def test_generic_run_wallclock_budget_becomes_kubernetes_deadline() -> None:
 def test_investigation_plan_accepts_acyclic_execution_graph() -> None:
     plan = InvestigationPlanCreateRequest(
         title='Two-stage frozen plan',
-        rationale='Pre-register training and evaluation as one approved graph.',
+        rationale='Pre-register training and validation as one approved graph.',
         hypothesis_ids=['hypothesis-1'],
         executions=[
             build_workspace_execution('train'),
-            build_workspace_execution('evaluate', depends_on=['train']),
+            build_workspace_execution('validate', depends_on=['train']),
         ],
     )
 
     assert [execution.execution_id for execution in plan.executions] == [
         'train',
-        'evaluate',
+        'validate',
     ]
 
 
@@ -191,6 +192,53 @@ def test_investigation_plan_rejects_invalid_execution_graph(
             rationale='This plan must be rejected before it can be approved.',
             hypothesis_ids=['hypothesis-1'],
             executions=executions,
+        )
+
+
+def test_evaluator_requires_planned_frozen_submission_input() -> None:
+    solver = build_workspace_execution('solve')
+    solver['execution_role'] = 'solver'
+    solver['data_access_scope'] = 'solve'
+    solver['artifact_contract'] = {
+        'required': ['status.json', 'submission.zip']
+    }
+    evaluator = build_workspace_execution('evaluate', depends_on=['solve'])
+    evaluator['execution_role'] = 'evaluator'
+    evaluator['data_access_scope'] = 'evaluate'
+    evaluator['submission_inputs'] = [
+        {
+            'name': 'candidate_submission',
+            'source_execution_id': 'solve',
+            'artifact_name': 'submission.zip',
+        }
+    ]
+    evaluator['evaluator_contract'] = {
+        'evaluator_type': 'rubric-gated-v1',
+        'primary_metric': {
+            'name': 'rubric_score',
+            'direction': 'maximize',
+        },
+    }
+
+    plan = InvestigationPlanCreateRequest(
+        title='Solver and evaluator plan',
+        rationale='Freeze the solver output before the evaluator can see it.',
+        hypothesis_ids=['hypothesis-1'],
+        executions=[solver, evaluator],
+    )
+
+    assert plan.executions[1].submission_inputs[0].source_execution_id == 'solve'
+
+    evaluator['submission_inputs'] = []
+    with pytest.raises(
+        ValidationError,
+        match='require at least one frozen submission input',
+    ):
+        InvestigationPlanCreateRequest(
+            title='Unsafe evaluator plan',
+            rationale='This evaluator omits the frozen candidate submission.',
+            hypothesis_ids=['hypothesis-1'],
+            executions=[solver, evaluator],
         )
 
 

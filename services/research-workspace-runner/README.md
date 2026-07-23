@@ -13,9 +13,11 @@ The runner:
 - fails a nominally successful command when required artifacts are absent
 - rejects symlinks as artifact evidence and hashes emitted files
 
-It does not generate research code. The research agent or researcher produces
-the source bundle first; plan approval freezes that bundle before this runner
-executes it.
+It does not decide what research code to generate or what evidence to accept.
+A trusted solver harness may run inside this boundary and emit
+`submission.zip`; workflow-api then freezes that exact artifact before a
+downstream experiment or separately scoped evaluator can consume it. Supported
+or refuted claims may use only evaluator-run evidence.
 
 The Kubernetes submitter mounts only the approved input files and the current
 run's output subdirectory. The runner never needs the roots of the shared

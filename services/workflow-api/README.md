@@ -84,6 +84,7 @@ Current execution prerequisites:
 
 Current approved execution templates include coarse job shapes, not research-topic labels:
 
+- `research-workspace-cpu-v1` on `cpu-research-medium`
 - `generic-tabular-benchmark` on `cpu-small`
 - `literature-to-experiment` on `cpu-medium`
 - `gpu-experiment` on `gpu-small`
@@ -125,13 +126,15 @@ Investigation aggregate endpoints:
 - `POST /investigations/{investigation_id}/hypotheses`
 - `POST /investigations/{investigation_id}/plans`
 - `POST /investigations/{investigation_id}/plan-approvals`
+- `POST /investigations/{investigation_id}/submissions`
 - `POST /investigations/{investigation_id}/runs`
 - `POST /investigations/{investigation_id}/claims`
 
 Investigations are independent of compatibility research sessions. They
 preserve the research question, exploratory or confirmatory mode, hypothesis
-history, immutable execution graphs, approved plan hashes, stage-scoped runs,
-and content-hashed evidence-backed claims. See
+history, immutable execution graphs, approved plan hashes, explicitly frozen
+solver submissions, stage-scoped runs, evaluator-only scientific evidence, and
+content-hashed claims. See
 `docs/glasslab-v2/investigation-api-v1.md`.
 
 Compatibility session-oriented operator endpoints:
