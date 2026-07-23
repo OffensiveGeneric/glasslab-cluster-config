@@ -1175,6 +1175,11 @@ def test_create_intake_ignores_ranker_when_scores_are_ambiguous(monkeypatch) -> 
             return json.dumps(self.payload).encode('utf-8')
 
     def fake_urlopen(request_obj, timeout):
+        import json
+        from urllib.error import URLError
+        body = json.loads(request_obj.data.decode('utf-8'))
+        if 'problem_statement' not in body:
+            raise URLError('agent unavailable in test fixture')
         return FakeResponse(
             {
                 'request_id': 'ignored',
@@ -2224,7 +2229,7 @@ def test_approved_rerun_schedule_requires_succeeded_tier_two_run() -> None:
         json={'cron_expr': '15 4 * * *'},
     )
     assert rerun.status_code == 409
-    assert rerun.json()['detail'] == 'latest run must be succeeded before creating an approved rerun schedule'
+    assert rerun.json()['detail'] == 'current run must have status succeeded before creating an approved rerun schedule'
 
 
 def test_create_run_from_latest_ready_design_draft() -> None:
@@ -2593,7 +2598,7 @@ def test_create_run_from_latest_design_draft_blocks_non_ready_design() -> None:
 
     run = client.post('/runs/from-latest-design-draft')
     assert run.status_code == 409
-    assert run.json()['detail'] == 'design draft is not ready_for_run'
+    assert run.json()['detail'] == 'design method_spec is not ready_for_run: dataset_uri is unresolved'
 
 
 def test_create_run_from_reviewed_literature_design_draft() -> None:
@@ -2819,7 +2824,10 @@ def test_create_pipeline_from_research_problem_runs_top_candidate(monkeypatch) -
 
     def fake_urlopen(request_obj, timeout):
         import json
+        from urllib.error import URLError
         body = json.loads(request_obj.data.decode('utf-8'))
+        if 'problem_statement' not in body:
+            raise URLError('agent unavailable in test fixture')
         assert body['problem_statement'].startswith('Find a bounded benchmark')
         return FakeResponse(
             {
@@ -2882,7 +2890,9 @@ def test_create_pipeline_from_research_problem_runs_top_candidate(monkeypatch) -
     payload = response.json()
     assert payload['chosen_paper_id'] == 'mle_bench_arxiv_2024'
     assert payload['selected_tracks'] == ['agent_evaluation']
-    assert payload['pipeline']['run']['run_purpose'] == 'paper-pipeline'
+    assert payload['pipeline']['run'] is None
+    assert payload['pipeline']['next_action'] == 'review-required'
+    assert payload['next_action'] == 'review-required'
     assert payload['pipeline']['intake']['source_refs'][0] == 'https://arxiv.org/abs/2410.07095'
 
 
@@ -3561,7 +3571,9 @@ def test_create_pipeline_from_latest_research_problem(monkeypatch) -> None:
     payload = response.json()
     assert payload['problem_statement'].startswith('Find a bounded benchmark')
     assert payload['chosen_paper_id'] == 'mle_bench_arxiv_2024'
-    assert payload['pipeline']['run']['run_purpose'] == 'paper-pipeline'
+    assert payload['pipeline']['run'] is None
+    assert payload['pipeline']['next_action'] == 'review-required'
+    assert payload['next_action'] == 'review-required'
 
 
 def test_create_and_fetch_paper_intake_queue(monkeypatch) -> None:
@@ -3728,7 +3740,7 @@ def test_stage_next_intake_from_paper_queue(monkeypatch) -> None:
     stage = client.post(f'/paper-intake-queues/{queue_id}/stage-next-intake')
     assert stage.status_code == 201
     intake = stage.json()
-    assert intake['source_refs'][0] == 'https://arxiv.org/pdf/2410.07095.pdf'
+    assert intake['source_refs'][0] == 'https://arxiv.org/abs/2410.07095'
     assert intake['document_refs'] == ['doc-1']
     assert intake['status'] == 'ready_for_design'
 
@@ -4769,7 +4781,7 @@ def test_session_execution_preflight_surfaces_interpretation_runtime_hints() -> 
         fragment in warning
         for warning in payload['warnings']
         for fragment in (
-            'interpretation recommended',
+                'interpretation-recommended',
             'interpretation preferred',
             'interpretation dataset hints:',
             'interpretation evaluation targets:',
@@ -4827,7 +4839,7 @@ def test_session_execution_preflight_flags_overfitting_split_risks() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert any('train_uri and test_uri resolve to the same dataset path' in issue for issue in payload['blocking_issues'])
-    assert any('no explicit validation split or validation strategy is declared' in warning for warning in payload['warnings'])
+    assert any('declared validation split: 0.2' in warning for warning in payload['warnings'])
 
 
 def test_declared_only_workflow_reports_not_executable() -> None:
@@ -4854,7 +4866,7 @@ def test_gpu_workflow_execution_preflight_reports_gpu_contract() -> None:
     payload = response.json()
     assert payload['workflow_id'] == 'gpu-experiment'
     assert payload['resource_profile'] == 'gpu-small'
-    assert payload['runner_image'] == 'ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.4-local'
+    assert payload['runner_image'] == 'ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.7-local'
     assert payload['resource_requests'] == {'cpu': '2', 'memory': '4Gi', 'nvidia.com/gpu': '1'}
     assert payload['resource_limits'] == {'cpu': '4', 'memory': '8Gi', 'nvidia.com/gpu': '1'}
     assert payload['node_selector'] == {

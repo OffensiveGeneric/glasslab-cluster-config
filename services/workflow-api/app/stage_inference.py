@@ -502,7 +502,7 @@ def infer_dataset_uri_hint(intake: IntakeRecord) -> str | None:
     match = re.search(r'(s3://\S+|file://\S+|/mnt/\S+)', text)
     if match:
         return match.group(1).rstrip('.,);')
-    match = re.search(r'(https?://\S+)', text)
+    match = re.search(r'(https?://\S+\.(?:csv|tsv|jsonl|json|parquet|arrow|feather|npy|npz)(?:[?#]\S*)?)', text, flags=re.IGNORECASE)
     if match:
         return match.group(1).rstrip('.,);')
     lowered = text.lower()

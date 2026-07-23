@@ -1355,23 +1355,6 @@ class ResearchSessionNextCommandResponse(BaseModel):
     launches_started: int = 0
 
 
-class StartLiteratureSearchRequest(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-
-    session_id: str = Field(min_length=1)
-    max_candidate_papers: int = Field(default=3, ge=1, le=25)
-    priorities: list[str] = Field(default_factory=list)
-    submitted_by: str | None = None
-
-
-class StartLiteratureSearchResponse(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-
-    session: ResearchSessionRecord
-    problem_id: str
-    problem_statement: str
-
-
 class PromotePaperToIntakeRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
 

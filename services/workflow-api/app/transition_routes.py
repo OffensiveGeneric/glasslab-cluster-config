@@ -24,12 +24,10 @@ from .schemas import (
     PromotePaperToIntakeResponse,
     RunCreateRequest,
     RunRecord,
-    StartLiteratureSearchRequest,
-    StartLiteratureSearchResponse,
     CreateValidationRunRequest,
     CreateValidationRunResponse,
 )
-from .session_helpers import build_research_problem_request_from_session, get_required_research_session, touch_research_session
+from .session_helpers import touch_research_session
 
 
 def build_intake_request_from_problem_candidate(
@@ -156,22 +154,6 @@ def register_transitions_routes(
     create_run_record_impl: Callable[..., RunRecord],
     build_research_problem_record_impl: Callable[..., Any],
 ) -> None:
-    @app.post('/transitions/start-literature-search', response_model=StartLiteratureSearchResponse)
-    def start_literature_search(request: StartLiteratureSearchRequest) -> StartLiteratureSearchResponse:
-        session = get_required_research_session(store, request.session_id)
-        problem_request = build_research_problem_request_from_session(session, settings)
-        problem_request.max_candidate_papers = request.max_candidate_papers
-        problem_request.priorities = request.priorities or problem_request.priorities
-        problem_record = build_research_problem_record_impl(problem_request, settings, session.session_id)
-        store.save_research_problem(problem_record)
-        updated_session = touch_research_session(store, session.session_id, latest_problem_id=problem_record.problem_id)
-        
-        return StartLiteratureSearchResponse(
-            session=updated_session,
-            problem_id=problem_record.problem_id,
-            problem_statement=problem_record.problem_statement,
-        )
-
     @app.post('/transitions/promote-paper-to-intake', response_model=PromotePaperToIntakeResponse)
     def promote_paper_to_intake(request: PromotePaperToIntakeRequest) -> PromotePaperToIntakeResponse:
         queue_record = store.get_paper_intake_queue(request.queue_id)

@@ -230,11 +230,15 @@ def register_execution_routes(
             notes=request.notes,
         )
 
-    def enrich_inputs_with_method_context(design) -> dict[str, Any]:
+    def filter_inputs_for_workflow(inputs: dict[str, Any], workflow) -> dict[str, Any]:
+        allowed_inputs = {item.name for item in workflow.required_inputs}
+        return {key: value for key, value in inputs.items() if key in allowed_inputs}
+
+    def enrich_inputs_with_method_context(design, workflow) -> dict[str, Any]:
         method_spec = getattr(design, 'method_spec', None)
         inputs = dict(method_spec.execution_inputs) if method_spec is not None else dict(design.declared_inputs)
         if method_spec is None:
-            return inputs
+            return filter_inputs_for_workflow(inputs, workflow)
         if method_spec.candidate_models:
             inputs['technique_candidate_models'] = list(method_spec.candidate_models)
         if method_spec.baseline_models:
@@ -245,7 +249,7 @@ def register_execution_routes(
             inputs['technique_task_type'] = method_spec.task_type
         if method_spec.metrics:
             inputs['technique_metrics'] = list(method_spec.metrics)
-        return inputs
+        return filter_inputs_for_workflow(inputs, workflow)
 
     def resolve_requested_models(requested_models: list[str], workflow) -> list[str]:
         allowed = list(workflow.allowed_models or [])
@@ -477,7 +481,7 @@ def register_execution_routes(
         request = RunCreateRequest(
             workflow_id=design.workflow_id,
             objective=design.objective,
-            inputs=enrich_inputs_with_method_context(design),
+            inputs=enrich_inputs_with_method_context(design, workflow),
             models=resolve_requested_models(
                 (method_spec.candidate_models if method_spec is not None and method_spec.candidate_models else design.candidate_models)
                 or workflow.allowed_models[:1],
@@ -517,7 +521,7 @@ def register_execution_routes(
         request = RunCreateRequest(
             workflow_id=design.workflow_id,
             objective=design.objective,
-            inputs=enrich_inputs_with_method_context(design),
+            inputs=enrich_inputs_with_method_context(design, workflow),
             models=resolve_requested_models(
                 (method_spec.candidate_models if method_spec is not None and method_spec.candidate_models else design.candidate_models)
                 or workflow.allowed_models[:1],
