@@ -985,6 +985,227 @@ class RunRecord(BaseModel):
     runtime_summary: dict[str, Any] = Field(default_factory=dict)
 
 
+class InvestigationHypothesisRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    hypothesis_id: str
+    statement: str = Field(min_length=8)
+    created_at: datetime
+    submitted_by: str
+
+
+class InvestigationPlanSnapshot(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    investigation_id: str
+    research_mode: Literal['exploratory', 'confirmatory']
+    research_question: str
+    hypotheses: list[InvestigationHypothesisRecord] = Field(min_length=1)
+    design: DesignDraftRecord
+
+
+class InvestigationPlanApprovalRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    approval_id: str
+    design_id: str
+    plan_sha256: str = Field(min_length=64, max_length=64)
+    approved_at: datetime
+    approved_by: str
+    hypothesis_ids: list[str] = Field(min_length=1)
+    research_mode: Literal['exploratory', 'confirmatory']
+    plan_snapshot: InvestigationPlanSnapshot
+    evaluator_contract: EvaluatorContract | None = None
+    budget_contract: BudgetContract | None = None
+    note: str | None = None
+
+
+class InvestigationEvidenceReference(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    run_id: str
+    artifact_name: str = Field(min_length=1)
+    artifact_ref: str = Field(min_length=1)
+
+
+class InvestigationClaimRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    claim_id: str
+    statement: str = Field(min_length=8)
+    assessment: Literal['supported', 'refuted', 'inconclusive']
+    hypothesis_ids: list[str] = Field(min_length=1)
+    evidence: list[InvestigationEvidenceReference] = Field(min_length=1)
+    created_at: datetime
+    submitted_by: str
+    note: str | None = None
+
+
+class InvestigationCreateRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    title: str | None = None
+    research_question: str = Field(min_length=12)
+    research_mode: Literal['exploratory', 'confirmatory'] = 'exploratory'
+    hypotheses: list[str] = Field(default_factory=list)
+    priorities: list[str] = Field(default_factory=list)
+    submitted_by: str | None = None
+
+    @field_validator('research_question')
+    @classmethod
+    def normalize_research_question(cls, value: str) -> str:
+        cleaned = ' '.join(value.split()).strip()
+        if len(cleaned) < 12:
+            raise ValueError('research_question must be at least 12 characters')
+        return cleaned
+
+    @field_validator('hypotheses')
+    @classmethod
+    def validate_unique_hypotheses(cls, value: list[str]) -> list[str]:
+        if not value:
+            return []
+        cleaned = [' '.join(item.split()).strip() for item in value if item.strip()]
+        if not cleaned:
+            raise ValueError('hypotheses must not contain only blank entries')
+        if any(len(item) < 8 for item in cleaned):
+            raise ValueError('hypotheses must be at least 8 characters')
+        deduped = list(dict.fromkeys(cleaned))
+        if len(deduped) != len(cleaned):
+            raise ValueError('hypotheses entries must be unique')
+        return deduped
+
+    @field_validator('priorities')
+    @classmethod
+    def validate_unique_priorities(cls, value: list[str]) -> list[str]:
+        cleaned = [' '.join(item.split()).strip() for item in value if item.strip()]
+        deduped = list(dict.fromkeys(cleaned))
+        if len(deduped) != len(cleaned):
+            raise ValueError('priorities entries must be unique')
+        return deduped
+
+
+class InvestigationHypothesisCreateRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    statement: str = Field(min_length=8)
+    submitted_by: str | None = None
+
+    @field_validator('statement')
+    @classmethod
+    def normalize_hypothesis_statement(cls, value: str) -> str:
+        cleaned = ' '.join(value.split()).strip()
+        if len(cleaned) < 8:
+            raise ValueError('statement must be at least 8 characters')
+        return cleaned
+
+
+class InvestigationPlanApproveRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    design_id: str | None = None
+    approved_by: str | None = None
+    note: str | None = None
+
+    @field_validator('note')
+    @classmethod
+    def normalize_approval_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = ' '.join(value.split()).strip()
+        return cleaned or None
+
+
+class InvestigationEvidenceRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    run_id: str = Field(min_length=1)
+    artifact_name: str = Field(min_length=1)
+
+    @field_validator('run_id', 'artifact_name')
+    @classmethod
+    def normalize_evidence_identifier(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError('evidence identifiers must not be empty')
+        return cleaned
+
+
+class InvestigationClaimCreateRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    statement: str = Field(min_length=8)
+    assessment: Literal['supported', 'refuted', 'inconclusive']
+    hypothesis_ids: list[str] = Field(min_length=1)
+    evidence: list[InvestigationEvidenceRequest] = Field(min_length=1)
+    submitted_by: str | None = None
+    note: str | None = None
+
+    @field_validator('statement')
+    @classmethod
+    def normalize_claim_statement(cls, value: str) -> str:
+        cleaned = ' '.join(value.split()).strip()
+        if len(cleaned) < 8:
+            raise ValueError('statement must be at least 8 characters')
+        return cleaned
+
+    @field_validator('hypothesis_ids')
+    @classmethod
+    def validate_unique_claim_hypotheses(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value if item.strip()]
+        if not cleaned:
+            raise ValueError('at least one hypothesis_id is required')
+        deduped = list(dict.fromkeys(cleaned))
+        if len(deduped) != len(cleaned):
+            raise ValueError('hypothesis_ids entries must be unique')
+        return deduped
+
+    @field_validator('note')
+    @classmethod
+    def normalize_claim_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = ' '.join(value.split()).strip()
+        return cleaned or None
+
+
+class InvestigationRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    investigation_id: str
+    session_id: str
+    created_at: datetime
+    updated_at: datetime
+    status: Literal['planning', 'approved', 'running', 'evaluating', 'completed', 'paused']
+    title: str
+    research_question: str
+    research_mode: Literal['exploratory', 'confirmatory']
+    hypotheses: list[InvestigationHypothesisRecord] = Field(default_factory=list)
+    plan_approvals: list[InvestigationPlanApprovalRecord] = Field(default_factory=list)
+    active_plan_approval_id: str | None = None
+    run_ids: list[str] = Field(default_factory=list)
+    claims: list[InvestigationClaimRecord] = Field(default_factory=list)
+    submitted_by: str
+
+
+class InvestigationRunResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    investigation: InvestigationRecord
+    approval: InvestigationPlanApprovalRecord
+    design: DesignDraftRecord
+    run: RunRecord
+
+
+class InvestigationContextResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    investigation: InvestigationRecord
+    session: ResearchSessionRecord
+    current_design: DesignDraftRecord | None = None
+    approved_design: DesignDraftRecord | None = None
+    runs: list[RunRecord] = Field(default_factory=list)
+
+
 class PaperPipelineReportState(BaseModel):
     model_config = ConfigDict(extra='forbid')
 

@@ -9,28 +9,34 @@ experiments.
 
 Read the product as:
 
-- session-first
+- investigation-first
 - plan-oriented
 - deterministic at the control boundary
 - bounded at execution time
 
 That means:
 
-- sessions hold durable operator state
+- investigations hold the question, hypotheses, approvals, runs, and claims
+- underlying sessions hold working operator and intake state
 - source intake enriches the session
 - a current plan is derived from the session
 - preflight decides whether that plan is runnable
+- explicit approval freezes the runnable plan before launch
 - runs are launched through approved workflow families
+- claims cite exact ingested run artifacts
 - comparison and decision drive the next mutation
 
 ## Primary Product Loop
 
 The intended loop is:
 
-`session -> intake -> plan -> preflight -> run -> compare -> decide -> next`
+`investigation -> intake -> plan -> preflight -> approve -> run -> evidence -> claim -> next`
 
 Compatibility aliases and older debug flows still exist, but they are not the
 product center.
+
+The first current implementation of this aggregate is documented in
+[investigation-api-v0.md](investigation-api-v0.md).
 
 ## Command Surface
 
@@ -68,10 +74,12 @@ The control plane.
 
 Owns:
 
+- investigations and plan-approval snapshots
 - sessions
 - source intake records
 - design drafts
 - run creation
+- evidence-backed claims
 - autoresearch transitions
 - execution preflight
 - evaluator/report handoff

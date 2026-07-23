@@ -13,7 +13,9 @@ Use this README with three buckets in mind:
 
 Current architectural reality:
 
-- sessions are becoming the primary product object
+- investigations are the primary product aggregate
+- sessions remain the working context used by intake, planning, and current
+  command adapters
 - skills/stages mutate session-owned state
 - workflow families are increasingly execution templates, not the whole ontology
 - mutating `latest` routes are still present for compatibility, but should not
@@ -23,6 +25,7 @@ What is committed here:
 
 - API contracts
 - store/backend selection behavior
+- investigation, plan-approval, and evidence-link records
 - session/skill route definitions
 - execution-preflight and job-submission behavior
 - source-document storage defaults
@@ -129,6 +132,20 @@ Primary session-oriented operator endpoints:
 
 Compatibility aliases remain available under `/research-sessions/latest/...`, but
 the primary product story should be explicit session id or sender-pinned session.
+
+Investigation aggregate endpoints:
+
+- `POST /investigations`
+- `GET /investigations/{investigation_id}/context`
+- `POST /investigations/{investigation_id}/hypotheses`
+- `POST /investigations/{investigation_id}/plan-approvals`
+- `POST /investigations/{investigation_id}/runs`
+- `POST /investigations/{investigation_id}/claims`
+
+Each investigation owns one underlying session while preserving the research
+question, exploratory or confirmatory mode, hypothesis history, approved plan
+hashes, linked runs, and evidence-backed claims. See
+`docs/glasslab-v2/investigation-api-v0.md`.
 
 Supporting paper/source-intake endpoints:
 

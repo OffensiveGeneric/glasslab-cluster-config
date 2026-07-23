@@ -59,6 +59,10 @@ Relevant paths:
 The control plane's job is to turn an approved run request into one bounded
 Kubernetes Job and a durable record.
 
+At the product layer, an investigation now binds the question and hypotheses to
+an immutable plan approval, the resulting runs, and evidence-backed claims. See
+[Investigation API v0](investigation-api-v0.md).
+
 ### 3. Scientific workload repositories
 
 Owned by each workload repo.

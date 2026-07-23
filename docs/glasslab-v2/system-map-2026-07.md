@@ -32,6 +32,22 @@ The primary control plane is:
 services/workflow-api
 ```
 
+The primary product aggregate is:
+
+```text
+investigation
+  -> research session working context
+  -> approved design snapshot
+  -> runs
+  -> evidence-backed claims
+```
+
+The first current API contract for that aggregate is:
+
+```text
+docs/glasslab-v2/investigation-api-v0.md
+```
+
 The primary registry is:
 
 ```text
@@ -57,7 +73,7 @@ workload_id = metric-search-v0 or another registry-backed workload
 | --- | --- | --- |
 | Physical lab, PXE, GPU prep, Kubernetes | `ansible/`, `kubeadm/`, `.44` | `.44` remains canonical for live state. |
 | Live Glasslab v2 manifests | `kubeadm/glasslab-v2/` | Apply from `.44`, not from the laptop. |
-| Run control plane | `services/workflow-api/` | This is the workflow brain. |
+| Investigation and run control plane | `services/workflow-api/` | Owns investigation records, approval snapshots, evidence links, and bounded runs. |
 | Workload catalog | `services/workflow-registry/` | Workloads should be registered here before execution. |
 | Learning-task submission | `scripts/submit-learning-task.sh` | Thin wrapper around `POST /experiments/runs`. |
 | Local model operator surface | `scripts/glasslab-opencode.sh` | Talks to exo's OpenAI-compatible endpoint. |
@@ -72,7 +88,7 @@ These should remain in the default docs, default CI, and normal operator path.
 
 | Component | Path | Role |
 | --- | --- | --- |
-| workflow-api | `services/workflow-api/` | Run records, validation, submission, comparison endpoints. |
+| workflow-api | `services/workflow-api/` | Investigations, plan approvals, run records, validation, submission, evidence links, and comparison endpoints. |
 | workflow-registry | `services/workflow-registry/` | Approved workload definitions. |
 | Postgres | `kubeadm/glasslab-v2/postgres/` | Durable records. |
 | MinIO | `kubeadm/glasslab-v2/minio/` | Object-style infrastructure; useful, but not the whole state model. |

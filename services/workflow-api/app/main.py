@@ -20,6 +20,7 @@ from .digest_scheduling import schedule_is_due
 from .execution_routes import register_execution_routes
 from .execution_preflight import build_execution_preflight_result
 from .external_literature import search_external_literature
+from .investigation_routes import register_investigation_routes
 from .job_submission import JobSubmitter, create_job_submitter
 from .literature_routes import register_literature_routes
 from .paper_pipeline import (
@@ -1714,15 +1715,7 @@ def create_app(
     def transition_prepare_latest_current_plan() -> DesignDraftRecord:
         return apply_latest_session_design_skill()
 
-    @app.post(
-        '/research-sessions/{session_id}/transitions/run-happy-path',
-        response_model=ResearchSessionRunCommandResponse,
-        status_code=status.HTTP_201_CREATED,
-    )
-    def transition_run_session_happy_path(session_id: str) -> ResearchSessionRunCommandResponse:
-        session_id = resolve_latest_session_id(session_id)
-        session = get_required_research_session(store, session_id)
-        design = apply_session_design_skill(session_id)
+    def launch_design_run(design: DesignDraftRecord) -> RunRecord:
         method_spec = getattr(design, 'method_spec', None)
         if method_spec is not None and method_spec.run_readiness != 'ready':
             detail = 'design method_spec is not ready_for_run'
@@ -1750,7 +1743,7 @@ def create_app(
             resource_profile=design.resource_profile,
             submitted_by=design.submitted_by,
         )
-        run = create_run_record(
+        return create_run_record(
             run_request,
             workflow,
             settings,
@@ -1761,6 +1754,17 @@ def create_app(
             run_purpose='validation',
             session_id=design.session_id,
         )
+
+    @app.post(
+        '/research-sessions/{session_id}/transitions/run-happy-path',
+        response_model=ResearchSessionRunCommandResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def transition_run_session_happy_path(session_id: str) -> ResearchSessionRunCommandResponse:
+        session_id = resolve_latest_session_id(session_id)
+        session = get_required_research_session(store, session_id)
+        design = apply_session_design_skill(session_id)
+        run = launch_design_run(design)
         session = get_required_research_session(store, session_id)
         return ResearchSessionRunCommandResponse(session=session, design=design, run=run)
 
@@ -2082,6 +2086,13 @@ def create_app(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='operation not found')
         return record
 
+    register_investigation_routes(
+        app,
+        settings=settings,
+        store=store,
+        build_research_session_record=lambda *args, **kwargs: build_research_session_record(*args, **kwargs),
+        launch_design_run=lambda *args, **kwargs: launch_design_run(*args, **kwargs),
+    )
     register_execution_routes(
         app,
         settings=settings,

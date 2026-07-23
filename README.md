@@ -2,14 +2,16 @@
 
 Glasslab is a runner-first ML research system built on a home Kubernetes lab.
 
-The product is narrower than many of the older docs imply. The goal is not
-general agent chat. The goal is:
+The run fabric is deliberately narrow, but the product-level object is now an
+investigation. The goal is not general agent chat. The goal is:
 
-- keep a bounded research session
-- turn that session into a reviewable plan
+- keep a bounded investigation with explicit hypotheses
+- turn it into a reviewable plan
+- freeze an approved plan before execution
 - launch approved runs
 - compare outcomes
 - record a decision
+- link claims to exact run artifacts
 - propose the next bounded mutation
 
 ## Repo Layout
@@ -101,6 +103,7 @@ If you want the current source of truth:
 - [docs/glasslab-v2/canonical-stack-2026-04.md](docs/glasslab-v2/canonical-stack-2026-04.md)
 - [docs/glasslab-v2/system-map-2026-07.md](docs/glasslab-v2/system-map-2026-07.md)
 - [docs/glasslab-v2/learning-task-flow.md](docs/glasslab-v2/learning-task-flow.md)
+- [docs/glasslab-v2/investigation-api-v0.md](docs/glasslab-v2/investigation-api-v0.md)
 - [docs/glasslab-v2/local-model-command-surface.md](docs/glasslab-v2/local-model-command-surface.md)
 - [docs/glasslab-v2/deprecated-api-surface-2026-07.md](docs/glasslab-v2/deprecated-api-surface-2026-07.md)
 - [docs/glasslab-v2/ci-policy-2026-07.md](docs/glasslab-v2/ci-policy-2026-07.md)
@@ -141,6 +144,7 @@ Glasslab does not need more competing paths.
 It needs:
 
 - one canonical command surface
+- one canonical investigation record
 - one canonical record store
 - one canonical bounded experiment loop
 - one honest statement about what literature support currently is

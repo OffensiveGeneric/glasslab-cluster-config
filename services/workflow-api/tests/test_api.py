@@ -66,6 +66,7 @@ def test_openapi_marks_literature_session_routes_deprecated() -> None:
     assert schema.status_code == 200
     paths = schema.json()['paths']
 
+    assert paths['/investigations']['post'].get('deprecated') is not True
     assert paths['/experiments/runs']['post'].get('deprecated') is not True
     assert paths['/research-sessions/start-literature-search']['post']['deprecated'] is True
     assert paths['/paper-pipelines/fresh-paper']['post']['deprecated'] is True
@@ -164,6 +165,259 @@ def test_generic_experiment_run_result_ingest_and_compare() -> None:
     assert payload['workload_id'] == 'metric-search-v0'
     assert payload['summary_metrics']['metric_name'] == 'composite_score'
     assert payload['summary_metrics']['best_run_id'] == run_b['run_id']
+
+
+def test_confirmatory_investigation_freezes_plan_launches_run_and_records_claim() -> None:
+    client = build_client()
+
+    create = client.post(
+        '/investigations',
+        json={
+            'title': 'Titanic baseline investigation',
+            'research_question': 'Does the approved random forest baseline outperform logistic regression on the bounded Titanic split?',
+            'research_mode': 'confirmatory',
+            'hypotheses': [
+                'Random forest produces higher holdout accuracy than logistic regression on the approved split.'
+            ],
+            'priorities': ['reproducibility', 'bounded execution'],
+            'submitted_by': 'test-researcher',
+        },
+    )
+    assert create.status_code == 201
+    investigation = create.json()
+    investigation_id = investigation['investigation_id']
+    session_id = investigation['session_id']
+    hypothesis_id = investigation['hypotheses'][0]['hypothesis_id']
+    assert investigation['status'] == 'planning'
+
+    intake = client.post(
+        f'/research-sessions/{session_id}/intakes',
+        json={
+            'raw_request': 'Benchmark approved Titanic baselines and compare logistic regression with random forest.',
+            'source_refs': ['https://example.org/titanic-note'],
+            'notes': ['Use the standard bounded holdout split.'],
+        },
+    )
+    assert intake.status_code == 201
+
+    plan = client.post(
+        f'/research-sessions/{session_id}/transitions/prepare-current-plan',
+    )
+    assert plan.status_code == 201
+    plan_payload = plan.json()
+    assert plan_payload['status'] == 'ready_for_run'
+
+    approve = client.post(
+        f'/investigations/{investigation_id}/plan-approvals',
+        json={
+            'design_id': plan_payload['design_id'],
+            'approved_by': 'test-researcher',
+            'note': 'Freeze the question, split, models, metrics, and budget before execution.',
+        },
+    )
+    assert approve.status_code == 200
+    approved = approve.json()
+    assert approved['status'] == 'approved'
+    assert len(approved['plan_approvals']) == 1
+    assert len(approved['plan_approvals'][0]['plan_sha256']) == 64
+    assert approved['plan_approvals'][0]['hypothesis_ids'] == [hypothesis_id]
+    assert (
+        approved['plan_approvals'][0]['plan_snapshot']['design']['design_id']
+        == plan_payload['design_id']
+    )
+    assert (
+        approved['plan_approvals'][0]['plan_snapshot']['hypotheses'][0]['statement']
+        == investigation['hypotheses'][0]['statement']
+    )
+
+    approve_again = client.post(
+        f'/investigations/{investigation_id}/plan-approvals',
+        json={'design_id': plan_payload['design_id']},
+    )
+    assert approve_again.status_code == 200
+    assert len(approve_again.json()['plan_approvals']) == 1
+
+    frozen_hypothesis = client.post(
+        f'/investigations/{investigation_id}/hypotheses',
+        json={'statement': 'A post-hoc confirmatory hypothesis should not be accepted.'},
+    )
+    assert frozen_hypothesis.status_code == 409
+    assert frozen_hypothesis.json()['detail'] == 'confirmatory hypotheses are frozen after plan approval'
+
+    mutate_approved_design = client.post(
+        f"/design-drafts/{plan_payload['design_id']}/review",
+        json={'review_notes': ['This edit intentionally invalidates the frozen plan hash.']},
+    )
+    assert mutate_approved_design.status_code == 200
+
+    stale_launch = client.post(f'/investigations/{investigation_id}/runs')
+    assert stale_launch.status_code == 409
+    assert (
+        stale_launch.json()['detail']
+        == 'approved plan snapshot no longer matches the current investigation state'
+    )
+
+    reapprove = client.post(
+        f'/investigations/{investigation_id}/plan-approvals',
+        json={
+            'design_id': plan_payload['design_id'],
+            'approved_by': 'test-researcher',
+            'note': 'Approve the revised immutable snapshot before execution.',
+        },
+    )
+    assert reapprove.status_code == 200
+    assert len(reapprove.json()['plan_approvals']) == 2
+
+    launch = client.post(f'/investigations/{investigation_id}/runs')
+    assert launch.status_code == 201
+    launch_payload = launch.json()
+    run_id = launch_payload['run']['run_id']
+    assert launch_payload['run']['source_design_id'] == plan_payload['design_id']
+    assert launch_payload['run']['session_id'] == session_id
+    assert launch_payload['investigation']['run_ids'] == [run_id]
+
+    premature_claim = client.post(
+        f'/investigations/{investigation_id}/claims',
+        json={
+            'statement': 'Random forest is supported as the stronger bounded baseline.',
+            'assessment': 'supported',
+            'hypothesis_ids': [hypothesis_id],
+            'evidence': [{'run_id': run_id, 'artifact_name': 'metrics.json'}],
+        },
+    )
+    assert premature_claim.status_code == 409
+    assert premature_claim.json()['detail'] == f'run is not terminal: {run_id}'
+
+    ingest = client.post(
+        f'/experiments/runs/{run_id}/results',
+        json={
+            'terminal_status': 'succeeded',
+            'metrics': {'accuracy': 0.82, 'baseline_accuracy': 0.78},
+            'artifact_refs': {
+                'metrics.json': f'runs/{run_id}/metrics.json',
+                'report.md': f'runs/{run_id}/report.md',
+            },
+            'runtime': {'node_name': 'test-node'},
+        },
+    )
+    assert ingest.status_code == 200
+
+    claim = client.post(
+        f'/investigations/{investigation_id}/claims',
+        json={
+            'statement': 'The frozen run supports random forest as the stronger bounded baseline.',
+            'assessment': 'supported',
+            'hypothesis_ids': [hypothesis_id],
+            'evidence': [{'run_id': run_id, 'artifact_name': 'metrics.json'}],
+            'submitted_by': 'test-researcher',
+        },
+    )
+    assert claim.status_code == 201
+    claim_payload = claim.json()
+    assert claim_payload['evidence'] == [
+        {
+            'run_id': run_id,
+            'artifact_name': 'metrics.json',
+            'artifact_ref': f'runs/{run_id}/metrics.json',
+        }
+    ]
+
+    context = client.get(f'/investigations/{investigation_id}/context')
+    assert context.status_code == 200
+    context_payload = context.json()
+    assert context_payload['investigation']['status'] == 'evaluating'
+    assert context_payload['investigation']['claims'][0]['claim_id'] == claim_payload['claim_id']
+    assert context_payload['current_design']['design_id'] == plan_payload['design_id']
+    assert context_payload['approved_design']['design_id'] == plan_payload['design_id']
+    assert context_payload['runs'][0]['status']['status'] == 'succeeded'
+
+
+def test_investigation_rejects_blank_hypothesis_after_normalization() -> None:
+    client = build_client()
+
+    question_only = client.post(
+        '/investigations',
+        json={
+            'research_question': 'Which testable hypotheses should be considered for this bounded question?',
+            'research_mode': 'exploratory',
+        },
+    )
+    assert question_only.status_code == 201
+    assert question_only.json()['hypotheses'] == []
+    approve_without_hypothesis = client.post(
+        f"/investigations/{question_only.json()['investigation_id']}/plan-approvals",
+        json={},
+    )
+    assert approve_without_hypothesis.status_code == 409
+    assert (
+        approve_without_hypothesis.json()['detail']
+        == 'investigation needs at least one hypothesis before plan approval'
+    )
+
+    create = client.post(
+        '/investigations',
+        json={
+            'research_question': 'Does request validation reject a hypothesis that only contains spaces?',
+            'research_mode': 'exploratory',
+            'hypotheses': ['        '],
+        },
+    )
+    assert create.status_code == 422
+
+
+def test_exploratory_hypothesis_change_invalidates_plan_approval() -> None:
+    client = build_client()
+
+    create = client.post(
+        '/investigations',
+        json={
+            'research_question': 'Which approved bounded Titanic baseline is most promising for a follow-up experiment?',
+            'research_mode': 'exploratory',
+            'hypotheses': [
+                'Tree-based models may outperform the linear baseline on the approved split.'
+            ],
+        },
+    )
+    assert create.status_code == 201
+    investigation = create.json()
+    investigation_id = investigation['investigation_id']
+    session_id = investigation['session_id']
+
+    intake = client.post(
+        f'/research-sessions/{session_id}/intakes',
+        json={
+            'raw_request': 'Explore approved Titanic baselines with a bounded holdout comparison.',
+            'notes': ['Keep this exploratory and small.'],
+        },
+    )
+    assert intake.status_code == 201
+    plan = client.post(
+        f'/research-sessions/{session_id}/transitions/prepare-current-plan',
+    )
+    assert plan.status_code == 201
+
+    approve = client.post(
+        f'/investigations/{investigation_id}/plan-approvals',
+        json={'design_id': plan.json()['design_id']},
+    )
+    assert approve.status_code == 200
+    assert approve.json()['active_plan_approval_id']
+
+    add_hypothesis = client.post(
+        f'/investigations/{investigation_id}/hypotheses',
+        json={
+            'statement': 'Calibration quality may matter more than raw holdout accuracy for the next study.'
+        },
+    )
+    assert add_hypothesis.status_code == 201
+    updated = add_hypothesis.json()
+    assert updated['status'] == 'planning'
+    assert updated['active_plan_approval_id'] is None
+    assert len(updated['plan_approvals']) == 1
+
+    blocked_launch = client.post(f'/investigations/{investigation_id}/runs')
+    assert blocked_launch.status_code == 409
+    assert blocked_launch.json()['detail'] == 'investigation has no active plan approval'
 
 
 def test_healthz_redacts_postgres_password() -> None:
