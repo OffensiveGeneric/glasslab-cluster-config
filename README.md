@@ -46,7 +46,14 @@ Useful service buckets:
 
 The active product is `glasslab-v2`.
 
-The canonical command path is:
+The canonical local command path is:
+
+- `OpenCode`
+- exo OpenAI-compatible serving
+- repo-owned scripts
+- `workflow-api`
+
+The optional remote adapter path is:
 
 - `whatsapp-gateway`
 - `research-ingress`
@@ -92,6 +99,7 @@ If you want the current source of truth:
 - [docs/glasslab-v2/current/README.md](docs/glasslab-v2/current/README.md)
 - [docs/glasslab-v2/canonical-stack-2026-04.md](docs/glasslab-v2/canonical-stack-2026-04.md)
 - [docs/glasslab-v2/learning-task-flow.md](docs/glasslab-v2/learning-task-flow.md)
+- [docs/glasslab-v2/local-model-command-surface.md](docs/glasslab-v2/local-model-command-surface.md)
 - [docs/glasslab-v2/command-surface-spec.md](docs/glasslab-v2/command-surface-spec.md)
 - [docs/glasslab-v2/router-and-backend-contract.md](docs/glasslab-v2/router-and-backend-contract.md)
 - [docs/glasslab-v2/deprecation-map-2026-04.md](docs/glasslab-v2/deprecation-map-2026-04.md)

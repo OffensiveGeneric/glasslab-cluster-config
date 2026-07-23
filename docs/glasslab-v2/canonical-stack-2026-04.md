@@ -26,14 +26,22 @@ It is not primarily:
 
 ## Canonical control path
 
-The canonical command path is:
+The canonical local operator path is:
+
+* `OpenCode`
+* exo/OpenAI-compatible model serving
+* repo-owned scripts
+* `workflow-api`
+
+The optional remote chat adapter path is:
 
 * `whatsapp-gateway`
 * `research-ingress`
 * `research-command-router`
 * `workflow-api`
 
-This path owns the primary command loop.
+`workflow-api` owns the primary command loop. OpenCode and WhatsApp are
+operator surfaces that call into it.
 
 The primary loop is:
 
@@ -115,13 +123,15 @@ Use `ClusterIP` by default.
 
 ### Human-facing surfaces
 
-Keep exactly one primary command surface.
+Keep exactly one primary local command surface.
 
-Current primary command surface:
+Current primary local command surface:
 
-* repo-owned WhatsApp/control shell through `whatsapp-gateway`
+* OpenCode pointed at the lab exo/OpenAI-compatible endpoint
 
-There is no supported secondary conversational surface in the current product.
+Secondary remote adapter:
+
+* WhatsApp through `whatsapp-gateway`
 
 ## Canonical deployment posture
 

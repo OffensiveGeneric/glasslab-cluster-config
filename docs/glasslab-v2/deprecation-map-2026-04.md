@@ -6,6 +6,10 @@ This document explains what is current, what is secondary, and what should now b
 
 ### Primary command/control path
 
+* `OpenCode -> repo-owned scripts -> workflow-api`
+
+### Secondary remote command adapter
+
 * `whatsapp-gateway -> research-ingress -> research-command-router -> workflow-api`
 
 ### Primary product loop

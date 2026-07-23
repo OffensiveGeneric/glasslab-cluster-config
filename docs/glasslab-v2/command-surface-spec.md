@@ -4,6 +4,16 @@ This document defines the operator-facing command structure for Glasslab.
 
 The command surface should reflect the actual research loop, not historical implementation details.
 
+The command vocabulary is backend-owned. It can be invoked from OpenCode,
+scripts, or a remote adapter such as WhatsApp.
+
+The primary local operator surface is now OpenCode talking to the lab
+exo/OpenAI-compatible model endpoint and using repo-owned scripts to call
+`workflow-api`.
+
+WhatsApp is a secondary remote adapter, not the required surface for job
+control.
+
 ## Design principle
 
 Commands should represent:
