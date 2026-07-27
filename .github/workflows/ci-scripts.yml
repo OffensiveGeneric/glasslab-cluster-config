@@ -1,0 +1,45 @@
+name: CI Scripts
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "scripts/**/*.sh"
+      - "scripts/*.sh"
+      - ".github/workflows/ci-scripts.yml"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/**/*.sh"
+      - "scripts/*.sh"
+      - ".github/workflows/ci-scripts.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-scripts-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shell-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check shell syntax
+        run: |
+          failures=0
+          while IFS= read -r path; do
+            case "$path" in
+              *.bak|*.bak-*|*.bak[0-9])
+                continue
+                ;;
+            esac
+            if ! bash -n "$path"; then
+              failures=1
+            fi
+          done < <(find scripts -type f -name '*.sh' | sort)
+          exit "$failures"

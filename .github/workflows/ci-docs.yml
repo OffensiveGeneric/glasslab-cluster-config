@@ -1,0 +1,44 @@
+name: CI Docs
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "README.md"
+      - "CONTRIBUTING.md"
+      - "docs/**/*.md"
+      - "scripts/check-doc-links.py"
+      - "scripts/check-before-push.sh"
+      - ".github/workflows/ci-docs.yml"
+  push:
+    branches: [main]
+    paths:
+      - "README.md"
+      - "CONTRIBUTING.md"
+      - "docs/**/*.md"
+      - "scripts/check-doc-links.py"
+      - "scripts/check-before-push.sh"
+      - ".github/workflows/ci-docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  markdown-links:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check Markdown links
+        run: python scripts/check-doc-links.py
