@@ -812,3 +812,65 @@ def test_opencode_repairs_invalid_structured_output(
     assert 'Correct only the structured result' in (
         repair_payload['parts'][0]['text']
     )
+
+
+def test_opencode_repairs_missing_structured_output(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    requests: list[httpx.Request] = []
+    responses = [
+        {
+            'info': {'id': 'message-without-structure'},
+            'parts': [{'type': 'text', 'text': 'Implementation is complete.'}],
+        },
+        {
+            'info': {
+                'id': 'message-repaired',
+                'structured': {
+                    'kind': 'implementation_proposal',
+                    'summary': 'Returned the completed implementation proposal.',
+                    'requested_actions': [],
+                },
+            }
+        },
+    ]
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=responses[len(requests) - 1])
+
+    runtime = OpenCodeProcessRuntime(
+        Settings(opencode_structured_repair_attempts=1)
+    )
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    handle = SimpleNamespace(
+        base_url='http://opencode.test',
+        password='password',
+    )
+    monkeypatch.setattr(runtime, '_start_process', lambda **_: handle)
+    monkeypatch.setattr(
+        runtime,
+        '_client',
+        lambda _: httpx.Client(
+            base_url=handle.base_url,
+            transport=httpx.MockTransport(respond),
+        ),
+    )
+
+    result, message_id = runtime.run_turn(
+        run_id='run-1',
+        agent=AgentName.BEAKER,
+        workspace=workspace,
+        session_id='session-1',
+        prompt='Implement the experiment.',
+    )
+
+    assert result.kind.value == 'implementation_proposal'
+    assert message_id == 'message-repaired'
+    assert len(requests) == 2
+    repair_payload = json.loads(requests[1].content)
+    assert 'Return only the structured result' in (
+        repair_payload['parts'][0]['text']
+    )

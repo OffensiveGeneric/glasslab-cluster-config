@@ -527,9 +527,24 @@ class OpenCodeProcessRuntime(AgentRuntime):
                         try:
                             structured = json.loads(raw)
                         except json.JSONDecodeError as exc:
-                            raise OpenCodeRuntimeError(
-                                'OpenCode turn did not return structured output'
-                            ) from exc
+                            if (
+                                attempt
+                                >= self.settings.opencode_structured_repair_attempts
+                            ):
+                                raise OpenCodeRuntimeError(
+                                    'OpenCode turn did not return structured output'
+                                ) from exc
+                            current_prompt = (
+                                'Return only the structured result for your '
+                                'previous completed turn. Do not repeat the '
+                                'implementation or perform additional workspace '
+                                'work. Return a complete object matching the '
+                                'supplied JSON schema. Nested objects and arrays '
+                                'must be JSON values, not JSON-encoded strings. '
+                                'The previous response did not contain a valid '
+                                'structured object.'
+                            )
+                            continue
                     structured = normalize_structured_output(structured)
                     if isinstance(structured, dict):
                         structured = materialize_declared_workspace_files(
