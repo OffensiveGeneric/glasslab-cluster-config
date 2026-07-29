@@ -11,6 +11,7 @@ from typing import Any, Iterator
 from uuid import uuid4
 
 import httpx
+from pydantic import ValidationError
 
 from .config import Settings
 from .schemas import AgentName, AgentTurnResult
@@ -350,45 +351,76 @@ class OpenCodeProcessRuntime(AgentRuntime):
             agent=agent,
             workspace=workspace,
         )
-        payload = {
-            'model': {
-                'providerID': 'exo',
-                'modelID': self.settings.qwen_model_name,
-            },
-            'agent': 'build',
-            'system': self._system_prompts[agent],
-            'parts': [{'type': 'text', 'text': prompt}],
-            'format': {
-                'type': 'json_schema',
-                'schema': AgentTurnResult.model_json_schema(),
-                'retryCount': 2,
-            },
-        }
+        message_id: str | None = None
+        current_prompt = prompt
         with self._client(handle) as client:
-            response = client.post(
-                f'/session/{session_id}/message',
-                params={'directory': str(workspace)},
-                json=payload,
-            )
-            response.raise_for_status()
-            body = response.json()
-        info = body.get('info', {})
-        message_id = info.get('id')
-        structured = extract_structured_output(body)
-        if structured is None:
-            text_parts = [
-                str(part.get('text', ''))
-                for part in body.get('parts', [])
-                if part.get('type') == 'text'
-            ]
-            raw = ''.join(text_parts).strip()
             try:
-                structured = json.loads(raw)
-            except json.JSONDecodeError as exc:
+                for attempt in range(
+                    self.settings.opencode_structured_repair_attempts + 1
+                ):
+                    payload = {
+                        'model': {
+                            'providerID': 'exo',
+                            'modelID': self.settings.qwen_model_name,
+                        },
+                        'agent': 'build',
+                        'system': self._system_prompts[agent],
+                        'parts': [{'type': 'text', 'text': current_prompt}],
+                        'format': {
+                            'type': 'json_schema',
+                            'schema': AgentTurnResult.model_json_schema(),
+                            'retryCount': 2,
+                        },
+                    }
+                    response = client.post(
+                        f'/session/{session_id}/message',
+                        params={'directory': str(workspace)},
+                        json=payload,
+                    )
+                    response.raise_for_status()
+                    body = response.json()
+                    info = body.get('info', {})
+                    message_id = info.get('id')
+                    structured = extract_structured_output(body)
+                    if structured is None:
+                        text_parts = [
+                            str(part.get('text', ''))
+                            for part in body.get('parts', [])
+                            if part.get('type') == 'text'
+                        ]
+                        raw = ''.join(text_parts).strip()
+                        try:
+                            structured = json.loads(raw)
+                        except json.JSONDecodeError as exc:
+                            raise OpenCodeRuntimeError(
+                                'OpenCode turn did not return structured output'
+                            ) from exc
+                    try:
+                        return (
+                            AgentTurnResult.model_validate(structured),
+                            message_id,
+                        )
+                    except ValidationError as exc:
+                        if (
+                            attempt
+                            >= self.settings.opencode_structured_repair_attempts
+                        ):
+                            raise
+                        current_prompt = (
+                            'Correct only the structured result from your '
+                            'previous response. Do not run tools or edit files. '
+                            'Return a complete object matching the supplied '
+                            'JSON schema. Remove any requested action that is '
+                            'not required for this turn. The independent '
+                            f'validator reported:\n{exc}'
+                        )
+            except ValidationError as exc:
                 raise OpenCodeRuntimeError(
-                    'OpenCode turn did not return structured output'
+                    'OpenCode structured output remained invalid after '
+                    f'{self.settings.opencode_structured_repair_attempts} '
+                    'repair attempt(s)'
                 ) from exc
-        return AgentTurnResult.model_validate(structured), message_id
+        raise OpenCodeRuntimeError('OpenCode turn ended without a result')
 
     def abort(self, *, run_id: str, agent: AgentName, session_id: str) -> None:
         handle = self._handles.get((run_id, agent))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import httpx
 
@@ -194,3 +195,71 @@ def test_opencode_writable_runtime_directories_are_per_agent(
     assert config['permission']['task'] == 'deny'
     assert config['permission']['websearch'] == 'deny'
     assert config['permission']['external_directory'] == 'deny'
+
+
+def test_opencode_repairs_invalid_structured_output(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    requests: list[httpx.Request] = []
+    responses = [
+        {
+            'info': {
+                'id': 'message-invalid',
+                'structured': {
+                    'kind': 'protocol_draft',
+                    'summary': 'Malformed action.',
+                    'requested_actions': [{'reason': 'Missing type.'}],
+                },
+            }
+        },
+        {
+            'info': {
+                'id': 'message-repaired',
+                'structured': {
+                    'kind': 'protocol_draft',
+                    'summary': 'Corrected structured result.',
+                    'requested_actions': [],
+                },
+            }
+        },
+    ]
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=responses[len(requests) - 1])
+
+    runtime = OpenCodeProcessRuntime(
+        Settings(opencode_structured_repair_attempts=1)
+    )
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    handle = SimpleNamespace(
+        base_url='http://opencode.test',
+        password='password',
+    )
+    monkeypatch.setattr(runtime, '_start_process', lambda **_: handle)
+    monkeypatch.setattr(
+        runtime,
+        '_client',
+        lambda _: httpx.Client(
+            base_url=handle.base_url,
+            transport=httpx.MockTransport(respond),
+        ),
+    )
+
+    result, message_id = runtime.run_turn(
+        run_id='run-1',
+        agent=AgentName.HONEYDEW,
+        workspace=workspace,
+        session_id='session-1',
+        prompt='Draft the protocol.',
+    )
+
+    assert result.summary == 'Corrected structured result.'
+    assert message_id == 'message-repaired'
+    assert len(requests) == 2
+    repair_payload = json.loads(requests[1].content)
+    assert 'Correct only the structured result' in (
+        repair_payload['parts'][0]['text']
+    )
