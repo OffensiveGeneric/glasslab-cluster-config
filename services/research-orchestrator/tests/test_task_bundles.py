@@ -8,6 +8,8 @@ import zipfile
 import pytest
 
 from app.schemas import TaskAssetProposal, TaskSpecProposal
+from app.datasets import DatasetIngestionManager
+from app.storage import SqliteStore
 from app.task_bundles import (
     RUNTIME_PROFILES,
     TaskBundleError,
@@ -113,6 +115,93 @@ def test_task_asset_fetcher_rejects_non_public_url(tmp_path: Path) -> None:
                 role='train',
                 source_url='http://127.0.0.1/data.csv',
             ),
+        )
+
+
+def test_ingested_dataset_is_immutable_and_resolves_into_task(
+    tmp_path: Path,
+) -> None:
+    store = SqliteStore(str(tmp_path / 'orchestrator.db'))
+    datasets = DatasetIngestionManager(
+        store=store,
+        root=str(tmp_path / 'dataset-uploads'),
+        shared_mount_root=str(tmp_path),
+        maximum_bytes=1024,
+    )
+    first = datasets.ingest_bytes(
+        b'feature,label\n1,0\n',
+        filename='train.csv',
+        name='training_data',
+        role='train',
+        contains_labels=True,
+        uploaded_by='test',
+    )
+    second = datasets.ingest_bytes(
+        b'feature,label\n1,0\n',
+        filename='renamed.csv',
+        name='other_name',
+        role='input',
+        contains_labels=True,
+    )
+    assert second == first
+    assert first.reference_uri == f'glasslab-dataset://{first.sha256}'
+    assert Path(first.path).stat().st_mode & 0o222 == 0
+
+    manager = TaskBundleManager(
+        root=str(tmp_path / 'task-bundles'),
+        shared_mount_root=str(tmp_path),
+        dataset_catalog_path=str(tmp_path / 'catalog.json'),
+        task_asset_root=str(tmp_path / 'task-assets'),
+        ingested_datasets=datasets,
+    )
+    proposal = TaskSpecProposal(
+        schema_version='glasslab-task-spec-v1',
+        display_name='Uploaded Dataset Task',
+        runtime_profile='cpu-ml-standard-v1',
+        assets=[
+            TaskAssetProposal(
+                name='training_data',
+                role='train',
+                approved_uri=first.reference_uri,
+                expected_sha256=first.sha256,
+                contains_labels=True,
+            )
+        ],
+        rationale='Use the operator-approved upload.',
+    )
+    task = manager.compile(
+        manager.stage_archive(filename='task.zip', content=_archive()),
+        proposal,
+    )
+    assert task.datasets[0].uri == first.artifact_uri
+    assert manager.preflight(
+        task,
+        permitted_images={task.runner_image},
+        evaluator_ready=True,
+    ).ready
+
+
+def test_ingested_dataset_rejects_tampering(tmp_path: Path) -> None:
+    store = SqliteStore(str(tmp_path / 'orchestrator.db'))
+    datasets = DatasetIngestionManager(
+        store=store,
+        root=str(tmp_path / 'dataset-uploads'),
+        shared_mount_root=str(tmp_path),
+        maximum_bytes=1024,
+    )
+    record = datasets.ingest_bytes(
+        b'original',
+        filename='data.csv',
+        name='data',
+    )
+    Path(record.path).chmod(0o644)
+    Path(record.path).write_bytes(b'tampered')
+    with pytest.raises(TaskBundleError, match='checksum'):
+        datasets.resolve(
+            record.reference_uri,
+            name='data',
+            role='input',
+            contains_labels=False,
         )
 
 

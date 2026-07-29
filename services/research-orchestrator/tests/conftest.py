@@ -1,9 +1,31 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import subprocess
+import tempfile
 
 import pytest
+
+
+_IMPORT_ROOT = Path(tempfile.mkdtemp(prefix='glasslab-orchestrator-import-'))
+for _name, _relative in {
+    'DATABASE_PATH': 'orchestrator.db',
+    'WORKSPACE_ROOT': 'runs',
+    'ARTIFACT_ROOT': 'artifacts',
+    'PROMOTED_CONTRACT_ROOT': 'trusted-contracts/bundles',
+    'SEALED_CONTRACT_CANDIDATE_ROOT': 'contract-candidates',
+    'TRUSTED_CONTRACT_CATALOG_PATH': 'trusted-contracts/catalog.json',
+    'SHARED_MOUNT_ROOT': '.',
+    'TASK_BUNDLE_ROOT': 'task-bundles',
+    'TASK_ASSET_ROOT': 'task-assets',
+    'DATASET_UPLOAD_ROOT': 'dataset-uploads',
+    'BENCHMARK_DATASET_CATALOG_PATH': 'datasets/catalog.json',
+}.items():
+    os.environ.setdefault(
+        f'GLASSLAB_ORCHESTRATOR_{_name}',
+        str((_IMPORT_ROOT / _relative).resolve()),
+    )
 
 from app.cluster import FakeClusterExecutor
 from app.config import SERVICE_ROOT, Settings
@@ -72,6 +94,7 @@ def orchestrator_bundle(tmp_path):
         shared_mount_root=str(tmp_path),
         task_bundle_root=str(tmp_path / 'task-bundles'),
         task_asset_root=str(tmp_path / 'task-assets'),
+        dataset_upload_root=str(tmp_path / 'dataset-uploads'),
         benchmark_dataset_catalog_path=str(tmp_path / 'datasets' / 'catalog.json'),
         one_active_run=False,
         maximum_parallel_jobs=2,

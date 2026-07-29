@@ -33,6 +33,9 @@ Short version:
 - [`../research-orchestrator.md`](../research-orchestrator.md) describes the
   Honeydew/Beaker orchestrator, immutable evaluation contracts, approvals,
   workspace isolation, recovery, and its current validation boundary.
+- [`../research-orchestrator-command-surface.md`](../research-orchestrator-command-surface.md)
+  is the concise Discord/operator command reference and implementation
+  progress snapshot.
 
 These remain current and useful after the cleanup pass:
 

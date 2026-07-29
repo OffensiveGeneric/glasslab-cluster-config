@@ -191,11 +191,23 @@ class TaskAssetProposal(BaseModel):
     name: str = Field(pattern=r'^[a-z0-9][a-z0-9_-]{0,62}$')
     role: str = Field(min_length=1, max_length=120)
     source_url: str | None = None
+    approved_uri: str | None = Field(
+        default=None,
+        pattern=r'^glasslab-dataset://[a-f0-9]{64}$',
+    )
     expected_sha256: str | None = Field(
         default=None,
         pattern=r'^[a-f0-9]{64}$',
     )
     contains_labels: bool = False
+
+    @model_validator(mode='after')
+    def validate_asset_source(self) -> 'TaskAssetProposal':
+        if self.source_url and self.approved_uri:
+            raise ValueError(
+                'asset proposal cannot use both source_url and approved_uri'
+            )
+        return self
 
 
 class TaskSpecProposal(BaseModel):
@@ -517,6 +529,29 @@ class ArtifactRecord(BaseModel):
     uri: str
     sha256: str = Field(pattern=r'^[a-f0-9]{64}$')
     metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class IngestedDatasetRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    schema_version: Literal['glasslab-ingested-dataset-v1'] = (
+        'glasslab-ingested-dataset-v1'
+    )
+    dataset_id: str = Field(pattern=r'^[a-f0-9]{64}$')
+    name: str = Field(pattern=r'^[a-z0-9][a-z0-9_-]{0,62}$')
+    filename: str = Field(min_length=1, max_length=255)
+    reference_uri: str = Field(
+        pattern=r'^glasslab-dataset://[a-f0-9]{64}$'
+    )
+    artifact_uri: str = Field(pattern=r'^s3://artifacts/.+$')
+    path: str
+    sha256: str = Field(pattern=r'^[a-f0-9]{64}$')
+    size_bytes: int = Field(gt=0)
+    media_type: str | None = Field(default=None, max_length=255)
+    role: str = Field(min_length=1, max_length=120)
+    contains_labels: bool = False
+    uploaded_by: str | None = Field(default=None, max_length=255)
     created_at: datetime = Field(default_factory=utc_now)
 
 

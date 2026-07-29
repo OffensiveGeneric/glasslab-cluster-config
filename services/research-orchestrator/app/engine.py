@@ -13,6 +13,7 @@ from .config import Settings
 from .contract_candidates import ContractCandidateManager
 from .contracts import EvaluationContractResolver
 from .discord_adapter import DiscordAdapter
+from .datasets import DatasetIngestionManager
 from .matrix import expand_experiment_matrix
 from .opencode_runtime import AgentRuntime
 from .policy import ActionPolicy
@@ -65,6 +66,7 @@ class ResearchOrchestrator:
         cluster: ClusterExecutor,
         discord: DiscordAdapter,
         task_bundles: TaskBundleManager | None = None,
+        datasets: DatasetIngestionManager | None = None,
     ) -> None:
         self.settings = settings
         self.store = store
@@ -72,12 +74,19 @@ class ResearchOrchestrator:
         self.workspaces = workspaces
         self.contracts = contracts
         self.contract_candidates = contract_candidates
+        self.datasets = datasets or DatasetIngestionManager(
+            store=store,
+            root=settings.dataset_upload_root,
+            shared_mount_root=settings.shared_mount_root,
+            maximum_bytes=settings.maximum_dataset_upload_bytes,
+        )
         self.task_bundles = task_bundles or TaskBundleManager(
             root=settings.task_bundle_root,
             shared_mount_root=settings.shared_mount_root,
             dataset_catalog_path=settings.benchmark_dataset_catalog_path,
             task_asset_root=settings.task_asset_root,
             maximum_asset_bytes=settings.maximum_task_asset_bytes,
+            ingested_datasets=self.datasets,
         )
         self.policy = policy
         self.cluster = cluster
@@ -288,8 +297,10 @@ class ResearchOrchestrator:
                     'classical ML, and lightweight CPU work; or '
                     'gpu-ml-standard-v1 when the task materially requires '
                     'PyTorch/CUDA training. Identify every external dataset or '
-                    'model asset as an asset proposal with a canonical public '
-                    'HTTPS URL when one is explicit or confidently known. Do '
+                    'model asset as an asset proposal. Preserve any exact '
+                    '`glasslab-dataset://<sha256>` reference from the problem '
+                    'as approved_uri. Otherwise use a canonical public HTTPS '
+                    'URL only when one is explicit or confidently known. Do '
                     'not invent credentials, private URLs, commands, images, '
                     'Kubernetes fields, or evaluator code. List exact metric '
                     'keys and evidence artifacts required by the rubric. Put '
@@ -2253,7 +2264,13 @@ class ResearchOrchestrator:
         )
         self._transition(run_id, RunState.AWAITING_FINAL_ACCEPTANCE)
 
-    def pause_run(self, run_id: str) -> RunRecord:
+    def pause_run(
+        self,
+        run_id: str,
+        *,
+        requested_by: str | None = None,
+        reason: str | None = None,
+    ) -> RunRecord:
         # This deliberately does not take the advancement lock: pause must be
         # able to abort a model turn that currently owns that lock.
         run = self.store.get_run(run_id)
@@ -2269,11 +2286,21 @@ class ResearchOrchestrator:
             run_id,
             source='orchestrator',
             event_type='run.paused',
-            payload={'resume_state': run.state.value},
+            payload={
+                'resume_state': run.state.value,
+                'requested_by': requested_by,
+                'reason': reason,
+            },
         )
         return paused
 
-    def resume_run(self, run_id: str) -> RunRecord:
+    def resume_run(
+        self,
+        run_id: str,
+        *,
+        requested_by: str | None = None,
+        reason: str | None = None,
+    ) -> RunRecord:
         with self._advance_lock:
             run = self.store.get_run(run_id)
             if run.state != RunState.PAUSED or run.resume_state is None:
@@ -2288,7 +2315,11 @@ class ResearchOrchestrator:
                 run_id,
                 source='orchestrator',
                 event_type='run.resumed',
-                payload={'state': target.value},
+                payload={
+                    'state': target.value,
+                    'requested_by': requested_by,
+                    'reason': reason,
+                },
             )
             self._recover_run(run_id)
             return self.store.get_run(run_id)

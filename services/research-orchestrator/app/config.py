@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     task_bundle_root: str = '/tmp/glasslab-research-orchestrator/task-bundles'
     task_asset_root: str = '/tmp/glasslab-research-orchestrator/task-assets'
     maximum_task_asset_bytes: int = 2 * 1024 * 1024 * 1024
+    dataset_upload_root: str = (
+        '/tmp/glasslab-research-orchestrator/dataset-uploads'
+    )
+    maximum_dataset_upload_bytes: int = 2 * 1024 * 1024 * 1024
+    maximum_discord_dataset_upload_bytes: int = 100 * 1024 * 1024
     benchmark_dataset_catalog_path: str = (
         '/tmp/glasslab-research-orchestrator/datasets/catalog.json'
     )

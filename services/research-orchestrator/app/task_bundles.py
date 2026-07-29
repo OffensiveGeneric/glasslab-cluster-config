@@ -284,6 +284,7 @@ class TaskBundleManager:
         dataset_catalog_path: str,
         task_asset_root: str | None = None,
         maximum_asset_bytes: int = 2 * 1024 * 1024 * 1024,
+        ingested_datasets=None,
     ) -> None:
         self.root = Path(root).resolve()
         self.shared_mount_root = Path(shared_mount_root).resolve()
@@ -294,6 +295,7 @@ class TaskBundleManager:
             shared_mount_root=shared_mount_root,
             maximum_bytes=maximum_asset_bytes,
         )
+        self.ingested_datasets = ingested_datasets
 
     def stage_archive(self, *, filename: str, content: bytes) -> StagedTaskBundle:
         if not content or len(content) > self.MAX_ARCHIVE_BYTES:
@@ -398,8 +400,29 @@ class TaskBundleManager:
         datasets: list[DatasetAsset] = []
         missing = list(proposal.missing_inputs)
         for asset in proposal.assets:
+            if asset.approved_uri:
+                if self.ingested_datasets is None:
+                    missing.append(
+                        f'ingested dataset registry is unavailable: {asset.name}'
+                    )
+                    continue
+                try:
+                    datasets.append(
+                        self.ingested_datasets.resolve(
+                            asset.approved_uri,
+                            name=asset.name,
+                            role=asset.role,
+                            contains_labels=asset.contains_labels,
+                            expected_sha256=asset.expected_sha256,
+                        )
+                    )
+                except TaskBundleError as exc:
+                    missing.append(str(exc))
+                continue
             if not asset.source_url:
-                missing.append(f'asset `{asset.name}` has no source URL')
+                missing.append(
+                    f'asset `{asset.name}` has no approved URI or source URL'
+                )
                 continue
             try:
                 datasets.append(

@@ -793,8 +793,33 @@ def test_http_api_with_mock_runtime(orchestrator_bundle) -> None:
         run_id = response.json()['run_id']
         assert response.json()['state'] == 'AWAITING_PROTOCOL_APPROVAL'
         assert client.get(f'/runs/{run_id}').status_code == 200
+        paused = client.post(f'/runs/{run_id}/pause')
+        assert paused.status_code == 200
+        assert paused.json()['state'] == 'PAUSED'
+        resumed = client.post(f'/runs/{run_id}/resume')
+        assert resumed.status_code == 200
+        assert resumed.json()['state'] == 'AWAITING_PROTOCOL_APPROVAL'
         events = client.get(f'/runs/{run_id}/events').json()['events']
         assert events
+        assert any(event['event_type'] == 'run.paused' for event in events)
+        assert any(event['event_type'] == 'run.resumed' for event in events)
+        dataset = client.post(
+            '/datasets/import',
+            files={'dataset': ('train.csv', b'feature,label\n1,0\n', 'text/csv')},
+            data={
+                'name': 'training_data',
+                'role': 'train',
+                'contains_labels': 'true',
+                'uploaded_by': 'api-test',
+            },
+        )
+        assert dataset.status_code == 201
+        assert dataset.json()['reference_uri'].startswith(
+            'glasslab-dataset://'
+        )
+        dataset_id = dataset.json()['dataset_id']
+        assert client.get(f'/datasets/{dataset_id}').status_code == 200
+        assert len(client.get('/datasets').json()) == 1
         action = _pending_action(store, run_id, 'approve_protocol')
         approval = client.post(
             f'/actions/{action.action_id}/approve',

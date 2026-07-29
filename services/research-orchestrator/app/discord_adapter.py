@@ -393,6 +393,7 @@ class DiscordRenderer:
             )
         if event_type in {
             'run.paused',
+            'run.resumed',
             'run.cancelled',
             'run.completed',
         }:

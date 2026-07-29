@@ -14,6 +14,8 @@ from app.discord_controls import (
     DiscordControlGateway,
     DiscordControlPolicy,
     execute_discord_action,
+    execute_discord_dataset_ingestion,
+    execute_discord_run_control,
     execute_discord_run_cancellation,
     execute_discord_run_creation,
 )
@@ -325,6 +327,7 @@ def test_discord_gateway_registers_component_handler() -> None:
         channel_id='987654321',
         admin_role_id='role-1',
         admin_user_ids=[],
+        maximum_dataset_upload_bytes=1024,
     )
 
     assert gateway.client.on_interaction == gateway._on_interaction
@@ -339,6 +342,15 @@ def test_discord_gateway_registers_component_handler() -> None:
         guild=discord.Object(id=123456789),
     )
     assert cancel_command is not None
+    for command_name in (
+        'research-pause',
+        'research-resume',
+        'dataset-upload',
+    ):
+        assert gateway.tree.get_command(
+            command_name,
+            guild=discord.Object(id=123456789),
+        ) is not None
 
 
 def test_discord_cancellation_records_actor_and_reason() -> None:
@@ -367,6 +379,75 @@ def test_discord_cancellation_records_actor_and_reason() -> None:
         'run-1',
         requested_by='discord:142100176322953216:Tyler',
         reason='Superseded by benchmark validation.',
+    )
+
+
+def test_discord_pause_and_resume_record_actor_and_reason() -> None:
+    engine = Mock()
+    actor = DiscordControlActor(
+        user_id='142100176322953216',
+        display_name='Tyler',
+        guild_id='guild-1',
+        role_ids=frozenset({'role-1'}),
+    )
+
+    execute_discord_run_control(
+        engine,
+        operation='pause',
+        run_id='run-1',
+        actor=actor,
+        reason='Hold while checking the dataset.',
+    )
+    execute_discord_run_control(
+        engine,
+        operation='resume',
+        run_id='run-1',
+        actor=actor,
+    )
+
+    engine.pause_run.assert_called_once_with(
+        'run-1',
+        requested_by='discord:142100176322953216:Tyler',
+        reason='Hold while checking the dataset.',
+    )
+    engine.resume_run.assert_called_once_with(
+        'run-1',
+        requested_by='discord:142100176322953216:Tyler',
+        reason='Resumed through Discord controls.',
+    )
+
+
+def test_discord_dataset_ingestion_records_actor() -> None:
+    engine = Mock()
+    expected = SimpleNamespace(reference_uri='glasslab-dataset://' + 'a' * 64)
+    engine.datasets.ingest_bytes.return_value = expected
+    actor = DiscordControlActor(
+        user_id='142100176322953216',
+        display_name='Tyler',
+        guild_id='guild-1',
+        role_ids=frozenset({'role-1'}),
+    )
+
+    result = execute_discord_dataset_ingestion(
+        engine,
+        filename='train.csv',
+        content=b'x,y\n1,0\n',
+        name='training_data',
+        role='train',
+        contains_labels=True,
+        actor=actor,
+        media_type='text/csv',
+    )
+
+    assert result is expected
+    engine.datasets.ingest_bytes.assert_called_once_with(
+        b'x,y\n1,0\n',
+        filename='train.csv',
+        name='training_data',
+        role='train',
+        contains_labels=True,
+        media_type='text/csv',
+        uploaded_by='discord:142100176322953216:Tyler',
     )
 
 

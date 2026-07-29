@@ -10,6 +10,7 @@ from fastapi import (
     Depends,
     FastAPI,
     File,
+    Form,
     Header,
     HTTPException,
     Query,
@@ -24,6 +25,7 @@ from .contract_candidates import ContractCandidateManager
 from .contracts import ContractIntegrityError, EvaluationContractResolver
 from .discord_adapter import DisabledDiscordAdapter, DiscordHttpAdapter
 from .discord_controls import DiscordControlGateway
+from .datasets import DatasetIngestionError, DatasetIngestionManager
 from .engine import ResearchOrchestrator, WorkflowError
 from .opencode_runtime import AgentRuntime, OpenCodeProcessRuntime
 from .policy import ActionPolicy
@@ -32,6 +34,7 @@ from .schemas import (
     ApprovalRequest,
     ArtifactListResponse,
     EventListResponse,
+    IngestedDatasetRecord,
     RejectionRequest,
     RunCreateRequest,
     RunListResponse,
@@ -96,6 +99,12 @@ def build_engine(
         contract_candidates.install_repository_contract(
             baked_root / contract_id / '1.0.0'
         )
+    datasets = DatasetIngestionManager(
+        store=store,
+        root=settings.dataset_upload_root,
+        shared_mount_root=settings.shared_mount_root,
+        maximum_bytes=settings.maximum_dataset_upload_bytes,
+    )
     return ResearchOrchestrator(
         settings=settings,
         store=store,
@@ -110,12 +119,14 @@ def build_engine(
             fallback_roots=[settings.evaluation_contract_root],
         ),
         contract_candidates=contract_candidates,
+        datasets=datasets,
         task_bundles=TaskBundleManager(
             root=settings.task_bundle_root,
             shared_mount_root=settings.shared_mount_root,
             dataset_catalog_path=settings.benchmark_dataset_catalog_path,
             task_asset_root=settings.task_asset_root,
             maximum_asset_bytes=settings.maximum_task_asset_bytes,
+            ingested_datasets=datasets,
         ),
         policy=ActionPolicy(
             permitted_images=settings.permitted_job_images,
@@ -154,6 +165,9 @@ def create_app(
             channel_id=settings.discord_channel_id or '',
             admin_role_id=settings.discord_admin_role_id,
             admin_user_ids=settings.discord_admin_user_ids,
+            maximum_dataset_upload_bytes=(
+                settings.maximum_discord_dataset_upload_bytes
+            ),
         )
 
     @asynccontextmanager
@@ -234,6 +248,7 @@ def create_app(
                 WorkflowError,
                 WorkspaceError,
                 TaskBundleError,
+                DatasetIngestionError,
             ),
         ):
             return HTTPException(status_code=409, detail=str(exc))
@@ -317,6 +332,49 @@ def create_app(
     @app.get('/task-bundles', response_model=list[TaskBundleRecord])
     def list_task_bundles() -> list[TaskBundleRecord]:
         return engine.task_bundles.list()
+
+    @app.post(
+        '/datasets/import',
+        response_model=IngestedDatasetRecord,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def import_dataset(
+        dataset: UploadFile = File(...),
+        name: str = Form(...),
+        role: str = Form(default='input'),
+        contains_labels: bool = Form(default=False),
+        uploaded_by: str | None = Form(default=None),
+        _: None = Depends(require_operator),
+    ) -> IngestedDatasetRecord:
+        try:
+            return await asyncio.to_thread(
+                engine.datasets.ingest,
+                dataset.file,
+                filename=dataset.filename or '',
+                name=name,
+                role=role,
+                contains_labels=contains_labels,
+                media_type=dataset.content_type,
+                uploaded_by=uploaded_by,
+            )
+        except Exception as exc:
+            raise map_error(exc) from exc
+        finally:
+            await dataset.close()
+
+    @app.get('/datasets', response_model=list[IngestedDatasetRecord])
+    def list_datasets() -> list[IngestedDatasetRecord]:
+        return engine.store.list_datasets()
+
+    @app.get(
+        '/datasets/{dataset_id}',
+        response_model=IngestedDatasetRecord,
+    )
+    def get_dataset(dataset_id: str) -> IngestedDatasetRecord:
+        try:
+            return engine.store.get_dataset(dataset_id)
+        except Exception as exc:
+            raise map_error(exc) from exc
 
     @app.get('/task-bundles/{task_id}', response_model=TaskBundleRecord)
     def get_task_bundle(

@@ -52,6 +52,10 @@ durable outer research state machine around isolated OpenCode runtimes and the
 existing bounded cluster-execution service. The Titanic stack remains legacy
 v1 reference material.
 
+The current Discord and operator commands, arbitrary-task intake limits, and
+live progress are summarized in
+[`docs/research-orchestrator-command-surface.md`](docs/research-orchestrator-command-surface.md).
+
 The active product is `glasslab-v2`.
 
 The canonical local command path is:
@@ -110,6 +114,7 @@ If you want the current source of truth:
 - [docs/glasslab-v2/deprecated-api-surface-2026-07.md](docs/glasslab-v2/deprecated-api-surface-2026-07.md)
 - [docs/glasslab-v2/ci-policy-2026-07.md](docs/glasslab-v2/ci-policy-2026-07.md)
 - [docs/glasslab-v2/command-surface-spec.md](docs/glasslab-v2/command-surface-spec.md)
+- [docs/research-orchestrator-command-surface.md](docs/research-orchestrator-command-surface.md)
 - [docs/glasslab-v2/router-and-backend-contract.md](docs/glasslab-v2/router-and-backend-contract.md)
 - [docs/glasslab-v2/deprecation-map-2026-04.md](docs/glasslab-v2/deprecation-map-2026-04.md)
 

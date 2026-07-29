@@ -6,8 +6,11 @@ Discord threads and role-gated controls, restart recovery, and live Kubernetes
 deployment were tested on 2026-07-29. Three imported ML benchmark task types
 now have bounded CPU/GPU workload definitions and immutable evaluator contracts;
 their live end-to-end execution status is recorded below. Generic TaskSpec
-compilation is implemented and mock-tested but requires fresh live validation
-after this release.
+compilation and preflight were validated against live OpenCode and Qwen with a
+synthetic task; a complete arbitrary-dataset run remains outstanding.
+
+For the concise operator surface, read
+[`research-orchestrator-command-surface.md`](research-orchestrator-command-surface.md).
 
 ## Purpose
 
@@ -221,7 +224,7 @@ and returns a validated `glasslab-task-spec-v1` containing:
 
 - a human-facing name
 - one approved runtime profile
-- public asset requirements and optional expected checksums
+- uploaded-dataset references or public asset requirements and checksums
 - required metric keys and evidence artifacts
 - unresolved inputs that block execution
 
@@ -231,6 +234,14 @@ compiles the proposal into either `workspace-cpu-ml-v1` or
 `workspace-gpu-ml-v1`, downloads declared public HTTPS assets with size and
 address checks, computes SHA-256, stores immutable references, and binds the
 repository-controlled `generic-task-integrity-v1` contract.
+
+Local datasets are ingested separately from task ZIPs. The HTTP and Discord
+surfaces accept a bounded file, store it read-only under the shared artifact
+mount, and register its SHA-256 digest in SQLite. The returned
+`glasslab-dataset://<sha256>` reference is the model-facing identifier. Task
+compilation resolves it to an `s3://artifacts/...` contract; preflight verifies
+the file and digest, and `workflow-api` mounts the exact PVC subpath read-only
+in the experiment job.
 
 The generic contract verifies the task's declared metric keys and evidence
 artifacts. If those structural checks are not scientifically sufficient,
@@ -357,6 +368,12 @@ configured Discord control policy as approvals. The HTTP endpoint remains an
 internal automation and recovery interface; operators are not expected to
 construct it by hand for normal work.
 
+`/dataset-upload` registers a bounded attachment in the immutable dataset
+registry and returns a `glasslab-dataset://<sha256>` reference.
+`/research-pause`, `/research-resume`, and `/research-cancel` resolve the run
+from its thread, or accept an explicit run ID in the main channel. They record
+the Discord actor and optional reason in the append-only event history.
+
 The bot creates public threads and owns the editable status message. An
 optional channel webhook posts semantic events with per-message Honeydew,
 Beaker, and Orchestrator identities. Agent turn messages include the explicit
@@ -404,6 +421,9 @@ The service provides:
 ```text
 POST /runs
 POST /task-bundles/import
+POST /datasets/import
+GET  /datasets
+GET  /datasets/{dataset_id}
 GET  /task-bundles
 GET  /task-bundles/{task_id}
 GET  /task-bundles/{task_id}/preflight
@@ -437,6 +457,21 @@ Imported task usage is `/task-start` with a ZIP attachment. The command
 compiles, preflights, and starts only ready tasks. `/benchmark-start` remains
 as a compatibility alias. All start commands are restricted to the configured
 channel and Discord administrator role.
+
+Upload a local dataset before starting a task:
+
+```text
+/dataset-upload dataset:<attach file> name:training_data role:train contains_labels:true
+```
+
+Put the returned `glasslab-dataset://<sha256>` reference in `problem.md`.
+
+Pause and resume from the run thread:
+
+```text
+/research-pause reason: Hold while checking the dataset.
+/research-resume reason: Dataset check complete.
+```
 
 Cancel an active run from its Discord thread:
 
@@ -540,7 +575,7 @@ Manually tested:
 Not yet tested:
 
 - full Adult, Wine, or Fashion-MNIST benchmark completion on live GPUs/CPUs
-- generic `/task-start` compilation against live OpenCode and Qwen
+- full generic `/task-start` execution through final report acceptance
 - automatic public asset ingestion against a real new task
 
 ## MVP Limitations

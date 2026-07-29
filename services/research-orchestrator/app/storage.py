@@ -14,6 +14,7 @@ from .schemas import (
     ApprovalStatus,
     ArtifactRecord,
     EventRecord,
+    IngestedDatasetRecord,
     JobRecord,
     JobStatus,
     RunRecord,
@@ -129,6 +130,14 @@ class SqliteStore:
                 );
                 CREATE INDEX IF NOT EXISTS artifacts_run_idx
                 ON artifacts(run_id, created_at);
+
+                CREATE TABLE IF NOT EXISTS datasets (
+                    dataset_id TEXT PRIMARY KEY,
+                    payload TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS datasets_created_idx
+                ON datasets(created_at);
 
                 CREATE TABLE IF NOT EXISTS events (
                     event_id TEXT PRIMARY KEY,
@@ -680,6 +689,45 @@ class SqliteStore:
                 (run_id,),
             ).fetchall()
         return [ArtifactRecord.model_validate_json(row['payload']) for row in rows]
+
+    def save_dataset(
+        self,
+        record: IngestedDatasetRecord,
+    ) -> IngestedDatasetRecord:
+        with self.transaction() as connection:
+            connection.execute(
+                '''
+                INSERT OR IGNORE INTO datasets (
+                    dataset_id, payload, created_at
+                ) VALUES (?, ?, ?)
+                ''',
+                (
+                    record.dataset_id,
+                    _dump(record),
+                    record.created_at.isoformat(),
+                ),
+            )
+        return self.get_dataset(record.dataset_id)
+
+    def get_dataset(self, dataset_id: str) -> IngestedDatasetRecord:
+        with self._connect() as connection:
+            row = connection.execute(
+                'SELECT payload FROM datasets WHERE dataset_id = ?',
+                (dataset_id,),
+            ).fetchone()
+        if row is None:
+            raise RecordNotFound(dataset_id)
+        return IngestedDatasetRecord.model_validate_json(row['payload'])
+
+    def list_datasets(self) -> list[IngestedDatasetRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                'SELECT payload FROM datasets ORDER BY created_at, dataset_id'
+            ).fetchall()
+        return [
+            IngestedDatasetRecord.model_validate_json(row['payload'])
+            for row in rows
+        ]
 
     def list_events(
         self,
