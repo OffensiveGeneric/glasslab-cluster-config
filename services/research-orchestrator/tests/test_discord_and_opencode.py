@@ -10,6 +10,7 @@ from app.discord_adapter import DiscordHttpAdapter, DiscordRenderer
 from app.config import Settings
 from app.discord_controls import (
     DiscordControlActor,
+    DiscordControlGateway,
     DiscordControlPolicy,
     execute_discord_action,
 )
@@ -144,6 +145,18 @@ def test_discord_control_dispatch_records_immutable_identity() -> None:
         reason='Approved through Discord controls.',
     )
     engine.reject_action.assert_not_called()
+
+
+def test_discord_gateway_registers_component_handler() -> None:
+    gateway = DiscordControlGateway(
+        engine=Mock(),
+        bot_token='bot-token',
+        guild_id='guild-1',
+        admin_role_id='role-1',
+        admin_user_ids=[],
+    )
+
+    assert gateway.client.on_interaction == gateway._on_interaction
 
 
 def test_discord_webhook_uses_agent_identity_and_thread() -> None:

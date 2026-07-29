@@ -95,7 +95,7 @@ class DiscordControlGateway:
         intents = discord.Intents.none()
         intents.guilds = True
         self.client = discord.Client(intents=intents)
-        self.client.add_listener(self._on_interaction, 'on_interaction')
+        self.client.on_interaction = self._on_interaction
         self._tasks: set[asyncio.Task[None]] = set()
 
     async def run(self) -> None:
