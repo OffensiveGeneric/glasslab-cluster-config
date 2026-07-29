@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .paths import discover_repo_root
@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     artifacts_mount_path: str = '/mnt/artifacts'
     image_pull_secret_name: str = 'glasslab-ghcr-pull'
     gpu_runtime_class_name: str = 'nvidia'
+    evaluation_contracts: dict[str, dict[str, str]] = Field(default_factory=dict)
     user_priority_class_name: str = 'glasslab-user-high'
     autonomous_priority_class_name: str = 'glasslab-autonomous-low'
     intake_agent_enabled: bool = False

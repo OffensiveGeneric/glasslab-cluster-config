@@ -79,6 +79,53 @@ def _build_job_name(manifest: RunManifest) -> str:
     return f"{prefix}-{manifest.run_id[:8]}"[:63]
 
 
+def resolve_evaluation_contract(
+    manifest: RunManifest,
+    settings: Settings,
+) -> dict[str, str] | None:
+    requested = manifest.config_payload.get('evaluation_contract')
+    if requested is None:
+        return None
+    if not isinstance(requested, dict):
+        raise ValueError('evaluation_contract must be an object')
+    allowed_keys = {'contract_id', 'version', 'digest'}
+    if set(requested) != allowed_keys:
+        raise ValueError(
+            'evaluation_contract may contain only contract_id, version, and digest'
+        )
+    contract_id = str(requested.get('contract_id', '')).strip()
+    version = str(requested.get('version', '')).strip()
+    digest = str(requested.get('digest', '')).strip().lower()
+    key = f'{contract_id}@{version}'
+    trusted = settings.evaluation_contracts.get(key)
+    if trusted is None:
+        raise ValueError(f'evaluation contract is not trusted: {key}')
+    required = {
+        'contract_id',
+        'version',
+        'digest',
+        'container_image_digest',
+        'execution_wrapper',
+        'evaluation_entry_point',
+    }
+    if set(trusted) != required:
+        raise ValueError(f'trusted evaluation contract is malformed: {key}')
+    if (
+        trusted['contract_id'] != contract_id
+        or trusted['version'] != version
+        or trusted['digest'].lower() != digest
+    ):
+        raise ValueError(f'evaluation contract identity or digest mismatch: {key}')
+    image = trusted['container_image_digest']
+    if '@sha256:' not in image:
+        raise ValueError(f'evaluation contract image is not digest-pinned: {key}')
+    for field in ('execution_wrapper', 'evaluation_entry_point'):
+        path = PurePosixPath(trusted[field])
+        if path.is_absolute() or '..' in path.parts or path.as_posix() in {'', '.'}:
+            raise ValueError(f'evaluation contract has unsafe {field}: {key}')
+    return dict(trusted)
+
+
 def _build_runner_spec(manifest: RunManifest, settings: Settings) -> dict:
     if manifest.workflow_id == 'generic-tabular-benchmark':
         dataset_name = str(manifest.inputs.get('dataset_name', '')).strip()
@@ -344,6 +391,7 @@ class KubernetesJobSubmitter(JobSubmitter):
         self.core_api = self.client.CoreV1Api()
 
     def submit_run(self, manifest: RunManifest) -> JobSubmissionReceipt:
+        evaluation_contract = resolve_evaluation_contract(manifest, self.settings)
         job_name = _build_job_name(manifest)
         labels = {
             'app.kubernetes.io/name': 'glasslab-v2-runner',
@@ -427,6 +475,65 @@ class KubernetesJobSubmitter(JobSubmitter):
         )
         if manifest.entrypoint:
             container.command = manifest.entrypoint
+        original_entrypoint = list(container.command or [])
+        init_containers = None
+        if evaluation_contract:
+            contract_mount = '/evaluation-contract'
+            wrapper = f"{contract_mount}/{evaluation_contract['execution_wrapper']}"
+            evaluator = (
+                f"{contract_mount}/"
+                f"{evaluation_contract['evaluation_entry_point']}"
+            )
+            env.extend(
+                [
+                    self.client.V1EnvVar(
+                        name='GLASSLAB_EXPERIMENT_ENTRYPOINT_JSON',
+                        value=json.dumps(original_entrypoint),
+                    ),
+                    self.client.V1EnvVar(
+                        name='GLASSLAB_EVALUATION_ENTRY_POINT',
+                        value=evaluator,
+                    ),
+                    self.client.V1EnvVar(
+                        name='GLASSLAB_EVALUATION_CONTRACT_ID',
+                        value=evaluation_contract['contract_id'],
+                    ),
+                    self.client.V1EnvVar(
+                        name='GLASSLAB_EVALUATION_CONTRACT_VERSION',
+                        value=evaluation_contract['version'],
+                    ),
+                    self.client.V1EnvVar(
+                        name='GLASSLAB_EVALUATION_CONTRACT_DIGEST',
+                        value=evaluation_contract['digest'],
+                    ),
+                ]
+            )
+            container.env = env
+            container.command = ['python3', wrapper]
+            init_containers = [
+                self.client.V1Container(
+                    name='evaluation-contract',
+                    image=evaluation_contract['container_image_digest'],
+                    image_pull_policy=self.settings.runner_image_pull_policy,
+                    command=[
+                        '/bin/sh',
+                        '-c',
+                        'cp -a /contract/. /contract-copy/',
+                    ],
+                    security_context=self.client.V1SecurityContext(
+                        allow_privilege_escalation=False,
+                        read_only_root_filesystem=True,
+                        run_as_non_root=True,
+                        capabilities=self.client.V1Capabilities(drop=['ALL']),
+                    ),
+                    volume_mounts=[
+                        self.client.V1VolumeMount(
+                            name='evaluation-contract',
+                            mount_path='/contract-copy',
+                        )
+                    ],
+                )
+            ]
 
         research_workspace = _is_research_workspace_manifest(manifest)
 
@@ -441,6 +548,7 @@ class KubernetesJobSubmitter(JobSubmitter):
             automount_service_account_token=False,
             image_pull_secrets=[self.client.V1LocalObjectReference(name=self.settings.image_pull_secret_name)],
             containers=[container],
+            init_containers=init_containers,
             priority_class_name=priority_class_name or None,
             runtime_class_name=runtime_class_name,
             node_selector=manifest.node_selector or None,
@@ -459,6 +567,16 @@ class KubernetesJobSubmitter(JobSubmitter):
                     persistent_volume_claim=self.client.V1PersistentVolumeClaimVolumeSource(
                         claim_name=self.settings.artifacts_pvc_name,
                     ),
+                ),
+                *(
+                    [
+                        self.client.V1Volume(
+                            name='evaluation-contract',
+                            empty_dir=self.client.V1EmptyDirVolumeSource(),
+                        )
+                    ]
+                    if evaluation_contract
+                    else []
                 ),
             ],
         )
@@ -488,9 +606,29 @@ class KubernetesJobSubmitter(JobSubmitter):
                     mount_path=self.settings.artifacts_mount_path,
                 ),
             ]
+        if evaluation_contract:
+            container.volume_mounts.append(
+                self.client.V1VolumeMount(
+                    name='evaluation-contract',
+                    mount_path='/evaluation-contract',
+                    read_only=True,
+                )
+            )
 
         job = self.client.V1Job(
-            metadata=self.client.V1ObjectMeta(name=job_name, labels=labels),
+            metadata=self.client.V1ObjectMeta(
+                name=job_name,
+                labels=labels,
+                annotations=(
+                    {
+                        'glasslab.io/evaluation-contract-digest': (
+                            evaluation_contract['digest']
+                        )
+                    }
+                    if evaluation_contract
+                    else None
+                ),
+            ),
             spec=self.client.V1JobSpec(
                 backoff_limit=self.settings.runner_backoff_limit,
                 active_deadline_seconds=_active_deadline_seconds(manifest),

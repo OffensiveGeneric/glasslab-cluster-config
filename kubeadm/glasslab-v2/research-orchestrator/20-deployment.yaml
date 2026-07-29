@@ -1,0 +1,102 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: glasslab-research-orchestrator
+  namespace: glasslab-v2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: glasslab-research-orchestrator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: glasslab-research-orchestrator
+    spec:
+      serviceAccountName: glasslab-research-orchestrator
+      automountServiceAccountToken: false
+      nodeSelector:
+        kubernetes.io/hostname: node05
+      imagePullSecrets:
+        - name: glasslab-ghcr-pull
+      securityContext:
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+        - name: approved-repository
+          image: alpine/git:2.47.2
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              target=/mnt/artifacts/research-orchestrator/approved-repo
+              mkdir -p "$(dirname "$target")"
+              if [ ! -d "$target/.git" ]; then
+                git clone --branch main --single-branch \
+                  https://github.com/OffensiveGeneric/glasslab-cluster-config.git \
+                  "$target"
+              fi
+              git -C "$target" fetch origin main
+              git -C "$target" checkout --detach origin/main
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: artifacts-volume
+              mountPath: /mnt/artifacts
+      containers:
+        - name: orchestrator
+          image: ghcr.io/offensivegeneric/glasslab-research-orchestrator:0.1.0
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: glasslab-research-orchestrator-config
+            - secretRef:
+                name: glasslab-research-orchestrator
+                optional: true
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: artifacts-volume
+              mountPath: /mnt/artifacts
+            - name: temporary
+              mountPath: /tmp
+      volumes:
+        - name: artifacts-volume
+          persistentVolumeClaim:
+            claimName: glasslab-shared-artifacts
+        - name: temporary
+          emptyDir: {}

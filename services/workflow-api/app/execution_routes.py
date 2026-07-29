@@ -11,7 +11,7 @@ from services.common.schemas import ArtifactIndexEntry, ArtifactsIndex, Expected
 
 from .config import Settings
 from .execution_preflight import build_execution_preflight_result
-from .job_submission import JobSubmitter
+from .job_submission import JobSubmitter, resolve_evaluation_contract
 from .persistence import RunStore
 from .registry import WorkflowRegistry
 from .run_artifacts import (
@@ -202,6 +202,13 @@ def register_execution_routes(
             budget=request.budget,
             metric_contract=metric_contract,
         )
+        try:
+            resolve_evaluation_contract(manifest, settings)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(exc),
+            ) from exc
         status_payload = RunStatus(
             run_id=run_id,
             status='accepted',

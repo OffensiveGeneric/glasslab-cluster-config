@@ -18,6 +18,7 @@ CURRENT_DOCS = [
     Path('docs/glasslab-v2/investigation-api-v1.md'),
     Path('docs/glasslab-v2/local-model-command-surface.md'),
     Path('docs/glasslab-v2/deprecated-api-surface-2026-07.md'),
+    Path('docs/research-orchestrator.md'),
 ]
 SKIP_PREFIXES = (
     'http://',

@@ -1,6 +1,7 @@
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -10,13 +11,17 @@ for module_name in list(sys.modules):
         del sys.modules[module_name]
 
 from app.registry import WorkflowRegistry
+from app.config import Settings
 from app.investigation_routes import evaluator_contract_issues
 from app.job_submission import (
+    KubernetesJobSubmitter,
     _active_deadline_seconds,
     _asset_volume_subpath,
     _research_workspace_asset_locations,
     _research_workspace_volume_mount_specs,
+    resolve_evaluation_contract,
 )
+import app.job_submission as job_submission_module
 from app.schemas import InvestigationPlanCreateRequest, RunCreateRequest
 from app.validation import validate_run_request
 from services.common.schemas import RunManifest
@@ -146,6 +151,200 @@ def test_generic_run_wallclock_budget_becomes_kubernetes_deadline() -> None:
     )
 
     assert _active_deadline_seconds(manifest) == 17 * 60
+
+
+def test_evaluation_contract_must_match_trusted_catalog() -> None:
+    digest = 'a' * 64
+    manifest = RunManifest(
+        run_id='run-contract',
+        workflow_id='metric-search-v0',
+        workflow_family='metric-learning',
+        display_name='Metric Search',
+        objective='Execute one contract-bound experiment.',
+        submitted_by='test-suite',
+        submitted_at=datetime.now(timezone.utc),
+        inputs={},
+        requested_models=['agent-generated-python'],
+        resource_profile='gpu-small',
+        runner_image='ghcr.io/example/runner:test',
+        evaluator_type='contract',
+        approval_tier='tier-2-approved-execution',
+        expected_artifacts={'required': ['metrics.json'], 'optional': []},
+        experiment_type='gpu-training-job',
+        workload_id='metric-search-v0',
+        entrypoint=['python3', 'run.py'],
+        config_payload={
+            'evaluation_contract': {
+                'contract_id': 'example',
+                'version': '1.0.0',
+                'digest': digest,
+            }
+        },
+        budget={'max_wallclock_minutes': 5},
+    )
+    trusted = {
+        'contract_id': 'example',
+        'version': '1.0.0',
+        'digest': digest,
+        'container_image_digest': f'ghcr.io/example/contract@sha256:{"b" * 64}',
+        'execution_wrapper': 'run_contract.py',
+        'evaluation_entry_point': 'evaluator.py',
+    }
+    settings = Settings(
+        evaluation_contracts={'example@1.0.0': trusted}
+    )
+    assert resolve_evaluation_contract(manifest, settings) == trusted
+
+    replaced = manifest.model_copy(
+        update={
+            'config_payload': {
+                'evaluation_contract': {
+                    'contract_id': 'example',
+                    'version': '1.0.0',
+                    'digest': 'c' * 64,
+                }
+            }
+        }
+    )
+    with pytest.raises(ValueError, match='digest mismatch'):
+        resolve_evaluation_contract(replaced, settings)
+
+
+def test_evaluation_contract_rejects_agent_supplied_execution_fields() -> None:
+    manifest = RunManifest(
+        run_id='run-contract-override',
+        workflow_id='metric-search-v0',
+        workflow_family='metric-learning',
+        display_name='Metric Search',
+        objective='Reject a replaced evaluation entry point.',
+        submitted_by='test-suite',
+        submitted_at=datetime.now(timezone.utc),
+        inputs={},
+        requested_models=['agent-generated-python'],
+        resource_profile='gpu-small',
+        runner_image='ghcr.io/example/runner:test',
+        evaluator_type='contract',
+        approval_tier='tier-2-approved-execution',
+        expected_artifacts={'required': ['metrics.json'], 'optional': []},
+        experiment_type='gpu-training-job',
+        workload_id='metric-search-v0',
+        entrypoint=['python3', 'run.py'],
+        config_payload={
+            'evaluation_contract': {
+                'contract_id': 'example',
+                'version': '1.0.0',
+                'digest': 'a' * 64,
+                'evaluation_entry_point': 'attacker.py',
+            }
+        },
+        budget={'max_wallclock_minutes': 5},
+    )
+    with pytest.raises(ValueError, match='may contain only'):
+        resolve_evaluation_contract(manifest, Settings())
+
+
+def test_kubernetes_job_mounts_trusted_contract_read_only(monkeypatch) -> None:
+    digest = 'a' * 64
+    trusted = {
+        'contract_id': 'example',
+        'version': '1.0.0',
+        'digest': digest,
+        'container_image_digest': f'ghcr.io/example/contract@sha256:{"b" * 64}',
+        'execution_wrapper': 'run_contract.py',
+        'evaluation_entry_point': 'evaluator.py',
+    }
+    manifest = RunManifest(
+        run_id='run-contract-job',
+        workflow_id='metric-search-v0',
+        workflow_family='metric-learning',
+        display_name='Metric Search',
+        objective='Render one immutable contract job.',
+        submitted_by='test-suite',
+        submitted_at=datetime.now(timezone.utc),
+        inputs={},
+        requested_models=['agent-generated-python'],
+        resource_profile='gpu-small',
+        resource_requests={'cpu': '1'},
+        resource_limits={'cpu': '1'},
+        runner_image='ghcr.io/example/runner:test',
+        evaluator_type='contract',
+        approval_tier='tier-2-approved-execution',
+        expected_artifacts={'required': ['metrics.json'], 'optional': []},
+        experiment_type='gpu-training-job',
+        workload_id='metric-search-v0',
+        entrypoint=['python3', 'run.py'],
+        config_payload={
+            'evaluation_contract': {
+                'contract_id': 'example',
+                'version': '1.0.0',
+                'digest': digest,
+            }
+        },
+        budget={'max_wallclock_minutes': 5},
+    )
+
+    class Record(SimpleNamespace):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+
+    class BatchApi:
+        submitted = None
+
+        def create_namespaced_job(self, *, namespace, body):
+            self.submitted = (namespace, body)
+
+    batch = BatchApi()
+    client = SimpleNamespace(
+        BatchV1Api=lambda: batch,
+        CoreV1Api=lambda: Record(),
+        **{
+            name: Record
+            for name in (
+                'V1Capabilities',
+                'V1Container',
+                'V1EmptyDirVolumeSource',
+                'V1EnvVar',
+                'V1Job',
+                'V1JobSpec',
+                'V1LocalObjectReference',
+                'V1ObjectMeta',
+                'V1PersistentVolumeClaimVolumeSource',
+                'V1PodSecurityContext',
+                'V1PodSpec',
+                'V1PodTemplateSpec',
+                'V1ResourceRequirements',
+                'V1SeccompProfile',
+                'V1SecurityContext',
+                'V1Volume',
+                'V1VolumeMount',
+            )
+        },
+    )
+    kube_config = SimpleNamespace(load_incluster_config=lambda: None)
+    monkeypatch.setattr(
+        job_submission_module,
+        '_load_kube_modules',
+        lambda: (client, kube_config, RuntimeError, RuntimeError),
+    )
+    submitter = KubernetesJobSubmitter(
+        Settings(evaluation_contracts={'example@1.0.0': trusted})
+    )
+    submitter.submit_run(manifest)
+
+    _, job = batch.submitted
+    pod = job.spec.template.spec
+    assert pod.automount_service_account_token is False
+    assert pod.init_containers[0].image == trusted['container_image_digest']
+    assert pod.containers[0].command == [
+        'python3',
+        '/evaluation-contract/run_contract.py',
+    ]
+    contract_mount = next(
+        mount
+        for mount in pod.containers[0].volume_mounts
+        if mount.name == 'evaluation-contract'
+    )
+    assert contract_mount.read_only is True
 
 
 def test_investigation_plan_accepts_acyclic_execution_graph() -> None:

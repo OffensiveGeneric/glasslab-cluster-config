@@ -30,6 +30,10 @@ Short version:
 
 ## Current Architecture And Implementation Notes
 
+- [`../research-orchestrator.md`](../research-orchestrator.md) describes the
+  Honeydew/Beaker orchestrator, immutable evaluation contracts, approvals,
+  workspace isolation, recovery, and its current validation boundary.
+
 These remain current and useful after the cleanup pass:
 
 - `overview.md`

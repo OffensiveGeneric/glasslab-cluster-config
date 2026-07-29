@@ -46,6 +46,12 @@ Useful service buckets:
 
 ## Canonical Product Direction
 
+The first bounded Honeydew/Beaker research workflow is documented in
+[`docs/research-orchestrator.md`](docs/research-orchestrator.md). It adds a
+durable outer research state machine around isolated OpenCode runtimes and the
+existing bounded cluster-execution service. The Titanic stack remains legacy
+v1 reference material.
+
 The active product is `glasslab-v2`.
 
 The canonical local command path is:

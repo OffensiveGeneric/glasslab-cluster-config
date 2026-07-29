@@ -68,6 +68,7 @@ run_shell() {
     scripts/check-before-push.sh \
     scripts/glasslab-opencode.sh \
     scripts/research-session-cli.sh \
+    scripts/smoke-test-research-orchestrator.sh \
     scripts/submit-learning-task.sh \
     scripts/submit-sample-experiment.sh
 }
@@ -94,7 +95,7 @@ PY
 }
 
 run_workflow_api_tests() {
-  printf '[check-before-push] running workflow-api core tests\n'
+  printf '[check-before-push] running core service tests\n'
   (
     cd services/workflow-api
     PYTHONPATH=../..:. pytest \
@@ -111,6 +112,13 @@ run_workflow_api_tests() {
     PYTHONPATH=. pytest \
       -p no:cacheprovider \
       tests/test_runner.py \
+      -q
+  )
+  (
+    cd services/research-orchestrator
+    PYTHONPATH=. pytest \
+      -p no:cacheprovider \
+      tests \
       -q
   )
 }

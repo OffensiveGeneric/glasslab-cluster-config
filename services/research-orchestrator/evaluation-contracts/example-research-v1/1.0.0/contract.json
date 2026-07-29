@@ -1,0 +1,24 @@
+{
+  "container_image_digest": "ghcr.io/offensivegeneric/glasslab-evaluation-contract-example@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "contract_id": "example-research-v1",
+  "evaluation_entry_point": "evaluator.py",
+  "execution_wrapper": "run_contract.py",
+  "expected_input_schema": "input.schema.json",
+  "expected_output_schema": "output.schema.json",
+  "manifest": {
+    "description": "Small deterministic evaluator used by the local orchestrator smoke test.",
+    "primary_metric": "score",
+    "primary_metric_direction": "maximize"
+  },
+  "required_artifacts": [
+    "metrics.json",
+    "evaluation.json"
+  ],
+  "resource_constraints": {
+    "cpu": 1.0,
+    "gpus": 1,
+    "memory_gib": 1.0,
+    "wallclock_minutes": 5
+  },
+  "version": "1.0.0"
+}
