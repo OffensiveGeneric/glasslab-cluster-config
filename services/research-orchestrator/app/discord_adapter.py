@@ -291,13 +291,22 @@ class DiscordRenderer:
                 _render_action_context(payload),
                 components=components,
             )
-        if event_type in {'action.approved', 'action.rejected'}:
-            if event_type == 'action.rejected':
+        if event_type in {
+            'action.approved',
+            'action.rejected',
+            'action.rejection_resumed',
+        }:
+            if event_type in {'action.rejected', 'action.rejection_resumed'}:
+                heading = (
+                    'Rejected action recovery resumed'
+                    if event_type == 'action.rejection_resumed'
+                    else 'Action rejected'
+                )
                 return DiscordMessage(
                     'Orchestrator',
                     '\n'.join(
                         [
-                            '**Action rejected**',
+                            f'**{heading}**',
                             '',
                             f"Action: `{payload.get('action_id')}`",
                             f"Reviewer: {payload.get('reviewer', 'unknown')}",

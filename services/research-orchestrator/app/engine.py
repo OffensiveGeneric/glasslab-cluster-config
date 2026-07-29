@@ -814,6 +814,16 @@ class ResearchOrchestrator:
         with self._advance_lock:
             existing = self.store.get_action(action_id)
             if existing.approval_status == ApprovalStatus.REJECTED:
+                self._event(
+                    existing.run_id,
+                    source='orchestrator',
+                    event_type='action.rejection_resumed',
+                    payload={
+                        'action_id': action_id,
+                        'reviewer': reviewer,
+                        'reason': reason,
+                    },
+                )
                 self._resume_rejected_action(existing, feedback=reason)
                 return self.store.get_action(action_id)
             if existing.approval_status != ApprovalStatus.PENDING:

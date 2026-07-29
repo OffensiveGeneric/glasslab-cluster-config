@@ -149,6 +149,14 @@ def test_rejected_protocol_action_resumes_after_partial_failure(
     recovered = store.get_run(run.run_id)
     assert recovered.state == RunState.AWAITING_PROTOCOL_APPROVAL
     assert recovered.protocol_version == 2
+    resumed = next(
+        event
+        for event in store.list_events(run.run_id)
+        if event.event_type == 'action.rejection_resumed'
+    )
+    assert resumed.payload['reason'] == (
+        'Use the available hardware and fixed split.'
+    )
     assert _pending_action(
         store,
         run.run_id,
