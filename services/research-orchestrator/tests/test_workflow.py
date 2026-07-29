@@ -86,7 +86,7 @@ class NewContractRuntime(ScriptedMockRuntime):
                     'mock-wrong-kind',
                 )
             root = kwargs['workspace'] / 'contract-candidate/candidate-v1/1.0.0'
-            root.mkdir(parents=True)
+            root.mkdir(parents=True, exist_ok=True)
             descriptor = {
                 'contract_id': 'candidate-v1',
                 'version': '1.0.0',
@@ -144,6 +144,29 @@ class NewContractRuntime(ScriptedMockRuntime):
                 'mock-contract-review',
             )
         return super().run_turn(**kwargs)
+
+
+class InvalidThenValidContractRuntime(NewContractRuntime):
+    def __init__(self, *, runner_image: str) -> None:
+        super().__init__(runner_image=runner_image)
+        self.returned_invalid_candidate = False
+
+    def run_turn(self, **kwargs):
+        result, message_id = super().run_turn(**kwargs)
+        if (
+            kwargs['agent'].value == 'beaker'
+            and result.kind == TurnKind.CONTRACT_CANDIDATE
+            and not self.returned_invalid_candidate
+        ):
+            self.returned_invalid_candidate = True
+            root = (
+                kwargs['workspace']
+                / 'contract-candidate/candidate-v1/1.0.0'
+            )
+            descriptor = json.loads((root / 'contract.json').read_text())
+            descriptor['unexpected'] = True
+            (root / 'contract.json').write_text(json.dumps(descriptor))
+        return result, message_id
 
 
 def _pending_action(store, run_id: str, action_type: str):
@@ -265,6 +288,40 @@ def test_new_contract_is_reviewed_promoted_and_bound(
     assert Path(settings.trusted_contract_catalog_path).is_file()
     assert any(
         event.event_type == 'agent.output_rejected'
+        for event in store.list_events(run.run_id)
+    )
+
+
+def test_invalid_contract_candidate_is_rejected_and_retried(
+    orchestrator_bundle,
+) -> None:
+    settings, store, cluster, _, original = orchestrator_bundle
+    engine = ResearchOrchestrator(
+        settings=settings,
+        store=store,
+        runtime=InvalidThenValidContractRuntime(runner_image=RUNNER_IMAGE),
+        workspaces=original.workspaces,
+        contracts=original.contracts,
+        contract_candidates=original.contract_candidates,
+        policy=original.policy,
+        cluster=cluster,
+        discord=DisabledDiscordAdapter(),
+    )
+    run = engine.create_run(
+        RunCreateRequest(objective='Retry an invalid contract candidate.')
+    )
+    protocol = _pending_action(store, run.run_id, 'approve_protocol')
+    engine.approve_action(
+        protocol.action_id,
+        reviewer='test-human',
+        reason='Protocol accepted.',
+    )
+
+    assert store.get_run(run.run_id).state == (
+        RunState.AWAITING_CONTRACT_PROMOTION
+    )
+    assert any(
+        event.event_type == 'contract.candidate_rejected'
         for event in store.list_events(run.run_id)
     )
 

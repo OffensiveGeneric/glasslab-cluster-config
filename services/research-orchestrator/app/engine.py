@@ -1037,7 +1037,12 @@ class ResearchOrchestrator:
             '`contract-candidate/<contract-id>/<version>/` containing '
             'contract.json, the execution wrapper, evaluator, input and output '
             'JSON schemas, and concise test vectors or tests. The descriptor '
-            'must set container_image_digest to null. Do not write '
+            'must contain only the EvaluationContractDescriptor fields, set '
+            'container_image_digest to null, and put both primary_metric and '
+            'primary_metric_direction in manifest. execution_wrapper and '
+            'evaluation_entry_point must each be a relative path to a real '
+            'Python file inside the candidate directory, not a command or '
+            'module reference. Do not write '
             'contract.sha256; the orchestrator owns sealing. Run lightweight '
             'local checks. Return exactly one `propose_evaluation_contract` '
             'action with contract_id, semantic version, candidate_path, and '
@@ -1082,37 +1087,65 @@ class ResearchOrchestrator:
         source = (workspace / request.candidate_path).resolve()
         if not source.is_relative_to(workspace):
             raise WorkflowError('contract candidate escapes Beaker workspace')
-        sealed = self.contract_candidates.seal(
-            source=source,
-            contract_id=request.contract_id,
-            version=request.version,
-        )
-        descriptor = sealed.descriptor
-        primary = proposal.get('primary_metric')
-        resources = proposal.get('resource_constraints')
-        required_artifacts = proposal.get('required_artifacts')
-        if (
-            request.contract_id != proposal.get('evaluator_type')
-            or not isinstance(primary, dict)
-            or descriptor.manifest.get('primary_metric') != primary.get('name')
-            or descriptor.manifest.get('primary_metric_direction')
-            != primary.get('direction')
-            or not isinstance(required_artifacts, list)
-            or not set(required_artifacts).issubset(
-                descriptor.required_artifacts
+        try:
+            sealed = self.contract_candidates.seal(
+                source=source,
+                contract_id=request.contract_id,
+                version=request.version,
             )
-            or not isinstance(resources, dict)
-            or float(resources.get('cpu', float('inf')))
-            > descriptor.resource_constraints.cpu
-            or float(resources.get('memory_gib', float('inf')))
-            > descriptor.resource_constraints.memory_gib
-            or int(resources.get('gpus', self.policy.maximum_gpus + 1))
-            > descriptor.resource_constraints.gpus
-        ):
-            raise WorkflowError(
-                'candidate descriptor does not implement the approved '
-                'scientific contract proposal'
+            descriptor = sealed.descriptor
+            primary = proposal.get('primary_metric')
+            resources = proposal.get('resource_constraints')
+            required_artifacts = proposal.get('required_artifacts')
+            if (
+                request.contract_id != proposal.get('evaluator_type')
+                or not isinstance(primary, dict)
+                or descriptor.manifest.get('primary_metric')
+                != primary.get('name')
+                or descriptor.manifest.get('primary_metric_direction')
+                != primary.get('direction')
+                or not isinstance(required_artifacts, list)
+                or not set(required_artifacts).issubset(
+                    descriptor.required_artifacts
+                )
+                or not isinstance(resources, dict)
+                or float(resources.get('cpu', float('inf')))
+                > descriptor.resource_constraints.cpu
+                or float(resources.get('memory_gib', float('inf')))
+                > descriptor.resource_constraints.memory_gib
+                or int(resources.get('gpus', self.policy.maximum_gpus + 1))
+                > descriptor.resource_constraints.gpus
+            ):
+                raise WorkflowError(
+                    'candidate descriptor does not implement the approved '
+                    'scientific contract proposal'
+                )
+        except (OSError, ValueError, WorkflowError) as exc:
+            feedback_message = (
+                'The orchestrator rejected the candidate during deterministic '
+                f'validation: {exc}'
             )
+            self.store.update_action(
+                action.action_id,
+                approval_status=ApprovalStatus.REJECTED,
+                reviewer='orchestrator',
+                reason=feedback_message,
+            )
+            self._event(
+                run_id,
+                source='orchestrator',
+                event_type='contract.candidate_rejected',
+                payload={
+                    'action_id': action.action_id,
+                    'reason': feedback_message,
+                    'retrying': True,
+                },
+            )
+            self._beaker_draft_contract(
+                run_id,
+                feedback=feedback_message,
+            )
+            return
         review_path = self.workspaces.copy_contract_candidate_for_review(
             run_id=run_id,
             source=sealed.sealed_path,
