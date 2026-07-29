@@ -62,6 +62,10 @@ class ContractOversizedThenValidRuntime(ScriptedMockRuntime):
 
 
 class NewContractRuntime(ScriptedMockRuntime):
+    def __init__(self, *, runner_image: str) -> None:
+        super().__init__(runner_image=runner_image)
+        self.returned_wrong_contract_kind = False
+
     def run_turn(self, **kwargs):
         prompt = kwargs['prompt']
         agent = kwargs['agent'].value
@@ -71,6 +75,16 @@ class NewContractRuntime(ScriptedMockRuntime):
             result.evaluation_contract_proposal.evaluator_type = 'candidate-v1'
             return result, message_id
         if agent == 'beaker' and 'Draft an immutable evaluation-contract' in prompt:
+            if not self.returned_wrong_contract_kind:
+                self.returned_wrong_contract_kind = True
+                return (
+                    AgentTurnResult(
+                        kind=TurnKind.PROTOCOL_DRAFT,
+                        summary='Returned a stale phase label.',
+                        done=True,
+                    ),
+                    'mock-wrong-kind',
+                )
             root = kwargs['workspace'] / 'contract-candidate/candidate-v1/1.0.0'
             root.mkdir(parents=True)
             descriptor = {
@@ -249,6 +263,10 @@ def test_new_contract_is_reviewed_promoted_and_bound(
     assert rebound.evaluation_contract_id == 'candidate-v1'
     assert rebound.state == RunState.AWAITING_EXECUTION_APPROVAL
     assert Path(settings.trusted_contract_catalog_path).is_file()
+    assert any(
+        event.event_type == 'agent.output_rejected'
+        for event in store.list_events(run.run_id)
+    )
 
 
 def test_rejected_protocol_action_resumes_after_partial_failure(

@@ -292,9 +292,38 @@ class ResearchOrchestrator:
                 prompt=prompt,
             )
             if result.kind != expected_kind:
-                raise WorkflowError(
-                    f'{agent.value} returned {result.kind}; expected {expected_kind}'
+                returned_kind = result.kind
+                self._event(
+                    run_id,
+                    source='orchestrator',
+                    event_type='agent.output_rejected',
+                    payload={
+                        'turn_id': turn.turn_id,
+                        'returned_kind': returned_kind.value,
+                        'expected_kind': expected_kind.value,
+                        'repair_attempted': True,
+                    },
                 )
+                result, message_id = self.runtime.run_turn(
+                    run_id=run_id,
+                    agent=agent,
+                    workspace=workspace,
+                    session_id=session.session_id,
+                    prompt=(
+                        'Structured kind correction. Your previous response '
+                        f'used kind `{returned_kind.value}`, but this turn '
+                        f'requires kind `{expected_kind.value}`. Complete the '
+                        'original task and return a complete AgentTurnResult '
+                        'with exactly that kind. Do not repeat an earlier '
+                        'workflow phase.\n\nOriginal task:\n'
+                        + prompt
+                    ),
+                )
+                if result.kind != expected_kind:
+                    raise WorkflowError(
+                        f'{agent.value} returned {result.kind}; expected '
+                        f'{expected_kind} after one focused repair'
+                    )
             completed = turn.model_copy(
                 update={
                     'opencode_message_id': message_id,
