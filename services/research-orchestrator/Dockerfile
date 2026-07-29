@@ -1,6 +1,12 @@
 FROM python:3.11-slim
 
 ARG OPENCODE_VERSION=1.4.6
+ARG GLASSLAB_GIT_SHA=unknown
+ARG GLASSLAB_BUILD_SOURCE=unspecified
+
+LABEL org.opencontainers.image.revision="${GLASSLAB_GIT_SHA}"
+LABEL org.opencontainers.image.source="https://github.com/OffensiveGeneric/glasslab-cluster-config"
+LABEL io.glasslab.build-source="${GLASSLAB_BUILD_SOURCE}"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
