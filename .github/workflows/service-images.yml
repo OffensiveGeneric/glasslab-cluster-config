@@ -10,16 +10,6 @@ on:
       - "services/research-orchestrator/**"
       - ".github/workflows/service-images.yml"
   workflow_dispatch:
-    inputs:
-      service:
-        description: "Service image to publish"
-        required: true
-        default: "all"
-        type: choice
-        options:
-          - all
-          - workflow-api
-          - research-orchestrator
 
 permissions:
   contents: read
@@ -30,74 +20,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  changes:
-    runs-on: ubuntu-latest
-    outputs:
-      workflow_api: ${{ steps.select.outputs.workflow_api }}
-      research_orchestrator: ${{ steps.select.outputs.research_orchestrator }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Select images
-        id: select
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BEFORE_SHA: ${{ github.event.before }}
-          CURRENT_SHA: ${{ github.sha }}
-          REQUESTED_SERVICE: ${{ inputs.service }}
-        run: |
-          workflow_api=false
-          research_orchestrator=false
-
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            case "$REQUESTED_SERVICE" in
-              all)
-                workflow_api=true
-                research_orchestrator=true
-                ;;
-              workflow-api)
-                workflow_api=true
-                ;;
-              research-orchestrator)
-                research_orchestrator=true
-                ;;
-              *)
-                echo "Unsupported service: $REQUESTED_SERVICE" >&2
-                exit 1
-                ;;
-            esac
-          else
-            if [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
-              changed_files="$(git ls-tree -r --name-only "$CURRENT_SHA")"
-            else
-              changed_files="$(git diff --name-only "$BEFORE_SHA" "$CURRENT_SHA")"
-            fi
-
-            while IFS= read -r path; do
-              case "$path" in
-                services/common/*|services/workflow-api/*|services/workflow-registry/*)
-                  workflow_api=true
-                  ;;
-                services/research-orchestrator/*)
-                  research_orchestrator=true
-                  ;;
-                .github/workflows/service-images.yml)
-                  workflow_api=true
-                  research_orchestrator=true
-                  ;;
-              esac
-            done <<< "$changed_files"
-          fi
-
-          echo "workflow_api=$workflow_api" >> "$GITHUB_OUTPUT"
-          echo "research_orchestrator=$research_orchestrator" >> "$GITHUB_OUTPUT"
-
   workflow-api:
-    needs: changes
-    if: ${{ needs.changes.outputs.workflow_api == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -127,8 +50,6 @@ jobs:
           cache-to: type=gha,mode=max,scope=workflow-api
 
   research-orchestrator:
-    needs: changes
-    if: ${{ needs.changes.outputs.research_orchestrator == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

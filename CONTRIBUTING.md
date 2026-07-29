@@ -87,8 +87,8 @@ The laptop checkout is not authoritative for live state.
 - Docs are documented state.
 - Only `.44` can confirm actual live cluster state.
 
-Merges to `main` publish affected service images to GHCR under the full commit
-SHA. If a change affects a live service, wait for the `Publish Service Images`
+Relevant merges to `main` publish a matched pair of service images to GHCR
+under the full commit SHA. If a change affects a live service, wait for the `Publish Service Images`
 workflow, then roll that exact commit from `.44`:
 
 ```bash

@@ -23,13 +23,15 @@ Kubernetes pulls the exact reviewed image
 
 ## Publishing
 
-`.github/workflows/service-images.yml` publishes only affected images:
+`.github/workflows/service-images.yml` runs when either control service or its
+shared inputs change. It publishes both images as one release set:
 
-- changes under `services/workflow-api`, `services/workflow-registry`, or
-  `services/common` publish `glasslab-workflow-api`
-- changes under `services/research-orchestrator` publish
-  `glasslab-research-orchestrator`
-- changes to the image workflow publish both
+- `glasslab-workflow-api:<full-commit-sha>`
+- `glasslab-research-orchestrator:<full-commit-sha>`
+
+Publishing both ensures the default rollout and rollback commands always have
+a complete pair for the selected commit. Docker build caching keeps unchanged
+dependency layers reusable.
 
 Images use the full Git commit SHA. Mutable `latest` tags and manually chosen
 version counters are not part of the deployment contract.
