@@ -4,9 +4,10 @@ on:
   push:
     branches: [main]
     paths:
-      - "services/research-workspace-runner/**"
+      - "services/research-workspace-runner/Dockerfile"
+      - "services/research-workspace-runner/requirements.txt"
+      - "services/research-workspace-runner/runner.py"
       - "services/workflow-registry/definitions/research-workspace-cpu-v1.json"
-      - ".github/workflows/research-workspace-runner-image.yml"
   workflow_dispatch:
 
 permissions:

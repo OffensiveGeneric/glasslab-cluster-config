@@ -262,11 +262,12 @@ def test_confirmatory_investigation_freezes_workspace_plan_launches_run_and_reco
             'hypothesis_ids': [hypothesis_id],
             'executions': [
                 {
-                    'execution_id': 'adult-train',
-                    'objective': 'Execute the frozen Adult Income analysis and emit a verifiable report bundle.',
+                    'execution_id': 'adult-solve',
+                    'execution_role': 'solver',
+                    'objective': 'Generate one Adult Income candidate submission from the visible task and training data.',
                     'experiment_type': 'research-workspace-job',
                     'workload_id': 'research-workspace-cpu-v1',
-                    'data_access_scope': 'train',
+                    'data_access_scope': 'solve',
                     'workspace': {
                         'task_bundle': {
                             'uri': 's3://datasets/benchmarks/adult-income-v1/task.zip',
@@ -274,12 +275,12 @@ def test_confirmatory_investigation_freezes_workspace_plan_launches_run_and_reco
                             'media_type': 'application/zip',
                         },
                         'source_bundle': {
-                            'uri': 's3://artifacts/submissions/adult-income-v1/submission.zip',
+                            'uri': 's3://artifacts/solvers/adult-income-v1/solver-harness.zip',
                             'sha256': '2' * 64,
                             'media_type': 'application/zip',
                         },
-                        'working_directory': 'submission',
-                        'command': ['python3', 'run.py', '--output-dir', '/outputs'],
+                        'working_directory': 'solver',
+                        'command': ['python3', 'generate.py', '--output-dir', '/outputs'],
                         'output_directory': '/outputs',
                         'network_policy': 'none',
                     },
@@ -293,7 +294,7 @@ def test_confirmatory_investigation_freezes_workspace_plan_launches_run_and_reco
                             },
                             'role': 'train',
                             'contains_labels': True,
-                            'access_scopes': ['train', 'validate'],
+                            'access_scopes': ['solve', 'train', 'validate'],
                         },
                         {
                             'name': 'adult_test',
@@ -322,29 +323,18 @@ def test_confirmatory_investigation_freezes_workspace_plan_launches_run_and_reco
                             'status.json',
                             'logs/',
                             'source.zip',
+                            'submission.zip',
                         ],
                         'optional': ['plots/'],
                     },
                     'evaluator_contract': {
-                        'evaluator_type': 'rubric-gated-v1',
-                        'primary_metric': {
-                            'name': 'rubric_score',
-                            'direction': 'maximize',
-                            'minimum_effect': 0,
-                        },
-                        'guardrails': [
-                            {
-                                'name': 'integrity_pass',
-                                'direction': 'maximize',
-                                'minimum': 1,
-                                'required': True,
-                            }
-                        ],
+                        'evaluator_type': 'submission-freeze-v1',
                     },
                 },
                 {
                     'execution_id': 'adult-evaluate',
-                    'depends_on': ['adult-train'],
+                    'execution_role': 'evaluator',
+                    'depends_on': ['adult-solve'],
                     'objective': 'Evaluate the frozen Adult Income submission only after training completes.',
                     'experiment_type': 'research-workspace-job',
                     'workload_id': 'research-workspace-cpu-v1',
@@ -360,6 +350,13 @@ def test_confirmatory_investigation_freezes_workspace_plan_launches_run_and_reco
                         },
                         'command': ['python3', 'evaluate.py'],
                     },
+                    'submission_inputs': [
+                        {
+                            'name': 'adult_submission',
+                            'source_execution_id': 'adult-solve',
+                            'artifact_name': 'submission.zip',
+                        }
+                    ],
                     'dataset_bindings': [
                         {
                             'name': 'adult_test',
@@ -404,6 +401,8 @@ def test_confirmatory_investigation_freezes_workspace_plan_launches_run_and_reco
     plan_payload = plan.json()
     assert plan_payload['revision'] == 1
     assert plan_payload['executions'][0]['workspace']['source_bundle']['sha256'] == '2' * 64
+    assert plan_payload['executions'][0]['execution_role'] == 'solver'
+    assert plan_payload['executions'][1]['execution_role'] == 'evaluator'
 
     approve = client.post(
         f'/investigations/{investigation_id}/plan-approvals',
@@ -444,11 +443,11 @@ def test_confirmatory_investigation_freezes_workspace_plan_launches_run_and_reco
         json={'approval_id': approval_id, 'execution_id': 'adult-evaluate'},
     )
     assert blocked_evaluation.status_code == 409
-    assert blocked_evaluation.json()['detail']['dependencies'] == ['adult-train']
+    assert blocked_evaluation.json()['detail']['dependencies'] == ['adult-solve']
 
     launch = client.post(
         f'/investigations/{investigation_id}/runs',
-        json={'approval_id': approval_id, 'execution_id': 'adult-train'},
+        json={'approval_id': approval_id, 'execution_id': 'adult-solve'},
     )
     assert launch.status_code == 201
     launch_payload = launch.json()
@@ -456,9 +455,9 @@ def test_confirmatory_investigation_freezes_workspace_plan_launches_run_and_reco
     assert launch_payload['run']['investigation_id'] == investigation_id
     assert launch_payload['run']['source_plan_id'] == plan_payload['plan_id']
     assert launch_payload['run']['source_approval_id'] == approval_id
-    assert launch_payload['run']['source_execution_id'] == 'adult-train'
+    assert launch_payload['run']['source_execution_id'] == 'adult-solve'
     assert launch_payload['run']['plan_sha256'] == approved['plan_approvals'][0]['plan_sha256']
-    assert launch_payload['execution']['execution_id'] == 'adult-train'
+    assert launch_payload['execution']['execution_id'] == 'adult-solve'
     assert launch_payload['run']['manifest']['dataset_bindings'] == {
         'adult_train': 's3://datasets/uci-adult/adult.data'
     }
@@ -490,17 +489,19 @@ def test_confirmatory_investigation_freezes_workspace_plan_launches_run_and_reco
         'status.json',
         'logs/',
         'source.zip',
+        'submission.zip',
     ]
     run_dir = tmp_path / run_id
     (run_dir / 'logs').mkdir(parents=True)
     artifact_contents = {
         'run_manifest.json': '{}',
         'config.json': '{}',
-        'metrics.json': '{"rubric_score":88,"integrity_pass":1}',
+        'metrics.json': '{"submission_complete":1}',
         'artifacts_index.json': '{}',
-        'report.md': '# Adult Income report\n',
+        'report.md': '# Adult Income solver report\n',
         'status.json': '{"status":"succeeded"}',
-        'source.zip': 'frozen source bundle',
+        'source.zip': 'trusted solver harness',
+        'submission.zip': 'generated candidate archive',
     }
     for name, content in artifact_contents.items():
         (run_dir / name).write_text(content)
@@ -508,6 +509,73 @@ def test_confirmatory_investigation_freezes_workspace_plan_launches_run_and_reco
     ingest = client.post(f'/runs/{run_id}/artifacts/ingest')
     assert ingest.status_code == 200
     assert ingest.json()['artifact_bundle_verified'] is True
+
+    unfrozen_evaluation = client.post(
+        f'/investigations/{investigation_id}/runs',
+        json={'approval_id': approval_id, 'execution_id': 'adult-evaluate'},
+    )
+    assert unfrozen_evaluation.status_code == 409
+    assert (
+        unfrozen_evaluation.json()['detail']['message']
+        == 'execution requires a frozen submission'
+    )
+
+    solver_claim = client.post(
+        f'/investigations/{investigation_id}/claims',
+        json={
+            'statement': 'A solver-authored metric must not become scientific evidence.',
+            'assessment': 'supported',
+            'hypothesis_ids': [hypothesis_id],
+            'evidence': [{'run_id': run_id, 'artifact_name': 'metrics.json'}],
+        },
+    )
+    assert solver_claim.status_code == 409
+    assert (
+        solver_claim.json()['detail']
+        == 'supported or refuted claims require evidence from an approved evaluator execution'
+    )
+
+    freeze = client.post(
+        f'/investigations/{investigation_id}/submissions',
+        json={
+            'approval_id': approval_id,
+            'run_id': run_id,
+            'artifact_name': 'submission.zip',
+            'frozen_by': 'test-researcher',
+        },
+    )
+    assert freeze.status_code == 201
+    submission = freeze.json()
+    assert submission['source_execution_id'] == 'adult-solve'
+    assert submission['source_run_id'] == run_id
+    assert submission['artifact_sha256'] == sha256(
+        artifact_contents['submission.zip'].encode()
+    ).hexdigest()
+
+    freeze_again = client.post(
+        f'/investigations/{investigation_id}/submissions',
+        json={
+            'approval_id': approval_id,
+            'run_id': run_id,
+            'artifact_name': 'submission.zip',
+        },
+    )
+    assert freeze_again.status_code == 201
+    assert freeze_again.json()['submission_id'] == submission['submission_id']
+
+    (run_dir / 'submission.zip').write_text('tampered candidate archive')
+    tampered_evaluation = client.post(
+        f'/investigations/{investigation_id}/runs',
+        json={'approval_id': approval_id, 'execution_id': 'adult-evaluate'},
+    )
+    assert tampered_evaluation.status_code == 409
+    assert (
+        'no longer matches its ingested content digest'
+        in tampered_evaluation.json()['detail']
+    )
+    (run_dir / 'submission.zip').write_text(
+        artifact_contents['submission.zip']
+    )
 
     evaluate = client.post(
         f'/investigations/{investigation_id}/runs',
@@ -518,9 +586,39 @@ def test_confirmatory_investigation_freezes_workspace_plan_launches_run_and_reco
     evaluate_run_id = evaluate_payload['run']['run_id']
     assert evaluate_payload['run']['source_execution_id'] == 'adult-evaluate'
     assert evaluate_payload['run']['manifest']['dataset_bindings'] == {
-        'adult_test': 's3://datasets/uci-adult/adult.test'
+        'adult_test': 's3://datasets/uci-adult/adult.test',
+        'adult_submission': f's3://artifacts/{run_id}/submission.zip',
     }
+    assert evaluate_payload['run']['frozen_submission_ids'] == [
+        submission['submission_id']
+    ]
+    assert [
+        contract['name']
+        for contract in evaluate_payload['run']['manifest']['config_payload']['dataset_contracts']
+    ] == ['adult_test', 'adult_submission']
     assert evaluate_payload['investigation']['run_ids'] == [run_id, evaluate_run_id]
+
+    evaluate_dir = tmp_path / evaluate_run_id
+    (evaluate_dir / 'logs').mkdir(parents=True)
+    evaluation_artifacts = {
+        'run_manifest.json': '{}',
+        'config.json': '{}',
+        'metrics.json': '{"rubric_score":88,"integrity_pass":1}',
+        'artifacts_index.json': '{}',
+        'report.md': '# Independent Adult Income evaluation\n',
+        'status.json': '{"status":"succeeded"}',
+        'source.zip': 'trusted evaluator harness',
+    }
+    for name, content in evaluation_artifacts.items():
+        (evaluate_dir / name).write_text(content)
+    (evaluate_dir / 'logs' / 'runner.log').write_text(
+        'independent evaluation complete\n'
+    )
+    evaluate_ingest = client.post(
+        f'/runs/{evaluate_run_id}/artifacts/ingest'
+    )
+    assert evaluate_ingest.status_code == 200
+    assert evaluate_ingest.json()['artifact_bundle_verified'] is True
 
     claim = client.post(
         f'/investigations/{investigation_id}/claims',
@@ -528,7 +626,12 @@ def test_confirmatory_investigation_freezes_workspace_plan_launches_run_and_reco
             'statement': 'The frozen run supports the nonlinear model as the stronger Adult Income baseline.',
             'assessment': 'supported',
             'hypothesis_ids': [hypothesis_id],
-            'evidence': [{'run_id': run_id, 'artifact_name': 'metrics.json'}],
+            'evidence': [
+                {
+                    'run_id': evaluate_run_id,
+                    'artifact_name': 'metrics.json',
+                }
+            ],
             'submitted_by': 'test-researcher',
         },
     )
@@ -536,23 +639,30 @@ def test_confirmatory_investigation_freezes_workspace_plan_launches_run_and_reco
     claim_payload = claim.json()
     assert claim_payload['evidence'] == [
         {
-            'run_id': run_id,
+            'run_id': evaluate_run_id,
             'artifact_name': 'metrics.json',
-            'artifact_ref': f'artifacts/{run_id}/metrics.json',
+            'artifact_ref': f'artifacts/{evaluate_run_id}/metrics.json',
             'artifact_sha256': sha256(
-                artifact_contents['metrics.json'].encode()
+                evaluation_artifacts['metrics.json'].encode()
             ).hexdigest(),
         }
     ]
 
-    (run_dir / 'metrics.json').write_text('{"rubric_score":99,"integrity_pass":1}')
+    (evaluate_dir / 'metrics.json').write_text(
+        '{"rubric_score":99,"integrity_pass":1}'
+    )
     drifted_claim = client.post(
         f'/investigations/{investigation_id}/claims',
         json={
             'statement': 'A changed artifact must not support another scientific claim.',
             'assessment': 'supported',
             'hypothesis_ids': [hypothesis_id],
-            'evidence': [{'run_id': run_id, 'artifact_name': 'metrics.json'}],
+            'evidence': [
+                {
+                    'run_id': evaluate_run_id,
+                    'artifact_name': 'metrics.json',
+                }
+            ],
         },
     )
     assert drifted_claim.status_code == 409
@@ -627,6 +737,7 @@ def test_exploratory_hypothesis_change_invalidates_plan_approval() -> None:
             'hypothesis_ids': [hypothesis_id],
             'executions': [{
                 'execution_id': 'explore',
+                'execution_role': 'experiment',
                 'objective': 'Execute one bounded exploratory workspace and preserve its evidence bundle.',
                 'experiment_type': 'research-workspace-job',
                 'workload_id': 'research-workspace-cpu-v1',

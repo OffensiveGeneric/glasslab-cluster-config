@@ -989,6 +989,7 @@ class RunRecord(BaseModel):
     source_approval_id: str | None = None
     source_execution_id: str | None = None
     plan_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+    frozen_submission_ids: list[str] = Field(default_factory=list)
     artifact_bundle_verified: bool = False
 
 
@@ -1081,15 +1082,71 @@ class InvestigationDatasetBinding(BaseModel):
         return value
 
 
+def normalize_artifact_file_name(value: str) -> str:
+    cleaned = value.strip()
+    path = PurePosixPath(cleaned)
+    if (
+        not cleaned
+        or cleaned.endswith('/')
+        or path.as_posix() == '.'
+        or path.is_absolute()
+        or '..' in path.parts
+    ):
+        raise ValueError('artifact_name must identify one relative file')
+    return path.as_posix()
+
+
+class InvestigationSubmissionSelector(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    source_execution_id: str = Field(min_length=1)
+    artifact_name: str = Field(default='submission.zip', min_length=1)
+
+    @field_validator('source_execution_id')
+    @classmethod
+    def normalize_source_execution_id(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError('source_execution_id must not be blank')
+        return cleaned
+
+    @field_validator('artifact_name')
+    @classmethod
+    def normalize_artifact_name(cls, value: str) -> str:
+        return normalize_artifact_file_name(value)
+
+
+class InvestigationSubmissionInput(InvestigationSubmissionSelector):
+    name: str = Field(min_length=1)
+
+    @field_validator('name')
+    @classmethod
+    def normalize_submission_input_name(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError('submission input name must not be blank')
+        return cleaned
+
+
 class InvestigationWorkspaceSpec(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     task_bundle: ImmutableAssetReference
-    source_bundle: ImmutableAssetReference
+    source_bundle: ImmutableAssetReference | None = None
+    source_submission: InvestigationSubmissionSelector | None = None
     working_directory: str = '.'
     command: list[str] = Field(min_length=1)
     output_directory: Literal['/outputs'] = '/outputs'
     network_policy: Literal['none', 'approved-egress'] = 'none'
+
+    @model_validator(mode='after')
+    def validate_source(self) -> 'InvestigationWorkspaceSpec':
+        if (self.source_bundle is None) == (self.source_submission is None):
+            raise ValueError(
+                'workspace requires exactly one of source_bundle or '
+                'source_submission'
+            )
+        return self
 
     @field_validator('working_directory')
     @classmethod
@@ -1116,6 +1173,7 @@ class InvestigationExecutionSpec(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     execution_id: str = Field(min_length=1)
+    execution_role: Literal['solver', 'experiment', 'evaluator']
     objective: str = Field(min_length=8)
     experiment_type: str = Field(min_length=3)
     workload_id: str = Field(min_length=3)
@@ -1123,6 +1181,9 @@ class InvestigationExecutionSpec(BaseModel):
     depends_on: list[str] = Field(default_factory=list)
     workspace: InvestigationWorkspaceSpec
     dataset_bindings: list[InvestigationDatasetBinding] = Field(default_factory=list)
+    submission_inputs: list[InvestigationSubmissionInput] = Field(
+        default_factory=list
+    )
     config_payload: dict[str, Any] = Field(default_factory=dict)
     budget: BudgetContract
     artifact_contract: ExpectedArtifactsSpec
@@ -1151,8 +1212,31 @@ class InvestigationExecutionSpec(BaseModel):
         if self.execution_id in self.depends_on:
             raise ValueError('execution cannot depend on itself')
         names = [binding.name for binding in self.dataset_bindings]
+        names.extend(binding.name for binding in self.submission_inputs)
         if len(set(names)) != len(names):
-            raise ValueError('dataset binding names must be unique')
+            raise ValueError('dataset and submission input names must be unique')
+        if self.execution_role == 'solver':
+            if self.data_access_scope != 'solve':
+                raise ValueError('solver executions must use the solve data scope')
+            if self.workspace.source_submission is not None or self.submission_inputs:
+                raise ValueError('solver executions cannot consume frozen submissions')
+            if 'submission.zip' not in self.artifact_contract.required:
+                raise ValueError(
+                    'solver executions must require submission.zip as an artifact'
+                )
+        if self.execution_role == 'evaluator':
+            if self.data_access_scope != 'evaluate':
+                raise ValueError(
+                    'evaluator executions must use the evaluate data scope'
+                )
+            if not self.submission_inputs:
+                raise ValueError(
+                    'evaluator executions require at least one frozen submission input'
+                )
+            if self.evaluator_contract.primary_metric is None:
+                raise ValueError(
+                    'evaluator executions require an approved primary metric'
+                )
         return self
 
 
@@ -1181,6 +1265,30 @@ class InvestigationPlanRecord(BaseModel):
                     f'execution {execution.execution_id} has unknown dependencies: '
                     + ', '.join(unknown)
                 )
+            selectors = list(execution.submission_inputs)
+            if execution.workspace.source_submission is not None:
+                selectors.append(execution.workspace.source_submission)
+            for selector in selectors:
+                if selector.source_execution_id not in execution.depends_on:
+                    raise ValueError(
+                        f'execution {execution.execution_id} must depend on '
+                        f'submission source {selector.source_execution_id}'
+                    )
+                source_execution = next(
+                    candidate
+                    for candidate in self.executions
+                    if candidate.execution_id == selector.source_execution_id
+                )
+                if (
+                    selector.artifact_name
+                    not in source_execution.artifact_contract.required
+                ):
+                    raise ValueError(
+                        f'execution {execution.execution_id} references '
+                        f'undeclared submission artifact '
+                        f'{selector.source_execution_id}:'
+                        f'{selector.artifact_name}'
+                    )
 
         remaining = {
             execution.execution_id: set(execution.depends_on)
@@ -1223,6 +1331,24 @@ class InvestigationPlanApprovalRecord(BaseModel):
     research_mode: Literal['exploratory', 'confirmatory']
     plan_snapshot: InvestigationPlanSnapshot
     note: str | None = None
+
+
+class InvestigationSubmissionRecord(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    submission_id: str
+    approval_id: str
+    source_execution_id: str
+    source_run_id: str
+    artifact_name: str
+    artifact_ref: str
+    artifact_sha256: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r'^[0-9a-f]{64}$',
+    )
+    frozen_at: datetime
+    frozen_by: str
 
 
 class InvestigationEvidenceReference(BaseModel):
@@ -1382,6 +1508,28 @@ class InvestigationRunCreateRequest(BaseModel):
         return cleaned
 
 
+class InvestigationSubmissionFreezeRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    approval_id: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    artifact_name: str = Field(default='submission.zip', min_length=1)
+    frozen_by: str | None = None
+
+    @field_validator('approval_id', 'run_id')
+    @classmethod
+    def normalize_submission_identifier(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError('submission identifiers must not be blank')
+        return cleaned
+
+    @field_validator('artifact_name')
+    @classmethod
+    def normalize_submission_artifact_name(cls, value: str) -> str:
+        return normalize_artifact_file_name(value)
+
+
 class InvestigationEvidenceRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -1395,6 +1543,11 @@ class InvestigationEvidenceRequest(BaseModel):
         if not cleaned:
             raise ValueError('evidence identifiers must not be empty')
         return cleaned
+
+    @field_validator('artifact_name')
+    @classmethod
+    def normalize_evidence_artifact_name(cls, value: str) -> str:
+        return normalize_artifact_file_name(value)
 
 
 class InvestigationClaimCreateRequest(BaseModel):
@@ -1441,7 +1594,15 @@ class InvestigationRecord(BaseModel):
     investigation_id: str
     created_at: datetime
     updated_at: datetime
-    status: Literal['planning', 'approved', 'running', 'evaluating', 'completed', 'paused']
+    status: Literal[
+        'planning',
+        'approved',
+        'running',
+        'submission_ready',
+        'evaluating',
+        'completed',
+        'paused',
+    ]
     title: str
     research_question: str
     research_mode: Literal['exploratory', 'confirmatory']
@@ -1451,6 +1612,7 @@ class InvestigationRecord(BaseModel):
     plan_approvals: list[InvestigationPlanApprovalRecord] = Field(default_factory=list)
     active_plan_approval_id: str | None = None
     run_ids: list[str] = Field(default_factory=list)
+    submissions: list[InvestigationSubmissionRecord] = Field(default_factory=list)
     claims: list[InvestigationClaimRecord] = Field(default_factory=list)
     submitted_by: str
 
