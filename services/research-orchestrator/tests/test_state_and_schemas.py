@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.config import Settings
-from app.schemas import AgentTurnResult, RunState
+from app.schemas import AgentTurnResult, EvaluationContractProposal, RunState
 from app.state_machine import InvalidTransition, validate_transition
 
 
@@ -57,6 +57,34 @@ def test_structured_agent_output_validation() -> None:
                 'done': True,
             }
         )
+
+
+def test_evaluation_contract_proposal_requires_matching_budget_limit() -> None:
+    proposal = {
+        'evaluator_type': 'cifar100-unseen-v1',
+        'primary_metric': {
+            'name': 'test_unseen_global_recall_at_1',
+            'direction': 'maximize',
+            'minimum_effect': 0.02,
+        },
+        'guardrails': [],
+        'required_artifacts': ['metrics.json', 'evaluation.json'],
+        'budget_mode': 'training_exposure',
+        'resource_constraints': {
+            'cpu': 4,
+            'memory_gib': 16,
+            'gpus': 1,
+            'wallclock_minutes': 60,
+        },
+        'rationale': 'Compare methods under equal training exposure.',
+    }
+    with pytest.raises(ValidationError, match='matching limit'):
+        EvaluationContractProposal.model_validate(proposal)
+
+    valid = EvaluationContractProposal.model_validate(
+        {**proposal, 'max_samples_seen': 500_000}
+    )
+    assert valid.primary_metric.direction == 'maximize'
 
 
 def test_comma_separated_image_allowlist_from_environment(

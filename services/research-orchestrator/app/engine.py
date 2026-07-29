@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from hashlib import sha256
 import json
 from pathlib import Path
 from threading import RLock
@@ -399,6 +400,14 @@ class ResearchOrchestrator:
             ),
             None,
         )
+        contract_proposal_artifact = next(
+            (
+                artifact
+                for artifact in reversed(artifacts)
+                if artifact.type == 'evaluation_contract_proposal'
+            ),
+            None,
+        )
         effects = {
             'approve_protocol': (
                 'Authorize Beaker to implement against this frozen protocol. '
@@ -439,6 +448,13 @@ class ResearchOrchestrator:
                 'uri': relevant_artifact.uri,
                 'sha256': relevant_artifact.sha256,
             }
+        if contract_proposal_artifact is not None:
+            payload['contract_proposal'] = (
+                contract_proposal_artifact.metadata.get('proposal')
+            )
+            payload['contract_binding'] = (
+                contract_proposal_artifact.metadata.get('technical_binding')
+            )
         if action.type == 'approve_protocol':
             payload['protocol_version'] = run.protocol_version
         return payload
@@ -504,7 +520,13 @@ class ResearchOrchestrator:
             'and dependent variables, controls, baselines, source references, '
             'required artifacts, evaluation criteria, budgets, stopping '
             'conditions, and explicit approval gates. Return it as a produced '
-            'file with purpose "protocol".'
+            'file with purpose "protocol". Also populate '
+            'evaluation_contract_proposal with the scientific evaluator type, '
+            'primary metric and direction, minimum meaningful effect, '
+            'guardrails, required artifacts, budget policy, resource ceilings, '
+            'and rationale. Propose data and metrics only. Do not propose '
+            'executable paths, container images, commands, or checksums; those '
+            'remain controlled by the orchestrator.'
         )
         if feedback:
             prompt += f'\n\nHuman rejection feedback:\n{feedback}'
@@ -520,6 +542,20 @@ class ResearchOrchestrator:
         ]
         if len(protocol_files) != 1:
             raise WorkflowError('Honeydew must produce exactly one protocol file')
+        proposal = result.evaluation_contract_proposal
+        if proposal is None:
+            raise WorkflowError(
+                'Honeydew must return an evaluation contract proposal'
+            )
+        proposal_resources = proposal.resource_constraints
+        if (
+            proposal_resources.cpu > self.policy.maximum_cpu
+            or proposal_resources.memory_gib > self.policy.maximum_memory_gib
+            or proposal_resources.gpus > self.policy.maximum_gpus
+        ):
+            raise WorkflowError(
+                'Honeydew contract proposal exceeds orchestrator resource ceilings'
+            )
         destination, digest = self.workspaces.copy_agent_output(
             run_id=run_id,
             agent=AgentName.HONEYDEW,
@@ -558,6 +594,74 @@ class ResearchOrchestrator:
                 'path': str(destination),
                 'sha256': digest,
                 'turn_id': turn.turn_id,
+            },
+        )
+        resolved_contract = self.contracts.resolve(
+            run.evaluation_contract_id,
+            run.evaluation_contract_version,
+        )
+        descriptor = resolved_contract.descriptor
+        technical_primary_metric = str(
+            descriptor.manifest.get('primary_metric', '')
+        )
+        ceiling = descriptor.resource_constraints
+        binding_compatible = (
+            proposal.primary_metric.name == technical_primary_metric
+            and proposal_resources.cpu <= ceiling.cpu
+            and proposal_resources.memory_gib <= ceiling.memory_gib
+            and proposal_resources.gpus <= ceiling.gpus
+            and proposal_resources.wallclock_minutes
+            <= ceiling.wallclock_minutes
+        )
+        proposal_payload = proposal.model_dump(mode='json')
+        proposal_path = (
+            Path(run.shared_artifacts_path)
+            / 'evaluation-contract-proposal.json'
+        )
+        proposal_path.parent.mkdir(parents=True, exist_ok=True)
+        proposal_bytes = (
+            json.dumps(proposal_payload, indent=2, sort_keys=True) + '\n'
+        ).encode()
+        proposal_path.write_bytes(proposal_bytes)
+        proposal_digest = sha256(proposal_bytes).hexdigest()
+        proposal_uri = (
+            f'artifact://{run_id}/shared-artifacts/'
+            'evaluation-contract-proposal.json'
+        )
+        technical_binding = {
+            'status': (
+                'compatible'
+                if binding_compatible
+                else 'requires_new_harness'
+            ),
+            'contract_id': run.evaluation_contract_id,
+            'version': run.evaluation_contract_version,
+            'digest': run.evaluation_contract_digest,
+        }
+        self._save_local_artifact(
+            run_id=run_id,
+            artifact_type='evaluation_contract_proposal',
+            uri=proposal_uri,
+            digest=proposal_digest,
+            metadata={
+                'path': str(proposal_path),
+                'turn_id': turn.turn_id,
+                'proposal': proposal_payload,
+                'technical_binding': technical_binding,
+            },
+        )
+        self._event(
+            run_id,
+            source='honeydew',
+            event_type='artifact.recorded',
+            payload={
+                'type': 'evaluation_contract_proposal',
+                'uri': proposal_uri,
+                'path': str(proposal_path),
+                'sha256': proposal_digest,
+                'turn_id': turn.turn_id,
+                'proposal': proposal_payload,
+                'technical_binding': technical_binding,
             },
         )
         self._create_human_action(
@@ -1505,6 +1609,11 @@ class ResearchOrchestrator:
                 and payload.get('type') == 'protocol'
             ):
                 artifact_type = 'protocol'
+            elif (
+                event.event_type == 'artifact.recorded'
+                and payload.get('type') == 'evaluation_contract_proposal'
+            ):
+                artifact_type = 'evaluation_contract_proposal'
             elif event.event_type == 'report.created':
                 artifact_type = 'report'
             if artifact_type is None:

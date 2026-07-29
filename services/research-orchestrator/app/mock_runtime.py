@@ -9,6 +9,7 @@ from .schemas import (
     AgentName,
     AgentTurnResult,
     Claim,
+    EvaluationContractProposal,
     ProducedFile,
     RequestedAction,
     RunState,
@@ -71,6 +72,35 @@ class ScriptedMockRuntime(AgentRuntime):
                 AgentTurnResult(
                     kind=TurnKind.PROTOCOL_DRAFT,
                     summary='Drafted a bounded protocol.',
+                    evaluation_contract_proposal=(
+                        EvaluationContractProposal.model_validate(
+                            {
+                                'evaluator_type': 'generic-score-v1',
+                                'primary_metric': {
+                                    'name': 'score',
+                                    'direction': 'maximize',
+                                    'minimum_effect': 0.01,
+                                },
+                                'guardrails': [],
+                                'required_artifacts': [
+                                    'metrics.json',
+                                    'evaluation.json',
+                                ],
+                                'budget_mode': 'wallclock',
+                                'max_wallclock_minutes': 5,
+                                'resource_constraints': {
+                                    'cpu': 1,
+                                    'memory_gib': 1,
+                                    'gpus': 0,
+                                    'wallclock_minutes': 5,
+                                },
+                                'rationale': (
+                                    'Use the immutable smoke evaluator for '
+                                    'the deterministic mock workflow.'
+                                ),
+                            }
+                        )
+                    ),
                     claims=[],
                     produced_files=[
                         ProducedFile(path='program.md', purpose='protocol')

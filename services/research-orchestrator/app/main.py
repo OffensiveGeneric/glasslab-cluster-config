@@ -110,6 +110,7 @@ def create_app(
             engine=engine,
             bot_token=settings.discord_bot_token,
             guild_id=settings.discord_guild_id,
+            channel_id=settings.discord_channel_id or '',
             admin_role_id=settings.discord_admin_role_id,
             admin_user_ids=settings.discord_admin_user_ids,
         )

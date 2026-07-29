@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import discord
 import httpx
 
 from app.discord_adapter import DiscordHttpAdapter, DiscordRenderer
@@ -13,6 +14,7 @@ from app.discord_controls import (
     DiscordControlGateway,
     DiscordControlPolicy,
     execute_discord_action,
+    execute_discord_run_creation,
 )
 from app.opencode_runtime import (
     OpenCodeProcessRuntime,
@@ -85,6 +87,32 @@ def test_discord_pending_action_has_approval_controls() -> None:
                     'version': '1.0.0',
                     'digest': 'b' * 64,
                 },
+                'contract_proposal': {
+                    'evaluator_type': 'cifar100-unseen-v1',
+                    'primary_metric': {
+                        'name': 'test_unseen_global_recall_at_1',
+                        'direction': 'maximize',
+                        'minimum_effect': 0.02,
+                    },
+                    'guardrails': [
+                        {
+                            'name': 'effective_rank',
+                            'direction': 'maximize',
+                        }
+                    ],
+                    'budget_mode': 'training_exposure',
+                    'resource_constraints': {
+                        'cpu': 4,
+                        'memory_gib': 16,
+                        'gpus': 1,
+                        'wallclock_minutes': 60,
+                    },
+                },
+                'contract_binding': {
+                    'status': 'requires_new_harness',
+                    'contract_id': 'contract-1',
+                    'version': '1.0.0',
+                },
             },
         )
     )
@@ -95,6 +123,9 @@ def test_discord_pending_action_has_approval_controls() -> None:
     assert '**Approval authorizes**' in message.content
     assert 'no cluster job is authorized' in message.content
     assert 'artifact://run-1/protocol/program.md' in message.content
+    assert "Honeydew's evaluation contract proposal" in message.content
+    assert 'test_unseen_global_recall_at_1' in message.content
+    assert 'requires_new_harness' in message.content
     assert message.components is not None
     buttons = message.components[0]['components']
     assert buttons[0]['label'] == 'Approve protocol'
@@ -263,12 +294,37 @@ def test_discord_gateway_registers_component_handler() -> None:
     gateway = DiscordControlGateway(
         engine=Mock(),
         bot_token='bot-token',
-        guild_id='guild-1',
+        guild_id='123456789',
+        channel_id='987654321',
         admin_role_id='role-1',
         admin_user_ids=[],
     )
 
     assert gateway.client.on_interaction == gateway._on_interaction
+    assert gateway.client.on_ready == gateway._on_ready
+    command = gateway.tree.get_command(
+        'research-start',
+        guild=discord.Object(id=123456789),
+    )
+    assert command is not None
+
+
+def test_discord_run_creation_uses_objective_without_http() -> None:
+    engine = Mock()
+    expected = SimpleNamespace(
+        run_id='run-1',
+        discord_thread_id='thread-1',
+    )
+    engine.create_run.return_value = expected
+
+    result = execute_discord_run_creation(
+        engine,
+        objective='Compare bounded metric-learning miners.',
+    )
+
+    request = engine.create_run.call_args.args[0]
+    assert request.objective == 'Compare bounded metric-learning miners.'
+    assert result is expected
 
 
 def test_discord_webhook_uses_agent_identity_and_thread() -> None:

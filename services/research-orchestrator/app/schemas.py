@@ -89,6 +89,70 @@ class RequestedAction(BaseModel):
     reason: str = Field(min_length=1)
 
 
+class ProposedMetric(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    name: str = Field(min_length=1)
+    direction: Literal['maximize', 'minimize']
+    minimum_effect: float = Field(default=0.0, ge=0.0)
+
+
+class ProposedGuardrail(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    name: str = Field(min_length=1)
+    direction: Literal['maximize', 'minimize']
+    minimum: float | None = None
+    maximum: float | None = None
+    required: bool = False
+
+
+class ProposedResourceConstraints(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    cpu: float = Field(gt=0)
+    memory_gib: float = Field(gt=0)
+    gpus: int = Field(ge=0)
+    wallclock_minutes: int = Field(ge=1)
+
+
+class EvaluationContractProposal(BaseModel):
+    """Scientific contract proposed by Honeydew, never executable model code."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    evaluator_type: str = Field(
+        min_length=1,
+        pattern=r'^[a-z0-9][a-z0-9._-]{0,127}$',
+    )
+    primary_metric: ProposedMetric
+    guardrails: list[ProposedGuardrail] = Field(default_factory=list)
+    required_artifacts: list[str] = Field(min_length=1)
+    budget_mode: Literal[
+        'wallclock',
+        'training_exposure',
+        'fixed_steps',
+    ]
+    max_wallclock_minutes: int | None = Field(default=None, ge=1)
+    max_samples_seen: int | None = Field(default=None, ge=1)
+    max_optimizer_steps: int | None = Field(default=None, ge=1)
+    resource_constraints: ProposedResourceConstraints
+    rationale: str = Field(min_length=1)
+
+    @model_validator(mode='after')
+    def require_budget_limit(self) -> 'EvaluationContractProposal':
+        limits = {
+            'wallclock': self.max_wallclock_minutes,
+            'training_exposure': self.max_samples_seen,
+            'fixed_steps': self.max_optimizer_steps,
+        }
+        if limits[self.budget_mode] is None:
+            raise ValueError(
+                f'{self.budget_mode} proposal requires its matching limit'
+            )
+        return self
+
+
 class ProducedFile(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -121,6 +185,7 @@ class AgentTurnResult(BaseModel):
 
     kind: TurnKind
     summary: str = Field(min_length=1)
+    evaluation_contract_proposal: EvaluationContractProposal | None = None
     claims: list[Claim] = Field(default_factory=list)
     requested_actions: list[RequestedAction] = Field(default_factory=list)
     produced_files: list[ProducedFile] = Field(default_factory=list)

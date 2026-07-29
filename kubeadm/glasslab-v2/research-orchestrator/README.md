@@ -18,7 +18,9 @@ repository. Production rollout still requires:
 Discord application, guild, and channel IDs are non-secret values in the
 ConfigMap. The bot must be installed in the guild and have View Channel, Send
 Messages, Read Message History, Create Public Threads, and Send Messages in
-Threads on the configured channel. Administrator is not required. Approval
+Threads on the configured channel. The installation must include the
+`applications.commands` OAuth2 scope so the guild-scoped `/research-start`
+command can be registered. Administrator is not required. Approval
 buttons are received over an outbound Gateway connection and are authorized
 against the immutable role or user IDs configured in the ConfigMap. The live
 configuration uses the `Mystic Arts Masters` role; changing that role's

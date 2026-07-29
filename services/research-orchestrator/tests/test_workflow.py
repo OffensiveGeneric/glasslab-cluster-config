@@ -116,8 +116,13 @@ def test_mocked_complete_workflow_and_agent_isolation(orchestrator_bundle) -> No
     assert (Path(run.reports_path) / 'report.md').is_file()
     assert {
         artifact.type for artifact in store.list_artifacts(run.run_id)
-    } == {'protocol', 'metrics', 'report'}
-    assert len(store.list_artifacts(run.run_id)) == 4
+    } == {
+        'protocol',
+        'evaluation_contract_proposal',
+        'metrics',
+        'report',
+    }
+    assert len(store.list_artifacts(run.run_id)) == 5
     turns = store.list_turns(run.run_id)
     assert len(turns) == 6
     assert all(turn.status == 'completed' for turn in turns)
@@ -331,7 +336,7 @@ def test_restart_recovery_from_job_running(orchestrator_bundle) -> None:
     assert restarted.recover() == [run.run_id]
     recovered = restarted_store.get_run(run.run_id)
     assert recovered.state == RunState.AWAITING_FINAL_ACCEPTANCE
-    assert len(restarted_store.list_artifacts(run.run_id)) == 4
+    assert len(restarted_store.list_artifacts(run.run_id)) == 5
 
 
 def test_recovery_backfills_protocol_artifact_from_event(
@@ -343,19 +348,28 @@ def test_recovery_backfills_protocol_artifact_from_event(
             objective='Backfill a protocol artifact from its durable event.'
         )
     )
-    protocol = store.list_artifacts(run.run_id)[0]
+    protocol = next(
+        artifact
+        for artifact in store.list_artifacts(run.run_id)
+        if artifact.type == 'protocol'
+    )
     with store._connect() as connection:
         connection.execute(
             'DELETE FROM artifacts WHERE artifact_id = ?',
             (protocol.artifact_id,),
         )
 
-    assert store.list_artifacts(run.run_id) == []
+    assert {
+        artifact.type for artifact in store.list_artifacts(run.run_id)
+    } == {'evaluation_contract_proposal'}
     engine.recover()
 
-    restored = store.list_artifacts(run.run_id)
+    restored = [
+        artifact
+        for artifact in store.list_artifacts(run.run_id)
+        if artifact.type == 'protocol'
+    ]
     assert len(restored) == 1
-    assert restored[0].type == 'protocol'
     assert restored[0].sha256 == protocol.sha256
 
 

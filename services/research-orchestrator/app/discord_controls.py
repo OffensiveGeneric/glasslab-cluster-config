@@ -5,8 +5,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import discord
+from discord import app_commands
 
-from .schemas import ApprovalStatus
+from .schemas import ApprovalStatus, RunCreateRequest, RunRecord
 
 if TYPE_CHECKING:
     from .engine import ResearchOrchestrator
@@ -73,6 +74,14 @@ def execute_discord_action(
         raise ValueError(f'unsupported Discord operation: {operation}')
 
 
+def execute_discord_run_creation(
+    engine: ResearchOrchestrator,
+    *,
+    objective: str,
+) -> RunRecord:
+    return engine.create_run(RunCreateRequest(objective=objective))
+
+
 class DiscordControlGateway:
     """Outbound Gateway listener for bounded approval-button interactions."""
 
@@ -82,11 +91,13 @@ class DiscordControlGateway:
         engine: ResearchOrchestrator,
         bot_token: str,
         guild_id: str,
+        channel_id: str,
         admin_role_id: str | None,
         admin_user_ids: list[str],
     ) -> None:
         self.engine = engine
         self.bot_token = bot_token
+        self.channel_id = channel_id
         self.policy = DiscordControlPolicy(
             guild_id=guild_id,
             admin_role_id=admin_role_id,
@@ -95,8 +106,40 @@ class DiscordControlGateway:
         intents = discord.Intents.none()
         intents.guilds = True
         self.client = discord.Client(intents=intents)
+        self.guild = discord.Object(id=int(guild_id))
+        self.tree = app_commands.CommandTree(self.client)
+        self._commands_synced = False
+        self._register_commands()
+        self.client.on_ready = self._on_ready
         self.client.on_interaction = self._on_interaction
         self._tasks: set[asyncio.Task[None]] = set()
+
+    def _register_commands(self) -> None:
+        @self.tree.command(
+            name='research-start',
+            description='Start a Glasslab research run from an objective.',
+            guild=self.guild,
+        )
+        @app_commands.describe(
+            objective=(
+                'Research objective for Honeydew to turn into a protocol '
+                'and evaluation contract proposal.'
+            )
+        )
+        async def research_start(
+            interaction: discord.Interaction,
+            objective: app_commands.Range[str, 10, 2000],
+        ) -> None:
+            await self._on_research_start(
+                interaction,
+                objective=str(objective),
+            )
+
+    async def _on_ready(self) -> None:
+        if self._commands_synced:
+            return
+        await self.tree.sync(guild=self.guild)
+        self._commands_synced = True
 
     async def run(self) -> None:
         await self.client.start(self.bot_token, reconnect=True)
@@ -132,6 +175,77 @@ class DiscordControlGateway:
             ephemeral=True,
             allowed_mentions=discord.AllowedMentions.none(),
         )
+
+    async def _on_research_start(
+        self,
+        interaction: discord.Interaction,
+        *,
+        objective: str,
+    ) -> None:
+        actor = self._actor(interaction)
+        if not self.policy.is_authorized(actor):
+            await self._respond(
+                interaction,
+                'You are not authorized to start Glasslab research runs.',
+            )
+            return
+        if str(interaction.channel_id) != self.channel_id:
+            await self._respond(
+                interaction,
+                'Start research runs from the configured Glasslab channel.',
+            )
+            return
+        await self._respond(
+            interaction,
+            (
+                'Research request accepted. Honeydew is drafting the protocol '
+                'and evaluation contract proposal; a run thread will appear '
+                'in this channel.'
+            ),
+        )
+        task = asyncio.create_task(
+            self._create_run(
+                interaction=interaction,
+                objective=objective,
+            )
+        )
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _create_run(
+        self,
+        *,
+        interaction: discord.Interaction,
+        objective: str,
+    ) -> None:
+        try:
+            run = await asyncio.to_thread(
+                execute_discord_run_creation,
+                self.engine,
+                objective=objective,
+            )
+            destination = (
+                f'<#{run.discord_thread_id}>'
+                if run.discord_thread_id
+                else f'run `{run.run_id}`'
+            )
+            await interaction.followup.send(
+                (
+                    f'Research run created in {destination}. '
+                    'Review the proposed protocol and evaluation contract there.'
+                ),
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except Exception as exc:
+            try:
+                await interaction.followup.send(
+                    f'Research run creation failed: {exc}',
+                    ephemeral=True,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except discord.HTTPException:
+                return
 
     async def _on_interaction(
         self,

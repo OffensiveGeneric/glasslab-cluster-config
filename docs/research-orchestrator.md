@@ -251,6 +251,13 @@ Honeydew, Beaker, and Orchestrator messages and one editable status message.
 Messages are rendered from persisted events after transaction commit. No
 token-by-token output is posted, and Discord history is never used as memory.
 
+The guild-scoped `/research-start objective:...` command is the human front
+door. It invokes the same authoritative `create_run` engine method as the HTTP
+API, then creates the run thread. The command is role-gated using the same
+configured Discord control policy as approvals. The HTTP endpoint remains an
+internal automation and recovery interface; operators are not expected to
+construct it by hand for normal work.
+
 The bot creates public threads and owns the editable status message. An
 optional channel webhook posts semantic events with per-message Honeydew,
 Beaker, and Orchestrator identities. Agent turn messages include the explicit
@@ -266,6 +273,15 @@ only after deterministic preflight and Honeydew methodology approval succeed.
 Post-approval execution failures are posted publicly in the run thread from the
 persisted failure event; an ephemeral interaction response is not the only
 failure signal.
+
+Honeydew's protocol turn also returns a schema-validated logical evaluation
+contract proposal: evaluator type, primary metric, direction, minimum effect,
+guardrails, required artifacts, budget mode, resource ceilings, and rationale.
+The orchestrator stores it as a checksummed artifact and shows it in the
+protocol approval brief. The proposal cannot contain executable paths, images,
+commands, or digests. Those remain in the repository-controlled immutable
+harness. The brief explicitly reports whether the proposal is compatible with
+the currently bound harness or requires a new trusted harness.
 
 The bot requires only View Channel, Send Messages, Read Message History,
 Create Public Threads, and Send Messages in Threads on the configured channel.
@@ -307,6 +323,12 @@ Deployment requires `X-Glasslab-Operator-Token` on all state-changing
 endpoints. Health, readiness, run reads, events, artifacts, and SSE remain
 read-only. Local development leaves this check disabled unless
 `GLASSLAB_ORCHESTRATOR_REQUIRE_OPERATOR_AUTH=true`.
+
+Normal Discord usage is:
+
+```text
+/research-start objective: Compare naive and semi-hard triplet mining on unseen CIFAR-100 classes.
+```
 
 ## Local Development
 

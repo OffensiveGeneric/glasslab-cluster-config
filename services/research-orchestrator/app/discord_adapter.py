@@ -76,6 +76,56 @@ def _render_action_context(payload: dict[str, Any]) -> str:
                 ),
             ]
         )
+        proposal = payload.get('contract_proposal')
+        binding = payload.get('contract_binding')
+        if isinstance(proposal, dict):
+            primary = proposal.get('primary_metric')
+            resources = proposal.get('resource_constraints')
+            if not isinstance(primary, dict):
+                primary = {}
+            if not isinstance(resources, dict):
+                resources = {}
+            guardrails = proposal.get('guardrails')
+            if not isinstance(guardrails, list):
+                guardrails = []
+            guardrail_names = [
+                str(item.get('name'))
+                for item in guardrails
+                if isinstance(item, dict) and item.get('name')
+            ]
+            lines.extend(
+                [
+                    '',
+                    "**Honeydew's evaluation contract proposal**",
+                    (
+                        f"Evaluator: `{proposal.get('evaluator_type', 'unknown')}`. "
+                        f"Primary metric: `{primary.get('name', 'unknown')}` "
+                        f"({primary.get('direction', '?')}, minimum effect "
+                        f"{primary.get('minimum_effect', '?')})."
+                    ),
+                    (
+                        f"Guardrails: {', '.join(guardrail_names) or 'none'}. "
+                        f"Budget: {proposal.get('budget_mode', 'unknown')}."
+                    ),
+                    (
+                        f"Ceiling: {resources.get('gpus', '?')} GPU, "
+                        f"{resources.get('cpu', '?')} CPU, "
+                        f"{resources.get('memory_gib', '?')} GiB RAM, "
+                        f"{resources.get('wallclock_minutes', '?')} minutes."
+                    ),
+                ]
+            )
+        if isinstance(binding, dict):
+            lines.extend(
+                [
+                    (
+                        'Immutable harness binding: '
+                        f"`{binding.get('contract_id', 'unknown')}` "
+                        f"v{binding.get('version', '?')} "
+                        f"(`{binding.get('status', 'unknown')}`)."
+                    )
+                ]
+            )
     elif action_type == 'submit_experiment_matrix':
         variants = arguments.get('variants', [])
         seeds = arguments.get('seeds', [])
