@@ -169,6 +169,16 @@ class InvalidThenValidContractRuntime(NewContractRuntime):
         return result, message_id
 
 
+class FailingContractReviewRuntime(NewContractRuntime):
+    def run_turn(self, **kwargs):
+        if (
+            kwargs['agent'].value == 'honeydew'
+            and 'Review the sealed evaluation-contract' in kwargs['prompt']
+        ):
+            raise RuntimeError('mock malformed Honeydew output')
+        return super().run_turn(**kwargs)
+
+
 def _pending_action(store, run_id: str, action_type: str):
     return next(
         action
@@ -322,6 +332,53 @@ def test_invalid_contract_candidate_is_rejected_and_retried(
     )
     assert any(
         event.event_type == 'contract.candidate_rejected'
+        for event in store.list_events(run.run_id)
+    )
+
+
+def test_recovery_agent_failure_pauses_instead_of_terminalizing(
+    orchestrator_bundle,
+) -> None:
+    settings, store, cluster, _, original = orchestrator_bundle
+    engine = ResearchOrchestrator(
+        settings=settings,
+        store=store,
+        runtime=FailingContractReviewRuntime(runner_image=RUNNER_IMAGE),
+        workspaces=original.workspaces,
+        contracts=original.contracts,
+        contract_candidates=original.contract_candidates,
+        policy=original.policy,
+        cluster=cluster,
+        discord=DisabledDiscordAdapter(),
+    )
+    run = engine.create_run(
+        RunCreateRequest(objective='Pause a failed recovered agent turn.')
+    )
+    protocol = _pending_action(store, run.run_id, 'approve_protocol')
+    with pytest.raises(RuntimeError, match='malformed Honeydew'):
+        engine.approve_action(
+            protocol.action_id,
+            reviewer='test-human',
+            reason='Protocol accepted.',
+        )
+    current = store.get_run(run.run_id)
+    assert current.state == RunState.PAUSED
+    assert current.resume_state == RunState.HONEYDEW_REVIEWING_CONTRACT
+
+    failed = current.model_copy(
+        update={
+            'state': RunState.HONEYDEW_REVIEWING_CONTRACT,
+            'resume_state': None,
+        }
+    )
+    store.replace_run(failed, expected_version=current.version)
+    engine.recover()
+
+    recovered = store.get_run(run.run_id)
+    assert recovered.state == RunState.PAUSED
+    assert recovered.resume_state == RunState.HONEYDEW_REVIEWING_CONTRACT
+    assert any(
+        event.event_type == 'run.recovery_failed'
         for event in store.list_events(run.run_id)
     )
 

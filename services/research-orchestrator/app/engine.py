@@ -2081,7 +2081,35 @@ class ResearchOrchestrator:
             try:
                 self._recover_run(run.run_id)
             except Exception as exc:
-                self._fail_run(run.run_id, exc)
+                current = self.store.get_run(run.run_id)
+                resumable_agent_states = {
+                    RunState.HONEYDEW_DRAFTING_PROTOCOL,
+                    RunState.BEAKER_DRAFTING_CONTRACT,
+                    RunState.HONEYDEW_REVIEWING_CONTRACT,
+                    RunState.BEAKER_IMPLEMENTING,
+                    RunState.HONEYDEW_REVIEWING,
+                    RunState.BEAKER_REVISING,
+                    RunState.BEAKER_ANALYZING,
+                    RunState.HONEYDEW_VERIFYING,
+                    RunState.HONEYDEW_WRITING_REPORT,
+                }
+                if current.state in resumable_agent_states:
+                    self._event(
+                        run.run_id,
+                        source='orchestrator',
+                        event_type='run.recovery_failed',
+                        payload={
+                            'state': current.state.value,
+                            'error': str(exc),
+                            'next_step': (
+                                'The run is paused at the same phase. Resume '
+                                'to retry the bounded agent turn.'
+                            ),
+                        },
+                    )
+                    self.pause_run(run.run_id)
+                else:
+                    self._fail_run(run.run_id, exc)
             recovered.append(run.run_id)
         return recovered
 
