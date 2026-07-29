@@ -153,8 +153,14 @@ class OpenCodeProcessRuntime(AgentRuntime):
             )
         return {
             '*': 'allow',
+            'doom_loop': 'deny',
             'external_directory': 'deny',
+            'lsp': 'deny',
+            'question': 'deny',
+            'skill': 'deny',
+            'task': 'deny',
             'webfetch': 'deny',
+            'websearch': 'deny',
             'bash': denied_shell,
         }
 
@@ -182,6 +188,7 @@ class OpenCodeProcessRuntime(AgentRuntime):
             'default_agent': 'build',
             'share': 'disabled',
             'autoupdate': False,
+            'lsp': False,
             'provider': {
                 'exo': {
                     'npm': '@ai-sdk/openai-compatible',

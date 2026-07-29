@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -62,7 +62,14 @@ class Claim(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     text: str = Field(min_length=1)
-    evidence: list[str] = Field(default_factory=list)
+    evidence: list[
+        Annotated[
+            str,
+            Field(
+                pattern=r'^(artifact|git|event|job|contract)://.+$',
+            ),
+        ]
+    ] = Field(default_factory=list)
 
     @field_validator('evidence')
     @classmethod

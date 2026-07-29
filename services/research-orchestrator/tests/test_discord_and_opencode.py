@@ -189,3 +189,8 @@ def test_opencode_writable_runtime_directories_are_per_agent(
 
     assert all(path.is_dir() for path in roots)
     assert all(path.is_relative_to(tmp_path / 'run-1') for path in roots)
+    config = json.loads((roots[0] / 'opencode' / 'opencode.json').read_text())
+    assert config['lsp'] is False
+    assert config['permission']['task'] == 'deny'
+    assert config['permission']['websearch'] == 'deny'
+    assert config['permission']['external_directory'] == 'deny'
