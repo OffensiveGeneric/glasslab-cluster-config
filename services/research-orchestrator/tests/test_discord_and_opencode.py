@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import httpx
 
 from app.discord_adapter import DiscordHttpAdapter, DiscordRenderer
 from app.config import Settings
+from app.discord_controls import (
+    DiscordControlActor,
+    DiscordControlPolicy,
+    execute_discord_action,
+)
 from app.opencode_runtime import (
     OpenCodeProcessRuntime,
     extract_structured_output,
@@ -48,6 +54,96 @@ def test_discord_renderer_includes_agent_handoff() -> None:
     assert message is not None
     assert message.identity == 'Beaker'
     assert '**To Honeydew:** Review the proposed controls.' in message.content
+
+
+def test_discord_pending_action_has_approval_controls() -> None:
+    message = DiscordRenderer().render(
+        EventRecord(
+            sequence_number=3,
+            run_id='run-1',
+            source='orchestrator',
+            event_type='action.proposed',
+            payload={
+                'action_id': 'action-1',
+                'type': 'approve_protocol',
+                'policy_classification': 'human_approval',
+                'approval_status': 'pending',
+            },
+        )
+    )
+
+    assert message is not None
+    assert message.components is not None
+    buttons = message.components[0]['components']
+    assert [button['custom_id'] for button in buttons] == [
+        'glasslab:approve:action-1',
+        'glasslab:reject:action-1',
+    ]
+
+
+def test_discord_control_policy_uses_guild_role_or_user_id() -> None:
+    policy = DiscordControlPolicy(
+        guild_id='guild-1',
+        admin_role_id='role-1',
+        admin_user_ids=['user-1'],
+    )
+
+    assert policy.is_authorized(
+        DiscordControlActor(
+            user_id='user-1',
+            display_name='Tyler',
+            guild_id='guild-1',
+            role_ids=frozenset(),
+        )
+    )
+    assert policy.is_authorized(
+        DiscordControlActor(
+            user_id='user-2',
+            display_name='Mike',
+            guild_id='guild-1',
+            role_ids=frozenset({'role-1'}),
+        )
+    )
+    assert not policy.is_authorized(
+        DiscordControlActor(
+            user_id='user-3',
+            display_name='Unapproved',
+            guild_id='guild-1',
+            role_ids=frozenset(),
+        )
+    )
+    assert not policy.is_authorized(
+        DiscordControlActor(
+            user_id='user-1',
+            display_name='Tyler',
+            guild_id='other-guild',
+            role_ids=frozenset({'role-1'}),
+        )
+    )
+
+
+def test_discord_control_dispatch_records_immutable_identity() -> None:
+    engine = Mock()
+    actor = DiscordControlActor(
+        user_id='142100176322953216',
+        display_name='Tyler',
+        guild_id='guild-1',
+        role_ids=frozenset(),
+    )
+
+    execute_discord_action(
+        engine,
+        operation='approve',
+        action_id='action-1',
+        actor=actor,
+    )
+
+    engine.approve_action.assert_called_once_with(
+        'action-1',
+        reviewer='discord:142100176322953216:Tyler',
+        reason='Approved through Discord controls.',
+    )
+    engine.reject_action.assert_not_called()
 
 
 def test_discord_webhook_uses_agent_identity_and_thread() -> None:
@@ -107,6 +203,42 @@ def test_discord_creates_public_run_thread() -> None:
         'auto_archive_duration': 1440,
     }
     assert 'X-Audit-Log-Reason' in requests[0].headers
+
+
+def test_discord_action_controls_are_posted_by_bot() -> None:
+    requests: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={'id': 'control-message'})
+
+    adapter = DiscordHttpAdapter(
+        bot_token='bot-token',
+        channel_id='channel-1',
+        webhook_url='https://discord.com/api/webhooks/webhook-id/token',
+        transport=httpx.MockTransport(respond),
+    )
+    adapter.publish(
+        thread_id='thread-1',
+        status_message_id=None,
+        event=EventRecord(
+            sequence_number=4,
+            run_id='run-1',
+            source='orchestrator',
+            event_type='action.proposed',
+            payload={
+                'action_id': 'action-1',
+                'type': 'approve_protocol',
+                'policy_classification': 'human_approval',
+                'approval_status': 'pending',
+            },
+        ),
+    )
+
+    assert len(requests) == 1
+    assert requests[0].url.path == '/api/v10/channels/thread-1/messages'
+    payload = json.loads(requests[0].content)
+    assert payload['components'][0]['components'][0]['label'] == 'Approve'
 
 
 def test_discord_status_message_id_is_reused() -> None:

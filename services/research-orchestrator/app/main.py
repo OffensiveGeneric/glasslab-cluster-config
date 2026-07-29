@@ -13,6 +13,7 @@ from .cluster import FakeClusterExecutor, WorkflowApiClusterExecutor
 from .config import Settings, get_settings
 from .contracts import ContractIntegrityError, EvaluationContractResolver
 from .discord_adapter import DisabledDiscordAdapter, DiscordHttpAdapter
+from .discord_controls import DiscordControlGateway
 from .engine import ResearchOrchestrator, WorkflowError
 from .opencode_runtime import AgentRuntime, OpenCodeProcessRuntime
 from .policy import ActionPolicy
@@ -99,6 +100,19 @@ def create_app(
         engine,
         poll_interval_seconds=settings.job_poll_interval_seconds,
     )
+    discord_controls = None
+    if (
+        settings.discord_controls_enabled
+        and settings.discord_bot_token
+        and settings.discord_guild_id
+    ):
+        discord_controls = DiscordControlGateway(
+            engine=engine,
+            bot_token=settings.discord_bot_token,
+            guild_id=settings.discord_guild_id,
+            admin_role_id=settings.discord_admin_role_id,
+            admin_user_ids=settings.discord_admin_user_ids,
+        )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -114,14 +128,26 @@ def create_app(
             if start_watcher
             else None
         )
+        discord_task = (
+            asyncio.create_task(
+                discord_controls.run(),
+                name='research-orchestrator-discord-controls',
+            )
+            if discord_controls is not None
+            else None
+        )
         try:
             yield
         finally:
             watcher.stop()
             engine.runtime.close()
+            if discord_controls is not None:
+                await discord_controls.close()
             tasks = [recovery_task]
             if watcher_task is not None:
                 tasks.append(watcher_task)
+            if discord_task is not None:
+                tasks.append(discord_task)
             await asyncio.gather(*tasks, return_exceptions=True)
 
     app = FastAPI(
@@ -130,6 +156,7 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.engine = engine
+    app.state.discord_controls = discord_controls
 
     def require_operator(
         supplied_token: str | None = Header(
@@ -197,6 +224,14 @@ def create_app(
         return {
             'status': 'ready',
             'database': database_ready,
+            'discord_controls': (
+                'ready'
+                if discord_controls is not None
+                and discord_controls.client.is_ready()
+                else 'disabled'
+                if discord_controls is None
+                else 'connecting'
+            ),
             'evaluation_contract': {
                 'contract_id': contract.descriptor.contract_id,
                 'version': contract.descriptor.version,

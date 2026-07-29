@@ -70,10 +70,20 @@ class Settings(BaseSettings):
     discord_webhook_url: str | None = None
     discord_application_id: str | None = None
     discord_guild_id: str | None = None
+    discord_controls_enabled: bool = False
+    discord_admin_role_id: str | None = None
+    discord_admin_user_ids: Annotated[list[str], NoDecode] = []
 
     @field_validator('permitted_job_images', mode='before')
     @classmethod
     def parse_image_allowlist(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(',') if item.strip()]
+        return value
+
+    @field_validator('discord_admin_user_ids', mode='before')
+    @classmethod
+    def parse_discord_user_allowlist(cls, value: object) -> object:
         if isinstance(value, str):
             return [item.strip() for item in value.split(',') if item.strip()]
         return value

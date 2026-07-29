@@ -15,6 +15,7 @@ class DiscordMessage:
     identity: str
     content: str
     is_status: bool = False
+    components: list[dict[str, Any]] | None = None
 
 
 class DiscordRenderer:
@@ -51,12 +52,39 @@ class DiscordRenderer:
                 content,
             )
         if event_type == 'action.proposed':
+            components = None
+            if payload.get('approval_status') == 'pending':
+                action_id = str(payload.get('action_id', ''))
+                components = [
+                    {
+                        'type': 1,
+                        'components': [
+                            {
+                                'type': 2,
+                                'style': 3,
+                                'label': 'Approve',
+                                'custom_id': (
+                                    f'glasslab:approve:{action_id}'
+                                ),
+                            },
+                            {
+                                'type': 2,
+                                'style': 4,
+                                'label': 'Reject',
+                                'custom_id': (
+                                    f'glasslab:reject:{action_id}'
+                                ),
+                            },
+                        ],
+                    }
+                ]
             return DiscordMessage(
                 identity,
                 (
                     f"Action proposed: {payload.get('type')} "
                     f"({payload.get('policy_classification')})"
                 ),
+                components=components,
             )
         if event_type in {'action.approved', 'action.rejected'}:
             return DiscordMessage(
@@ -196,20 +224,27 @@ class DiscordHttpAdapter(DiscordAdapter):
         message = self.renderer.render(event)
         if message is None:
             return status_message_id
-        if self.webhook_url and not message.is_status:
+        if (
+            self.webhook_url
+            and not message.is_status
+            and not message.components
+        ):
             self._publish_webhook(thread_id=thread_id, message=message)
             return status_message_id
         content = f'**{message.identity}:** {message.content}'[:2000]
+        payload: dict[str, Any] = {'content': content}
+        if message.components is not None:
+            payload['components'] = message.components
         with self._client() as client:
             if message.is_status and status_message_id:
                 response = client.patch(
                     f'/channels/{thread_id}/messages/{status_message_id}',
-                    json={'content': content},
+                    json=payload,
                 )
             else:
                 response = client.post(
                     f'/channels/{thread_id}/messages',
-                    json={'content': content},
+                    json=payload,
                 )
             response.raise_for_status()
             if message.is_status and not status_message_id:

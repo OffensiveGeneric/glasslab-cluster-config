@@ -243,9 +243,18 @@ webhook cannot approve actions or alter workflow state.
 
 The bot requires only View Channel, Send Messages, Read Message History,
 Create Public Threads, and Send Messages in Threads on the configured channel.
-It does not require Administrator. The bot token and webhook URL belong in the
-ignored local Kubernetes Secret; application, guild, and channel IDs are
-non-secret deployment configuration.
+It does not require Administrator. When controls are enabled, the bot maintains
+an outbound Gateway connection and posts Approve and Reject buttons on pending
+actions. No public callback ingress is required. Each interaction is checked
+against the configured guild, run thread, pending action, and immutable admin
+role or user IDs before invoking the same authoritative engine methods as the
+HTTP API. The Discord user ID and display name are stored as the reviewer.
+Buttons acknowledge immediately; long agent work continues asynchronously.
+
+The bot token and webhook URL belong in the ignored local Kubernetes Secret.
+Application, guild, channel, and approval-role IDs are non-secret deployment
+configuration. Glasslab currently authorizes the `Mystic Arts Masters` role
+by ID. Discord role membership is therefore the operational approval policy.
 
 ## HTTP API
 
