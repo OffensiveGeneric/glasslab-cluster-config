@@ -405,6 +405,28 @@ class ResearchOrchestrator:
         )
         return record
 
+    def _save_local_artifact(
+        self,
+        *,
+        run_id: str,
+        artifact_type: str,
+        uri: str,
+        digest: str,
+        metadata: dict[str, Any],
+    ) -> ArtifactRecord:
+        artifact = ArtifactRecord(
+            artifact_id=uuid5(
+                NAMESPACE_URL,
+                f'{run_id}:{uri}:{digest}',
+            ).hex,
+            run_id=run_id,
+            type=artifact_type,
+            uri=uri,
+            sha256=digest,
+            metadata=metadata,
+        )
+        return self.store.save_artifact(artifact)
+
     def _draft_protocol(self, run_id: str, feedback: str | None = None) -> None:
         run = self.store.get_run(run_id)
         prompt = (
@@ -448,13 +470,26 @@ class ResearchOrchestrator:
             ),
             expected_version=current.version,
         )
+        uri = f'artifact://{run_id}/protocol/program.md'
+        self._save_local_artifact(
+            run_id=run_id,
+            artifact_type='protocol',
+            uri=uri,
+            digest=digest,
+            metadata={
+                'path': str(destination),
+                'protocol_version': current.protocol_version + 1,
+                'turn_id': turn.turn_id,
+            },
+        )
         self._event(
             run_id,
             source='honeydew',
             event_type='artifact.recorded',
             payload={
                 'type': 'protocol',
-                'uri': f'artifact://{run_id}/protocol/program.md',
+                'uri': uri,
+                'path': str(destination),
                 'sha256': digest,
                 'turn_id': turn.turn_id,
             },
@@ -1116,12 +1151,23 @@ class ResearchOrchestrator:
             relative_path=report_files[0].path,
             destination_kind='report',
         )
+        uri = f'artifact://{run_id}/reports/report.md'
+        self._save_local_artifact(
+            run_id=run_id,
+            artifact_type='report',
+            uri=uri,
+            digest=digest,
+            metadata={
+                'path': str(destination),
+                'turn_id': turn.turn_id,
+            },
+        )
         self._event(
             run_id,
             source='honeydew',
             event_type='report.created',
             payload={
-                'uri': f'artifact://{run_id}/reports/report.md',
+                'uri': uri,
                 'path': str(destination),
                 'sha256': digest,
                 'turn_id': turn.turn_id,
@@ -1234,6 +1280,8 @@ class ResearchOrchestrator:
         return cancelled
 
     def recover(self) -> list[str]:
+        for run in self.store.list_runs():
+            self._backfill_local_artifacts(run.run_id)
         recovered: list[str] = []
         for run in self.store.list_active_runs():
             interrupted = self.store.mark_running_turns_interrupted(run.run_id)
@@ -1250,6 +1298,35 @@ class ResearchOrchestrator:
                 self._fail_run(run.run_id, exc)
             recovered.append(run.run_id)
         return recovered
+
+    def _backfill_local_artifacts(self, run_id: str) -> None:
+        for event in self.store.list_events(run_id):
+            payload = event.payload
+            artifact_type = None
+            if (
+                event.event_type == 'artifact.recorded'
+                and payload.get('type') == 'protocol'
+            ):
+                artifact_type = 'protocol'
+            elif event.event_type == 'report.created':
+                artifact_type = 'report'
+            if artifact_type is None:
+                continue
+            uri = payload.get('uri')
+            digest = payload.get('sha256')
+            if not isinstance(uri, str) or not isinstance(digest, str):
+                continue
+            self._save_local_artifact(
+                run_id=run_id,
+                artifact_type=artifact_type,
+                uri=uri,
+                digest=digest,
+                metadata={
+                    key: value
+                    for key, value in payload.items()
+                    if key not in {'type', 'uri', 'sha256'}
+                },
+            )
 
     def _recover_run(self, run_id: str) -> None:
         run = self.store.get_run(run_id)

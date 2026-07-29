@@ -96,7 +96,10 @@ def test_mocked_complete_workflow_and_agent_isolation(orchestrator_bundle) -> No
     assert run.beaker_workspace != run.honeydew_workspace
     assert Path(run.protocol_path or '').is_file()
     assert (Path(run.reports_path) / 'report.md').is_file()
-    assert len(store.list_artifacts(run.run_id)) == 2
+    assert {
+        artifact.type for artifact in store.list_artifacts(run.run_id)
+    } == {'protocol', 'metrics', 'report'}
+    assert len(store.list_artifacts(run.run_id)) == 4
     turns = store.list_turns(run.run_id)
     assert len(turns) == 6
     assert all(turn.status == 'completed' for turn in turns)
@@ -181,7 +184,32 @@ def test_restart_recovery_from_job_running(orchestrator_bundle) -> None:
     assert restarted.recover() == [run.run_id]
     recovered = restarted_store.get_run(run.run_id)
     assert recovered.state == RunState.AWAITING_FINAL_ACCEPTANCE
-    assert len(restarted_store.list_artifacts(run.run_id)) == 2
+    assert len(restarted_store.list_artifacts(run.run_id)) == 4
+
+
+def test_recovery_backfills_protocol_artifact_from_event(
+    orchestrator_bundle,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(
+            objective='Backfill a protocol artifact from its durable event.'
+        )
+    )
+    protocol = store.list_artifacts(run.run_id)[0]
+    with store._connect() as connection:
+        connection.execute(
+            'DELETE FROM artifacts WHERE artifact_id = ?',
+            (protocol.artifact_id,),
+        )
+
+    assert store.list_artifacts(run.run_id) == []
+    engine.recover()
+
+    restored = store.list_artifacts(run.run_id)
+    assert len(restored) == 1
+    assert restored[0].type == 'protocol'
+    assert restored[0].sha256 == protocol.sha256
 
 
 def test_restart_recovers_submission_without_external_id(
