@@ -83,17 +83,23 @@ def execute_discord_run_creation(
     return engine.create_run(RunCreateRequest(objective=objective))
 
 
-def execute_discord_benchmark_creation(
+def execute_discord_task_creation(
     engine: ResearchOrchestrator,
     *,
     filename: str,
     content: bytes,
     objective: str | None,
 ) -> RunRecord:
-    task = engine.task_bundles.import_archive(
+    task = engine.import_task_bundle(
         filename=filename,
         content=content,
     )
+    preflight = engine.task_preflight(task)
+    if not preflight.ready:
+        raise ValueError(
+            'task compiled but is not ready: '
+            + '; '.join(preflight.blocking_issues)
+        )
     return engine.create_run(
         RunCreateRequest(
             objective=objective
@@ -102,6 +108,10 @@ def execute_discord_benchmark_creation(
             task_bundle_digest=task.digest,
         )
     )
+
+
+# Compatibility name for callers that predate generic task compilation.
+execute_discord_benchmark_creation = execute_discord_task_creation
 
 
 class DiscordControlGateway:
@@ -167,6 +177,26 @@ class DiscordControlGateway:
             objective='Optional narrower objective for this benchmark run.',
         )
         async def benchmark_start(
+            interaction: discord.Interaction,
+            archive: discord.Attachment,
+            objective: app_commands.Range[str, 10, 1000] | None = None,
+        ) -> None:
+            await self._on_benchmark_start(
+                interaction,
+                archive=archive,
+                objective=str(objective) if objective else None,
+            )
+
+        @self.tree.command(
+            name='task-start',
+            description='Compile, preflight, and start a Glasslab research task.',
+            guild=self.guild,
+        )
+        @app_commands.describe(
+            archive='ZIP containing one problem.md and an optional evaluator rubric.',
+            objective='Optional narrower objective for this research run.',
+        )
+        async def task_start(
             interaction: discord.Interaction,
             archive: discord.Attachment,
             objective: app_commands.Range[str, 10, 1000] | None = None,
@@ -311,9 +341,13 @@ class DiscordControlGateway:
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
+            if archive.size > self.engine.task_bundles.MAX_ARCHIVE_BYTES:
+                raise ValueError(
+                    'task archive exceeds the configured import size limit'
+                )
             content = await archive.read()
             run = await asyncio.to_thread(
-                execute_discord_benchmark_creation,
+                execute_discord_task_creation,
                 self.engine,
                 filename=archive.filename,
                 content=content,
@@ -326,7 +360,7 @@ class DiscordControlGateway:
             )
             await interaction.followup.send(
                 (
-                    f'Benchmark imported and started in {destination}. '
+                    f'Task compiled, preflighted, and started in {destination}. '
                     'Honeydew is drafting the protocol from the task and rubric.'
                 ),
                 ephemeral=True,

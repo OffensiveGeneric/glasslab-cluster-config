@@ -39,7 +39,11 @@ from .schemas import (
     utc_now,
 )
 from .storage import ConcurrencyConflict, SqliteStore
-from .task_bundles import TaskBundleManager
+from .task_bundles import (
+    TaskBundleManager,
+    TaskBundleRecord,
+    TaskPreflight,
+)
 from .workspaces import WorkspaceManager
 
 
@@ -72,6 +76,8 @@ class ResearchOrchestrator:
             root=settings.task_bundle_root,
             shared_mount_root=settings.shared_mount_root,
             dataset_catalog_path=settings.benchmark_dataset_catalog_path,
+            task_asset_root=settings.task_asset_root,
+            maximum_asset_bytes=settings.maximum_task_asset_bytes,
         )
         self.policy = policy
         self.cluster = cluster
@@ -160,6 +166,13 @@ class ResearchOrchestrator:
                 or self.settings.default_evaluation_contract_version
             )
             contract = self.contracts.resolve(contract_id, contract_version)
+            if task:
+                preflight = self.task_preflight(task)
+                if not preflight.ready:
+                    raise WorkflowError(
+                        'task preflight failed: '
+                        + '; '.join(preflight.blocking_issues)
+                    )
             run_id = uuid4().hex
             paths = self.workspaces.prepare(run_id)
             if task:
@@ -227,6 +240,99 @@ class ResearchOrchestrator:
                 self._fail_run(run_id, exc)
                 raise
             return self.store.get_run(run_id)
+
+    def import_task_bundle(
+        self,
+        *,
+        filename: str,
+        content: bytes,
+    ) -> TaskBundleRecord:
+        with self._advance_lock:
+            return self._compile_task_bundle(
+                filename=filename,
+                content=content,
+            )
+
+    def _compile_task_bundle(
+        self,
+        *,
+        filename: str,
+        content: bytes,
+    ) -> TaskBundleRecord:
+        digest = sha256(content).hexdigest()
+        existing = self.task_bundles.find_by_digest(digest)
+        if existing is not None:
+            return existing
+        staged = self.task_bundles.stage_archive(
+            filename=filename,
+            content=content,
+        )
+        compiler_id = f'task-compiler-{staged.digest[:16]}'
+        workspace = staged.root / 'normalized'
+        try:
+            session = self.runtime.ensure_session(
+                run_id=compiler_id,
+                agent=AgentName.HONEYDEW,
+                workspace=workspace,
+                existing_session_id=None,
+            )
+            result, _ = self.runtime.run_turn(
+                run_id=compiler_id,
+                agent=AgentName.HONEYDEW,
+                workspace=workspace,
+                session_id=session.session_id,
+                prompt=(
+                    'Compile this task archive into a Glasslab TaskSpec. Read '
+                    '`problem.md` and `eval_agent_prompt.md`. Select only one '
+                    'approved runtime profile: cpu-ml-standard-v1 for tabular, '
+                    'classical ML, and lightweight CPU work; or '
+                    'gpu-ml-standard-v1 when the task materially requires '
+                    'PyTorch/CUDA training. Identify every external dataset or '
+                    'model asset as an asset proposal with a canonical public '
+                    'HTTPS URL when one is explicit or confidently known. Do '
+                    'not invent credentials, private URLs, commands, images, '
+                    'Kubernetes fields, or evaluator code. List exact metric '
+                    'keys and evidence artifacts required by the rubric. Put '
+                    'unresolved requirements in missing_inputs. Return kind '
+                    '"task_spec", task_spec_proposal, no requested actions, '
+                    'and done=true.'
+                ),
+            )
+            if (
+                result.kind != TurnKind.TASK_SPEC
+                or result.task_spec_proposal is None
+                or result.requested_actions
+            ):
+                raise WorkflowError(
+                    'Honeydew task compiler did not return a valid TaskSpec'
+                )
+            return self.task_bundles.compile(
+                staged,
+                result.task_spec_proposal,
+            )
+        except Exception:
+            self.task_bundles.discard_staged(staged)
+            raise
+        finally:
+            self.runtime.release(
+                run_id=compiler_id,
+                agent=AgentName.HONEYDEW,
+            )
+
+    def task_preflight(self, task: TaskBundleRecord) -> TaskPreflight:
+        try:
+            self.contracts.resolve(
+                task.default_contract_id,
+                task.default_contract_version,
+            )
+            evaluator_ready = True
+        except Exception:
+            evaluator_ready = False
+        return self.task_bundles.preflight(
+            task,
+            permitted_images=self.policy.permitted_images,
+            evaluator_ready=evaluator_ready,
+        )
 
     def _check_turn_budget(self, run: RunRecord) -> None:
         if run.turn_number >= run.maximum_turns:
@@ -629,6 +735,15 @@ class ResearchOrchestrator:
         if not isinstance(required_artifacts, list):
             return False
         ceiling = descriptor.resource_constraints
+        allowed_artifacts = set(descriptor.required_artifacts)
+        if (
+            descriptor.contract_id == 'generic-task-integrity-v1'
+            and run.task_definition
+        ):
+            allowed_artifacts.update(
+                str(item)
+                for item in run.task_definition.get('required_artifacts', [])
+            )
         return bool(
             contract.digest == run.evaluation_contract_digest
             and proposal.get('evaluator_type') == descriptor.contract_id
@@ -636,7 +751,7 @@ class ResearchOrchestrator:
             and primary.get('direction')
             == descriptor.manifest.get('primary_metric_direction')
             and set(str(item) for item in required_artifacts).issubset(
-                descriptor.required_artifacts
+                allowed_artifacts
             )
             and float(resources.get('cpu', float('inf'))) <= ceiling.cpu
             and float(resources.get('memory_gib', float('inf')))
@@ -660,15 +775,29 @@ class ResearchOrchestrator:
                 run.evaluation_contract_id,
                 run.evaluation_contract_version,
             )
+            generic_task = (
+                run.task_definition.get('compilation_source')
+                == 'honeydew-task-spec'
+            )
             task_context = (
-                '\n\nThis is an imported benchmark task. Read the immutable '
+                '\n\nThis is an imported research task. Read the immutable '
                 '`benchmark-task/problem.md` and '
                 '`benchmark-task/eval_agent_prompt.md` files. Treat the task '
                 'requirements and evaluator rubric as binding source material. '
-                'Do not redesign the evaluator contract or request a new '
-                'harness; the repository-controlled contract is already bound '
-                'to this run. Make evaluation_contract_proposal exactly match '
-                'this installed descriptor:\n'
+                + (
+                    'The generic integrity evaluator is a baseline. Use it '
+                    'only if artifact and metric-key checks are scientifically '
+                    'sufficient; otherwise propose the task-specific evaluator '
+                    'that Beaker should implement and Honeydew should review. '
+                    if generic_task
+                    else
+                    'Do not redesign the evaluator contract or request a new '
+                    'harness; the repository-controlled contract is already '
+                    'bound to this legacy task. Make '
+                    'evaluation_contract_proposal exactly match this installed '
+                    'descriptor. '
+                )
+                + '\nInstalled descriptor:\n'
                 + json.dumps(
                     bound.descriptor.model_dump(mode='json'),
                     indent=2,
@@ -770,13 +899,22 @@ class ResearchOrchestrator:
             descriptor.manifest.get('primary_metric', '')
         )
         ceiling = descriptor.resource_constraints
+        allowed_artifacts = set(descriptor.required_artifacts)
+        if (
+            descriptor.contract_id == 'generic-task-integrity-v1'
+            and run.task_definition
+        ):
+            allowed_artifacts.update(
+                str(item)
+                for item in run.task_definition.get('required_artifacts', [])
+            )
         binding_compatible = (
             proposal.evaluator_type == descriptor.contract_id
             and proposal.primary_metric.name == technical_primary_metric
             and proposal.primary_metric.direction
             == descriptor.manifest.get('primary_metric_direction')
             and set(proposal.required_artifacts).issubset(
-                descriptor.required_artifacts
+                allowed_artifacts
             )
             and proposal_resources.cpu <= ceiling.cpu
             and proposal_resources.memory_gib <= ceiling.memory_gib
@@ -1727,6 +1865,7 @@ class ResearchOrchestrator:
                     dataset['name']: dataset['uri']
                     for dataset in task['datasets']
                 },
+                'task_spec': task.get('task_spec'),
             }
             self._save_local_artifact(
                 run_id=run.run_id,

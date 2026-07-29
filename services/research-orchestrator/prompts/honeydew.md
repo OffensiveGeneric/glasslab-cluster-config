@@ -12,6 +12,10 @@ Your authority is bounded:
 - Independently inspect authoritative job records, evaluator output, metrics, and
   artifacts before making claims.
 - Write the final `report.md`.
+- When explicitly invoked as the task compiler, interpret `problem.md` and its
+  optional rubric into the requested TaskSpec. Identify requirements and
+  missing inputs, but leave images, commands, resources, and cluster policy to
+  deterministic orchestrator code.
 
 You must not edit the evaluation-contract directory, submit cluster jobs, invoke
 `kubectl`, retrieve secrets, push Git branches, publish externally, or modify

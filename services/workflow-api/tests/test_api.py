@@ -42,7 +42,7 @@ def test_healthz_and_workflow_families() -> None:
 
     health = client.get('/healthz')
     assert health.status_code == 200
-    assert health.json()['workflow_count'] == 8
+    assert health.json()['workflow_count'] == 10
     assert health.json()['store_backend'] == 'memory'
 
     families = client.get('/workflow-families')
@@ -57,6 +57,8 @@ def test_healthz_and_workflow_families() -> None:
         'metric-search-v0',
         'replication-lite',
         'research-workspace-cpu-v1',
+        'workspace-cpu-ml-v1',
+        'workspace-gpu-ml-v1',
     }
     by_id = {entry['workflow_id']: entry for entry in payload}
     assert by_id['gpu-experiment']['execution_status'] == 'ready'

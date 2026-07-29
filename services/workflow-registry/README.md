@@ -30,6 +30,9 @@ Current approved templates include CPU tabular, literature-to-experiment, a
 declared-only replication lane, and a coarse `gpu-experiment` template that
 requests `nvidia.com/gpu` on GPU-candidate nodes. These should be read as
 execution shapes the cluster can run, not as a taxonomy of research topics.
+New compiled research tasks use the fixed `workspace-cpu-ml-v1` and
+`workspace-gpu-ml-v1` profiles. The older `benchmark-workspace-*` entries are
+compatibility definitions for already imported benchmark records.
 
 What is committed here:
 

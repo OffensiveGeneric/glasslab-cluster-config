@@ -5,7 +5,9 @@ mocked OpenCode and cluster adapters. OpenCode against the two-node exo model,
 Discord threads and role-gated controls, restart recovery, and live Kubernetes
 deployment were tested on 2026-07-29. Three imported ML benchmark task types
 now have bounded CPU/GPU workload definitions and immutable evaluator contracts;
-their live end-to-end execution status is recorded below.
+their live end-to-end execution status is recorded below. Generic TaskSpec
+compilation is implemented and mock-tested but requires fresh live validation
+after this release.
 
 ## Purpose
 
@@ -210,34 +212,48 @@ catalog at startup after checksum verification. Agent-generated contracts
 still require Honeydew and human promotion approval. Unknown, changed, or
 mismatched bundles fail closed.
 
-## Imported ML Benchmarks
+## Compiled Research Tasks
 
-The orchestrator accepts these exact task archive names:
+The generic contribution path accepts a ZIP with exactly one `problem.md` and
+zero or one `eval_agent_prompt.md`; its filename has no semantic meaning.
+Honeydew reads the normalized files in a temporary isolated OpenCode session
+and returns a validated `glasslab-task-spec-v1` containing:
 
-| Archive | Task ID | Execution |
-|---|---|---|
-| `ML_Benchmark_Adult_Income.zip` | `adult-income` | bounded CPU |
-| `ML_Benchmark_Wine_Clustering.zip` | `wine-clustering` | bounded CPU |
-| `ML_Benchmark_FashionMNIST_Contrastive.zip` | `fashion-mnist-contrastive` | one GPU |
+- a human-facing name
+- one approved runtime profile
+- public asset requirements and optional expected checksums
+- required metric keys and evidence artifacts
+- unresolved inputs that block execution
 
-The archive is an immutable research-task input, not executable code. Import
-requires exactly one `problem.md` and one `eval_agent_prompt.md`, rejects
-links/path traversal/oversized input, computes SHA-256, and stores a read-only
-normalized copy. Dataset import is separate and fail-closed: the task cannot be
-imported until its canonical datasets are staged and listed with digests in the
-shared catalog.
+The model does not select a container image, command, workload ID, resource
+ceiling, evaluator entry point, or Kubernetes fields. Deterministic code
+compiles the proposal into either `workspace-cpu-ml-v1` or
+`workspace-gpu-ml-v1`, downloads declared public HTTPS assets with size and
+address checks, computes SHA-256, stores immutable references, and binds the
+repository-controlled `generic-task-integrity-v1` contract.
 
-Beaker writes runnable code only under
-`benchmark-workspace/<task-id>/`. At approved submission time the orchestrator
-creates a deterministic `source.zip`, sends task/source/dataset digest
-references to `workflow-api`, and selects a fixed workload, image, resources,
-command, and evaluation contract. The model cannot provide a Kubernetes
-manifest, evaluator path, arbitrary image, or dataset path.
+The generic contract verifies the task's declared metric keys and evidence
+artifacts. If those structural checks are not scientifically sufficient,
+Honeydew proposes a task-specific evaluator and the existing Beaker
+candidate, Honeydew review, and human promotion workflow is used. The generic
+gate is never treated as proof of a domain-specific scientific claim.
+
+Import rejects links, traversal, unsafe paths, and oversized archives. Task
+preflight blocks run creation when inputs are missing, an image is not
+allowlisted, or the evaluator is unavailable. Beaker writes executable code
+under `research-workspace/<task-id>/`; approved submission creates a
+deterministic `source.zip` and sends only digest-pinned task, source, and asset
+references through `workflow-api`.
+
+The three previously imported Adult, Wine, and Fashion-MNIST records remain
+readable and keep their original task-specific contracts and workload IDs.
+The old registry entries and `/benchmark-start` command are compatibility
+aliases, not the extension mechanism for new tasks.
 
 Start from Discord:
 
 ```text
-/benchmark-start archive:<attach one supported ZIP>
+/task-start archive:<attach task ZIP>
 ```
 
 Or use HTTP:
@@ -245,24 +261,26 @@ Or use HTTP:
 ```bash
 curl -fsS -X POST http://127.0.0.1:8080/task-bundles/import \
   -H "X-Glasslab-Operator-Token: $TOKEN" \
-  -F "archive=@$HOME/Downloads/ML_Benchmark_Adult_Income.zip"
+  -F "archive=@$HOME/Downloads/my-research-task.zip"
+
+curl -fsS \
+  "http://127.0.0.1:8080/task-bundles/<task-id>/preflight?digest=<sha256>"
 
 curl -fsS -X POST http://127.0.0.1:8080/runs \
   -H "X-Glasslab-Operator-Token: $TOKEN" \
   -H 'content-type: application/json' \
-  -d '{"objective":"Complete the imported Adult benchmark.","task_id":"adult-income"}'
+  -d '{"objective":"Complete and evaluate this imported task.","task_id":"<task-id>","task_bundle_digest":"<sha256>"}'
 ```
 
-Stage or refresh canonical datasets from `.44`:
+The legacy benchmark dataset staging helper remains available for the three
+existing compatibility records:
 
 ```bash
 ./scripts/stage-ml-benchmark-datasets.sh
 ```
 
-This downloads the official Adult and Wine files plus the four official
-Fashion-MNIST IDX gzip files, verifies dataset sizes/headers, creates one
-deterministic Fashion-MNIST archive, and writes the digest catalog to the
-shared artifacts PVC.
+New tasks declare assets in their TaskSpec instead of requiring code changes or
+a catalog entry.
 
 ## Actions And Jobs
 
@@ -385,6 +403,10 @@ The service provides:
 
 ```text
 POST /runs
+POST /task-bundles/import
+GET  /task-bundles
+GET  /task-bundles/{task_id}
+GET  /task-bundles/{task_id}/preflight
 GET  /runs
 GET  /runs/{run_id}
 GET  /runs/{run_id}/events
@@ -411,9 +433,10 @@ Normal Discord usage is:
 /research-start objective: Compare naive and semi-hard triplet mining on unseen CIFAR-100 classes.
 ```
 
-Imported benchmark usage is `/benchmark-start` with a supported ZIP
-attachment. Both commands are restricted to the configured channel and
-Discord administrator role.
+Imported task usage is `/task-start` with a ZIP attachment. The command
+compiles, preflights, and starts only ready tasks. `/benchmark-start` remains
+as a compatibility alias. All start commands are restricted to the configured
+channel and Discord administrator role.
 
 ## Local Development
 
@@ -455,13 +478,13 @@ repository checkout.
 Before deployment:
 
 1. publish the orchestrator image and pin the desired tag or digest,
-2. publish both benchmark workspace runner images when benchmark support changes,
+2. verify the standard CPU/GPU workspace runner images are published,
 3. verify the Qwen endpoint and exact model ID from the target node,
 4. configure the published contract in the workflow-api trusted catalog,
 5. validate workflow submission, status, artifacts, idempotency, and cancel,
 6. create a local Discord secret only when Discord is enabled, and
 7. deploy from the canonical checkout on `.44`, and
-8. run `scripts/stage-ml-benchmark-datasets.sh`.
+8. run `scripts/stage-ml-benchmark-datasets.sh` only for legacy benchmark data.
 
 ## Legacy Relationship
 
@@ -483,6 +506,8 @@ Implemented:
 - contract digest checks and read-only job rendering
 - policy, quotas, matrix expansion, fake and workflow-api cluster adapters
 - HTTP API, SSE, Discord renderer, manifests, and configuration
+- model-produced TaskSpec validation, deterministic CPU/GPU profile compilation,
+  immutable asset ingestion, task preflight, and generic integrity evaluation
 
 Covered by mocks:
 
@@ -504,6 +529,8 @@ Manually tested:
 Not yet tested:
 
 - full Adult, Wine, or Fashion-MNIST benchmark completion on live GPUs/CPUs
+- generic `/task-start` compilation against live OpenCode and Qwen
+- automatic public asset ingestion against a real new task
 
 ## MVP Limitations
 
@@ -513,7 +540,7 @@ Not yet tested:
 - one process per agent, not a separate pod or Unix identity
 - no Git push, PR creation, arbitrary SSH, or raw Kubernetes access
 - no autonomous literature subsystem
-- deterministic benchmark gates validate required evidence and core invariants;
+- deterministic task gates validate required evidence and core invariants;
   Honeydew still performs the detailed rubric assessment
 
 ## Files

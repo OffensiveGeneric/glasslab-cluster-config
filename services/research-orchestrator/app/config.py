@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     )
     shared_mount_root: str = '/tmp/glasslab-research-orchestrator'
     task_bundle_root: str = '/tmp/glasslab-research-orchestrator/task-bundles'
+    task_asset_root: str = '/tmp/glasslab-research-orchestrator/task-assets'
+    maximum_task_asset_bytes: int = 2 * 1024 * 1024 * 1024
     benchmark_dataset_catalog_path: str = (
         '/tmp/glasslab-research-orchestrator/datasets/catalog.json'
     )

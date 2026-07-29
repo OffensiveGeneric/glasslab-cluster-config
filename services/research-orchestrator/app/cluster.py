@@ -179,6 +179,7 @@ class WorkflowApiClusterExecutor(ClusterExecutor):
                             'network_policy': 'none',
                         },
                         'dataset_contracts': spec.dataset_contracts,
+                        'task_spec': spec.task_spec,
                     }
                     if spec.task_bundle and spec.source_bundle
                     else {}

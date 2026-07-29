@@ -13,6 +13,7 @@ from .schemas import (
     ProducedFile,
     RequestedAction,
     RunState,
+    TaskSpecProposal,
     TurnKind,
 )
 
@@ -56,7 +57,27 @@ class ScriptedMockRuntime(AgentRuntime):
     ) -> tuple[AgentTurnResult, str | None]:
         self.turn_counts[agent] += 1
         message_id = f'mock-message-{uuid4().hex[:12]}'
+        if agent == AgentName.HONEYDEW and 'Compile this task archive' in prompt:
+            return (
+                AgentTurnResult(
+                    kind=TurnKind.TASK_SPEC,
+                    summary='Compiled the supplied task into a bounded CPU profile.',
+                    task_spec_proposal=TaskSpecProposal(
+                        schema_version='glasslab-task-spec-v1',
+                        display_name='Generic Test Classification',
+                        runtime_profile='cpu-ml-standard-v1',
+                        assets=[],
+                        required_artifacts=['tables/metrics.csv'],
+                        required_metric_keys=['accuracy'],
+                        missing_inputs=[],
+                        rationale='The supplied task is a small tabular workload.',
+                    ),
+                    done=True,
+                ),
+                message_id,
+            )
         if agent == AgentName.HONEYDEW and 'Draft a concrete program.md' in prompt:
+            generic_task = 'generic-task-integrity-v1' in prompt
             (workspace / 'program.md').write_text(
                 '# Program\n\n'
                 '## Hypothesis\n\n'
@@ -75,9 +96,17 @@ class ScriptedMockRuntime(AgentRuntime):
                     evaluation_contract_proposal=(
                         EvaluationContractProposal.model_validate(
                             {
-                                'evaluator_type': 'example-research-v1',
+                                'evaluator_type': (
+                                    'generic-task-integrity-v1'
+                                    if generic_task
+                                    else 'example-research-v1'
+                                ),
                                 'primary_metric': {
-                                    'name': 'score',
+                                    'name': (
+                                        'rubric_score'
+                                        if generic_task
+                                        else 'score'
+                                    ),
                                     'direction': 'maximize',
                                     'minimum_effect': 0.01,
                                 },
@@ -89,10 +118,12 @@ class ScriptedMockRuntime(AgentRuntime):
                                 'budget_mode': 'wallclock',
                                 'max_wallclock_minutes': 5,
                                 'resource_constraints': {
-                                    'cpu': 1,
-                                    'memory_gib': 1,
+                                    'cpu': 4 if generic_task else 1,
+                                    'memory_gib': 8 if generic_task else 1,
                                     'gpus': 0,
-                                    'wallclock_minutes': 5,
+                                    'wallclock_minutes': (
+                                        60 if generic_task else 5
+                                    ),
                                 },
                                 'rationale': (
                                     'Use the immutable smoke evaluator for '
@@ -244,3 +275,6 @@ class ScriptedMockRuntime(AgentRuntime):
 
     def abort(self, *, run_id: str, agent: AgentName, session_id: str) -> None:
         self.aborted.append((run_id, agent, session_id))
+
+    def release(self, *, run_id: str, agent: AgentName) -> None:
+        self.sessions.pop((run_id, agent), None)

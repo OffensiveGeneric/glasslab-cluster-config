@@ -52,6 +52,7 @@ class AgentName(StrEnum):
 
 
 class TurnKind(StrEnum):
+    TASK_SPEC = 'task_spec'
     PROTOCOL_DRAFT = 'protocol_draft'
     CONTRACT_CANDIDATE = 'contract_candidate'
     IMPLEMENTATION_PROPOSAL = 'implementation_proposal'
@@ -184,11 +185,59 @@ class ProducedFile(BaseModel):
         return normalized
 
 
+class TaskAssetProposal(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    name: str = Field(pattern=r'^[a-z0-9][a-z0-9_-]{0,62}$')
+    role: str = Field(min_length=1, max_length=120)
+    source_url: str | None = None
+    expected_sha256: str | None = Field(
+        default=None,
+        pattern=r'^[a-f0-9]{64}$',
+    )
+    contains_labels: bool = False
+
+
+class TaskSpecProposal(BaseModel):
+    """Model interpretation compiled into policy-owned execution settings."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    schema_version: Literal['glasslab-task-spec-v1']
+    display_name: str = Field(min_length=3, max_length=160)
+    runtime_profile: Literal['cpu-ml-standard-v1', 'gpu-ml-standard-v1']
+    assets: list[TaskAssetProposal] = Field(default_factory=list)
+    required_artifacts: list[str] = Field(default_factory=list)
+    required_metric_keys: list[
+        Annotated[str, Field(pattern=r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$')]
+    ] = Field(default_factory=list)
+    missing_inputs: list[str] = Field(default_factory=list)
+    rationale: str = Field(min_length=1)
+
+    @field_validator('required_artifacts')
+    @classmethod
+    def safe_artifact_paths(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for item in value:
+            path = item.strip().replace('\\', '/')
+            parts = path.rstrip('/').split('/')
+            if (
+                not path
+                or path.startswith('/')
+                or '..' in parts
+                or any(not part for part in parts)
+            ):
+                raise ValueError(f'unsafe required artifact path: {item}')
+            normalized.append(path)
+        return list(dict.fromkeys(normalized))
+
+
 class AgentTurnResult(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     kind: TurnKind
     summary: str = Field(min_length=1)
+    task_spec_proposal: TaskSpecProposal | None = None
     evaluation_contract_proposal: EvaluationContractProposal | None = None
     claims: list[Claim] = Field(default_factory=list)
     requested_actions: list[RequestedAction] = Field(default_factory=list)
@@ -326,6 +375,7 @@ class ExpandedJobSpec(BaseModel):
     workspace_command: list[str] = Field(default_factory=list)
     dataset_contracts: list[dict[str, Any]] = Field(default_factory=list)
     dataset_bindings: dict[str, str] = Field(default_factory=dict)
+    task_spec: dict[str, Any] | None = None
 
 
 class RunRecord(BaseModel):

@@ -70,6 +70,9 @@ def orchestrator_bundle(tmp_path):
             tmp_path / 'trusted-contracts' / 'catalog.json'
         ),
         shared_mount_root=str(tmp_path),
+        task_bundle_root=str(tmp_path / 'task-bundles'),
+        task_asset_root=str(tmp_path / 'task-assets'),
+        benchmark_dataset_catalog_path=str(tmp_path / 'datasets' / 'catalog.json'),
         one_active_run=False,
         maximum_parallel_jobs=2,
     )

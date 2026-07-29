@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 import secrets
+import socket
 import subprocess
 import time
 from typing import Any, Iterator
@@ -56,6 +57,9 @@ class AgentRuntime(ABC):
         raise NotImplementedError
 
     def close(self) -> None:
+        return None
+
+    def release(self, *, run_id: str, agent: AgentName) -> None:
         return None
 
 
@@ -120,6 +124,7 @@ def normalize_structured_output(structured: Any) -> Any:
     normalized = dict(structured)
     for field, expected_type in (
         ('evaluation_contract_proposal', dict),
+        ('task_spec_proposal', dict),
         ('claims', list),
         ('requested_actions', list),
         ('produced_files', list),
@@ -242,10 +247,25 @@ class OpenCodeProcessRuntime(AgentRuntime):
             AgentName.BEAKER: (prompt_root / 'beaker.md').read_text(),
         }
 
-    def _runtime_port(self, agent: AgentName) -> int:
-        return self.settings.opencode_start_port + (
-            0 if agent == AgentName.HONEYDEW else 1
-        )
+    def _runtime_port(self) -> int:
+        used = {
+            int(handle.base_url.rsplit(':', 1)[1])
+            for handle in self._handles.values()
+            if handle.process.poll() is None
+        }
+        for port in range(
+            self.settings.opencode_start_port,
+            self.settings.opencode_start_port + 100,
+        ):
+            if port in used:
+                continue
+            with socket.socket() as probe:
+                try:
+                    probe.bind((self.settings.opencode_server_host, port))
+                except OSError:
+                    continue
+            return port
+        raise OpenCodeRuntimeError('no OpenCode runtime port is available')
 
     def _permissions(self, agent: AgentName) -> dict[str, Any]:
         denied_shell = {
@@ -342,7 +362,7 @@ class OpenCodeProcessRuntime(AgentRuntime):
         existing = self._handles.get(key)
         if existing is not None and existing.process.poll() is None:
             return existing
-        port = self._runtime_port(agent)
+        port = self._runtime_port()
         (
             config_root,
             data_root,
@@ -594,3 +614,8 @@ class OpenCodeProcessRuntime(AgentRuntime):
         for handle in list(self._handles.values()):
             self._stop_handle(handle)
         self._handles.clear()
+
+    def release(self, *, run_id: str, agent: AgentName) -> None:
+        handle = self._handles.pop((run_id, agent), None)
+        if handle is not None:
+            self._stop_handle(handle)

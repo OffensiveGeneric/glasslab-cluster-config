@@ -1,0 +1,65 @@
+{
+  "workflow_id": "workspace-gpu-ml-v1",
+  "display_name": "Standard GPU ML Workspace v1",
+  "workflow_family": "research-workspace",
+  "description": "Execute a compiled, digest-pinned research task in the standard bounded single-GPU ML workspace.",
+  "required_inputs": [
+    {
+      "name": "workspace",
+      "input_type": "artifact_bundle",
+      "required": true,
+      "description": "Immutable task and source bundle references plus the normalized command."
+    },
+    {
+      "name": "dataset_bindings",
+      "input_type": "artifact_bundle",
+      "required": false,
+      "description": "Optional digest-pinned read-only task assets."
+    }
+  ],
+  "allowed_models": ["agent-generated-python"],
+  "runner_image": "ghcr.io/offensivegeneric/glasslab-research-workspace-runner:benchmark-gpu-v1",
+  "evaluator_type": "immutable-task-contract-v1",
+  "expected_artifacts": {
+    "required": [
+      "run_manifest.json",
+      "config.json",
+      "metrics.json",
+      "evaluation.json",
+      "artifacts_index.json",
+      "report.md",
+      "status.json",
+      "logs/",
+      "source.zip"
+    ],
+    "optional": ["task.zip", "plots/", "tables/", "environment.json", "checkpoints/"]
+  },
+  "resource_profile": {
+    "profile_name": "gpu-ml-standard-v1",
+    "requests": {"cpu": "2", "memory": "8Gi", "ephemeral-storage": "4Gi", "nvidia.com/gpu": "1"},
+    "limits": {"cpu": "8", "memory": "32Gi", "ephemeral-storage": "16Gi", "nvidia.com/gpu": "1"},
+    "node_selector": {"glasslab.io/gpu-candidate": "true"}
+  },
+  "approval_tier": "tier-3-human-approval",
+  "execution_status": "ready",
+  "submission_backend": "kubernetes",
+  "execution_blockers": [],
+  "runtime_requirements": {
+    "gpu": true,
+    "required_python_packages": ["torch", "torchvision", "numpy", "pandas", "scipy", "scikit-learn", "matplotlib"],
+    "modalities": ["image", "representation-learning"],
+    "dataset_layouts": ["files", "archive"],
+    "purpose": "bounded single-GPU research task execution"
+  },
+  "experiment_type": "research-workspace-job",
+  "workload_id": "workspace-gpu-ml-v1",
+  "schema_ref": "glasslab-benchmark-workspace-v1",
+  "default_entrypoint": ["python3", "-m", "runner"],
+  "allow_custom_image": false,
+  "allow_custom_entrypoint": false,
+  "metric_contract": {
+    "primary_metric": "rubric_score",
+    "higher_is_better": true,
+    "required_guardrails": ["integrity_pass"]
+  }
+}

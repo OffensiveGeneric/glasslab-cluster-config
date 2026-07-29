@@ -38,7 +38,12 @@ from .schemas import (
     RunRecord,
 )
 from .storage import ConcurrencyConflict, RecordNotFound, SqliteStore
-from .task_bundles import TaskBundleError, TaskBundleManager, TaskBundleRecord
+from .task_bundles import (
+    TaskBundleError,
+    TaskBundleManager,
+    TaskBundleRecord,
+    TaskPreflight,
+)
 from .watcher import JobWatcher
 from .workspaces import WorkspaceError, WorkspaceManager
 
@@ -83,6 +88,7 @@ def build_engine(
     )
     baked_root = SERVICE_ROOT / 'evaluation-contracts'
     for contract_id in (
+        'generic-task-integrity-v1',
         'ml-benchmark-adult-income-v1',
         'ml-benchmark-wine-clustering-v1',
         'ml-benchmark-fashion-contrastive-v1',
@@ -108,6 +114,8 @@ def build_engine(
             root=settings.task_bundle_root,
             shared_mount_root=settings.shared_mount_root,
             dataset_catalog_path=settings.benchmark_dataset_catalog_path,
+            task_asset_root=settings.task_asset_root,
+            maximum_asset_bytes=settings.maximum_task_asset_bytes,
         ),
         policy=ActionPolicy(
             permitted_images=settings.permitted_job_images,
@@ -297,7 +305,7 @@ def create_app(
             content = await archive.read(
                 TaskBundleManager.MAX_ARCHIVE_BYTES + 1
             )
-            return engine.task_bundles.import_archive(
+            return engine.import_task_bundle(
                 filename=archive.filename or '',
                 content=content,
             )
@@ -317,6 +325,21 @@ def create_app(
     ) -> TaskBundleRecord:
         try:
             return engine.task_bundles.get(task_id, digest)
+        except Exception as exc:
+            raise map_error(exc) from exc
+
+    @app.get(
+        '/task-bundles/{task_id}/preflight',
+        response_model=TaskPreflight,
+    )
+    def get_task_bundle_preflight(
+        task_id: str,
+        digest: str | None = Query(default=None),
+    ) -> TaskPreflight:
+        try:
+            return engine.task_preflight(
+                engine.task_bundles.get(task_id, digest)
+            )
         except Exception as exc:
             raise map_error(exc) from exc
 
