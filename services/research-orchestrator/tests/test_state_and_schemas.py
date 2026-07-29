@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from app.config import Settings
 from app.schemas import AgentTurnResult, RunState
 from app.state_machine import InvalidTransition, validate_transition
 
@@ -52,3 +53,17 @@ def test_structured_agent_output_validation() -> None:
                 'done': True,
             }
         )
+
+
+def test_comma_separated_image_allowlist_from_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        'GLASSLAB_ORCHESTRATOR_PERMITTED_JOB_IMAGES',
+        'ghcr.io/example/runner:a,ghcr.io/example/runner:b',
+    )
+
+    assert Settings().permitted_job_images == [
+        'ghcr.io/example/runner:a',
+        'ghcr.io/example/runner:b',
+    ]

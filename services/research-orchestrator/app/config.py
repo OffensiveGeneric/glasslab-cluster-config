@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
@@ -47,7 +48,7 @@ class Settings(BaseSettings):
     cluster_execution_workload_id: str = 'metric-search-v0'
     cluster_execution_experiment_type: str = 'gpu-training-job'
     kubernetes_namespace: str = 'glasslab-v2'
-    permitted_job_images: list[str] = [
+    permitted_job_images: Annotated[list[str], NoDecode] = [
         'ghcr.io/offensivegeneric/glasslab-metric-search:latest',
     ]
 
