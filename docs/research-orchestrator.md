@@ -571,10 +571,16 @@ Manually tested:
   `mlx-community/Qwen3-Coder-Next-4bit` model from `.44`
 - live Discord public-thread creation, editable status publication, and
   Honeydew/Beaker webhook identities in the configured guild and channel
+- live guild registration of `/dataset-upload`, `/research-pause`, and
+  `/research-resume`
+- live immutable dataset upload, durable lookup, and SHA-256 readback
+- live resume of a paused Adult run into a new Beaker implementation turn
 
 Not yet tested:
 
 - full Adult, Wine, or Fashion-MNIST benchmark completion on live GPUs/CPUs
+- research-orchestrator submission of an experiment Kubernetes Job; the active
+  Adult run has not yet returned a structured matrix proposal
 - full generic `/task-start` execution through final report acceptance
 - automatic public asset ingestion against a real new task
 

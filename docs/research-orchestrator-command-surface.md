@@ -227,6 +227,9 @@ Validated:
 - live OpenCode/Qwen structured task compilation
 - live Discord threads, identities, approvals, rejection feedback, and
   cancellation projection
+- live Discord registration of dataset upload, pause, and resume commands
+- live immutable dataset upload, durable lookup, and checksum readback
+- live pause/resume recovery of the Adult run into a new Beaker turn
 - live Kubernetes rollout and service readiness
 - Adult, Wine, and Fashion-MNIST task preflight
 
@@ -235,7 +238,10 @@ Benchmark milestone:
 - Adult Income run `406b2d800d3b4e9a90af79e6b1b0ab55` was created from
   the pre-registered compatibility task.
 - Honeydew drafted its protocol and the protocol was approved.
-- The run advanced to Beaker implementation.
+- The first Beaker implementation turn wrote experiment code but timed out
+  before returning its structured matrix proposal.
+- Pause/resume recovery started Beaker turn 3; no experiment Kubernetes Job
+  had been submitted at the time of this update.
 - This records a workflow milestone, not benchmark completion.
 - Wine and Fashion-MNIST are preflight-ready but have not completed live runs.
 
