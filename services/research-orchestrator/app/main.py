@@ -6,11 +6,20 @@ import json
 import secrets
 from typing import AsyncIterator
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Header,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 from fastapi.responses import StreamingResponse
 
 from .cluster import FakeClusterExecutor, WorkflowApiClusterExecutor
-from .config import Settings, get_settings
+from .config import SERVICE_ROOT, Settings, get_settings
 from .contract_candidates import ContractCandidateManager
 from .contracts import ContractIntegrityError, EvaluationContractResolver
 from .discord_adapter import DisabledDiscordAdapter, DiscordHttpAdapter
@@ -29,6 +38,7 @@ from .schemas import (
     RunRecord,
 )
 from .storage import ConcurrencyConflict, RecordNotFound, SqliteStore
+from .task_bundles import TaskBundleError, TaskBundleManager, TaskBundleRecord
 from .watcher import JobWatcher
 from .workspaces import WorkspaceError, WorkspaceManager
 
@@ -65,6 +75,21 @@ def build_engine(
             )
         else:
             discord = DisabledDiscordAdapter()
+    contract_candidates = ContractCandidateManager(
+        sealed_root=settings.sealed_contract_candidate_root,
+        promoted_root=settings.promoted_contract_root,
+        catalog_path=settings.trusted_contract_catalog_path,
+        shared_mount_root=settings.shared_mount_root,
+    )
+    baked_root = SERVICE_ROOT / 'evaluation-contracts'
+    for contract_id in (
+        'ml-benchmark-adult-income-v1',
+        'ml-benchmark-wine-clustering-v1',
+        'ml-benchmark-fashion-contrastive-v1',
+    ):
+        contract_candidates.install_repository_contract(
+            baked_root / contract_id / '1.0.0'
+        )
     return ResearchOrchestrator(
         settings=settings,
         store=store,
@@ -78,11 +103,11 @@ def build_engine(
             settings.promoted_contract_root,
             fallback_roots=[settings.evaluation_contract_root],
         ),
-        contract_candidates=ContractCandidateManager(
-            sealed_root=settings.sealed_contract_candidate_root,
-            promoted_root=settings.promoted_contract_root,
-            catalog_path=settings.trusted_contract_catalog_path,
+        contract_candidates=contract_candidates,
+        task_bundles=TaskBundleManager(
+            root=settings.task_bundle_root,
             shared_mount_root=settings.shared_mount_root,
+            dataset_catalog_path=settings.benchmark_dataset_catalog_path,
         ),
         policy=ActionPolicy(
             permitted_images=settings.permitted_job_images,
@@ -200,6 +225,7 @@ def create_app(
                 ContractIntegrityError,
                 WorkflowError,
                 WorkspaceError,
+                TaskBundleError,
             ),
         ):
             return HTTPException(status_code=409, detail=str(exc))
@@ -255,6 +281,42 @@ def create_app(
     ) -> RunRecord:
         try:
             return engine.create_run(request)
+        except Exception as exc:
+            raise map_error(exc) from exc
+
+    @app.post(
+        '/task-bundles/import',
+        response_model=TaskBundleRecord,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def import_task_bundle(
+        archive: UploadFile = File(...),
+        _: None = Depends(require_operator),
+    ) -> TaskBundleRecord:
+        try:
+            content = await archive.read(
+                TaskBundleManager.MAX_ARCHIVE_BYTES + 1
+            )
+            return engine.task_bundles.import_archive(
+                filename=archive.filename or '',
+                content=content,
+            )
+        except Exception as exc:
+            raise map_error(exc) from exc
+        finally:
+            await archive.close()
+
+    @app.get('/task-bundles', response_model=list[TaskBundleRecord])
+    def list_task_bundles() -> list[TaskBundleRecord]:
+        return engine.task_bundles.list()
+
+    @app.get('/task-bundles/{task_id}', response_model=TaskBundleRecord)
+    def get_task_bundle(
+        task_id: str,
+        digest: str | None = Query(default=None),
+    ) -> TaskBundleRecord:
+        try:
+            return engine.task_bundles.get(task_id, digest)
         except Exception as exc:
             raise map_error(exc) from exc
 

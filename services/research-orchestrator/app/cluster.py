@@ -153,8 +153,8 @@ class WorkflowApiClusterExecutor(ClusterExecutor):
             'objective': (
                 f'Research orchestrator variant {spec.variant_name}, seed {spec.seed}'
             ),
-            'experiment_type': self.experiment_type,
-            'workload_id': self.workload_id,
+            'experiment_type': spec.experiment_type or self.experiment_type,
+            'workload_id': spec.workload_id or self.workload_id,
             'campaign_id': spec.run_id,
             'image_ref': spec.runner_image,
             'config_payload': {
@@ -168,7 +168,23 @@ class WorkflowApiClusterExecutor(ClusterExecutor):
                     'version': spec.evaluation_contract_version,
                     'digest': spec.evaluation_contract_digest,
                 },
+                **(
+                    {
+                        'workspace': {
+                            'task_bundle': spec.task_bundle,
+                            'source_bundle': spec.source_bundle,
+                            'command': spec.workspace_command,
+                            'working_directory': '.',
+                            'output_directory': '/outputs',
+                            'network_policy': 'none',
+                        },
+                        'dataset_contracts': spec.dataset_contracts,
+                    }
+                    if spec.task_bundle and spec.source_bundle
+                    else {}
+                ),
             },
+            'dataset_bindings': spec.dataset_bindings,
             'resources': spec.resources.model_dump(mode='json'),
             'budget': {
                 'max_wallclock_minutes': spec.resources.wallclock_minutes,

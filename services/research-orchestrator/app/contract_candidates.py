@@ -232,6 +232,49 @@ class ContractCandidateManager:
         )
         return destination
 
+    def install_repository_contract(self, source: Path) -> Path:
+        """Install a checksum-pinned contract shipped in the service image."""
+        source = source.resolve()
+        descriptor = self._validate_descriptor(
+            source,
+            contract_id=source.parent.name,
+            version=source.name,
+        )
+        expected = (source / 'contract.sha256').read_text(
+            encoding='ascii'
+        ).strip()
+        actual = compute_contract_digest(source)
+        if expected != actual:
+            raise ContractIntegrityError(
+                f'repository contract digest mismatch: {descriptor.contract_id}'
+            )
+        destination = (
+            self.promoted_root / descriptor.contract_id / descriptor.version
+        )
+        if destination.exists():
+            if compute_contract_digest(destination) != actual:
+                raise ContractCandidateError(
+                    'repository contract conflicts with a promoted version: '
+                    f'{descriptor.contract_id}@{descriptor.version}'
+                )
+        else:
+            staging = destination.parent / f'.{descriptor.version}.{uuid4().hex}'
+            staging.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(
+                source,
+                staging,
+                ignore=shutil.ignore_patterns('__pycache__', '*.pyc'),
+            )
+            os.replace(staging, destination)
+        for path in destination.rglob('*'):
+            path.chmod(0o555 if path.is_dir() else 0o444)
+        self._write_catalog_entry(
+            descriptor=descriptor,
+            digest=actual,
+            promoted_path=destination,
+        )
+        return destination
+
     def _write_catalog_entry(
         self,
         *,

@@ -42,7 +42,7 @@ def test_healthz_and_workflow_families() -> None:
 
     health = client.get('/healthz')
     assert health.status_code == 200
-    assert health.json()['workflow_count'] == 6
+    assert health.json()['workflow_count'] == 8
     assert health.json()['store_backend'] == 'memory'
 
     families = client.get('/workflow-families')
@@ -50,6 +50,8 @@ def test_healthz_and_workflow_families() -> None:
     payload = families.json()
     assert {entry['workflow_id'] for entry in payload} == {
         'gpu-experiment',
+        'benchmark-workspace-cpu-v1',
+        'benchmark-workspace-gpu-v1',
         'generic-tabular-benchmark',
         'literature-to-experiment',
         'metric-search-v0',

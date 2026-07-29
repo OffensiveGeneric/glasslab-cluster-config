@@ -116,6 +116,11 @@ run_workflow_api_tests() {
   )
   (
     cd services/research-orchestrator
+    contract_test_root="$(mktemp -d)"
+    trap 'chmod -R u+w "$contract_test_root" 2>/dev/null || true; rm -rf "$contract_test_root"' EXIT
+    GLASSLAB_ORCHESTRATOR_PROMOTED_CONTRACT_ROOT="$contract_test_root/bundles" \
+    GLASSLAB_ORCHESTRATOR_TRUSTED_CONTRACT_CATALOG_PATH="$contract_test_root/catalog.json" \
+    GLASSLAB_ORCHESTRATOR_SHARED_MOUNT_ROOT="$contract_test_root" \
     PYTHONPATH=. pytest \
       -p no:cacheprovider \
       tests \

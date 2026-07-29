@@ -5,6 +5,7 @@ from hashlib import sha256
 from pathlib import Path
 import shutil
 import subprocess
+import zipfile
 
 from .schemas import AgentName
 
@@ -138,6 +139,68 @@ class WorkspaceManager:
             target = workspace / 'program.md'
             shutil.copy2(protocol, target)
             target.chmod(0o444)
+
+    def install_task_bundle(
+        self,
+        *,
+        run_id: str,
+        problem_path: str,
+        evaluator_prompt_path: str,
+    ) -> None:
+        for workspace in (
+            self.paths(run_id).beaker,
+            self.paths(run_id).honeydew,
+        ):
+            destination = workspace / 'benchmark-task'
+            destination.mkdir(parents=True, exist_ok=True)
+            for source_name, destination_name in (
+                (problem_path, 'problem.md'),
+                (evaluator_prompt_path, 'eval_agent_prompt.md'),
+            ):
+                source = Path(source_name).resolve()
+                if source.is_symlink() or not source.is_file():
+                    raise WorkspaceError(
+                        f'benchmark task file is unavailable: {source}'
+                    )
+                target = destination / destination_name
+                shutil.copy2(source, target)
+                target.chmod(0o444)
+            destination.chmod(0o555)
+
+    def package_source_bundle(
+        self,
+        *,
+        run_id: str,
+        source_subdirectory: str,
+    ) -> tuple[Path, str]:
+        workspace = self.paths(run_id).beaker.resolve()
+        source = (workspace / source_subdirectory).resolve()
+        if not source.is_relative_to(workspace) or not source.is_dir():
+            raise WorkspaceError(
+                f'benchmark source directory is missing: {source_subdirectory}'
+            )
+        entrypoint = source / 'run.py'
+        if entrypoint.is_symlink() or not entrypoint.is_file():
+            raise WorkspaceError('benchmark source requires a real run.py')
+        destination = self.paths(run_id).shared_artifacts / 'source.zip'
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(
+            destination,
+            mode='w',
+            compression=zipfile.ZIP_DEFLATED,
+        ) as archive:
+            for path in sorted(source.rglob('*')):
+                if path.is_symlink():
+                    raise WorkspaceError(
+                        f'benchmark source cannot contain symlinks: {path}'
+                    )
+                if path.is_file():
+                    info = zipfile.ZipInfo(path.relative_to(source).as_posix())
+                    info.date_time = (1980, 1, 1, 0, 0, 0)
+                    info.external_attr = 0o100644 << 16
+                    archive.writestr(info, path.read_bytes())
+        digest = sha256(destination.read_bytes()).hexdigest()
+        return destination, digest
 
     def copy_contract_candidate_for_review(
         self,

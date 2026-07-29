@@ -20,6 +20,7 @@ BASE_GENERATED_ARTIFACTS = {
     'artifacts_index.json',
     'status.json',
     'logs/',
+    'evaluation.json',
 }
 
 

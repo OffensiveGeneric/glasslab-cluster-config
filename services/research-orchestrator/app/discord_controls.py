@@ -83,6 +83,27 @@ def execute_discord_run_creation(
     return engine.create_run(RunCreateRequest(objective=objective))
 
 
+def execute_discord_benchmark_creation(
+    engine: ResearchOrchestrator,
+    *,
+    filename: str,
+    content: bytes,
+    objective: str | None,
+) -> RunRecord:
+    task = engine.task_bundles.import_archive(
+        filename=filename,
+        content=content,
+    )
+    return engine.create_run(
+        RunCreateRequest(
+            objective=objective
+            or f'Complete and evaluate the imported {task.display_name} benchmark.',
+            task_id=task.task_id,
+            task_bundle_digest=task.digest,
+        )
+    )
+
+
 class DiscordControlGateway:
     """Outbound Gateway listener for bounded approval-button interactions."""
 
@@ -134,6 +155,26 @@ class DiscordControlGateway:
             await self._on_research_start(
                 interaction,
                 objective=str(objective),
+            )
+
+        @self.tree.command(
+            name='benchmark-start',
+            description='Import and start a supported Glasslab ML benchmark.',
+            guild=self.guild,
+        )
+        @app_commands.describe(
+            archive='One supported ML_Benchmark_*.zip task bundle.',
+            objective='Optional narrower objective for this benchmark run.',
+        )
+        async def benchmark_start(
+            interaction: discord.Interaction,
+            archive: discord.Attachment,
+            objective: app_commands.Range[str, 10, 1000] | None = None,
+        ) -> None:
+            await self._on_benchmark_start(
+                interaction,
+                archive=archive,
+                objective=str(objective) if objective else None,
             )
 
     async def _on_ready(self) -> None:
@@ -247,6 +288,56 @@ class DiscordControlGateway:
                 )
             except discord.HTTPException:
                 return
+
+    async def _on_benchmark_start(
+        self,
+        interaction: discord.Interaction,
+        *,
+        archive: discord.Attachment,
+        objective: str | None,
+    ) -> None:
+        actor = self._actor(interaction)
+        if not self.policy.is_authorized(actor):
+            await self._respond(
+                interaction,
+                'You are not authorized to start Glasslab benchmark runs.',
+            )
+            return
+        if str(interaction.channel_id) != self.channel_id:
+            await self._respond(
+                interaction,
+                'Start benchmark runs from the configured Glasslab channel.',
+            )
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            content = await archive.read()
+            run = await asyncio.to_thread(
+                execute_discord_benchmark_creation,
+                self.engine,
+                filename=archive.filename,
+                content=content,
+                objective=objective,
+            )
+            destination = (
+                f'<#{run.discord_thread_id}>'
+                if run.discord_thread_id
+                else f'run `{run.run_id}`'
+            )
+            await interaction.followup.send(
+                (
+                    f'Benchmark imported and started in {destination}. '
+                    'Honeydew is drafting the protocol from the task and rubric.'
+                ),
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except Exception as exc:
+            await interaction.followup.send(
+                f'Benchmark import or run creation failed: {exc}',
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
 
     async def _on_interaction(
         self,

@@ -39,6 +39,7 @@ from .schemas import (
     utc_now,
 )
 from .storage import ConcurrencyConflict, SqliteStore
+from .task_bundles import TaskBundleManager
 from .workspaces import WorkspaceManager
 
 
@@ -59,6 +60,7 @@ class ResearchOrchestrator:
         policy: ActionPolicy,
         cluster: ClusterExecutor,
         discord: DiscordAdapter,
+        task_bundles: TaskBundleManager | None = None,
     ) -> None:
         self.settings = settings
         self.store = store
@@ -66,6 +68,11 @@ class ResearchOrchestrator:
         self.workspaces = workspaces
         self.contracts = contracts
         self.contract_candidates = contract_candidates
+        self.task_bundles = task_bundles or TaskBundleManager(
+            root=settings.task_bundle_root,
+            shared_mount_root=settings.shared_mount_root,
+            dataset_catalog_path=settings.benchmark_dataset_catalog_path,
+        )
         self.policy = policy
         self.cluster = cluster
         self.discord = discord
@@ -134,17 +141,33 @@ class ResearchOrchestrator:
 
     def create_run(self, request: RunCreateRequest) -> RunRecord:
         with self._advance_lock:
+            task = (
+                self.task_bundles.get(
+                    request.task_id,
+                    request.task_bundle_digest,
+                )
+                if request.task_id
+                else None
+            )
             contract_id = (
                 request.evaluation_contract_id
+                or (task.default_contract_id if task else None)
                 or self.settings.default_evaluation_contract_id
             )
             contract_version = (
                 request.evaluation_contract_version
+                or (task.default_contract_version if task else None)
                 or self.settings.default_evaluation_contract_version
             )
             contract = self.contracts.resolve(contract_id, contract_version)
             run_id = uuid4().hex
             paths = self.workspaces.prepare(run_id)
+            if task:
+                self.workspaces.install_task_bundle(
+                    run_id=run_id,
+                    problem_path=task.problem_path,
+                    evaluator_prompt_path=task.evaluator_prompt_path,
+                )
             now = utc_now()
             record = RunRecord(
                 run_id=run_id,
@@ -153,6 +176,12 @@ class ResearchOrchestrator:
                 evaluation_contract_id=contract_id,
                 evaluation_contract_version=contract_version,
                 evaluation_contract_digest=contract.digest,
+                task_id=task.task_id if task else None,
+                task_bundle_digest=task.digest if task else None,
+                task_bundle_path=task.archive_path if task else None,
+                task_definition=(
+                    task.model_dump(mode='json') if task else None
+                ),
                 beaker_workspace=str(paths.beaker),
                 honeydew_workspace=str(paths.honeydew),
                 shared_artifacts_path=str(paths.shared_artifacts),
@@ -625,6 +654,27 @@ class ResearchOrchestrator:
 
     def _draft_protocol(self, run_id: str, feedback: str | None = None) -> None:
         run = self.store.get_run(run_id)
+        task_context = ''
+        if run.task_definition:
+            bound = self.contracts.resolve(
+                run.evaluation_contract_id,
+                run.evaluation_contract_version,
+            )
+            task_context = (
+                '\n\nThis is an imported benchmark task. Read the immutable '
+                '`benchmark-task/problem.md` and '
+                '`benchmark-task/eval_agent_prompt.md` files. Treat the task '
+                'requirements and evaluator rubric as binding source material. '
+                'Do not redesign the evaluator contract or request a new '
+                'harness; the repository-controlled contract is already bound '
+                'to this run. Make evaluation_contract_proposal exactly match '
+                'this installed descriptor:\n'
+                + json.dumps(
+                    bound.descriptor.model_dump(mode='json'),
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
         prompt = (
             'Draft a concrete program.md for this objective:\n\n'
             f'{run.objective}\n\n'
@@ -641,6 +691,7 @@ class ResearchOrchestrator:
             'and rationale. Propose data and metrics only. Do not propose '
             'executable paths, container images, commands, or checksums; those '
             'remain controlled by the orchestrator.'
+            + task_context
         )
         if feedback:
             prompt += f'\n\nHuman rejection feedback:\n{feedback}'
@@ -1335,6 +1386,31 @@ class ResearchOrchestrator:
 
     def _beaker_implement(self, run_id: str) -> None:
         run = self.store.get_run(run_id)
+        task_context = ''
+        if run.task_definition:
+            source = run.task_definition['source_subdirectory']
+            task_context = (
+                '\nThis is an imported benchmark task. Read '
+                '`benchmark-task/problem.md`, `benchmark-task/eval_agent_prompt.md`, '
+                'and the frozen `program.md`. Put the complete executable '
+                f'solution under `{source}/`, including `run.py`. The run must '
+                'use only dataset paths supplied through '
+                '`GLASSLAB_DATASET_BINDINGS_JSON`, write all outputs beneath '
+                '`GLASSLAB_OUTPUT_DIR`, and make no network calls. Use the '
+                'exact preselected runner image and resource request:\n'
+                + json.dumps(
+                    {
+                        'runner_image': run.task_definition['runner_image'],
+                        'resources': run.task_definition['resources'],
+                        'required_artifacts': (
+                            run.task_definition['required_artifacts']
+                        ),
+                        'datasets': run.task_definition['datasets'],
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
         prompt = (
             'Read the approved read-only program.md. Implement the bounded '
             'experiment in your isolated worktree, run lightweight tests, and '
@@ -1350,6 +1426,7 @@ class ResearchOrchestrator:
             f'gpus={self.policy.maximum_gpus}, '
             'maximum_parallel_jobs='
             f'{self.policy.maximum_parallel_jobs}.'
+            + task_context
         )
         turn, result = self._run_agent_turn(
             run_id=run_id,
@@ -1519,6 +1596,19 @@ class ResearchOrchestrator:
                     'base_config does not exist inside the Beaker workspace: '
                     f'{matrix.base_config}'
                 )
+            if run.task_definition:
+                expected_image = str(run.task_definition['runner_image'])
+                expected_resources = run.task_definition['resources']
+                if matrix.runner_image != expected_image:
+                    return (
+                        'imported benchmark requires runner_image '
+                        f'{expected_image}'
+                    )
+                if matrix.resources.model_dump(mode='json') != expected_resources:
+                    return (
+                        'imported benchmark resources must exactly match the '
+                        'preselected task resource profile'
+                    )
             contract = self.contracts.resolve(
                 run.evaluation_contract_id,
                 run.evaluation_contract_version,
@@ -1536,6 +1626,15 @@ class ResearchOrchestrator:
         return None
 
     def _beaker_revise(self, run_id: str, *, feedback: str) -> None:
+        run = self.store.get_run(run_id)
+        task_context = ''
+        if run.task_definition:
+            task_context = (
+                '\nPreserve the imported benchmark boundary: all executable '
+                f'files stay under `{run.task_definition["source_subdirectory"]}`, '
+                'datasets come only from the provided bindings, and the '
+                'preselected image/resources must not change.'
+            )
         prompt = (
             'Revise the implementation and experiment matrix in response to '
             'the review below. Run local checks and return a replacement '
@@ -1549,6 +1648,7 @@ class ResearchOrchestrator:
             'maximum_parallel_jobs='
             f'{self.policy.maximum_parallel_jobs}.\n\n'
             f'Review feedback:\n{feedback}'
+            + task_context
         )
         turn, result = self._run_agent_turn(
             run_id=run_id,
@@ -1590,11 +1690,57 @@ class ResearchOrchestrator:
         )
         if contract.digest != run.evaluation_contract_digest:
             raise WorkflowError('evaluation contract changed after run creation')
+        execution: dict[str, object] | None = None
+        if run.task_definition:
+            task = run.task_definition
+            source_path, source_digest = self.workspaces.package_source_bundle(
+                run_id=run.run_id,
+                source_subdirectory=str(task['source_subdirectory']),
+            )
+            shared_root = Path(self.settings.shared_mount_root).resolve()
+            source_relative = source_path.resolve().relative_to(shared_root)
+            execution = {
+                'workload_id': task['workload_id'],
+                'experiment_type': task['experiment_type'],
+                'task_bundle': {
+                    'uri': task['archive_uri'],
+                    'sha256': task['digest'],
+                },
+                'source_bundle': {
+                    'uri': 's3://artifacts/' + source_relative.as_posix(),
+                    'sha256': source_digest,
+                },
+                'workspace_command': task['command'],
+                'dataset_contracts': [
+                    {
+                        'name': dataset['name'],
+                        'role': dataset['role'],
+                        'contains_labels': dataset['contains_labels'],
+                        'asset': {
+                            'uri': dataset['uri'],
+                            'sha256': dataset['sha256'],
+                        },
+                    }
+                    for dataset in task['datasets']
+                ],
+                'dataset_bindings': {
+                    dataset['name']: dataset['uri']
+                    for dataset in task['datasets']
+                },
+            }
+            self._save_local_artifact(
+                run_id=run.run_id,
+                artifact_type='source_bundle',
+                uri='artifact://' + source_relative.as_posix(),
+                digest=source_digest,
+                metadata={'path': str(source_path)},
+            )
         specs = expand_experiment_matrix(
             run_id=run.run_id,
             action_id=action.action_id,
             matrix=matrix,
             contract=contract,
+            execution=execution,
         )
         for spec in specs:
             record = JobRecord(

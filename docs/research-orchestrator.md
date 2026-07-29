@@ -3,8 +3,9 @@
 Status: deployed as a single-replica MVP. The complete workflow is covered with
 mocked OpenCode and cluster adapters. OpenCode against the two-node exo model,
 Discord threads and role-gated controls, restart recovery, and live Kubernetes
-deployment were tested on 2026-07-29. Real research-job submission remains
-intentionally unvalidated.
+deployment were tested on 2026-07-29. Three imported ML benchmark task types
+now have bounded CPU/GPU workload definitions and immutable evaluator contracts;
+their live end-to-end execution status is recorded below.
 
 ## Purpose
 
@@ -203,9 +204,65 @@ use a digest-pinned init image and read-only `emptyDir`. In either case it
 replaces the runner command with the trusted wrapper. The wrapper executes the
 registry-approved experiment entry point first and then the fixed evaluator.
 
-The included example contract and image digest are test fixtures. The live
-catalog begins empty and is populated only by an approved promotion. Unknown,
-changed, or mismatched bundles fail closed.
+The included example contract and image digest are test fixtures. Three
+repository-controlled benchmark contracts are installed into the trusted
+catalog at startup after checksum verification. Agent-generated contracts
+still require Honeydew and human promotion approval. Unknown, changed, or
+mismatched bundles fail closed.
+
+## Imported ML Benchmarks
+
+The orchestrator accepts these exact task archive names:
+
+| Archive | Task ID | Execution |
+|---|---|---|
+| `ML_Benchmark_Adult_Income.zip` | `adult-income` | bounded CPU |
+| `ML_Benchmark_Wine_Clustering.zip` | `wine-clustering` | bounded CPU |
+| `ML_Benchmark_FashionMNIST_Contrastive.zip` | `fashion-mnist-contrastive` | one GPU |
+
+The archive is an immutable research-task input, not executable code. Import
+requires exactly one `problem.md` and one `eval_agent_prompt.md`, rejects
+links/path traversal/oversized input, computes SHA-256, and stores a read-only
+normalized copy. Dataset import is separate and fail-closed: the task cannot be
+imported until its canonical datasets are staged and listed with digests in the
+shared catalog.
+
+Beaker writes runnable code only under
+`benchmark-workspace/<task-id>/`. At approved submission time the orchestrator
+creates a deterministic `source.zip`, sends task/source/dataset digest
+references to `workflow-api`, and selects a fixed workload, image, resources,
+command, and evaluation contract. The model cannot provide a Kubernetes
+manifest, evaluator path, arbitrary image, or dataset path.
+
+Start from Discord:
+
+```text
+/benchmark-start archive:<attach one supported ZIP>
+```
+
+Or use HTTP:
+
+```bash
+curl -fsS -X POST http://127.0.0.1:8080/task-bundles/import \
+  -H "X-Glasslab-Operator-Token: $TOKEN" \
+  -F "archive=@$HOME/Downloads/ML_Benchmark_Adult_Income.zip"
+
+curl -fsS -X POST http://127.0.0.1:8080/runs \
+  -H "X-Glasslab-Operator-Token: $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"objective":"Complete the imported Adult benchmark.","task_id":"adult-income"}'
+```
+
+Stage or refresh canonical datasets from `.44`:
+
+```bash
+./scripts/stage-ml-benchmark-datasets.sh
+```
+
+This downloads the official Adult and Wine files plus the four official
+Fashion-MNIST IDX gzip files, verifies dataset sizes/headers, creates one
+deterministic Fashion-MNIST archive, and writes the digest catalog to the
+shared artifacts PVC.
 
 ## Actions And Jobs
 
@@ -354,6 +411,10 @@ Normal Discord usage is:
 /research-start objective: Compare naive and semi-hard triplet mining on unseen CIFAR-100 classes.
 ```
 
+Imported benchmark usage is `/benchmark-start` with a supported ZIP
+attachment. Both commands are restricted to the configured channel and
+Discord administrator role.
+
 ## Local Development
 
 ```bash
@@ -394,12 +455,13 @@ repository checkout.
 Before deployment:
 
 1. publish the orchestrator image and pin the desired tag or digest,
-2. publish a real evaluation-contract image,
+2. publish both benchmark workspace runner images when benchmark support changes,
 3. verify the Qwen endpoint and exact model ID from the target node,
 4. configure the published contract in the workflow-api trusted catalog,
 5. validate workflow submission, status, artifacts, idempotency, and cancel,
 6. create a local Discord secret only when Discord is enabled, and
-7. deploy from the canonical checkout on `.44`.
+7. deploy from the canonical checkout on `.44`, and
+8. run `scripts/stage-ml-benchmark-datasets.sh`.
 
 ## Legacy Relationship
 
@@ -441,8 +503,7 @@ Manually tested:
 
 Not yet tested:
 
-- live workflow-api job submission, cancellation, or artifact collection
-- Kubernetes rollout and restart recovery on Glasslab
+- full Adult, Wine, or Fashion-MNIST benchmark completion on live GPUs/CPUs
 
 ## MVP Limitations
 
@@ -452,7 +513,8 @@ Not yet tested:
 - one process per agent, not a separate pod or Unix identity
 - no Git push, PR creation, arbitrary SSH, or raw Kubernetes access
 - no autonomous literature subsystem
-- a fixture evaluation contract until a real evaluator image is published
+- deterministic benchmark gates validate required evidence and core invariants;
+  Honeydew still performs the detailed rubric assessment
 
 ## Files
 
@@ -462,6 +524,7 @@ The implementation is contained in:
 - the evaluation-contract enforcement path in `services/workflow-api/`
 - `kubeadm/glasslab-v2/research-orchestrator/`
 - `scripts/smoke-test-research-orchestrator.sh`
+- `scripts/stage-ml-benchmark-datasets.sh`
 - `docs/research-orchestrator.md`
 
 CI, pre-push checks, deployment orchestration, and current documentation indexes

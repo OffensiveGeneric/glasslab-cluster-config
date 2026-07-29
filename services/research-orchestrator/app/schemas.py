@@ -319,6 +319,13 @@ class ExpandedJobSpec(BaseModel):
     evaluation_contract_id: str
     evaluation_contract_version: str
     evaluation_contract_digest: str
+    workload_id: str | None = None
+    experiment_type: str | None = None
+    task_bundle: dict[str, str] | None = None
+    source_bundle: dict[str, str] | None = None
+    workspace_command: list[str] = Field(default_factory=list)
+    dataset_contracts: list[dict[str, Any]] = Field(default_factory=list)
+    dataset_bindings: dict[str, str] = Field(default_factory=dict)
 
 
 class RunRecord(BaseModel):
@@ -332,6 +339,10 @@ class RunRecord(BaseModel):
     evaluation_contract_id: str
     evaluation_contract_version: str
     evaluation_contract_digest: str
+    task_id: str | None = None
+    task_bundle_digest: str | None = None
+    task_bundle_path: str | None = None
+    task_definition: dict[str, Any] | None = None
     beaker_runtime_id: str | None = None
     beaker_session_id: str | None = None
     honeydew_runtime_id: str | None = None
@@ -480,6 +491,14 @@ class RunCreateRequest(BaseModel):
     maximum_turns: int | None = Field(default=None, ge=1)
     maximum_runtime_seconds: int | None = Field(default=None, ge=60)
     maximum_parallel_jobs: int | None = Field(default=None, ge=1)
+    task_id: str | None = Field(
+        default=None,
+        pattern=r'^[a-z0-9][a-z0-9-]{1,62}$',
+    )
+    task_bundle_digest: str | None = Field(
+        default=None,
+        pattern=r'^[a-f0-9]{64}$',
+    )
 
     @model_validator(mode='after')
     def require_contract_pair(self) -> 'RunCreateRequest':

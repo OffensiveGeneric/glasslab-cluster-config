@@ -26,6 +26,7 @@ def expand_experiment_matrix(
     action_id: str,
     matrix: ExperimentMatrix,
     contract: ResolvedEvaluationContract,
+    execution: dict[str, object] | None = None,
 ) -> list[ExpandedJobSpec]:
     reject_contract_overrides(matrix.model_dump(mode='json'))
     ceiling = contract.descriptor.resource_constraints
@@ -79,6 +80,7 @@ def expand_experiment_matrix(
                     evaluation_contract_id=contract.descriptor.contract_id,
                     evaluation_contract_version=contract.descriptor.version,
                     evaluation_contract_digest=contract.digest,
+                    **(execution or {}),
                 )
             )
     return expanded

@@ -37,6 +37,10 @@ class Settings(BaseSettings):
         '/tmp/glasslab-research-orchestrator/trusted-contracts/catalog.json'
     )
     shared_mount_root: str = '/tmp/glasslab-research-orchestrator'
+    task_bundle_root: str = '/tmp/glasslab-research-orchestrator/task-bundles'
+    benchmark_dataset_catalog_path: str = (
+        '/tmp/glasslab-research-orchestrator/datasets/catalog.json'
+    )
     default_evaluation_contract_id: str = 'example-research-v1'
     default_evaluation_contract_version: str = '1.0.0'
 

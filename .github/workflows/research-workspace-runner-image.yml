@@ -6,6 +6,8 @@ on:
     paths:
       - "services/research-workspace-runner/**"
       - "services/workflow-registry/definitions/research-workspace-cpu-v1.json"
+      - "services/workflow-registry/definitions/benchmark-workspace-cpu-v1.json"
+      - "services/workflow-registry/definitions/benchmark-workspace-gpu-v1.json"
       - ".github/workflows/research-workspace-runner-image.yml"
   workflow_dispatch:
 
@@ -20,6 +22,19 @@ concurrency:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: research-cpu
+            definition: research-workspace-cpu-v1.json
+            dockerfile: services/research-workspace-runner/Dockerfile
+          - name: benchmark-cpu
+            definition: benchmark-workspace-cpu-v1.json
+            dockerfile: services/research-workspace-runner/Dockerfile
+          - name: benchmark-gpu
+            definition: benchmark-workspace-gpu-v1.json
+            dockerfile: services/research-workspace-runner/Dockerfile.gpu
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,7 +50,7 @@ jobs:
           definition = json.loads(
               Path(
                   "services/workflow-registry/definitions/"
-                  "research-workspace-cpu-v1.json"
+                  "${{ matrix.definition }}"
               ).read_text()
           )
           image_ref = definition["runner_image"]
@@ -54,7 +69,7 @@ jobs:
           print(f"image={image}")
           print(f"tag={tag}")
           print(f"image_ref={image_ref}")
-          print(f"sha_ref={image}:sha-${{ github.sha }}")
+          print(f"sha_ref={image}:sha-${{ github.sha }}-${{ matrix.name }}")
           PY
 
       - name: Set up Docker Buildx
@@ -72,7 +87,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: services/research-workspace-runner/Dockerfile
+          file: ${{ matrix.dockerfile }}
           push: true
           tags: |
             ${{ steps.image.outputs.image_ref }}
@@ -88,7 +103,7 @@ jobs:
       - name: Record published image
         run: |
           {
-            echo "### Research workspace runner"
+            echo "### Research workspace runner: ${{ matrix.name }}"
             echo
             echo "- Version: \`${{ steps.image.outputs.tag }}\`"
             echo "- Image: \`${{ steps.image.outputs.image_ref }}\`"

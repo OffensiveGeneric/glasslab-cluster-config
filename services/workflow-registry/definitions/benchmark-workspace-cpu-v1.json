@@ -1,0 +1,73 @@
+{
+  "workflow_id": "benchmark-workspace-cpu-v1",
+  "display_name": "Benchmark Workspace CPU v1",
+  "workflow_family": "research-workspace",
+  "description": "Execute a digest-pinned ML benchmark task and Beaker source bundle in a bounded CPU workspace.",
+  "required_inputs": [
+    {
+      "name": "workspace",
+      "input_type": "artifact_bundle",
+      "required": true,
+      "description": "Immutable task and source bundle references plus the normalized command."
+    },
+    {
+      "name": "dataset_bindings",
+      "input_type": "artifact_bundle",
+      "required": true,
+      "description": "Digest-pinned read-only benchmark datasets."
+    }
+  ],
+  "allowed_models": ["agent-generated-python"],
+  "runner_image": "ghcr.io/offensivegeneric/glasslab-research-workspace-runner:benchmark-cpu-v1",
+  "evaluator_type": "immutable-benchmark-contract-v1",
+  "expected_artifacts": {
+    "required": [
+      "run_manifest.json",
+      "config.json",
+      "metrics.json",
+      "evaluation.json",
+      "artifacts_index.json",
+      "report.md",
+      "status.json",
+      "logs/",
+      "source.zip"
+    ],
+    "optional": ["task.zip", "plots/", "tables/", "environment.json"]
+  },
+  "resource_profile": {
+    "profile_name": "cpu-benchmark-medium",
+    "requests": {"cpu": "1", "memory": "2Gi", "ephemeral-storage": "2Gi"},
+    "limits": {"cpu": "4", "memory": "8Gi", "ephemeral-storage": "8Gi"},
+    "node_selector": {}
+  },
+  "approval_tier": "tier-2-approved-execution",
+  "execution_status": "ready",
+  "submission_backend": "kubernetes",
+  "execution_blockers": [],
+  "runtime_requirements": {
+    "gpu": false,
+    "required_python_packages": [
+      "numpy",
+      "pandas",
+      "scipy",
+      "scikit-learn",
+      "matplotlib",
+      "seaborn",
+      "joblib"
+    ],
+    "modalities": ["tabular", "classical-machine-learning"],
+    "dataset_layouts": ["files", "archive"],
+    "purpose": "bounded CPU benchmark execution"
+  },
+  "experiment_type": "research-workspace-job",
+  "workload_id": "benchmark-workspace-cpu-v1",
+  "schema_ref": "glasslab-benchmark-workspace-v1",
+  "default_entrypoint": ["python3", "-m", "runner"],
+  "allow_custom_image": false,
+  "allow_custom_entrypoint": false,
+  "metric_contract": {
+    "primary_metric": "rubric_score",
+    "higher_is_better": true,
+    "required_guardrails": ["integrity_pass"]
+  }
+}

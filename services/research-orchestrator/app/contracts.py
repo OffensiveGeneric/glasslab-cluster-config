@@ -30,7 +30,12 @@ def compute_contract_digest(root: Path) -> str:
     files = sorted(
         path
         for path in root.rglob('*')
-        if path.is_file() and path.name != 'contract.sha256'
+        if (
+            path.is_file()
+            and path.name != 'contract.sha256'
+            and '__pycache__' not in path.relative_to(root).parts
+            and path.suffix != '.pyc'
+        )
     )
     if not files:
         raise ContractIntegrityError(f'contract has no content: {root}')

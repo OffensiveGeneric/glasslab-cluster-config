@@ -149,7 +149,12 @@ def resolve_evaluation_contract(
         files = sorted(
             path
             for path in bundle.rglob('*')
-            if path.is_file() and path.name != 'contract.sha256'
+            if (
+                path.is_file()
+                and path.name != 'contract.sha256'
+                and '__pycache__' not in path.relative_to(bundle).parts
+                and path.suffix != '.pyc'
+            )
         )
         if not files:
             raise ValueError(f'evaluation contract bundle is empty: {key}')
@@ -299,7 +304,10 @@ def _active_deadline_seconds(manifest: RunManifest) -> int | None:
 
 
 def _is_research_workspace_manifest(manifest: RunManifest) -> bool:
-    return manifest.schema_ref == 'glasslab-investigation-workspace-v1'
+    return manifest.schema_ref in {
+        'glasslab-investigation-workspace-v1',
+        'glasslab-benchmark-workspace-v1',
+    }
 
 
 def _asset_volume_subpath(uri: str) -> tuple[str, str]:
