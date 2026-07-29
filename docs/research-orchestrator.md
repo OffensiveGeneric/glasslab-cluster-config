@@ -361,7 +361,9 @@ clears the stale session ID, writes
 `events/<agent>-recovery-checkpoint.json`, and returns the run to `PAUSED`.
 Resume creates a fresh OpenCode session, injects the compact checkpoint, and
 continues from the unchanged worktree. Successful sessions remain reusable
-across normal turns.
+across normal turns. Resume also detects older paused records whose latest
+failed turn still references the attached session and rotates them before
+recovery.
 
 Beaker implementation is split into two bounded turns. `BEAKER_PLANNING`
 produces a task-specific `implementation-plan.md`; `BEAKER_IMPLEMENTING`

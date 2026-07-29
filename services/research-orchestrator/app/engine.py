@@ -2520,6 +2520,8 @@ class ResearchOrchestrator:
             run = self.store.get_run(run_id)
             if run.state != RunState.PAUSED or run.resume_state is None:
                 raise WorkflowError('run is not resumable')
+            self._rotate_failed_session_before_resume(run)
+            run = self.store.get_run(run_id)
             target = run.resume_state
             resumed = self._transition(
                 run_id,
@@ -2546,6 +2548,77 @@ class ResearchOrchestrator:
                 )
                 raise
             return self.store.get_run(run_id)
+
+    def _rotate_failed_session_before_resume(self, run: RunRecord) -> None:
+        phase: dict[RunState, tuple[AgentName, TurnKind]] = {
+            RunState.HONEYDEW_DRAFTING_PROTOCOL: (
+                AgentName.HONEYDEW,
+                TurnKind.PROTOCOL_DRAFT,
+            ),
+            RunState.BEAKER_DRAFTING_CONTRACT: (
+                AgentName.BEAKER,
+                TurnKind.CONTRACT_CANDIDATE,
+            ),
+            RunState.HONEYDEW_REVIEWING_CONTRACT: (
+                AgentName.HONEYDEW,
+                TurnKind.METHODOLOGY_REVIEW,
+            ),
+            RunState.BEAKER_PLANNING: (
+                AgentName.BEAKER,
+                TurnKind.IMPLEMENTATION_PLAN,
+            ),
+            RunState.BEAKER_IMPLEMENTING: (
+                AgentName.BEAKER,
+                TurnKind.IMPLEMENTATION_PROPOSAL,
+            ),
+            RunState.HONEYDEW_REVIEWING: (
+                AgentName.HONEYDEW,
+                TurnKind.METHODOLOGY_REVIEW,
+            ),
+            RunState.BEAKER_REVISING: (
+                AgentName.BEAKER,
+                TurnKind.REVISION,
+            ),
+            RunState.BEAKER_ANALYZING: (
+                AgentName.BEAKER,
+                TurnKind.EXPERIMENT_ANALYSIS,
+            ),
+            RunState.HONEYDEW_VERIFYING: (
+                AgentName.HONEYDEW,
+                TurnKind.VERIFICATION,
+            ),
+            RunState.HONEYDEW_WRITING_REPORT: (
+                AgentName.HONEYDEW,
+                TurnKind.FINAL_REPORT,
+            ),
+        }
+        selected = phase.get(run.resume_state)
+        if selected is None:
+            return
+        agent, expected_kind = selected
+        session_id = (
+            run.honeydew_session_id
+            if agent == AgentName.HONEYDEW
+            else run.beaker_session_id
+        )
+        if session_id is None:
+            return
+        failed_turns = [
+            turn
+            for turn in self.store.list_turns(run.run_id)
+            if turn.agent == agent and turn.status == 'failed'
+        ]
+        if not failed_turns or failed_turns[-1].opencode_session_id != session_id:
+            return
+        self._rotate_agent_session(
+            run_id=run.run_id,
+            agent=agent,
+            expected_kind=expected_kind,
+            error=(
+                'resume detected a failed turn still attached to the active '
+                'OpenCode session'
+            ),
+        )
 
     def _abort_agent_turns(self, run: RunRecord) -> None:
         if run.honeydew_session_id:

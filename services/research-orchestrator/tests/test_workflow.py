@@ -662,6 +662,13 @@ def test_failed_turn_resumes_with_fresh_session_and_checkpoint(
     assert paused.beaker_session_id is None
     assert runtime.failed_session_id is not None
 
+    legacy_paused = paused.model_copy(
+        update={
+            'beaker_runtime_id': 'legacy-runtime',
+            'beaker_session_id': runtime.failed_session_id,
+        }
+    )
+    store.replace_run(legacy_paused, expected_version=paused.version)
     resumed = engine.resume_run(run.run_id, requested_by='test-human')
     assert resumed.state == RunState.AWAITING_EXECUTION_APPROVAL
     assert resumed.beaker_session_id != runtime.failed_session_id
