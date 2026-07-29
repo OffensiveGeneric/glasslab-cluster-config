@@ -20,6 +20,30 @@ TRANSITIONS: dict[RunState, set[RunState]] = {
     },
     RunState.AWAITING_PROTOCOL_APPROVAL: {
         RunState.HONEYDEW_DRAFTING_PROTOCOL,
+        RunState.BEAKER_DRAFTING_CONTRACT,
+        RunState.BEAKER_IMPLEMENTING,
+        RunState.PAUSED,
+        RunState.CANCELLED,
+        RunState.FAILED,
+        RunState.TIMED_OUT,
+    },
+    RunState.BEAKER_DRAFTING_CONTRACT: {
+        RunState.HONEYDEW_REVIEWING_CONTRACT,
+        RunState.PAUSED,
+        RunState.CANCELLED,
+        RunState.FAILED,
+        RunState.TIMED_OUT,
+    },
+    RunState.HONEYDEW_REVIEWING_CONTRACT: {
+        RunState.BEAKER_DRAFTING_CONTRACT,
+        RunState.AWAITING_CONTRACT_PROMOTION,
+        RunState.PAUSED,
+        RunState.CANCELLED,
+        RunState.FAILED,
+        RunState.TIMED_OUT,
+    },
+    RunState.AWAITING_CONTRACT_PROMOTION: {
+        RunState.BEAKER_DRAFTING_CONTRACT,
         RunState.BEAKER_IMPLEMENTING,
         RunState.PAUSED,
         RunState.CANCELLED,
@@ -27,6 +51,7 @@ TRANSITIONS: dict[RunState, set[RunState]] = {
         RunState.TIMED_OUT,
     },
     RunState.BEAKER_IMPLEMENTING: {
+        RunState.BEAKER_DRAFTING_CONTRACT,
         RunState.BEAKER_REVISING,
         RunState.HONEYDEW_REVIEWING,
         RunState.PAUSED,
@@ -35,6 +60,7 @@ TRANSITIONS: dict[RunState, set[RunState]] = {
         RunState.TIMED_OUT,
     },
     RunState.HONEYDEW_REVIEWING: {
+        RunState.BEAKER_DRAFTING_CONTRACT,
         RunState.BEAKER_REVISING,
         RunState.AWAITING_EXECUTION_APPROVAL,
         RunState.PAUSED,
@@ -43,6 +69,7 @@ TRANSITIONS: dict[RunState, set[RunState]] = {
         RunState.TIMED_OUT,
     },
     RunState.BEAKER_REVISING: {
+        RunState.BEAKER_DRAFTING_CONTRACT,
         RunState.HONEYDEW_REVIEWING,
         RunState.PAUSED,
         RunState.CANCELLED,
@@ -50,6 +77,7 @@ TRANSITIONS: dict[RunState, set[RunState]] = {
         RunState.TIMED_OUT,
     },
     RunState.AWAITING_EXECUTION_APPROVAL: {
+        RunState.BEAKER_DRAFTING_CONTRACT,
         RunState.JOB_QUEUED,
         RunState.BEAKER_REVISING,
         RunState.PAUSED,

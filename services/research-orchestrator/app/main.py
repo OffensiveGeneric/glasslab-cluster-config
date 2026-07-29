@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from .cluster import FakeClusterExecutor, WorkflowApiClusterExecutor
 from .config import Settings, get_settings
+from .contract_candidates import ContractCandidateManager
 from .contracts import ContractIntegrityError, EvaluationContractResolver
 from .discord_adapter import DisabledDiscordAdapter, DiscordHttpAdapter
 from .discord_controls import DiscordControlGateway
@@ -74,7 +75,14 @@ def build_engine(
             approved_repo_ref=settings.approved_repo_ref,
         ),
         contracts=EvaluationContractResolver(
-            settings.evaluation_contract_root
+            settings.promoted_contract_root,
+            fallback_roots=[settings.evaluation_contract_root],
+        ),
+        contract_candidates=ContractCandidateManager(
+            sealed_root=settings.sealed_contract_candidate_root,
+            promoted_root=settings.promoted_contract_root,
+            catalog_path=settings.trusted_contract_catalog_path,
+            shared_mount_root=settings.shared_mount_root,
         ),
         policy=ActionPolicy(
             permitted_images=settings.permitted_job_images,

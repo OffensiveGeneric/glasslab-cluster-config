@@ -75,7 +75,7 @@ class ScriptedMockRuntime(AgentRuntime):
                     evaluation_contract_proposal=(
                         EvaluationContractProposal.model_validate(
                             {
-                                'evaluator_type': 'generic-score-v1',
+                                'evaluator_type': 'example-research-v1',
                                 'primary_metric': {
                                     'name': 'score',
                                     'direction': 'maximize',

@@ -10,6 +10,7 @@ from uuid import uuid4, uuid5, NAMESPACE_URL
 
 from .cluster import ClusterExecutor
 from .config import Settings
+from .contract_candidates import ContractCandidateManager
 from .contracts import EvaluationContractResolver
 from .discord_adapter import DiscordAdapter
 from .matrix import expand_experiment_matrix
@@ -21,6 +22,8 @@ from .schemas import (
     AgentTurnResult,
     ApprovalStatus,
     ArtifactRecord,
+    ContractCandidateRequest,
+    EvaluationContractDescriptor,
     ExperimentMatrix,
     JOB_TERMINAL_STATUSES,
     JobRecord,
@@ -52,6 +55,7 @@ class ResearchOrchestrator:
         runtime: AgentRuntime,
         workspaces: WorkspaceManager,
         contracts: EvaluationContractResolver,
+        contract_candidates: ContractCandidateManager,
         policy: ActionPolicy,
         cluster: ClusterExecutor,
         discord: DiscordAdapter,
@@ -61,6 +65,7 @@ class ResearchOrchestrator:
         self.runtime = runtime
         self.workspaces = workspaces
         self.contracts = contracts
+        self.contract_candidates = contract_candidates
         self.policy = policy
         self.cluster = cluster
         self.discord = discord
@@ -421,6 +426,11 @@ class ResearchOrchestrator:
                 'Accept the report as the final output and mark this research '
                 'run complete. This does not publish it externally.'
             ),
+            'propose_evaluation_contract': (
+                'Promote the sealed, Honeydew-reviewed evaluation contract '
+                'into the trusted catalog and bind this run to its exact digest. '
+                'This does not authorize a cluster job.'
+            ),
         }
         payload: dict[str, Any] = {
             'action_id': action.action_id,
@@ -455,6 +465,23 @@ class ResearchOrchestrator:
             payload['contract_binding'] = (
                 contract_proposal_artifact.metadata.get('technical_binding')
             )
+        if action.type == 'propose_evaluation_contract':
+            candidate = next(
+                (
+                    artifact
+                    for artifact in reversed(artifacts)
+                    if artifact.type == 'evaluation_contract_candidate'
+                    and artifact.metadata.get('action_id') == action.action_id
+                ),
+                None,
+            )
+            if candidate is not None:
+                payload['artifact'] = {
+                    'type': candidate.type,
+                    'uri': candidate.uri,
+                    'sha256': candidate.sha256,
+                }
+                payload['contract_candidate'] = candidate.metadata
         if action.type == 'approve_protocol':
             payload['protocol_version'] = run.protocol_version
         return payload
@@ -508,6 +535,64 @@ class ResearchOrchestrator:
             metadata=metadata,
         )
         return self.store.save_artifact(artifact)
+
+    def _latest_contract_proposal(
+        self,
+        run_id: str,
+    ) -> dict[str, Any] | None:
+        matches = [
+            artifact
+            for artifact in self.store.list_artifacts(run_id)
+            if artifact.type == 'evaluation_contract_proposal'
+        ]
+        if not matches:
+            return None
+        proposal = matches[-1].metadata.get('proposal')
+        return proposal if isinstance(proposal, dict) else None
+
+    def _contract_binding_compatible(self, run_id: str) -> bool:
+        run = self.store.get_run(run_id)
+        proposal = self._latest_contract_proposal(run_id)
+        if proposal is None:
+            return False
+        try:
+            contract = self.contracts.resolve(
+                run.evaluation_contract_id,
+                run.evaluation_contract_version,
+            )
+        except ValueError:
+            return False
+        descriptor = contract.descriptor
+        primary = proposal.get('primary_metric')
+        resources = proposal.get('resource_constraints')
+        required_artifacts = proposal.get('required_artifacts')
+        if not isinstance(primary, dict) or not isinstance(resources, dict):
+            return False
+        if not isinstance(required_artifacts, list):
+            return False
+        ceiling = descriptor.resource_constraints
+        return bool(
+            contract.digest == run.evaluation_contract_digest
+            and proposal.get('evaluator_type') == descriptor.contract_id
+            and primary.get('name') == descriptor.manifest.get('primary_metric')
+            and primary.get('direction')
+            == descriptor.manifest.get('primary_metric_direction')
+            and set(str(item) for item in required_artifacts).issubset(
+                descriptor.required_artifacts
+            )
+            and float(resources.get('cpu', float('inf'))) <= ceiling.cpu
+            and float(resources.get('memory_gib', float('inf')))
+            <= ceiling.memory_gib
+            and int(resources.get('gpus', self.policy.maximum_gpus + 1))
+            <= ceiling.gpus
+            and int(
+                resources.get(
+                    'wallclock_minutes',
+                    ceiling.wallclock_minutes + 1,
+                )
+            )
+            <= ceiling.wallclock_minutes
+        )
 
     def _draft_protocol(self, run_id: str, feedback: str | None = None) -> None:
         run = self.store.get_run(run_id)
@@ -606,7 +691,13 @@ class ResearchOrchestrator:
         )
         ceiling = descriptor.resource_constraints
         binding_compatible = (
-            proposal.primary_metric.name == technical_primary_metric
+            proposal.evaluator_type == descriptor.contract_id
+            and proposal.primary_metric.name == technical_primary_metric
+            and proposal.primary_metric.direction
+            == descriptor.manifest.get('primary_metric_direction')
+            and set(proposal.required_artifacts).issubset(
+                descriptor.required_artifacts
+            )
             and proposal_resources.cpu <= ceiling.cpu
             and proposal_resources.memory_gib <= ceiling.memory_gib
             and proposal_resources.gpus <= ceiling.gpus
@@ -787,8 +878,19 @@ class ResearchOrchestrator:
             if run.state != RunState.AWAITING_PROTOCOL_APPROVAL:
                 return
             self.workspaces.freeze_protocol(action.run_id)
-            self._transition(action.run_id, RunState.BEAKER_IMPLEMENTING)
-            self._beaker_implement(action.run_id)
+            if self._contract_binding_compatible(action.run_id):
+                self._transition(action.run_id, RunState.BEAKER_IMPLEMENTING)
+                self._beaker_implement(action.run_id)
+            else:
+                self._transition(
+                    action.run_id,
+                    RunState.BEAKER_DRAFTING_CONTRACT,
+                )
+                self._beaker_draft_contract(action.run_id)
+        elif action.type == 'propose_evaluation_contract':
+            if run.state != RunState.AWAITING_CONTRACT_PROMOTION:
+                return
+            self._promote_contract_candidate(action)
         elif action.type == 'submit_experiment_matrix':
             if run.state != RunState.AWAITING_EXECUTION_APPROVAL:
                 return
@@ -877,11 +979,295 @@ class ResearchOrchestrator:
                 RunState.HONEYDEW_WRITING_REPORT,
             )
             self._write_report(action.run_id, feedback=feedback)
+        elif action.type == 'propose_evaluation_contract':
+            if run.state != RunState.AWAITING_CONTRACT_PROMOTION:
+                return
+            self._transition(
+                action.run_id,
+                RunState.BEAKER_DRAFTING_CONTRACT,
+            )
+            self._beaker_draft_contract(action.run_id, feedback=feedback)
         elif run.state not in TERMINAL_STATES:
             self._fail_run(
                 action.run_id,
                 WorkflowError(f'unhandled rejected action: {action.type}'),
             )
+
+    def _beaker_draft_contract(
+        self,
+        run_id: str,
+        *,
+        feedback: str | None = None,
+    ) -> None:
+        proposal = self._latest_contract_proposal(run_id)
+        if proposal is None:
+            raise WorkflowError('run has no evaluation contract proposal')
+        prompt = (
+            'Draft an immutable evaluation-contract candidate for the approved '
+            'program.md. Create a self-contained directory under '
+            '`contract-candidate/<contract-id>/<version>/` containing '
+            'contract.json, the execution wrapper, evaluator, input and output '
+            'JSON schemas, and concise test vectors or tests. The descriptor '
+            'must set container_image_digest to null. Do not write '
+            'contract.sha256; the orchestrator owns sealing. Run lightweight '
+            'local checks. Return exactly one `propose_evaluation_contract` '
+            'action with contract_id, semantic version, candidate_path, and '
+            'rationale. Do not request publication, Kubernetes, registry, or '
+            'shared-storage access.\n\nApproved scientific proposal:\n'
+            + json.dumps(proposal, indent=2, sort_keys=True)
+        )
+        if feedback:
+            prompt += f'\n\nReview feedback:\n{feedback}'
+        turn, result = self._run_agent_turn(
+            run_id=run_id,
+            agent=AgentName.BEAKER,
+            prompt=prompt,
+            expected_kind=TurnKind.CONTRACT_CANDIDATE,
+            input_event={'proposal': proposal, 'feedback': feedback},
+        )
+        actions = self._record_requested_actions(
+            run_id=run_id,
+            agent=AgentName.BEAKER,
+            result=result,
+            turn_number=self.store.get_run(run_id).turn_number,
+        )
+        candidates = [
+            action
+            for action in actions
+            if action.type == 'propose_evaluation_contract'
+            and action.approval_status == ApprovalStatus.PENDING
+        ]
+        if len(candidates) != 1:
+            denied = [
+                action.reason
+                for action in actions
+                if action.type == 'propose_evaluation_contract'
+            ]
+            raise WorkflowError(
+                'Beaker must propose exactly one valid contract candidate'
+                + (f': {"; ".join(denied)}' if denied else '')
+            )
+        action = candidates[0]
+        request = ContractCandidateRequest.model_validate(action.arguments)
+        workspace = Path(self.store.get_run(run_id).beaker_workspace).resolve()
+        source = (workspace / request.candidate_path).resolve()
+        if not source.is_relative_to(workspace):
+            raise WorkflowError('contract candidate escapes Beaker workspace')
+        sealed = self.contract_candidates.seal(
+            source=source,
+            contract_id=request.contract_id,
+            version=request.version,
+        )
+        descriptor = sealed.descriptor
+        primary = proposal.get('primary_metric')
+        resources = proposal.get('resource_constraints')
+        required_artifacts = proposal.get('required_artifacts')
+        if (
+            request.contract_id != proposal.get('evaluator_type')
+            or not isinstance(primary, dict)
+            or descriptor.manifest.get('primary_metric') != primary.get('name')
+            or descriptor.manifest.get('primary_metric_direction')
+            != primary.get('direction')
+            or not isinstance(required_artifacts, list)
+            or not set(required_artifacts).issubset(
+                descriptor.required_artifacts
+            )
+            or not isinstance(resources, dict)
+            or float(resources.get('cpu', float('inf')))
+            > descriptor.resource_constraints.cpu
+            or float(resources.get('memory_gib', float('inf')))
+            > descriptor.resource_constraints.memory_gib
+            or int(resources.get('gpus', self.policy.maximum_gpus + 1))
+            > descriptor.resource_constraints.gpus
+        ):
+            raise WorkflowError(
+                'candidate descriptor does not implement the approved '
+                'scientific contract proposal'
+            )
+        review_path = self.workspaces.copy_contract_candidate_for_review(
+            run_id=run_id,
+            source=sealed.sealed_path,
+            contract_id=sealed.contract_id,
+            version=sealed.version,
+            digest=sealed.digest,
+        )
+        uri = (
+            f'artifact://{run_id}/contract-candidates/'
+            f'{sealed.contract_id}/{sealed.version}@{sealed.digest}'
+        )
+        artifact = self._save_local_artifact(
+            run_id=run_id,
+            artifact_type='evaluation_contract_candidate',
+            uri=uri,
+            digest=sealed.digest,
+            metadata={
+                'action_id': action.action_id,
+                'turn_id': turn.turn_id,
+                'contract_id': sealed.contract_id,
+                'version': sealed.version,
+                'sealed_path': str(sealed.sealed_path),
+                'review_path': str(review_path),
+                'descriptor': descriptor.model_dump(mode='json'),
+            },
+        )
+        self._event(
+            run_id,
+            source='orchestrator',
+            event_type='contract.candidate_sealed',
+            payload={
+                'action_id': action.action_id,
+                'artifact_id': artifact.artifact_id,
+                'uri': uri,
+                'contract_id': sealed.contract_id,
+                'version': sealed.version,
+                'digest': sealed.digest,
+                'review_path': str(review_path),
+            },
+        )
+        self._transition(run_id, RunState.HONEYDEW_REVIEWING_CONTRACT)
+        self._honeydew_review_contract(
+            run_id,
+            action=action,
+            artifact=artifact,
+        )
+
+    def _honeydew_review_contract(
+        self,
+        run_id: str,
+        *,
+        action: ActionRecord,
+        artifact: ArtifactRecord,
+    ) -> None:
+        prompt = (
+            'Review the sealed evaluation-contract candidate against the '
+            'approved program.md and scientific proposal. Inspect every file '
+            'under the read-only review path. Check metric semantics, schemas, '
+            'required artifacts, leakage risks, deterministic behavior, '
+            'resource limits, and whether the wrapper preserves the immutable '
+            'evaluation boundary. Set done=true only if it is suitable for '
+            'admin promotion. Do not edit the candidate.\n\n'
+            f'Review path: {artifact.metadata["review_path"]}\n'
+            f'Descriptor:\n'
+            + json.dumps(
+                artifact.metadata['descriptor'],
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        turn, result = self._run_agent_turn(
+            run_id=run_id,
+            agent=AgentName.HONEYDEW,
+            prompt=prompt,
+            expected_kind=TurnKind.METHODOLOGY_REVIEW,
+            input_event={
+                'action_id': action.action_id,
+                'artifact_id': artifact.artifact_id,
+            },
+        )
+        if not result.done:
+            reason = result.summary
+            self.store.update_action(
+                action.action_id,
+                approval_status=ApprovalStatus.REJECTED,
+                reviewer='honeydew',
+                reason=reason,
+            )
+            self._event(
+                run_id,
+                source='honeydew',
+                event_type='action.rejected',
+                payload={
+                    'action_id': action.action_id,
+                    'reason': reason,
+                },
+            )
+            self._transition(run_id, RunState.BEAKER_DRAFTING_CONTRACT)
+            self._beaker_draft_contract(
+                run_id,
+                feedback=result.message_to_other_agent or reason,
+            )
+            return
+        approved = self.store.mark_action_honeydew_approved(
+            action.action_id,
+            review_turn_id=turn.turn_id,
+        )
+        self._event(
+            run_id,
+            source='honeydew',
+            event_type='contract.candidate_reviewed',
+            payload={
+                'action_id': action.action_id,
+                'artifact_id': artifact.artifact_id,
+                'digest': artifact.sha256,
+                'human_approval_still_required': True,
+            },
+        )
+        self._transition(run_id, RunState.AWAITING_CONTRACT_PROMOTION)
+        self._event(
+            run_id,
+            source='orchestrator',
+            event_type='action.human_approval_requested',
+            payload=self._approval_event_payload(
+                approved,
+                human_approval_ready=True,
+            ),
+        )
+
+    def _promote_contract_candidate(self, action: ActionRecord) -> None:
+        matches = [
+            artifact
+            for artifact in self.store.list_artifacts(action.run_id)
+            if artifact.type == 'evaluation_contract_candidate'
+            and artifact.metadata.get('action_id') == action.action_id
+        ]
+        if len(matches) != 1:
+            raise WorkflowError(
+                'approved contract action has no unique sealed candidate'
+            )
+        artifact = matches[0]
+        destination = self.contract_candidates.promote(
+            sealed_path=Path(str(artifact.metadata['sealed_path'])),
+            expected_digest=artifact.sha256,
+        )
+        descriptor = EvaluationContractDescriptor.model_validate(
+            artifact.metadata['descriptor']
+        )
+        current = self.store.get_run(action.run_id)
+        self.store.replace_run(
+            current.model_copy(
+                update={
+                    'evaluation_contract_id': descriptor.contract_id,
+                    'evaluation_contract_version': descriptor.version,
+                    'evaluation_contract_digest': artifact.sha256,
+                }
+            ),
+            expected_version=current.version,
+        )
+        resolved = self.contracts.resolve(
+            descriptor.contract_id,
+            descriptor.version,
+        )
+        if resolved.digest != artifact.sha256:
+            raise WorkflowError('promoted contract cannot be resolved by digest')
+        self._event(
+            action.run_id,
+            source='orchestrator',
+            event_type='contract.promoted',
+            payload={
+                'action_id': action.action_id,
+                'contract_id': descriptor.contract_id,
+                'version': descriptor.version,
+                'digest': artifact.sha256,
+                'path': str(destination),
+                'reviewer': action.reviewer,
+            },
+        )
+        if not self._contract_binding_compatible(action.run_id):
+            raise WorkflowError(
+                'promoted contract remains incompatible with the protocol'
+            )
+        self._transition(action.run_id, RunState.BEAKER_IMPLEMENTING)
+        self._beaker_implement(action.run_id)
 
     def _beaker_implement(self, run_id: str) -> None:
         run = self.store.get_run(run_id)
@@ -1054,6 +1440,11 @@ class ResearchOrchestrator:
         try:
             matrix = ExperimentMatrix.model_validate(action.arguments)
             run = self.store.get_run(run_id)
+            if not self._contract_binding_compatible(run_id):
+                return (
+                    'installed evaluation contract is incompatible with the '
+                    'approved protocol; promote a matching contract first'
+                )
             workspace = Path(run.beaker_workspace).resolve()
             base_config = (workspace / matrix.base_config).resolve()
             if (
@@ -1669,11 +2060,75 @@ class ResearchOrchestrator:
     def _recover_run(self, run_id: str) -> None:
         run = self.store.get_run(run_id)
         state = run.state
+        contract_sensitive_states = {
+            RunState.BEAKER_IMPLEMENTING,
+            RunState.HONEYDEW_REVIEWING,
+            RunState.BEAKER_REVISING,
+            RunState.AWAITING_EXECUTION_APPROVAL,
+        }
+        if state in contract_sensitive_states and not self._contract_binding_compatible(
+            run_id
+        ):
+            for action in self.store.list_actions(run_id):
+                if (
+                    action.type == 'submit_experiment_matrix'
+                    and action.approval_status == ApprovalStatus.PENDING
+                ):
+                    self.store.update_action(
+                        action.action_id,
+                        approval_status=ApprovalStatus.REJECTED,
+                        reviewer='orchestrator',
+                        reason=(
+                            'The approved protocol requires a different '
+                            'evaluation contract.'
+                        ),
+                    )
+            self._transition(run_id, RunState.BEAKER_DRAFTING_CONTRACT)
+            self._beaker_draft_contract(
+                run_id,
+                feedback=(
+                    'Recovery detected that the installed evaluation contract '
+                    'does not implement the approved protocol. Draft the '
+                    'required immutable contract candidate before continuing.'
+                ),
+            )
+            return
         if state == RunState.PREPARING:
             self._transition(run_id, RunState.HONEYDEW_DRAFTING_PROTOCOL)
             self._draft_protocol(run_id)
         elif state == RunState.HONEYDEW_DRAFTING_PROTOCOL:
             self._draft_protocol(run_id)
+        elif state == RunState.BEAKER_DRAFTING_CONTRACT:
+            self._beaker_draft_contract(run_id)
+        elif state == RunState.HONEYDEW_REVIEWING_CONTRACT:
+            candidates = [
+                artifact
+                for artifact in self.store.list_artifacts(run_id)
+                if artifact.type == 'evaluation_contract_candidate'
+            ]
+            if not candidates:
+                self._transition(run_id, RunState.BEAKER_DRAFTING_CONTRACT)
+                self._beaker_draft_contract(
+                    run_id,
+                    feedback='The sealed contract candidate was not recoverable.',
+                )
+                return
+            artifact = candidates[-1]
+            action = self.store.get_action(str(artifact.metadata['action_id']))
+            self._honeydew_review_contract(
+                run_id,
+                action=action,
+                artifact=artifact,
+            )
+        elif state == RunState.AWAITING_CONTRACT_PROMOTION:
+            approved = [
+                action
+                for action in self.store.list_actions(run_id)
+                if action.type == 'propose_evaluation_contract'
+                and action.approval_status == ApprovalStatus.APPROVED
+            ]
+            if approved:
+                self._promote_contract_candidate(approved[-1])
         elif state == RunState.BEAKER_IMPLEMENTING:
             pending = [
                 action

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
+from hashlib import sha256
 import json
 from pathlib import Path, PurePosixPath
 import re
@@ -97,18 +98,30 @@ def resolve_evaluation_contract(
     version = str(requested.get('version', '')).strip()
     digest = str(requested.get('digest', '')).strip().lower()
     key = f'{contract_id}@{version}'
-    trusted = settings.evaluation_contracts.get(key)
+    catalog = dict(settings.evaluation_contracts)
+    if settings.evaluation_contract_catalog_path:
+        catalog_path = Path(settings.evaluation_contract_catalog_path)
+        if catalog_path.is_file():
+            try:
+                dynamic = json.loads(catalog_path.read_text(encoding='utf-8'))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ValueError('trusted evaluation contract catalog is invalid') from exc
+            if not isinstance(dynamic, dict):
+                raise ValueError('trusted evaluation contract catalog must be an object')
+            catalog.update(dynamic)
+    trusted = catalog.get(key)
     if trusted is None:
         raise ValueError(f'evaluation contract is not trusted: {key}')
-    required = {
+    common = {
         'contract_id',
         'version',
         'digest',
-        'container_image_digest',
         'execution_wrapper',
         'evaluation_entry_point',
     }
-    if set(trusted) != required:
+    image_keys = common | {'container_image_digest'}
+    bundle_keys = common | {'bundle_path'}
+    if frozenset(trusted) not in {frozenset(image_keys), frozenset(bundle_keys)}:
         raise ValueError(f'trusted evaluation contract is malformed: {key}')
     if (
         trusted['contract_id'] != contract_id
@@ -116,9 +129,62 @@ def resolve_evaluation_contract(
         or trusted['digest'].lower() != digest
     ):
         raise ValueError(f'evaluation contract identity or digest mismatch: {key}')
-    image = trusted['container_image_digest']
-    if '@sha256:' not in image:
-        raise ValueError(f'evaluation contract image is not digest-pinned: {key}')
+    if 'container_image_digest' in trusted:
+        image = trusted['container_image_digest']
+        if '@sha256:' not in image:
+            raise ValueError(f'evaluation contract image is not digest-pinned: {key}')
+    else:
+        relative = PurePosixPath(trusted['bundle_path'])
+        if (
+            relative.is_absolute()
+            or '..' in relative.parts
+            or relative.as_posix() in {'', '.'}
+        ):
+            raise ValueError(f'evaluation contract has unsafe bundle_path: {key}')
+        root = Path(settings.evaluation_contract_bundle_root).resolve()
+        bundle = (root / relative.as_posix()).resolve()
+        if not bundle.is_relative_to(root) or bundle.is_symlink() or not bundle.is_dir():
+            raise ValueError(f'evaluation contract bundle is unavailable: {key}')
+        digest_builder = sha256()
+        files = sorted(
+            path
+            for path in bundle.rglob('*')
+            if path.is_file() and path.name != 'contract.sha256'
+        )
+        if not files:
+            raise ValueError(f'evaluation contract bundle is empty: {key}')
+        for path in files:
+            if path.is_symlink():
+                raise ValueError(f'evaluation contract bundle contains a symlink: {key}')
+            relative_file = path.relative_to(bundle).as_posix().encode()
+            content = path.read_bytes()
+            digest_builder.update(len(relative_file).to_bytes(8, 'big'))
+            digest_builder.update(relative_file)
+            digest_builder.update(len(content).to_bytes(8, 'big'))
+            digest_builder.update(content)
+        actual_digest = digest_builder.hexdigest()
+        checksum_path = bundle / 'contract.sha256'
+        descriptor_path = bundle / 'contract.json'
+        if not checksum_path.is_file() or not descriptor_path.is_file():
+            raise ValueError(f'evaluation contract bundle is incomplete: {key}')
+        if (
+            checksum_path.read_text(encoding='ascii').strip().lower() != digest
+            or actual_digest != digest
+        ):
+            raise ValueError(f'evaluation contract bundle digest mismatch: {key}')
+        try:
+            descriptor = json.loads(descriptor_path.read_text(encoding='utf-8'))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f'evaluation contract descriptor is invalid: {key}') from exc
+        if (
+            not isinstance(descriptor, dict)
+            or descriptor.get('contract_id') != contract_id
+            or descriptor.get('version') != version
+            or descriptor.get('execution_wrapper') != trusted['execution_wrapper']
+            or descriptor.get('evaluation_entry_point')
+            != trusted['evaluation_entry_point']
+        ):
+            raise ValueError(f'evaluation contract descriptor mismatch: {key}')
     for field in ('execution_wrapper', 'evaluation_entry_point'):
         path = PurePosixPath(trusted[field])
         if path.is_absolute() or '..' in path.parts or path.as_posix() in {'', '.'}:
@@ -510,8 +576,9 @@ class KubernetesJobSubmitter(JobSubmitter):
             )
             container.env = env
             container.command = ['python3', wrapper]
-            init_containers = [
-                self.client.V1Container(
+            if 'container_image_digest' in evaluation_contract:
+                init_containers = [
+                    self.client.V1Container(
                     name='evaluation-contract',
                     image=evaluation_contract['container_image_digest'],
                     image_pull_policy=self.settings.runner_image_pull_policy,
@@ -532,8 +599,8 @@ class KubernetesJobSubmitter(JobSubmitter):
                             mount_path='/contract-copy',
                         )
                     ],
-                )
-            ]
+                    )
+                ]
 
         research_workspace = _is_research_workspace_manifest(manifest)
 
@@ -572,7 +639,19 @@ class KubernetesJobSubmitter(JobSubmitter):
                     [
                         self.client.V1Volume(
                             name='evaluation-contract',
-                            empty_dir=self.client.V1EmptyDirVolumeSource(),
+                            **(
+                                {
+                                    'empty_dir': self.client.V1EmptyDirVolumeSource()
+                                }
+                                if 'container_image_digest' in evaluation_contract
+                                else {
+                                    'persistent_volume_claim': (
+                                        self.client.V1PersistentVolumeClaimVolumeSource(
+                                            claim_name=self.settings.artifacts_pvc_name,
+                                        )
+                                    )
+                                }
+                            ),
                         )
                     ]
                     if evaluation_contract
@@ -612,6 +691,11 @@ class KubernetesJobSubmitter(JobSubmitter):
                     name='evaluation-contract',
                     mount_path='/evaluation-contract',
                     read_only=True,
+                    **(
+                        {'sub_path': evaluation_contract['bundle_path']}
+                        if 'bundle_path' in evaluation_contract
+                        else {}
+                    ),
                 )
             )
 

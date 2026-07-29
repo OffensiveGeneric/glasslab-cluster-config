@@ -17,6 +17,9 @@ class RunState(StrEnum):
     PREPARING = 'PREPARING'
     HONEYDEW_DRAFTING_PROTOCOL = 'HONEYDEW_DRAFTING_PROTOCOL'
     AWAITING_PROTOCOL_APPROVAL = 'AWAITING_PROTOCOL_APPROVAL'
+    BEAKER_DRAFTING_CONTRACT = 'BEAKER_DRAFTING_CONTRACT'
+    HONEYDEW_REVIEWING_CONTRACT = 'HONEYDEW_REVIEWING_CONTRACT'
+    AWAITING_CONTRACT_PROMOTION = 'AWAITING_CONTRACT_PROMOTION'
     BEAKER_IMPLEMENTING = 'BEAKER_IMPLEMENTING'
     HONEYDEW_REVIEWING = 'HONEYDEW_REVIEWING'
     BEAKER_REVISING = 'BEAKER_REVISING'
@@ -50,6 +53,7 @@ class AgentName(StrEnum):
 
 class TurnKind(StrEnum):
     PROTOCOL_DRAFT = 'protocol_draft'
+    CONTRACT_CANDIDATE = 'contract_candidate'
     IMPLEMENTATION_PROPOSAL = 'implementation_proposal'
     METHODOLOGY_REVIEW = 'methodology_review'
     REVISION = 'revision'
@@ -267,6 +271,27 @@ class EvaluationContractDescriptor(BaseModel):
     required_artifacts: list[str] = Field(min_length=1)
     resource_constraints: ResourceRequest
     container_image_digest: str | None = None
+
+
+class ContractCandidateRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    contract_id: str = Field(
+        min_length=3,
+        pattern=r'^[a-z0-9][a-z0-9._-]{1,126}[a-z0-9]$',
+    )
+    version: str = Field(
+        min_length=1,
+        pattern=r'^[0-9]+\.[0-9]+\.[0-9]+(?:-[a-z0-9.-]+)?$',
+    )
+    candidate_path: str = Field(
+        min_length=1,
+        pattern=(
+            r'^[A-Za-z0-9_-][A-Za-z0-9._-]*'
+            r'(?:/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$'
+        ),
+    )
+    rationale: str = Field(min_length=1)
 
 
 class ResolvedEvaluationContract(BaseModel):

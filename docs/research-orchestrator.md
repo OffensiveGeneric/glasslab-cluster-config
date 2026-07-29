@@ -64,6 +64,12 @@ The evaluation contract is repository-controlled and immutable to both agents.
 It fixes the evaluator entry point, schemas, required artifacts, resource
 limits, and optional digest-pinned image.
 
+When an approved protocol requires a harness that is not installed, Beaker may
+draft a contract candidate in its isolated worktree. The orchestrator validates
+and seals it, Honeydew reviews the sealed read-only copy, and a Discord
+administrator must approve promotion. Neither agent can write the trusted
+catalog.
+
 The orchestrator alone validates structured outputs, classifies actions,
 performs state transitions, expands approved matrices, and delegates jobs to
 the bounded cluster execution service.
@@ -75,6 +81,8 @@ The implemented states are:
 ```text
 CREATED -> PREPARING -> HONEYDEW_DRAFTING_PROTOCOL
   -> AWAITING_PROTOCOL_APPROVAL
+  -> BEAKER_DRAFTING_CONTRACT -> HONEYDEW_REVIEWING_CONTRACT
+  -> AWAITING_CONTRACT_PROMOTION
   -> BEAKER_IMPLEMENTING -> HONEYDEW_REVIEWING
   -> BEAKER_REVISING (when requested)
   -> AWAITING_EXECUTION_APPROVAL
@@ -168,22 +176,36 @@ Resolution verifies:
 - a SHA-256 digest over all contract content
 - absence of symlinks
 
+Generated contract candidates are bounded to safe text, Python, and JSON files,
+syntax checked without executing candidate code, copied to a sealed directory,
+and hashed by the orchestrator. The sealed bundle is then copied read-only into
+Honeydew's workspace. Promotion installs that exact digest under:
+
+```text
+/mnt/artifacts/research-orchestrator/trusted-contracts/bundles/<id>/<version>
+```
+
+and atomically updates the shared trusted catalog. A protocol remains blocked
+from experiment submission until its evaluator type, primary metric,
+direction, required artifacts, and resource ceiling match the installed
+contract.
+
 Job proposals are recursively rejected when they attempt to supply evaluator
 paths, contract mounts, contract files, entry-point overrides, or contract
 digests. The deterministic Kubernetes renderer uses a digest-pinned init image,
 copies the contract to an `emptyDir`, and mounts it read-only into the runner.
 
 The authoritative `workflow-api` submission path independently resolves the
-requested ID, version, and digest against its trusted contract catalog. It
-replaces the runner command with the trusted contract wrapper, copies the
-digest-pinned contract image into an `emptyDir`, and mounts that directory
-read-only in the runner. The wrapper executes the registry-approved experiment
-entry point first and then the fixed evaluator.
+requested ID, version, and digest against its trusted contract catalog. For a
+promoted shared bundle it independently re-hashes the content and descriptor,
+then mounts the exact PVC subpath read-only. Image-backed contracts continue to
+use a digest-pinned init image and read-only `emptyDir`. In either case it
+replaces the runner command with the trusted wrapper. The wrapper executes the
+registry-approved experiment entry point first and then the fixed evaluator.
 
 The included example contract and image digest are test fixtures. The live
-trusted catalog is intentionally empty until a real contract image is
-published, so contract-bound submissions fail closed rather than run without
-the evaluator.
+catalog begins empty and is populated only by an approved promotion. Unknown,
+changed, or mismatched bundles fail closed.
 
 ## Actions And Jobs
 
@@ -195,6 +217,8 @@ Policy is deterministic:
 | Experiment-branch commit | automatic and audited |
 | Protocol update | Honeydew only |
 | Evaluation-contract modification | denied |
+| Draft evaluation-contract candidate | Beaker only |
+| Promote sealed evaluation contract | Honeydew review and human approval |
 | Small validation job | Honeydew approval |
 | GPU job | Honeydew and human approval |
 | Git push, PR, or publication | human approval |

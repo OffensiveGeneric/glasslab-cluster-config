@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from threading import Event
 
@@ -7,12 +8,21 @@ from fastapi.testclient import TestClient
 import pytest
 
 from app.contracts import EvaluationContractResolver
+from app.contract_candidates import ContractCandidateManager
 from app.discord_adapter import DisabledDiscordAdapter
 from app.engine import ResearchOrchestrator
 from app.main import create_app
 from app.mock_runtime import ScriptedMockRuntime
 from app.policy import ActionPolicy
-from app.schemas import ApprovalStatus, JobStatus, RunCreateRequest, RunState
+from app.schemas import (
+    AgentTurnResult,
+    ApprovalStatus,
+    JobStatus,
+    RequestedAction,
+    RunCreateRequest,
+    RunState,
+    TurnKind,
+)
 from app.storage import SqliteStore
 from app.workspaces import WorkspaceManager
 
@@ -49,6 +59,77 @@ class ContractOversizedThenValidRuntime(ScriptedMockRuntime):
             result.requested_actions[0].arguments['resources']['memory_gib'] = 2
             self._oversized_once = False
         return result, message_id
+
+
+class NewContractRuntime(ScriptedMockRuntime):
+    def run_turn(self, **kwargs):
+        prompt = kwargs['prompt']
+        agent = kwargs['agent'].value
+        if agent == 'honeydew' and 'Draft a concrete program.md' in prompt:
+            result, message_id = super().run_turn(**kwargs)
+            assert result.evaluation_contract_proposal is not None
+            result.evaluation_contract_proposal.evaluator_type = 'candidate-v1'
+            return result, message_id
+        if agent == 'beaker' and 'Draft an immutable evaluation-contract' in prompt:
+            root = kwargs['workspace'] / 'contract-candidate/candidate-v1/1.0.0'
+            root.mkdir(parents=True)
+            descriptor = {
+                'contract_id': 'candidate-v1',
+                'version': '1.0.0',
+                'manifest': {
+                    'primary_metric': 'score',
+                    'primary_metric_direction': 'maximize',
+                },
+                'execution_wrapper': 'run_contract.py',
+                'evaluation_entry_point': 'evaluator.py',
+                'expected_input_schema': 'input.schema.json',
+                'expected_output_schema': 'output.schema.json',
+                'required_artifacts': ['metrics.json', 'evaluation.json'],
+                'resource_constraints': {
+                    'cpu': 1,
+                    'memory_gib': 1,
+                    'gpus': 0,
+                    'wallclock_minutes': 5,
+                },
+                'container_image_digest': None,
+            }
+            (root / 'contract.json').write_text(json.dumps(descriptor))
+            (root / 'run_contract.py').write_text('print("wrapper")\n')
+            (root / 'evaluator.py').write_text('print("evaluate")\n')
+            (root / 'input.schema.json').write_text('{"type": "object"}\n')
+            (root / 'output.schema.json').write_text('{"type": "object"}\n')
+            return (
+                AgentTurnResult(
+                    kind=TurnKind.CONTRACT_CANDIDATE,
+                    summary='Drafted and locally checked the candidate.',
+                    requested_actions=[
+                        RequestedAction(
+                            type='propose_evaluation_contract',
+                            arguments={
+                                'contract_id': 'candidate-v1',
+                                'version': '1.0.0',
+                                'candidate_path': (
+                                    'contract-candidate/candidate-v1/1.0.0'
+                                ),
+                                'rationale': 'Implement the approved evaluator.',
+                            },
+                            reason='Review and promote the sealed candidate.',
+                        )
+                    ],
+                    done=True,
+                ),
+                'mock-contract-message',
+            )
+        if agent == 'honeydew' and 'Review the sealed evaluation-contract' in prompt:
+            return (
+                AgentTurnResult(
+                    kind=TurnKind.METHODOLOGY_REVIEW,
+                    summary='The sealed candidate implements the protocol.',
+                    done=True,
+                ),
+                'mock-contract-review',
+            )
+        return super().run_turn(**kwargs)
 
 
 def _pending_action(store, run_id: str, action_type: str):
@@ -123,6 +204,51 @@ def test_protocol_rejection_redrafts_with_feedback(
         'approve_protocol',
     )
     assert replacement.action_id != original.action_id
+
+
+def test_new_contract_is_reviewed_promoted_and_bound(
+    orchestrator_bundle,
+) -> None:
+    settings, store, cluster, _, original = orchestrator_bundle
+    engine = ResearchOrchestrator(
+        settings=settings,
+        store=store,
+        runtime=NewContractRuntime(runner_image=RUNNER_IMAGE),
+        workspaces=original.workspaces,
+        contracts=original.contracts,
+        contract_candidates=original.contract_candidates,
+        policy=original.policy,
+        cluster=cluster,
+        discord=DisabledDiscordAdapter(),
+    )
+    run = engine.create_run(
+        RunCreateRequest(objective='Exercise contract candidate promotion.')
+    )
+    protocol = _pending_action(store, run.run_id, 'approve_protocol')
+    engine.approve_action(
+        protocol.action_id,
+        reviewer='test-human',
+        reason='Protocol accepted.',
+    )
+
+    awaiting = store.get_run(run.run_id)
+    assert awaiting.state == RunState.AWAITING_CONTRACT_PROMOTION
+    candidate = _pending_action(
+        store,
+        run.run_id,
+        'propose_evaluation_contract',
+    )
+    assert candidate.honeydew_approved is True
+    engine.approve_action(
+        candidate.action_id,
+        reviewer='test-admin',
+        reason='Promote the reviewed harness.',
+    )
+
+    rebound = store.get_run(run.run_id)
+    assert rebound.evaluation_contract_id == 'candidate-v1'
+    assert rebound.state == RunState.AWAITING_EXECUTION_APPROVAL
+    assert Path(settings.trusted_contract_catalog_path).is_file()
 
 
 def test_rejected_protocol_action_resumes_after_partial_failure(
@@ -389,7 +515,14 @@ def test_restart_recovery_from_job_running(orchestrator_bundle) -> None:
             approved_repo_ref=settings.approved_repo_ref,
         ),
         contracts=EvaluationContractResolver(
-            settings.evaluation_contract_root
+            settings.promoted_contract_root,
+            fallback_roots=[settings.evaluation_contract_root],
+        ),
+        contract_candidates=ContractCandidateManager(
+            sealed_root=settings.sealed_contract_candidate_root,
+            promoted_root=settings.promoted_contract_root,
+            catalog_path=settings.trusted_contract_catalog_path,
+            shared_mount_root=settings.shared_mount_root,
         ),
         policy=ActionPolicy(
             permitted_images=settings.permitted_job_images,

@@ -1,5 +1,7 @@
 import sys
 from datetime import datetime, timezone
+from hashlib import sha256
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -208,6 +210,80 @@ def test_evaluation_contract_must_match_trusted_catalog() -> None:
     )
     with pytest.raises(ValueError, match='digest mismatch'):
         resolve_evaluation_contract(replaced, settings)
+
+
+def test_evaluation_contract_resolves_verified_shared_bundle(
+    tmp_path: Path,
+) -> None:
+    bundle = tmp_path / 'trusted' / 'candidate-v1' / '1.0.0'
+    bundle.mkdir(parents=True)
+    descriptor = {
+        'contract_id': 'candidate-v1',
+        'version': '1.0.0',
+        'execution_wrapper': 'run_contract.py',
+        'evaluation_entry_point': 'evaluator.py',
+    }
+    (bundle / 'contract.json').write_text(json.dumps(descriptor))
+    (bundle / 'run_contract.py').write_text('print("wrapper")\n')
+    (bundle / 'evaluator.py').write_text('print("evaluate")\n')
+    digest_builder = sha256()
+    for path in sorted(bundle.rglob('*')):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(bundle).as_posix().encode()
+        content = path.read_bytes()
+        digest_builder.update(len(relative).to_bytes(8, 'big'))
+        digest_builder.update(relative)
+        digest_builder.update(len(content).to_bytes(8, 'big'))
+        digest_builder.update(content)
+    digest = digest_builder.hexdigest()
+    (bundle / 'contract.sha256').write_text(digest + '\n')
+    trusted = {
+        'contract_id': 'candidate-v1',
+        'version': '1.0.0',
+        'digest': digest,
+        'bundle_path': 'trusted/candidate-v1/1.0.0',
+        'execution_wrapper': 'run_contract.py',
+        'evaluation_entry_point': 'evaluator.py',
+    }
+    catalog = tmp_path / 'catalog.json'
+    catalog.write_text(json.dumps({'candidate-v1@1.0.0': trusted}))
+    manifest = RunManifest(
+        run_id='run-shared-contract',
+        workflow_id='metric-search-v0',
+        workflow_family='metric-learning',
+        display_name='Metric Search',
+        objective='Execute one shared-bundle contract.',
+        submitted_by='test-suite',
+        submitted_at=datetime.now(timezone.utc),
+        inputs={},
+        requested_models=['agent-generated-python'],
+        resource_profile='gpu-small',
+        runner_image='ghcr.io/example/runner:test',
+        evaluator_type='contract',
+        approval_tier='tier-2-approved-execution',
+        expected_artifacts={'required': ['metrics.json'], 'optional': []},
+        experiment_type='gpu-training-job',
+        workload_id='metric-search-v0',
+        entrypoint=['python3', 'run.py'],
+        config_payload={
+            'evaluation_contract': {
+                'contract_id': 'candidate-v1',
+                'version': '1.0.0',
+                'digest': digest,
+            }
+        },
+        budget={'max_wallclock_minutes': 5},
+    )
+    settings = Settings(
+        evaluation_contract_catalog_path=str(catalog),
+        evaluation_contract_bundle_root=str(tmp_path),
+    )
+
+    assert resolve_evaluation_contract(manifest, settings) == trusted
+    (bundle / 'evaluator.py').write_text('print("tampered")\n')
+    with pytest.raises(ValueError, match='bundle digest mismatch'):
+        resolve_evaluation_contract(manifest, settings)
 
 
 def test_evaluation_contract_rejects_agent_supplied_execution_fields() -> None:

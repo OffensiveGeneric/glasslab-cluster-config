@@ -7,6 +7,7 @@ import tempfile
 
 from .cluster import FakeClusterExecutor
 from .config import SERVICE_ROOT, Settings
+from .contract_candidates import ContractCandidateManager
 from .contracts import EvaluationContractResolver
 from .discord_adapter import DisabledDiscordAdapter
 from .engine import ResearchOrchestrator
@@ -62,6 +63,12 @@ def run_smoke() -> dict[str, object]:
             ),
             permitted_job_images=[RUNNER_IMAGE],
             cluster_execution_mode='fake',
+            promoted_contract_root=str(root / 'trusted-contracts'),
+            sealed_contract_candidate_root=str(root / 'contract-candidates'),
+            trusted_contract_catalog_path=str(
+                root / 'trusted-contracts' / 'catalog.json'
+            ),
+            shared_mount_root=str(root),
             one_active_run=True,
             maximum_parallel_jobs=2,
         )
@@ -77,7 +84,14 @@ def run_smoke() -> dict[str, object]:
                 approved_repo_ref=settings.approved_repo_ref,
             ),
             contracts=EvaluationContractResolver(
-                settings.evaluation_contract_root
+                settings.promoted_contract_root,
+                fallback_roots=[settings.evaluation_contract_root],
+            ),
+            contract_candidates=ContractCandidateManager(
+                sealed_root=settings.sealed_contract_candidate_root,
+                promoted_root=settings.promoted_contract_root,
+                catalog_path=settings.trusted_contract_catalog_path,
+                shared_mount_root=settings.shared_mount_root,
             ),
             policy=ActionPolicy(
                 permitted_images=settings.permitted_job_images,

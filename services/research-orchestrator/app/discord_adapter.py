@@ -23,6 +23,7 @@ def _action_title(action_type: str) -> str:
         'approve_protocol': 'Approve research protocol',
         'submit_experiment_matrix': 'Approve cluster experiment matrix',
         'accept_final_report': 'Accept final research report',
+        'propose_evaluation_contract': 'Promote evaluation contract',
     }.get(action_type, action_type.replace('_', ' ').capitalize())
 
 
@@ -40,6 +41,8 @@ def _button_label(action_type: str, arguments: dict[str, Any]) -> str:
             else 0
         )
         return f'Approve {job_count} jobs' if job_count else 'Approve matrix'
+    if action_type == 'propose_evaluation_contract':
+        return 'Promote contract'
     return 'Approve'
 
 
@@ -126,6 +129,38 @@ def _render_action_context(payload: dict[str, Any]) -> str:
                     )
                 ]
             )
+    elif action_type == 'propose_evaluation_contract':
+        candidate = payload.get('contract_candidate')
+        artifact = payload.get('artifact')
+        if not isinstance(candidate, dict):
+            candidate = {}
+        if not isinstance(artifact, dict):
+            artifact = {}
+        descriptor = candidate.get('descriptor')
+        if not isinstance(descriptor, dict):
+            descriptor = {}
+        manifest = descriptor.get('manifest')
+        if not isinstance(manifest, dict):
+            manifest = {}
+        lines.extend(
+            [
+                '',
+                '**What you are reviewing**',
+                (
+                    f"Sealed contract `{candidate.get('contract_id', 'unknown')}` "
+                    f"version `{candidate.get('version', 'unknown')}` "
+                    f"(SHA-256 `{str(artifact.get('sha256', 'unknown'))[:12]}...`)."
+                ),
+                (
+                    f"Primary metric: `{manifest.get('primary_metric', 'unknown')}` "
+                    f"({manifest.get('primary_metric_direction', 'unknown')}). "
+                    f"Honeydew approval: `{payload.get('honeydew_approved', False)}`."
+                ),
+                '',
+                '**What approval does**',
+                str(payload.get('effect', 'Promote the sealed contract.')),
+            ]
+        )
     elif action_type == 'submit_experiment_matrix':
         variants = arguments.get('variants', [])
         seeds = arguments.get('seeds', [])

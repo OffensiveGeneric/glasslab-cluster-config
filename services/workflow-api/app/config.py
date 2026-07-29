@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     image_pull_secret_name: str = 'glasslab-ghcr-pull'
     gpu_runtime_class_name: str = 'nvidia'
     evaluation_contracts: dict[str, dict[str, str]] = Field(default_factory=dict)
+    evaluation_contract_catalog_path: str | None = None
+    evaluation_contract_bundle_root: str = '/mnt/artifacts'
     user_priority_class_name: str = 'glasslab-user-high'
     autonomous_priority_class_name: str = 'glasslab-autonomous-low'
     intake_agent_enabled: bool = False

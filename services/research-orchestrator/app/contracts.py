@@ -47,13 +47,32 @@ def compute_contract_digest(root: Path) -> str:
 
 
 class EvaluationContractResolver:
-    def __init__(self, contract_root: str) -> None:
+    def __init__(
+        self,
+        contract_root: str,
+        *,
+        fallback_roots: list[str] | None = None,
+    ) -> None:
         self.contract_root = Path(contract_root).resolve()
+        self.fallback_roots = [
+            Path(root).resolve() for root in (fallback_roots or [])
+        ]
 
     def resolve(self, contract_id: str, version: str) -> ResolvedEvaluationContract:
-        root = (self.contract_root / contract_id / version).resolve()
-        if not root.is_relative_to(self.contract_root):
-            raise ContractIntegrityError('contract path escapes configured root')
+        root = None
+        for candidate_root in [self.contract_root, *self.fallback_roots]:
+            candidate = (candidate_root / contract_id / version).resolve()
+            if not candidate.is_relative_to(candidate_root):
+                raise ContractIntegrityError(
+                    'contract path escapes configured root'
+                )
+            if candidate.is_dir():
+                root = candidate
+                break
+        if root is None:
+            raise ContractIntegrityError(
+                f'evaluation contract is not installed: {contract_id}@{version}'
+            )
         descriptor_path = root / 'contract.json'
         digest_path = root / 'contract.sha256'
         if not descriptor_path.is_file() or not digest_path.is_file():

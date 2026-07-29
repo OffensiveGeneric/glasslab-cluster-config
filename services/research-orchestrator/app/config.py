@@ -27,6 +27,16 @@ class Settings(BaseSettings):
     approved_repo_path: str = '/workspace/cluster-config'
     approved_repo_ref: str = 'main'
     evaluation_contract_root: str = str(SERVICE_ROOT / 'evaluation-contracts')
+    promoted_contract_root: str = (
+        '/tmp/glasslab-research-orchestrator/trusted-contracts'
+    )
+    sealed_contract_candidate_root: str = (
+        '/tmp/glasslab-research-orchestrator/contract-candidates'
+    )
+    trusted_contract_catalog_path: str = (
+        '/tmp/glasslab-research-orchestrator/trusted-contracts/catalog.json'
+    )
+    shared_mount_root: str = '/tmp/glasslab-research-orchestrator'
     default_evaluation_contract_id: str = 'example-research-v1'
     default_evaluation_contract_version: str = '1.0.0'
 

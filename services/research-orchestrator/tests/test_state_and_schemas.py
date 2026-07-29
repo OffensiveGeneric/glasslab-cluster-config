@@ -22,6 +22,14 @@ def test_valid_and_invalid_state_transitions() -> None:
         RunState.AWAITING_PROTOCOL_APPROVAL,
         RunState.HONEYDEW_DRAFTING_PROTOCOL,
     )
+    validate_transition(
+        RunState.AWAITING_PROTOCOL_APPROVAL,
+        RunState.BEAKER_DRAFTING_CONTRACT,
+    )
+    validate_transition(
+        RunState.AWAITING_CONTRACT_PROMOTION,
+        RunState.BEAKER_IMPLEMENTING,
+    )
     with pytest.raises(InvalidTransition):
         validate_transition(RunState.CREATED, RunState.COMPLETE)
     with pytest.raises(InvalidTransition):

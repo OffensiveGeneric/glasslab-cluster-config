@@ -7,6 +7,7 @@ import pytest
 
 from app.cluster import FakeClusterExecutor
 from app.config import SERVICE_ROOT, Settings
+from app.contract_candidates import ContractCandidateManager
 from app.contracts import EvaluationContractResolver
 from app.discord_adapter import DisabledDiscordAdapter
 from app.engine import ResearchOrchestrator
@@ -63,6 +64,12 @@ def orchestrator_bundle(tmp_path):
         evaluation_contract_root=str(SERVICE_ROOT / 'evaluation-contracts'),
         permitted_job_images=[RUNNER_IMAGE],
         cluster_execution_mode='fake',
+        promoted_contract_root=str(tmp_path / 'trusted-contracts'),
+        sealed_contract_candidate_root=str(tmp_path / 'contract-candidates'),
+        trusted_contract_catalog_path=str(
+            tmp_path / 'trusted-contracts' / 'catalog.json'
+        ),
+        shared_mount_root=str(tmp_path),
         one_active_run=False,
         maximum_parallel_jobs=2,
     )
@@ -79,7 +86,14 @@ def orchestrator_bundle(tmp_path):
             approved_repo_ref=settings.approved_repo_ref,
         ),
         contracts=EvaluationContractResolver(
-            settings.evaluation_contract_root
+            settings.promoted_contract_root,
+            fallback_roots=[settings.evaluation_contract_root],
+        ),
+        contract_candidates=ContractCandidateManager(
+            sealed_root=settings.sealed_contract_candidate_root,
+            promoted_root=settings.promoted_contract_root,
+            catalog_path=settings.trusted_contract_catalog_path,
+            shared_mount_root=settings.shared_mount_root,
         ),
         policy=ActionPolicy(
             permitted_images=settings.permitted_job_images,

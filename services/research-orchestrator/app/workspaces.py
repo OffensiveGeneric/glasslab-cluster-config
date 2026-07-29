@@ -138,3 +138,29 @@ class WorkspaceManager:
             target = workspace / 'program.md'
             shutil.copy2(protocol, target)
             target.chmod(0o444)
+
+    def copy_contract_candidate_for_review(
+        self,
+        *,
+        run_id: str,
+        source: Path,
+        contract_id: str,
+        version: str,
+        digest: str,
+    ) -> Path:
+        source = source.resolve()
+        if source.is_symlink() or not source.is_dir():
+            raise WorkspaceError('sealed contract candidate is not a directory')
+        destination = (
+            self.paths(run_id).honeydew
+            / 'contract-candidate-review'
+            / contract_id
+            / version
+            / digest
+        )
+        if destination.exists():
+            shutil.rmtree(destination)
+        shutil.copytree(source, destination)
+        for path in destination.rglob('*'):
+            path.chmod(0o555 if path.is_dir() else 0o444)
+        return destination

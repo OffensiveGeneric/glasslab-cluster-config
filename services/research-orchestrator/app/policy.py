@@ -10,6 +10,7 @@ from .schemas import (
     ActionRecord,
     AgentName,
     ApprovalStatus,
+    ContractCandidateRequest,
     ExperimentMatrix,
     PolicyClassification,
     RequestedAction,
@@ -77,6 +78,18 @@ class ActionPolicy:
             return PolicyClassification.DENY, (
                 f'action type {action.type!r} is denied'
             )
+        if action.type == 'propose_evaluation_contract':
+            if proposed_by != AgentName.BEAKER:
+                return PolicyClassification.DENY, (
+                    'only Beaker may propose an evaluation contract candidate'
+                )
+            try:
+                ContractCandidateRequest.model_validate(action.arguments)
+            except ValidationError as exc:
+                return PolicyClassification.DENY, (
+                    f'contract candidate schema validation failed: {exc}'
+                )
+            return PolicyClassification.HONEYDEW_AND_HUMAN_APPROVAL, None
         try:
             reject_contract_overrides(action.arguments)
         except ContractIntegrityError as exc:

@@ -22,6 +22,8 @@ data:
   GLASSLAB_WORKFLOW_API_IMAGE_PULL_SECRET_NAME: glasslab-ghcr-pull
   # Keep empty until a real digest-pinned contract image is published.
   GLASSLAB_WORKFLOW_API_EVALUATION_CONTRACTS: "{}"
+  GLASSLAB_WORKFLOW_API_EVALUATION_CONTRACT_CATALOG_PATH: /mnt/artifacts/research-orchestrator/trusted-contracts/catalog.json
+  GLASSLAB_WORKFLOW_API_EVALUATION_CONTRACT_BUNDLE_ROOT: /mnt/artifacts
   GLASSLAB_WORKFLOW_API_USER_PRIORITY_CLASS_NAME: glasslab-user-high
   GLASSLAB_WORKFLOW_API_AUTONOMOUS_PRIORITY_CLASS_NAME: glasslab-autonomous-low
   GLASSLAB_WORKFLOW_API_INTAKE_AGENT_ENABLED: "false"
