@@ -1207,7 +1207,9 @@ class ResearchOrchestrator:
             'required artifacts, leakage risks, deterministic behavior, '
             'resource limits, and whether the wrapper preserves the immutable '
             'evaluation boundary. Set done=true only if it is suitable for '
-            'admin promotion. Do not edit the candidate.\n\n'
+            'admin promotion. Set requested_actions to an empty list; the '
+            'orchestrator already owns the promotion action. Do not propose '
+            'file, approval, or transition actions. Do not edit the candidate.\n\n'
             f'Review path: {artifact.metadata["review_path"]}\n'
             f'Descriptor:\n'
             + json.dumps(
