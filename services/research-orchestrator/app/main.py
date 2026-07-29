@@ -102,15 +102,27 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        await asyncio.to_thread(engine.recover)
-        task = asyncio.create_task(watcher.run()) if start_watcher else None
+        recovery_task = asyncio.create_task(
+            asyncio.to_thread(engine.recover),
+            name='research-orchestrator-recovery',
+        )
+        watcher_task = (
+            asyncio.create_task(
+                watcher.run(),
+                name='research-orchestrator-job-watcher',
+            )
+            if start_watcher
+            else None
+        )
         try:
             yield
         finally:
             watcher.stop()
-            if task is not None:
-                await task
             engine.runtime.close()
+            tasks = [recovery_task]
+            if watcher_task is not None:
+                tasks.append(watcher_task)
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     app = FastAPI(
         title='Glasslab Research Orchestrator',

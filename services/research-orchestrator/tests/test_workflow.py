@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import Event
 
 from fastapi.testclient import TestClient
 
@@ -232,6 +233,27 @@ def test_http_api_with_mock_runtime(orchestrator_bundle) -> None:
         )
         assert approval.status_code == 200
         assert client.get(f'/actions/{action.action_id}').status_code == 200
+
+
+def test_http_startup_does_not_wait_for_recovery(
+    orchestrator_bundle,
+    monkeypatch,
+) -> None:
+    settings, _, _, _, engine = orchestrator_bundle
+    recovery_started = Event()
+    release_recovery = Event()
+
+    def blocking_recovery() -> list[str]:
+        recovery_started.set()
+        release_recovery.wait(timeout=5)
+        return []
+
+    monkeypatch.setattr(engine, 'recover', blocking_recovery)
+    app = create_app(settings, engine=engine, start_watcher=False)
+    with TestClient(app) as client:
+        assert recovery_started.wait(timeout=1)
+        assert client.get('/health').status_code == 200
+        release_recovery.set()
 
 
 def test_http_mutations_require_operator_token(orchestrator_bundle) -> None:
