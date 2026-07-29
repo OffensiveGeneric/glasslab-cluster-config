@@ -2307,7 +2307,13 @@ class ResearchOrchestrator:
                 session_id=run.beaker_session_id,
             )
 
-    def cancel_run(self, run_id: str) -> RunRecord:
+    def cancel_run(
+        self,
+        run_id: str,
+        *,
+        requested_by: str | None = None,
+        reason: str | None = None,
+    ) -> RunRecord:
         # Like pause, cancellation must not wait for an active model turn.
         run = self.store.get_run(run_id)
         if run.state in TERMINAL_STATES:
@@ -2342,13 +2348,21 @@ class ResearchOrchestrator:
         cancelled = self._transition(
             run_id,
             RunState.CANCELLED,
-            payload={'cancellation_errors': cancellation_errors},
+            payload={
+                'cancellation_errors': cancellation_errors,
+                'requested_by': requested_by,
+                'reason': reason,
+            },
         )
         self._event(
             run_id,
             source='orchestrator',
             event_type='run.cancelled',
-            payload={'cancellation_errors': cancellation_errors},
+            payload={
+                'cancellation_errors': cancellation_errors,
+                'requested_by': requested_by,
+                'reason': reason,
+            },
         )
         return cancelled
 

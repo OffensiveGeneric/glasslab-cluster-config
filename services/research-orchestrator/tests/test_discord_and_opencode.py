@@ -14,6 +14,7 @@ from app.discord_controls import (
     DiscordControlGateway,
     DiscordControlPolicy,
     execute_discord_action,
+    execute_discord_run_cancellation,
     execute_discord_run_creation,
 )
 from app.opencode_runtime import (
@@ -333,6 +334,40 @@ def test_discord_gateway_registers_component_handler() -> None:
         guild=discord.Object(id=123456789),
     )
     assert command is not None
+    cancel_command = gateway.tree.get_command(
+        'research-cancel',
+        guild=discord.Object(id=123456789),
+    )
+    assert cancel_command is not None
+
+
+def test_discord_cancellation_records_actor_and_reason() -> None:
+    engine = Mock()
+    expected = SimpleNamespace(
+        run_id='run-1',
+        state=SimpleNamespace(value='CANCELLED'),
+    )
+    engine.cancel_run.return_value = expected
+    actor = DiscordControlActor(
+        user_id='142100176322953216',
+        display_name='Tyler',
+        guild_id='guild-1',
+        role_ids=frozenset({'role-1'}),
+    )
+
+    result = execute_discord_run_cancellation(
+        engine,
+        run_id='run-1',
+        actor=actor,
+        reason='Superseded by benchmark validation.',
+    )
+
+    assert result is expected
+    engine.cancel_run.assert_called_once_with(
+        'run-1',
+        requested_by='discord:142100176322953216:Tyler',
+        reason='Superseded by benchmark validation.',
+    )
 
 
 def test_discord_run_creation_uses_objective_without_http() -> None:

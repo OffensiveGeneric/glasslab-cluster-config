@@ -83,6 +83,20 @@ def execute_discord_run_creation(
     return engine.create_run(RunCreateRequest(objective=objective))
 
 
+def execute_discord_run_cancellation(
+    engine: ResearchOrchestrator,
+    *,
+    run_id: str,
+    actor: DiscordControlActor,
+    reason: str | None = None,
+) -> RunRecord:
+    return engine.cancel_run(
+        run_id,
+        requested_by=actor.reviewer,
+        reason=reason or 'Cancelled through Discord controls.',
+    )
+
+
 def execute_discord_task_creation(
     engine: ResearchOrchestrator,
     *,
@@ -205,6 +219,26 @@ class DiscordControlGateway:
                 interaction,
                 archive=archive,
                 objective=str(objective) if objective else None,
+            )
+
+        @self.tree.command(
+            name='research-cancel',
+            description='Cancel a Glasslab research run and its active jobs.',
+            guild=self.guild,
+        )
+        @app_commands.describe(
+            run_id='Optional in a run thread; required from the main channel.',
+            reason='Optional reason recorded in the authoritative event log.',
+        )
+        async def research_cancel(
+            interaction: discord.Interaction,
+            run_id: str | None = None,
+            reason: app_commands.Range[str, 3, 500] | None = None,
+        ) -> None:
+            await self._on_research_cancel(
+                interaction,
+                run_id=run_id,
+                reason=str(reason) if reason else None,
             )
 
     async def _on_ready(self) -> None:
@@ -371,6 +405,70 @@ class DiscordControlGateway:
                 f'Benchmark import or run creation failed: {exc}',
                 ephemeral=True,
                 allowed_mentions=discord.AllowedMentions.none(),
+            )
+
+    def _resolve_controlled_run(
+        self,
+        *,
+        channel_id: str,
+        run_id: str | None,
+    ) -> RunRecord:
+        if run_id:
+            run = self.engine.store.get_run(run_id)
+        else:
+            run = next(
+                (
+                    candidate
+                    for candidate in self.engine.store.list_runs()
+                    if candidate.discord_thread_id == channel_id
+                ),
+                None,
+            )
+            if run is None:
+                raise ValueError(
+                    'run_id is required outside a Glasslab research thread'
+                )
+        if channel_id not in {self.channel_id, run.discord_thread_id}:
+            raise ValueError(
+                'cancel the run from its research thread or the configured '
+                'Glasslab channel'
+            )
+        return run
+
+    async def _on_research_cancel(
+        self,
+        interaction: discord.Interaction,
+        *,
+        run_id: str | None,
+        reason: str | None,
+    ) -> None:
+        actor = self._actor(interaction)
+        if not self.policy.is_authorized(actor):
+            await self._respond(
+                interaction,
+                'You are not authorized to cancel Glasslab research runs.',
+            )
+            return
+        try:
+            run = self._resolve_controlled_run(
+                channel_id=str(interaction.channel_id),
+                run_id=run_id,
+            )
+            cancelled = await asyncio.to_thread(
+                execute_discord_run_cancellation,
+                self.engine,
+                run_id=run.run_id,
+                actor=actor,
+                reason=reason,
+            )
+            await self._respond(
+                interaction,
+                f'Run `{cancelled.run_id}` is now {cancelled.state.value}.',
+            )
+        except Exception as exc:
+            await self._respond(
+                interaction,
+                f'Run cancellation failed: {exc}',
             )
 
     async def _on_interaction(

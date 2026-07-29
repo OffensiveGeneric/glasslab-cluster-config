@@ -438,6 +438,17 @@ compiles, preflights, and starts only ready tasks. `/benchmark-start` remains
 as a compatibility alias. All start commands are restricted to the configured
 channel and Discord administrator role.
 
+Cancel an active run from its Discord thread:
+
+```text
+/research-cancel reason: Superseded by a newer experiment.
+```
+
+From the configured main channel, provide `run_id`. Cancellation aborts active
+OpenCode turns, requests cancellation of active cluster jobs, records the
+administrator identity and reason, and publishes the durable cancellation
+event back to the run thread.
+
 ## Local Development
 
 ```bash
