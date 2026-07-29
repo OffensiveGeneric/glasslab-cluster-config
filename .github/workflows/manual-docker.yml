@@ -94,7 +94,7 @@ jobs:
             TAG=$(echo "${{ inputs.tag }}" | tr '[:upper:]' '[:lower:]')
             echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           else
-            echo "tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            echo "tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Set up Docker Buildx

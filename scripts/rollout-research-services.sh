@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+NAMESPACE="${GLASSLAB_V2_NAMESPACE:-glasslab-v2}"
+KUBECTL="${KUBECTL:-kubectl}"
+SERVICE="all"
+IMAGE_TAG=""
+SYNC=false
+SKIP_SMOKE=false
+
+usage() {
+  cat <<'USAGE'
+Usage: rollout-research-services.sh [options]
+
+Roll out CI-published workflow-api and research-orchestrator images. Images are
+selected by immutable Git commit tag; this script does not build or push.
+
+Options:
+  --service <name>  all, workflow-api, or research-orchestrator. Default: all
+  --tag <tag>       GHCR image tag. Default: full SHA of the checked-out commit
+  --sync            Fast-forward the canonical checkout to origin/main first
+  --skip-smoke      Skip post-rollout service health checks
+  -h, --help        Show this help
+USAGE
+}
+
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 || {
+    printf '[rollout-research-services] missing command: %s\n' "$1" >&2
+    exit 1
+  }
+}
+
+apply_manifest() {
+  local path="$1"
+  printf '[rollout-research-services] applying %s\n' "$path"
+  "$KUBECTL" apply -f "$path"
+}
+
+require_object() {
+  local kind="$1"
+  local name="$2"
+  if ! "$KUBECTL" -n "$NAMESPACE" get "$kind" "$name" >/dev/null 2>&1; then
+    printf '[rollout-research-services] required %s/%s is missing in %s\n' \
+      "$kind" "$name" "$NAMESPACE" >&2
+    exit 1
+  fi
+}
+
+rollout_workflow_api() {
+  local image="ghcr.io/offensivegeneric/glasslab-workflow-api:${IMAGE_TAG}"
+
+  require_object persistentvolumeclaim glasslab-shared-datasets
+  require_object persistentvolumeclaim glasslab-shared-artifacts
+  "$ROOT_DIR/scripts/seed-registry.sh"
+  apply_manifest "$ROOT_DIR/kubeadm/glasslab-v2/config/10-workflow-api-configmap.yaml"
+  apply_manifest "$ROOT_DIR/kubeadm/glasslab-v2/workflow-api/10-rbac.yaml"
+  apply_manifest "$ROOT_DIR/kubeadm/glasslab-v2/workflow-api/30-service.yaml"
+  apply_manifest "$ROOT_DIR/kubeadm/glasslab-v2/workflow-api/40-workspace-network-policy.yaml"
+
+  printf '[rollout-research-services] deploying workflow-api image %s\n' "$image"
+  "$KUBECTL" set image \
+    -f "$ROOT_DIR/kubeadm/glasslab-v2/workflow-api/20-deployment.yaml" \
+    "workflow-api=$image" --local -o yaml |
+    "$KUBECTL" apply -f -
+  "$KUBECTL" -n "$NAMESPACE" rollout status \
+    deployment/glasslab-workflow-api --timeout=300s
+}
+
+rollout_research_orchestrator() {
+  local image="ghcr.io/offensivegeneric/glasslab-research-orchestrator:${IMAGE_TAG}"
+
+  require_object persistentvolumeclaim glasslab-shared-artifacts
+  apply_manifest "$ROOT_DIR/kubeadm/glasslab-v2/research-orchestrator/00-service-account.yaml"
+  apply_manifest "$ROOT_DIR/kubeadm/glasslab-v2/research-orchestrator/10-configmap.yaml"
+  apply_manifest "$ROOT_DIR/kubeadm/glasslab-v2/research-orchestrator/30-service.yaml"
+
+  printf '[rollout-research-services] deploying research-orchestrator image %s\n' "$image"
+  "$KUBECTL" set image \
+    -f "$ROOT_DIR/kubeadm/glasslab-v2/research-orchestrator/20-deployment.yaml" \
+    "orchestrator=$image" --local -o yaml |
+    "$KUBECTL" apply -f -
+  "$KUBECTL" -n "$NAMESPACE" rollout status \
+    deployment/glasslab-research-orchestrator --timeout=300s
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --service)
+      SERVICE="${2:-}"
+      shift 2
+      ;;
+    --tag)
+      IMAGE_TAG="${2:-}"
+      shift 2
+      ;;
+    --sync)
+      SYNC=true
+      shift
+      ;;
+    --skip-smoke)
+      SKIP_SMOKE=true
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      printf '[rollout-research-services] unknown argument: %s\n' "$1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+case "$SERVICE" in
+  all|workflow-api|research-orchestrator) ;;
+  *)
+    printf '[rollout-research-services] invalid service: %s\n' "$SERVICE" >&2
+    exit 1
+    ;;
+esac
+
+need_cmd git
+need_cmd "$KUBECTL"
+
+cd "$ROOT_DIR"
+
+if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+  printf '[rollout-research-services] refusing to deploy from a dirty checkout\n' >&2
+  git status --short >&2
+  exit 1
+fi
+
+if [[ "$SYNC" == true ]]; then
+  printf '[rollout-research-services] fast-forwarding to origin/main\n'
+  git fetch origin main
+  git checkout main
+  git merge --ff-only origin/main
+fi
+
+if [[ -z "$IMAGE_TAG" ]]; then
+  IMAGE_TAG="$(git rev-parse HEAD)"
+fi
+
+if [[ ! "$IMAGE_TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]; then
+  printf '[rollout-research-services] invalid image tag: %s\n' "$IMAGE_TAG" >&2
+  exit 1
+fi
+
+require_object secret glasslab-ghcr-pull
+
+case "$SERVICE" in
+  all)
+    rollout_workflow_api
+    rollout_research_orchestrator
+    ;;
+  workflow-api)
+    rollout_workflow_api
+    ;;
+  research-orchestrator)
+    rollout_research_orchestrator
+    ;;
+esac
+
+printf '[rollout-research-services] deployed images\n'
+"$KUBECTL" -n "$NAMESPACE" get deployment \
+  glasslab-workflow-api glasslab-research-orchestrator \
+  -o custom-columns=NAME:.metadata.name,IMAGE:.spec.template.spec.containers[0].image,READY:.status.readyReplicas
+
+if [[ "$SKIP_SMOKE" != true ]]; then
+  "$ROOT_DIR/scripts/smoke-test-v2.sh"
+  "$KUBECTL" -n "$NAMESPACE" exec \
+    deployment/glasslab-research-orchestrator -c orchestrator -- \
+    python -c 'import json, urllib.request; print(json.load(urllib.request.urlopen("http://127.0.0.1:8080/ready")))'
+fi
+
+printf '[rollout-research-services] done\n'

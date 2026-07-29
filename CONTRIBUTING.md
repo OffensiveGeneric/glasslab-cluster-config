@@ -87,16 +87,19 @@ The laptop checkout is not authoritative for live state.
 - Docs are documented state.
 - Only `.44` can confirm actual live cluster state.
 
-If a change affects a live service, roll it from `.44` using the service rollout
-helper and run the smoke test before calling it live.
-
-For workflow-api:
+Merges to `main` publish affected service images to GHCR under the full commit
+SHA. If a change affects a live service, wait for the `Publish Service Images`
+workflow, then roll that exact commit from `.44`:
 
 ```bash
 ssh glasslab-44
 cd /home/glasslab/cluster-config
-./scripts/rollout-workflow-api-live.sh
+./scripts/rollout-research-services.sh --sync
 ```
+
+Use `--service workflow-api` or `--service research-orchestrator` for a
+single-service rollout. The old workflow-api helper is a compatibility wrapper;
+it no longer builds images locally.
 
 ## Pull Request Expectations
 
