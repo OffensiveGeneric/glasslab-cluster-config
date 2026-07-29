@@ -293,6 +293,7 @@ class ApprovalStatus(StrEnum):
     APPROVED = 'approved'
     REJECTED = 'rejected'
     DENIED = 'denied'
+    EXECUTION_FAILED = 'execution_failed'
 
 
 class ActionRecord(BaseModel):

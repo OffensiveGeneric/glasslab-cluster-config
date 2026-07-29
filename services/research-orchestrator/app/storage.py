@@ -519,6 +519,46 @@ class SqliteStore:
             )
         return updated
 
+    def mark_action_execution_failed(
+        self,
+        action_id: str,
+        *,
+        reason: str,
+    ) -> ActionRecord:
+        with self.transaction() as connection:
+            row = connection.execute(
+                'SELECT payload FROM actions WHERE action_id = ?',
+                (action_id,),
+            ).fetchone()
+            if row is None:
+                raise RecordNotFound(action_id)
+            action = ActionRecord.model_validate_json(row['payload'])
+            if action.approval_status != ApprovalStatus.APPROVED:
+                raise ConcurrencyConflict(
+                    f'action is not approved: {action.approval_status}'
+                )
+            updated = action.model_copy(
+                update={
+                    'approval_status': ApprovalStatus.EXECUTION_FAILED,
+                    'reason': reason,
+                    'updated_at': utc_now(),
+                }
+            )
+            connection.execute(
+                '''
+                UPDATE actions
+                SET approval_status = ?, payload = ?, updated_at = ?
+                WHERE action_id = ?
+                ''',
+                (
+                    updated.approval_status.value,
+                    _dump(updated),
+                    updated.updated_at.isoformat(),
+                    action_id,
+                ),
+            )
+        return updated
+
     def get_action(self, action_id: str) -> ActionRecord:
         with self._connect() as connection:
             row = connection.execute(

@@ -165,6 +165,35 @@ def test_discord_matrix_waits_for_honeydew_before_showing_controls() -> None:
     )
 
 
+def test_discord_renders_durable_action_execution_failure() -> None:
+    message = DiscordRenderer().render(
+        EventRecord(
+            sequence_number=6,
+            run_id='run-1',
+            source='orchestrator',
+            event_type='action.execution_failed',
+            payload={
+                'action_id': 'matrix-1',
+                'type': 'submit_experiment_matrix',
+                'error': 'evaluation contract resource limit exceeded',
+                'jobs_created': 0,
+                'artifacts_created': 0,
+                'resulting_state': 'BEAKER_REVISING',
+                'next_step': (
+                    'Beaker will revise the matrix before another approval.'
+                ),
+            },
+        )
+    )
+
+    assert message is not None
+    assert 'could not be executed' in message.content
+    assert '0 job(s), 0 artifact(s)' in message.content
+    assert 'BEAKER_REVISING' in message.content
+    assert 'Beaker will revise' in message.content
+    assert message.components is None
+
+
 def test_discord_control_policy_uses_guild_role_or_user_id() -> None:
     policy = DiscordControlPolicy(
         guild_id='guild-1',

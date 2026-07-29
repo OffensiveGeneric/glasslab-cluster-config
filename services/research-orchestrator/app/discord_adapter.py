@@ -246,6 +246,30 @@ class DiscordRenderer:
                 'Orchestrator',
                 f"{event_type}: {payload.get('action_id')}",
             )
+        if event_type == 'action.execution_failed':
+            jobs_created = int(payload.get('jobs_created', 0))
+            artifacts_created = int(payload.get('artifacts_created', 0))
+            return DiscordMessage(
+                'Orchestrator',
+                '\n'.join(
+                    [
+                        '**Approved action could not be executed**',
+                        '',
+                        f"Action: `{payload.get('type', 'unknown')}`",
+                        f"Error: {payload.get('error', 'Unknown error.')}",
+                        (
+                            'Recorded side effects: '
+                            f'{jobs_created} job(s), '
+                            f'{artifacts_created} artifact(s).'
+                        ),
+                        (
+                            'Run state: '
+                            f"`{payload.get('resulting_state', 'PAUSED')}`."
+                        ),
+                        f"Next step: {payload.get('next_step', 'Operator review.')}",
+                    ]
+                ),
+            )
         if event_type in {'job.submitted', 'job.completed', 'job.failed'}:
             return DiscordMessage(
                 'Orchestrator',

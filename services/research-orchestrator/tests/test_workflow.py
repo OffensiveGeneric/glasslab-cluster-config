@@ -4,6 +4,7 @@ from pathlib import Path
 from threading import Event
 
 from fastapi.testclient import TestClient
+import pytest
 
 from app.contracts import EvaluationContractResolver
 from app.discord_adapter import DisabledDiscordAdapter
@@ -203,6 +204,98 @@ def test_contract_preflight_returns_beaker_to_revision(
         'submit_experiment_matrix',
     )
     assert pending.honeydew_approved is True
+
+
+def test_transient_approved_action_failure_is_persisted_and_pauses_run(
+    orchestrator_bundle,
+    monkeypatch,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(
+            objective='Pause safely when approved action execution fails.'
+        )
+    )
+    protocol = _pending_action(store, run.run_id, 'approve_protocol')
+
+    def fail_execution(_action):
+        raise RuntimeError('temporary OpenCode outage')
+
+    monkeypatch.setattr(engine, '_resume_approved_action', fail_execution)
+    with pytest.raises(RuntimeError, match='temporary OpenCode outage'):
+        engine.approve_action(
+            protocol.action_id,
+            reviewer='test-human',
+            reason='Protocol accepted.',
+        )
+
+    assert store.get_run(run.run_id).state == RunState.PAUSED
+    assert (
+        store.get_action(protocol.action_id).approval_status
+        == ApprovalStatus.APPROVED
+    )
+    failure = next(
+        event
+        for event in store.list_events(run.run_id)
+        if event.event_type == 'action.execution_failed'
+    )
+    assert failure.payload['retryable'] is True
+    assert failure.payload['jobs_created'] == 0
+    assert failure.payload['resulting_state'] == RunState.PAUSED.value
+
+
+def test_deterministic_matrix_execution_failure_requests_revision(
+    orchestrator_bundle,
+    monkeypatch,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(
+            objective='Revise after deterministic matrix execution failure.'
+        )
+    )
+    protocol = _pending_action(store, run.run_id, 'approve_protocol')
+    engine.approve_action(
+        protocol.action_id,
+        reviewer='test-human',
+        reason='Protocol accepted.',
+    )
+    matrix = _pending_action(
+        store,
+        run.run_id,
+        'submit_experiment_matrix',
+    )
+
+    def fail_submission(_action):
+        raise ValueError('contract changed before submission')
+
+    monkeypatch.setattr(engine, '_submit_matrix', fail_submission)
+    with pytest.raises(ValueError, match='contract changed'):
+        engine.approve_action(
+            matrix.action_id,
+            reviewer='test-human',
+            reason='Matrix accepted.',
+        )
+
+    assert (
+        store.get_action(matrix.action_id).approval_status
+        == ApprovalStatus.EXECUTION_FAILED
+    )
+    assert store.get_run(run.run_id).state == RunState.AWAITING_EXECUTION_APPROVAL
+    replacement = _pending_action(
+        store,
+        run.run_id,
+        'submit_experiment_matrix',
+    )
+    assert replacement.action_id != matrix.action_id
+    failure = next(
+        event
+        for event in store.list_events(run.run_id)
+        if event.event_type == 'action.execution_failed'
+    )
+    assert failure.payload['retryable'] is False
+    assert failure.payload['jobs_created'] == 0
+    assert failure.payload['resulting_state'] == RunState.BEAKER_REVISING.value
 
 
 def test_restart_recovery_from_job_running(orchestrator_bundle) -> None:

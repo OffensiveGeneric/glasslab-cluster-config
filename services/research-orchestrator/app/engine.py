@@ -601,8 +601,81 @@ class ResearchOrchestrator:
                 event_type='action.approved',
                 payload={'action_id': action_id, 'reviewer': reviewer},
             )
-            self._resume_approved_action(approved)
+            try:
+                self._resume_approved_action(approved)
+            except Exception as exc:
+                self._handle_approved_action_failure(approved, exc)
+                raise
             return approved
+
+    def _handle_approved_action_failure(
+        self,
+        action: ActionRecord,
+        exc: Exception,
+    ) -> None:
+        jobs = [
+            job
+            for job in self.store.list_jobs(action.run_id)
+            if job.action_id == action.action_id
+        ]
+        deterministic_matrix_failure = (
+            action.type == 'submit_experiment_matrix'
+            and isinstance(exc, ValueError)
+            and not jobs
+        )
+        resulting_state = (
+            RunState.BEAKER_REVISING
+            if deterministic_matrix_failure
+            else RunState.PAUSED
+        )
+        if deterministic_matrix_failure:
+            self.store.mark_action_execution_failed(
+                action.action_id,
+                reason=f'Approved action could not execute: {exc}',
+            )
+        current = self.store.get_run(action.run_id)
+        self._event(
+            action.run_id,
+            source='orchestrator',
+            event_type='action.execution_failed',
+            payload={
+                'action_id': action.action_id,
+                'type': action.type,
+                'objective': current.objective,
+                'error': str(exc),
+                'jobs_created': len(jobs),
+                'artifacts_created': len(
+                    [
+                        artifact
+                        for artifact in self.store.list_artifacts(action.run_id)
+                        if artifact.job_id in {job.job_id for job in jobs}
+                    ]
+                ),
+                'retryable': not deterministic_matrix_failure,
+                'resulting_state': resulting_state.value,
+                'next_step': (
+                    'Beaker will revise the matrix before another approval.'
+                    if deterministic_matrix_failure
+                    else (
+                        'The run is paused. Reconcile any recorded jobs, then '
+                        'resume to retry the authoritative action.'
+                    )
+                ),
+            },
+        )
+        if current.state in TERMINAL_STATES or current.state == RunState.PAUSED:
+            return
+        if deterministic_matrix_failure:
+            self._transition(action.run_id, RunState.BEAKER_REVISING)
+            self._beaker_revise(
+                action.run_id,
+                feedback=(
+                    'The approved matrix failed deterministic execution '
+                    f'validation: {exc}'
+                ),
+            )
+            return
+        self.pause_run(action.run_id)
 
     def _resume_approved_action(self, action: ActionRecord) -> None:
         run = self.store.get_run(action.run_id)

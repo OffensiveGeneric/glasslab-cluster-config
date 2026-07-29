@@ -211,6 +211,14 @@ evaluation-contract digest is unchanged, and every requested resource fits the
 contract's own ceilings. Honeydew's structured approval cannot bypass these
 checks.
 
+Approval and execution are separate audited facts. If an approved action cannot
+execute, the orchestrator records `action.execution_failed` with the error,
+authoritative job and artifact counts, retry classification, resulting safe
+state, and next step. A deterministic matrix failure is marked
+`execution_failed` and returned to Beaker for revision. A transient runtime or
+infrastructure failure preserves the approval and pauses the run for
+reconciliation and explicit resume.
+
 The `workflow-api` adapter uses the existing approved workload API and never
 passes Kubernetes credentials to an agent. `workflow-api` now owns the trusted
 evaluation-contract catalog and read-only wrapper mount. It does not yet
@@ -255,6 +263,9 @@ resources and concurrency where applicable, the evaluation contract, the gate
 reason, and exactly what approval authorizes. A matrix proposal is first posted
 without controls while Honeydew reviews it. Approve and Reject controls appear
 only after deterministic preflight and Honeydew methodology approval succeed.
+Post-approval execution failures are posted publicly in the run thread from the
+persisted failure event; an ephemeral interaction response is not the only
+failure signal.
 
 The bot requires only View Channel, Send Messages, Read Message History,
 Create Public Threads, and Send Messages in Threads on the configured channel.
