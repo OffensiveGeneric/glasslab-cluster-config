@@ -354,6 +354,10 @@ At startup the service:
 Cancellation aborts active OpenCode turns and requests cancellation for every
 nonterminal job. Prior events are retained.
 
+Pause records the exact state to resume. If recovery after resume fails, the
+orchestrator records the failed turn and returns the run to `PAUSED` with the
+failure reason instead of leaving it stranded in an active state.
+
 ## Discord
 
 Discord is an optional projection. One run maps to one thread, with semantic

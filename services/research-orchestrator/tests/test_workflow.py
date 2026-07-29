@@ -575,6 +575,34 @@ def test_transient_approved_action_failure_is_persisted_and_pauses_run(
     assert failure.payload['resulting_state'] == RunState.PAUSED.value
 
 
+def test_failed_resume_returns_run_to_paused_state(
+    orchestrator_bundle,
+    monkeypatch,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(
+            objective='Verify a failed resumed turn returns to paused state.'
+        )
+    )
+    engine.pause_run(run.run_id, requested_by='test')
+
+    def fail_recovery(_: str) -> None:
+        raise RuntimeError('mock resumed turn timeout')
+
+    monkeypatch.setattr(engine, '_recover_run', fail_recovery)
+    with pytest.raises(RuntimeError, match='mock resumed turn timeout'):
+        engine.resume_run(run.run_id, requested_by='test')
+
+    paused = store.get_run(run.run_id)
+    assert paused.state == RunState.PAUSED
+    assert paused.resume_state == RunState.AWAITING_PROTOCOL_APPROVAL
+    event = store.list_events(run.run_id)[-1]
+    assert event.event_type == 'run.paused'
+    assert event.payload['requested_by'] == 'orchestrator'
+    assert 'mock resumed turn timeout' in event.payload['reason']
+
+
 def test_deterministic_matrix_execution_failure_requests_revision(
     orchestrator_bundle,
     monkeypatch,

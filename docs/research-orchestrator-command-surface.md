@@ -221,7 +221,7 @@ Implemented and live:
 
 Validated:
 
-- 65 research-orchestrator tests
+- 66 research-orchestrator tests
 - 159 workflow-api tests
 - mocked complete research workflow
 - live OpenCode/Qwen structured task compilation

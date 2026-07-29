@@ -2321,7 +2321,15 @@ class ResearchOrchestrator:
                     'reason': reason,
                 },
             )
-            self._recover_run(run_id)
+            try:
+                self._recover_run(run_id)
+            except Exception as exc:
+                self.pause_run(
+                    run_id,
+                    requested_by='orchestrator',
+                    reason=f'Resumed workflow failed: {exc}',
+                )
+                raise
             return self.store.get_run(run_id)
 
     def _abort_agent_turns(self, run: RunRecord) -> None:
