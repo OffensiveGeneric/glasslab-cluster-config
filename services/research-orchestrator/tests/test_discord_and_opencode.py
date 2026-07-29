@@ -5,7 +5,12 @@ import json
 import httpx
 
 from app.discord_adapter import DiscordHttpAdapter, DiscordRenderer
-from app.opencode_runtime import extract_structured_output, normalize_opencode_event
+from app.config import Settings
+from app.opencode_runtime import (
+    OpenCodeProcessRuntime,
+    extract_structured_output,
+    normalize_opencode_event,
+)
 from app.schemas import AgentName, EventRecord
 
 
@@ -167,3 +172,20 @@ def test_extracts_current_and_legacy_opencode_structured_output() -> None:
     assert extract_structured_output(current) == {'kind': 'protocol_draft'}
     assert extract_structured_output(legacy) == {'kind': 'protocol_draft'}
     assert extract_structured_output({'info': {}}) is None
+
+
+def test_opencode_writable_runtime_directories_are_per_agent(
+    tmp_path,
+) -> None:
+    runtime = OpenCodeProcessRuntime(Settings())
+    workspace = tmp_path / 'run-1' / 'honeydew-worktree'
+    workspace.mkdir(parents=True)
+
+    roots = runtime._write_runtime_config(
+        run_id='run-1',
+        agent=AgentName.HONEYDEW,
+        workspace=workspace,
+    )
+
+    assert all(path.is_dir() for path in roots)
+    assert all(path.is_relative_to(tmp_path / 'run-1') for path in roots)

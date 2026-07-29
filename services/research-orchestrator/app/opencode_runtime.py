@@ -164,13 +164,17 @@ class OpenCodeProcessRuntime(AgentRuntime):
         run_id: str,
         agent: AgentName,
         workspace: Path,
-    ) -> tuple[Path, Path]:
+    ) -> tuple[Path, Path, Path, Path, Path]:
         runtime_root = workspace.parent / 'runtime' / agent.value
         config_root = runtime_root / 'config'
         data_root = runtime_root / 'data'
+        cache_root = runtime_root / 'cache'
+        state_root = runtime_root / 'state'
+        home_root = runtime_root / 'home'
         opencode_config_root = config_root / 'opencode'
         opencode_config_root.mkdir(parents=True, exist_ok=True)
-        data_root.mkdir(parents=True, exist_ok=True)
+        for path in (data_root, cache_root, state_root, home_root):
+            path.mkdir(parents=True, exist_ok=True)
         config = {
             '$schema': 'https://opencode.ai/config.json',
             'model': f'exo/{self.settings.qwen_model_name}',
@@ -202,7 +206,7 @@ class OpenCodeProcessRuntime(AgentRuntime):
         (opencode_config_root / 'opencode.json').write_text(
             json.dumps(config, indent=2, sort_keys=True) + '\n'
         )
-        return config_root, data_root
+        return config_root, data_root, cache_root, state_root, home_root
 
     def _start_process(
         self,
@@ -216,7 +220,13 @@ class OpenCodeProcessRuntime(AgentRuntime):
         if existing is not None and existing.process.poll() is None:
             return existing
         port = self._runtime_port(agent)
-        config_root, data_root = self._write_runtime_config(
+        (
+            config_root,
+            data_root,
+            cache_root,
+            state_root,
+            home_root,
+        ) = self._write_runtime_config(
             run_id=run_id,
             agent=agent,
             workspace=workspace,
@@ -229,6 +239,9 @@ class OpenCodeProcessRuntime(AgentRuntime):
             **__import__('os').environ,
             'XDG_CONFIG_HOME': str(config_root),
             'XDG_DATA_HOME': str(data_root),
+            'XDG_CACHE_HOME': str(cache_root),
+            'XDG_STATE_HOME': str(state_root),
+            'HOME': str(home_root),
             'OPENCODE_SERVER_USERNAME': 'glasslab-orchestrator',
             'OPENCODE_SERVER_PASSWORD': password,
         }
