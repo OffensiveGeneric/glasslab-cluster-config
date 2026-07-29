@@ -363,14 +363,85 @@ class ResearchOrchestrator:
                 run_id,
                 source=agent.value,
                 event_type='action.proposed',
-                payload={
-                    'action_id': record.action_id,
-                    'type': record.type,
-                    'policy_classification': record.policy_classification.value,
-                    'approval_status': record.approval_status.value,
-                },
+                payload=self._approval_event_payload(record),
             )
         return records
+
+    def _approval_event_payload(
+        self,
+        action: ActionRecord,
+        *,
+        human_approval_ready: bool | None = None,
+    ) -> dict[str, Any]:
+        run = self.store.get_run(action.run_id)
+        if human_approval_ready is None:
+            human_approval_ready = (
+                action.approval_status == ApprovalStatus.PENDING
+                and (
+                    action.policy_classification
+                    != PolicyClassification.HONEYDEW_AND_HUMAN_APPROVAL
+                    or action.honeydew_approved
+                )
+            )
+        artifacts = self.store.list_artifacts(action.run_id)
+        relevant_artifact = next(
+            (
+                artifact
+                for artifact in reversed(artifacts)
+                if (
+                    action.type == 'approve_protocol'
+                    and artifact.type == 'protocol'
+                )
+                or (
+                    action.type == 'accept_final_report'
+                    and artifact.type == 'report'
+                )
+            ),
+            None,
+        )
+        effects = {
+            'approve_protocol': (
+                'Authorize Beaker to implement against this frozen protocol. '
+                'This does not authorize a cluster job.'
+            ),
+            'submit_experiment_matrix': (
+                'Authorize the orchestrator to validate, expand, and submit '
+                'this experiment matrix under the recorded resource limits.'
+            ),
+            'accept_final_report': (
+                'Accept the report as the final output and mark this research '
+                'run complete. This does not publish it externally.'
+            ),
+        }
+        payload: dict[str, Any] = {
+            'action_id': action.action_id,
+            'type': action.type,
+            'policy_classification': action.policy_classification.value,
+            'approval_status': action.approval_status.value,
+            'human_approval_ready': human_approval_ready,
+            'honeydew_approved': action.honeydew_approved,
+            'objective': run.objective,
+            'reason': action.reason,
+            'effect': effects.get(
+                action.type,
+                'Authorize the stored action under its deterministic policy.',
+            ),
+            'arguments': action.arguments,
+            'evaluation_contract': {
+                'contract_id': run.evaluation_contract_id,
+                'version': run.evaluation_contract_version,
+                'digest': run.evaluation_contract_digest,
+            },
+        }
+        if relevant_artifact is not None:
+            payload['artifact'] = {
+                'type': relevant_artifact.type,
+                'uri': relevant_artifact.uri,
+                'sha256': relevant_artifact.sha256,
+            }
+        if action.type == 'approve_protocol':
+            payload['protocol_version'] = run.protocol_version
+        return payload
 
     def _create_human_action(
         self,
@@ -396,12 +467,7 @@ class ResearchOrchestrator:
             run_id,
             source='orchestrator',
             event_type='action.proposed',
-            payload={
-                'action_id': record.action_id,
-                'type': record.type,
-                'policy_classification': record.policy_classification.value,
-                'approval_status': record.approval_status.value,
-            },
+            payload=self._approval_event_payload(record),
         )
         return record
 
@@ -712,12 +778,21 @@ class ResearchOrchestrator:
                 'action_id': action.action_id,
             },
         )
-        if not result.done:
+        preflight_error = self._matrix_preflight_error(
+            run_id=run_id,
+            action=action,
+        )
+        if not result.done or preflight_error:
+            rejection_reason = (
+                f'Deterministic matrix preflight failed: {preflight_error}'
+                if preflight_error
+                else result.summary
+            )
             self.store.update_action(
                 action.action_id,
                 approval_status=ApprovalStatus.REJECTED,
                 reviewer='honeydew',
-                reason=result.summary,
+                reason=rejection_reason,
             )
             self._event(
                 run_id,
@@ -725,13 +800,18 @@ class ResearchOrchestrator:
                 event_type='action.rejected',
                 payload={
                     'action_id': action.action_id,
-                    'reason': result.summary,
+                    'reason': rejection_reason,
                 },
             )
             self._transition(run_id, RunState.BEAKER_REVISING)
-            self._beaker_revise(run_id, feedback=result.message_to_other_agent)
+            feedback = result.message_to_other_agent.strip()
+            if preflight_error:
+                feedback = (
+                    f'{feedback}\n\n' if feedback else ''
+                ) + rejection_reason
+            self._beaker_revise(run_id, feedback=feedback or rejection_reason)
             return
-        self.store.mark_action_honeydew_approved(
+        approved_action = self.store.mark_action_honeydew_approved(
             action.action_id,
             review_turn_id=turn.turn_id,
         )
@@ -746,6 +826,50 @@ class ResearchOrchestrator:
             },
         )
         self._transition(run_id, RunState.AWAITING_EXECUTION_APPROVAL)
+        self._event(
+            run_id,
+            source='orchestrator',
+            event_type='action.human_approval_requested',
+            payload=self._approval_event_payload(
+                approved_action,
+                human_approval_ready=True,
+            ),
+        )
+
+    def _matrix_preflight_error(
+        self,
+        *,
+        run_id: str,
+        action: ActionRecord,
+    ) -> str | None:
+        try:
+            matrix = ExperimentMatrix.model_validate(action.arguments)
+            run = self.store.get_run(run_id)
+            workspace = Path(run.beaker_workspace).resolve()
+            base_config = (workspace / matrix.base_config).resolve()
+            if (
+                not base_config.is_relative_to(workspace)
+                or not base_config.is_file()
+            ):
+                return (
+                    'base_config does not exist inside the Beaker workspace: '
+                    f'{matrix.base_config}'
+                )
+            contract = self.contracts.resolve(
+                run.evaluation_contract_id,
+                run.evaluation_contract_version,
+            )
+            if contract.digest != run.evaluation_contract_digest:
+                return 'evaluation contract changed after run creation'
+            expand_experiment_matrix(
+                run_id=run_id,
+                action_id=action.action_id,
+                matrix=matrix,
+                contract=contract,
+            )
+        except ValueError as exc:
+            return str(exc)
+        return None
 
     def _beaker_revise(self, run_id: str, *, feedback: str) -> None:
         prompt = (

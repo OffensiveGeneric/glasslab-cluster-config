@@ -1,8 +1,10 @@
 # Glasslab Research Orchestrator
 
-Status: implemented as a single-replica MVP; the complete workflow is covered
-with mocked OpenCode and cluster adapters. It has not yet been rolled out to the
-live Glasslab cluster.
+Status: deployed as a single-replica MVP. The complete workflow is covered with
+mocked OpenCode and cluster adapters. OpenCode against the two-node exo model,
+Discord threads and role-gated controls, restart recovery, and live Kubernetes
+deployment were tested on 2026-07-29. Real research-job submission remains
+intentionally unvalidated.
 
 ## Purpose
 
@@ -203,6 +205,12 @@ integrity are checked before submission. Matrix expansion is canonical and
 deterministic across variants and seeds. Every expanded job receives a stable
 idempotency key.
 
+Before an experiment matrix can reach human approval, deterministic preflight
+also verifies that its base configuration exists in Beaker's worktree, the
+evaluation-contract digest is unchanged, and every requested resource fits the
+contract's own ceilings. Honeydew's structured approval cannot bypass these
+checks.
+
 The `workflow-api` adapter uses the existing approved workload API and never
 passes Kubernetes credentials to an agent. `workflow-api` now owns the trusted
 evaluation-contract catalog and read-only wrapper mount. It does not yet
@@ -240,6 +248,13 @@ optional channel webhook posts semantic events with per-message Honeydew,
 Beaker, and Orchestrator identities. Agent turn messages include the explicit
 `message_to_other_agent` handoff stored in the authoritative event. The
 webhook cannot approve actions or alter workflow state.
+
+Approval messages are decision briefs rather than bare action IDs. They state
+the research objective, the artifact or experiment scope under review, per-job
+resources and concurrency where applicable, the evaluation contract, the gate
+reason, and exactly what approval authorizes. A matrix proposal is first posted
+without controls while Honeydew reviews it. Approve and Reject controls appear
+only after deterministic preflight and Honeydew methodology approval succeed.
 
 The bot requires only View Channel, Send Messages, Read Message History,
 Create Public Threads, and Send Messages in Threads on the configured channel.

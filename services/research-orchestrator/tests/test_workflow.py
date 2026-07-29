@@ -33,6 +33,23 @@ class DeniedThenValidRuntime(ScriptedMockRuntime):
         return super().run_turn(**kwargs)
 
 
+class ContractOversizedThenValidRuntime(ScriptedMockRuntime):
+    def __init__(self, *, runner_image: str) -> None:
+        super().__init__(runner_image=runner_image)
+        self._oversized_once = True
+
+    def run_turn(self, **kwargs):
+        result, message_id = super().run_turn(**kwargs)
+        if (
+            self._oversized_once
+            and kwargs['agent'].value == 'beaker'
+            and 'Implement the bounded' in kwargs['prompt']
+        ):
+            result.requested_actions[0].arguments['resources']['memory_gib'] = 2
+            self._oversized_once = False
+        return result, message_id
+
+
 def _pending_action(store, run_id: str, action_type: str):
     return next(
         action
@@ -149,6 +166,43 @@ def test_policy_denial_returns_beaker_to_revision(
         and event.payload.get('to') == RunState.BEAKER_REVISING.value
         for event in store.list_events(run.run_id)
     )
+
+
+def test_contract_preflight_returns_beaker_to_revision(
+    orchestrator_bundle,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    engine.runtime = ContractOversizedThenValidRuntime(
+        runner_image=RUNNER_IMAGE
+    )
+    run = engine.create_run(
+        RunCreateRequest(
+            objective='Reject a matrix that exceeds the evaluation contract.'
+        )
+    )
+    protocol = _pending_action(store, run.run_id, 'approve_protocol')
+    engine.approve_action(
+        protocol.action_id,
+        reviewer='test-human',
+        reason='Protocol accepted.',
+    )
+
+    run = store.get_run(run.run_id)
+    assert run.state == RunState.AWAITING_EXECUTION_APPROVAL
+    rejected = [
+        action
+        for action in store.list_actions(run.run_id)
+        if action.type == 'submit_experiment_matrix'
+        and action.approval_status == ApprovalStatus.REJECTED
+    ]
+    assert len(rejected) == 1
+    assert 'evaluation-contract resource constraints' in rejected[0].reason
+    pending = _pending_action(
+        store,
+        run.run_id,
+        'submit_experiment_matrix',
+    )
+    assert pending.honeydew_approved is True
 
 
 def test_restart_recovery_from_job_running(orchestrator_bundle) -> None:

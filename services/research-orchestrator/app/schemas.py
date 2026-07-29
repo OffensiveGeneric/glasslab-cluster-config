@@ -156,6 +156,20 @@ class ExperimentMatrix(BaseModel):
     resources: ResourceRequest = Field(default_factory=ResourceRequest)
     required_artifacts: list[str] = Field(default_factory=list)
 
+    @field_validator('base_config')
+    @classmethod
+    def safe_base_config(cls, value: str) -> str:
+        normalized = value.strip().replace('\\', '/')
+        parts = normalized.split('/')
+        if (
+            not normalized
+            or normalized.startswith('/')
+            or '..' in parts
+            or any(not part for part in parts)
+        ):
+            raise ValueError('base_config must be a safe relative path')
+        return normalized
+
     @field_validator('seeds')
     @classmethod
     def unique_seeds(cls, value: list[int]) -> list[int]:

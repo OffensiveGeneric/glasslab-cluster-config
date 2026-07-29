@@ -87,6 +87,10 @@ class ScriptedMockRuntime(AgentRuntime):
             (workspace / 'experiment.py').write_text(
                 'print("bounded mock experiment")\n'
             )
+            (workspace / 'configs').mkdir(exist_ok=True)
+            (workspace / 'configs' / 'baseline.yaml').write_text(
+                'learning_rate: 0.0001\n'
+            )
             kind = (
                 TurnKind.REVISION
                 if 'Revise the implementation' in prompt

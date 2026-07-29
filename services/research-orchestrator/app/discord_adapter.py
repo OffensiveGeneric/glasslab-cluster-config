@@ -18,6 +18,145 @@ class DiscordMessage:
     components: list[dict[str, Any]] | None = None
 
 
+def _action_title(action_type: str) -> str:
+    return {
+        'approve_protocol': 'Approve research protocol',
+        'submit_experiment_matrix': 'Approve cluster experiment matrix',
+        'accept_final_report': 'Accept final research report',
+    }.get(action_type, action_type.replace('_', ' ').capitalize())
+
+
+def _button_label(action_type: str, arguments: dict[str, Any]) -> str:
+    if action_type == 'approve_protocol':
+        return 'Approve protocol'
+    if action_type == 'accept_final_report':
+        return 'Accept report'
+    if action_type == 'submit_experiment_matrix':
+        variants = arguments.get('variants', [])
+        seeds = arguments.get('seeds', [])
+        job_count = (
+            len(variants) * len(seeds)
+            if isinstance(variants, list) and isinstance(seeds, list)
+            else 0
+        )
+        return f'Approve {job_count} jobs' if job_count else 'Approve matrix'
+    return 'Approve'
+
+
+def _render_action_context(payload: dict[str, Any]) -> str:
+    action_type = str(payload.get('type', 'action'))
+    arguments = payload.get('arguments')
+    if not isinstance(arguments, dict):
+        arguments = {}
+    ready = bool(payload.get('human_approval_ready', False))
+    heading = (
+        'Approval requested'
+        if ready
+        else 'Proposed action under methodology review'
+    )
+    lines = [
+        f'**{heading}: {_action_title(action_type)}**',
+        '',
+        '**Research objective**',
+        str(payload.get('objective', 'Not recorded.')),
+    ]
+
+    if action_type == 'approve_protocol':
+        artifact = payload.get('artifact')
+        if not isinstance(artifact, dict):
+            artifact = {}
+        lines.extend(
+            [
+                '',
+                '**What you are reviewing**',
+                (
+                    f"Protocol v{payload.get('protocol_version', '?')} "
+                    f"at `{artifact.get('uri', 'program.md')}` "
+                    f"(SHA-256 `{str(artifact.get('sha256', 'unknown'))[:12]}...`)."
+                ),
+            ]
+        )
+    elif action_type == 'submit_experiment_matrix':
+        variants = arguments.get('variants', [])
+        seeds = arguments.get('seeds', [])
+        resources = arguments.get('resources', {})
+        if not isinstance(variants, list):
+            variants = []
+        if not isinstance(seeds, list):
+            seeds = []
+        if not isinstance(resources, dict):
+            resources = {}
+        variant_names = [
+            str(item.get('name'))
+            for item in variants
+            if isinstance(item, dict) and item.get('name')
+        ]
+        job_count = len(variant_names) * len(seeds)
+        lines.extend(
+            [
+                '',
+                '**Experiment scope**',
+                (
+                    f"{job_count} jobs: {', '.join(variant_names) or 'unnamed variants'} "
+                    f"across seeds {', '.join(map(str, seeds)) or 'not recorded'}."
+                ),
+                (
+                    f"Per job: {resources.get('gpus', '?')} GPU, "
+                    f"{resources.get('cpu', '?')} CPU, "
+                    f"{resources.get('memory_gib', '?')} GiB RAM, "
+                    f"up to {resources.get('wallclock_minutes', '?')} minutes."
+                ),
+                (
+                    f"Concurrency: up to "
+                    f"{arguments.get('maximum_parallel_jobs', '?')} jobs. "
+                    f"Image: `{arguments.get('runner_image', 'not recorded')}`."
+                ),
+            ]
+        )
+    elif action_type == 'accept_final_report':
+        artifact = payload.get('artifact')
+        if not isinstance(artifact, dict):
+            artifact = {}
+        lines.extend(
+            [
+                '',
+                '**Report being accepted**',
+                (
+                    f"`{artifact.get('uri', 'report.md')}` "
+                    f"(SHA-256 `{str(artifact.get('sha256', 'unknown'))[:12]}...`)."
+                ),
+            ]
+        )
+
+    contract = payload.get('evaluation_contract')
+    if isinstance(contract, dict):
+        lines.extend(
+            [
+                '',
+                '**Evaluation contract**',
+                (
+                    f"`{contract.get('contract_id', 'unknown')}` "
+                    f"v{contract.get('version', '?')} "
+                    f"(digest `{str(contract.get('digest', 'unknown'))[:12]}...`)."
+                ),
+            ]
+        )
+    lines.extend(
+        [
+            '',
+            '**Why this gate exists**',
+            str(payload.get('reason', 'Human review is required.')),
+            '',
+            '**Approval authorizes**',
+            str(payload.get('effect', 'The stored action.')),
+        ]
+    )
+    content = '\n'.join(lines)
+    if len(content) <= 1900:
+        return content
+    return content[:1885].rstrip() + '\n...[details truncated]'
+
+
 class DiscordRenderer:
     IDENTITIES = {
         'honeydew': 'Honeydew',
@@ -51,10 +190,26 @@ class DiscordRenderer:
                 identity,
                 content,
             )
-        if event_type == 'action.proposed':
+        if event_type in {
+            'action.proposed',
+            'action.human_approval_requested',
+        }:
             components = None
-            if payload.get('approval_status') == 'pending':
+            human_approval_ready = bool(
+                payload.get(
+                    'human_approval_ready',
+                    payload.get('policy_classification')
+                    != 'honeydew_and_human_approval',
+                )
+            )
+            if (
+                payload.get('approval_status') == 'pending'
+                and human_approval_ready
+            ):
                 action_id = str(payload.get('action_id', ''))
+                arguments = payload.get('arguments')
+                if not isinstance(arguments, dict):
+                    arguments = {}
                 components = [
                     {
                         'type': 1,
@@ -62,7 +217,10 @@ class DiscordRenderer:
                             {
                                 'type': 2,
                                 'style': 3,
-                                'label': 'Approve',
+                                'label': _button_label(
+                                    str(payload.get('type', '')),
+                                    arguments,
+                                ),
                                 'custom_id': (
                                     f'glasslab:approve:{action_id}'
                                 ),
@@ -80,10 +238,7 @@ class DiscordRenderer:
                 ]
             return DiscordMessage(
                 identity,
-                (
-                    f"Action proposed: {payload.get('type')} "
-                    f"({payload.get('policy_classification')})"
-                ),
+                _render_action_context(payload),
                 components=components,
             )
         if event_type in {'action.approved', 'action.rejected'}:

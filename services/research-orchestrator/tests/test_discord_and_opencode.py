@@ -69,17 +69,100 @@ def test_discord_pending_action_has_approval_controls() -> None:
                 'type': 'approve_protocol',
                 'policy_classification': 'human_approval',
                 'approval_status': 'pending',
+                'human_approval_ready': True,
+                'objective': 'Compare two bounded metric-learning methods.',
+                'reason': 'Review the protocol before implementation.',
+                'effect': (
+                    'Authorize Beaker to implement; no cluster job is authorized.'
+                ),
+                'protocol_version': 1,
+                'artifact': {
+                    'uri': 'artifact://run-1/protocol/program.md',
+                    'sha256': 'a' * 64,
+                },
+                'evaluation_contract': {
+                    'contract_id': 'contract-1',
+                    'version': '1.0.0',
+                    'digest': 'b' * 64,
+                },
             },
         )
     )
 
     assert message is not None
+    assert '**Research objective**' in message.content
+    assert 'Compare two bounded metric-learning methods.' in message.content
+    assert '**Approval authorizes**' in message.content
+    assert 'no cluster job is authorized' in message.content
+    assert 'artifact://run-1/protocol/program.md' in message.content
     assert message.components is not None
     buttons = message.components[0]['components']
+    assert buttons[0]['label'] == 'Approve protocol'
     assert [button['custom_id'] for button in buttons] == [
         'glasslab:approve:action-1',
         'glasslab:reject:action-1',
     ]
+
+
+def test_discord_matrix_waits_for_honeydew_before_showing_controls() -> None:
+    payload = {
+        'action_id': 'matrix-1',
+        'type': 'submit_experiment_matrix',
+        'policy_classification': 'honeydew_and_human_approval',
+        'approval_status': 'pending',
+        'human_approval_ready': False,
+        'objective': 'Compare naive and semi-hard triplet mining.',
+        'reason': 'The matrix requires methodology and human approval.',
+        'effect': 'Authorize bounded cluster submission.',
+        'arguments': {
+            'variants': [
+                {'name': 'naive-mining', 'overrides': {}},
+                {'name': 'semi-hard-mining', 'overrides': {}},
+            ],
+            'seeds': [17, 31, 49],
+            'maximum_parallel_jobs': 2,
+            'runner_image': 'example/runner@sha256:abc',
+            'resources': {
+                'cpu': 4,
+                'memory_gib': 16,
+                'gpus': 1,
+                'wallclock_minutes': 60,
+            },
+        },
+    }
+    renderer = DiscordRenderer()
+
+    proposed = renderer.render(
+        EventRecord(
+            sequence_number=4,
+            run_id='run-1',
+            source='beaker',
+            event_type='action.proposed',
+            payload=payload,
+        )
+    )
+    assert proposed is not None
+    assert 'under methodology review' in proposed.content
+    assert proposed.components is None
+    assert '6 jobs' in proposed.content
+    assert '1 GPU' in proposed.content
+
+    requested = renderer.render(
+        EventRecord(
+            sequence_number=5,
+            run_id='run-1',
+            source='orchestrator',
+            event_type='action.human_approval_requested',
+            payload={**payload, 'human_approval_ready': True},
+        )
+    )
+    assert requested is not None
+    assert 'Approval requested' in requested.content
+    assert requested.components is not None
+    assert (
+        requested.components[0]['components'][0]['label']
+        == 'Approve 6 jobs'
+    )
 
 
 def test_discord_control_policy_uses_guild_role_or_user_id() -> None:
@@ -251,7 +334,10 @@ def test_discord_action_controls_are_posted_by_bot() -> None:
     assert len(requests) == 1
     assert requests[0].url.path == '/api/v10/channels/thread-1/messages'
     payload = json.loads(requests[0].content)
-    assert payload['components'][0]['components'][0]['label'] == 'Approve'
+    assert (
+        payload['components'][0]['components'][0]['label']
+        == 'Approve protocol'
+    )
 
 
 def test_discord_status_message_id_is_reused() -> None:
