@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from hashlib import sha256
 from pathlib import Path
 import shutil
@@ -139,6 +140,25 @@ class WorkspaceManager:
             target = workspace / 'program.md'
             shutil.copy2(protocol, target)
             target.chmod(0o444)
+
+    def write_recovery_checkpoint(
+        self,
+        *,
+        run_id: str,
+        agent: AgentName,
+        payload: dict,
+    ) -> Path:
+        destination = self.paths(run_id).events / (
+            f'{agent.value}-recovery-checkpoint.json'
+        )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_suffix('.tmp')
+        temporary.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + '\n',
+            encoding='utf-8',
+        )
+        temporary.replace(destination)
+        return destination
 
     def install_task_bundle(
         self,

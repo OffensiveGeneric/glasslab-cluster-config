@@ -26,6 +26,7 @@ class ScriptedMockRuntime(AgentRuntime):
         self.sessions: dict[tuple[str, AgentName], RuntimeSession] = {}
         self.turn_counts: defaultdict[AgentName, int] = defaultdict(int)
         self.aborted: list[tuple[str, AgentName, str]] = []
+        self.released: list[tuple[str, AgentName]] = []
 
     def ensure_session(
         self,
@@ -41,7 +42,7 @@ class ScriptedMockRuntime(AgentRuntime):
             session = RuntimeSession(
                 runtime_id=f'mock-runtime-{agent.value}-{run_id[:8]}',
                 session_id=existing_session_id
-                or f'mock-session-{agent.value}-{run_id[:8]}',
+                or f'mock-session-{agent.value}-{uuid4().hex[:12]}',
             )
             self.sessions[key] = session
         return session
@@ -57,6 +58,27 @@ class ScriptedMockRuntime(AgentRuntime):
     ) -> tuple[AgentTurnResult, str | None]:
         self.turn_counts[agent] += 1
         message_id = f'mock-message-{uuid4().hex[:12]}'
+        if agent == AgentName.BEAKER and 'Write implementation-plan.md' in prompt:
+            (workspace / 'implementation-plan.md').write_text(
+                '# Implementation Plan\n\n'
+                '1. Inspect the task inputs and existing repository boundaries.\n'
+                '2. Implement the smallest complete experiment runner.\n'
+                '3. Run lightweight local checks and propose the bounded matrix.\n'
+            )
+            return (
+                AgentTurnResult(
+                    kind=TurnKind.IMPLEMENTATION_PLAN,
+                    summary='Planned a bounded task-specific implementation.',
+                    produced_files=[
+                        ProducedFile(
+                            path='implementation-plan.md',
+                            purpose='implementation',
+                        )
+                    ],
+                    done=True,
+                ),
+                message_id,
+            )
         if agent == AgentName.HONEYDEW and 'Compile this task archive' in prompt:
             return (
                 AgentTurnResult(
@@ -143,6 +165,7 @@ class ScriptedMockRuntime(AgentRuntime):
             )
         if agent == AgentName.BEAKER and (
             'Implement the bounded' in prompt
+            or 'Execute the task-specific plan' in prompt
             or 'Revise the implementation' in prompt
         ):
             (workspace / 'experiment.py').write_text(
@@ -277,4 +300,5 @@ class ScriptedMockRuntime(AgentRuntime):
         self.aborted.append((run_id, agent, session_id))
 
     def release(self, *, run_id: str, agent: AgentName) -> None:
+        self.released.append((run_id, agent))
         self.sessions.pop((run_id, agent), None)

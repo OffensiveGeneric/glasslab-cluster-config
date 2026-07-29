@@ -15,6 +15,7 @@ from app.main import create_app
 from app.mock_runtime import ScriptedMockRuntime
 from app.policy import ActionPolicy
 from app.schemas import (
+    AgentName,
     AgentTurnResult,
     ApprovalStatus,
     JobStatus,
@@ -33,7 +34,7 @@ class DeniedThenValidRuntime(ScriptedMockRuntime):
     def run_turn(self, **kwargs):
         if (
             kwargs['agent'].value == 'beaker'
-            and 'Implement the bounded' in kwargs['prompt']
+            and 'Execute the task-specific plan' in kwargs['prompt']
         ):
             allowed_image = self.runner_image
             self.runner_image = 'example.invalid/untrusted:latest'
@@ -54,11 +55,29 @@ class ContractOversizedThenValidRuntime(ScriptedMockRuntime):
         if (
             self._oversized_once
             and kwargs['agent'].value == 'beaker'
-            and 'Implement the bounded' in kwargs['prompt']
+            and 'Execute the task-specific plan' in kwargs['prompt']
         ):
             result.requested_actions[0].arguments['resources']['memory_gib'] = 2
             self._oversized_once = False
         return result, message_id
+
+
+class FailOnceImplementationRuntime(ScriptedMockRuntime):
+    def __init__(self, *, runner_image: str) -> None:
+        super().__init__(runner_image=runner_image)
+        self.failed_session_id: str | None = None
+        self.recovery_prompt: str | None = None
+
+    def run_turn(self, **kwargs):
+        if (
+            kwargs['agent'] == AgentName.BEAKER
+            and 'Execute the task-specific plan' in kwargs['prompt']
+        ):
+            if self.failed_session_id is None:
+                self.failed_session_id = kwargs['session_id']
+                raise RuntimeError('mock implementation timeout')
+            self.recovery_prompt = kwargs['prompt']
+        return super().run_turn(**kwargs)
 
 
 class NewContractRuntime(ScriptedMockRuntime):
@@ -340,10 +359,11 @@ def test_recovery_agent_failure_pauses_instead_of_terminalizing(
     orchestrator_bundle,
 ) -> None:
     settings, store, cluster, _, original = orchestrator_bundle
+    runtime = FailingContractReviewRuntime(runner_image=RUNNER_IMAGE)
     engine = ResearchOrchestrator(
         settings=settings,
         store=store,
-        runtime=FailingContractReviewRuntime(runner_image=RUNNER_IMAGE),
+        runtime=runtime,
         workspaces=original.workspaces,
         contracts=original.contracts,
         contract_candidates=original.contract_candidates,
@@ -364,6 +384,20 @@ def test_recovery_agent_failure_pauses_instead_of_terminalizing(
     current = store.get_run(run.run_id)
     assert current.state == RunState.PAUSED
     assert current.resume_state == RunState.HONEYDEW_REVIEWING_CONTRACT
+    assert current.honeydew_session_id is None
+    checkpoint = (
+        original.workspaces.paths(run.run_id).events
+        / 'honeydew-recovery-checkpoint.json'
+    )
+    assert checkpoint.is_file()
+    checkpoint_payload = json.loads(checkpoint.read_text())
+    assert checkpoint_payload['agent'] == 'honeydew'
+    assert checkpoint_payload['expected_turn_kind'] == 'methodology_review'
+    assert (run.run_id, AgentName.HONEYDEW) in runtime.released
+    assert any(
+        event.event_type == 'agent.session_rotated'
+        for event in store.list_events(run.run_id)
+    )
 
     failed = current.model_copy(
         update={
@@ -450,7 +484,7 @@ def test_mocked_complete_workflow_and_agent_isolation(orchestrator_bundle) -> No
     }
     assert len(store.list_artifacts(run.run_id)) == 5
     turns = store.list_turns(run.run_id)
-    assert len(turns) == 6
+    assert len(turns) == 7
     assert all(turn.status == 'completed' for turn in turns)
     assert runtime.turn_counts
 
@@ -601,6 +635,41 @@ def test_failed_resume_returns_run_to_paused_state(
     assert event.event_type == 'run.paused'
     assert event.payload['requested_by'] == 'orchestrator'
     assert 'mock resumed turn timeout' in event.payload['reason']
+
+
+def test_failed_turn_resumes_with_fresh_session_and_checkpoint(
+    orchestrator_bundle,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    runtime = FailOnceImplementationRuntime(runner_image=RUNNER_IMAGE)
+    engine.runtime = runtime
+    run = engine.create_run(
+        RunCreateRequest(
+            objective='Recover implementation without retaining failed history.'
+        )
+    )
+    protocol = _pending_action(store, run.run_id, 'approve_protocol')
+    with pytest.raises(RuntimeError, match='mock implementation timeout'):
+        engine.approve_action(
+            protocol.action_id,
+            reviewer='test-human',
+            reason='Protocol accepted.',
+        )
+
+    paused = store.get_run(run.run_id)
+    assert paused.state == RunState.PAUSED
+    assert paused.resume_state == RunState.BEAKER_IMPLEMENTING
+    assert paused.beaker_session_id is None
+    assert runtime.failed_session_id is not None
+
+    resumed = engine.resume_run(run.run_id, requested_by='test-human')
+    assert resumed.state == RunState.AWAITING_EXECUTION_APPROVAL
+    assert resumed.beaker_session_id != runtime.failed_session_id
+    assert runtime.recovery_prompt is not None
+    assert runtime.recovery_prompt.startswith(
+        'This is a fresh OpenCode session after an interrupted or failed turn.'
+    )
+    assert 'implementation-plan.md' in runtime.recovery_prompt
 
 
 def test_deterministic_matrix_execution_failure_requests_revision(

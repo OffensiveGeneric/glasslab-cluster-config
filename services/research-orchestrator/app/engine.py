@@ -4,6 +4,7 @@ from datetime import timedelta
 from hashlib import sha256
 import json
 from pathlib import Path
+import subprocess
 from threading import RLock
 from typing import Any
 from uuid import uuid4, uuid5, NAMESPACE_URL
@@ -361,6 +362,147 @@ class ResearchOrchestrator:
             )
             raise WorkflowError('maximum runtime reached')
 
+    def _write_recovery_checkpoint(
+        self,
+        *,
+        run_id: str,
+        agent: AgentName,
+        expected_kind: TurnKind,
+        error: str,
+    ) -> tuple[Path, dict[str, Any]]:
+        run = self.store.get_run(run_id)
+        workspace = Path(
+            run.honeydew_workspace
+            if agent == AgentName.HONEYDEW
+            else run.beaker_workspace
+        )
+        completed = [
+            turn
+            for turn in self.store.list_turns(run_id)
+            if turn.status == 'completed' and turn.structured_output is not None
+        ][-4:]
+        try:
+            status = subprocess.run(
+                ['git', 'status', '--short'],
+                cwd=workspace,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            workspace_status = status.stdout.splitlines()[:80]
+        except (OSError, subprocess.SubprocessError) as exc:
+            workspace_status = [f'git status unavailable: {exc}']
+        checkpoint = {
+            'schema_version': 'glasslab-recovery-checkpoint-v1',
+            'run_id': run_id,
+            'agent': agent.value,
+            'state': run.state.value,
+            'expected_turn_kind': expected_kind.value,
+            'objective': run.objective[:1000],
+            'evaluation_contract': {
+                'contract_id': run.evaluation_contract_id,
+                'version': run.evaluation_contract_version,
+                'digest': run.evaluation_contract_digest,
+            },
+            'protocol_path': run.protocol_path,
+            'task_id': run.task_id,
+            'failed_turn_error': error[:1000],
+            'workspace_status': workspace_status,
+            'recent_completed_turns': [
+                {
+                    'agent': turn.agent.value,
+                    'kind': turn.structured_output.kind.value,
+                    'summary': turn.structured_output.summary[:500],
+                }
+                for turn in completed
+            ],
+            'instruction': (
+                'Continue the current bounded phase from the persisted worktree. '
+                'Inspect existing files before editing and do not repeat completed '
+                'work solely because the OpenCode session was rotated.'
+            ),
+        }
+        path = self.workspaces.write_recovery_checkpoint(
+            run_id=run_id,
+            agent=agent,
+            payload=checkpoint,
+        )
+        return path, checkpoint
+
+    def _rotate_agent_session(
+        self,
+        *,
+        run_id: str,
+        agent: AgentName,
+        expected_kind: TurnKind,
+        error: str,
+    ) -> None:
+        release_error: str | None = None
+        try:
+            self.runtime.release(run_id=run_id, agent=agent)
+        except Exception as exc:
+            release_error = str(exc)
+        current = self.store.get_run(run_id)
+        updates: dict[str, Any] = {'current_agent': None}
+        if agent == AgentName.HONEYDEW:
+            updates.update(
+                {
+                    'honeydew_runtime_id': None,
+                    'honeydew_session_id': None,
+                }
+            )
+        else:
+            updates.update(
+                {
+                    'beaker_runtime_id': None,
+                    'beaker_session_id': None,
+                }
+            )
+        self.store.replace_run(
+            current.model_copy(update=updates),
+            expected_version=current.version,
+        )
+        path, _ = self._write_recovery_checkpoint(
+            run_id=run_id,
+            agent=agent,
+            expected_kind=expected_kind,
+            error=error,
+        )
+        self._event(
+            run_id,
+            source='orchestrator',
+            event_type='agent.session_rotated',
+            payload={
+                'agent': agent.value,
+                'reason': error[:1000],
+                'checkpoint_path': str(path),
+                'next_session': 'fresh',
+                'runtime_release_error': release_error,
+            },
+        )
+
+    def _recovery_context(
+        self,
+        *,
+        run_id: str,
+        agent: AgentName,
+    ) -> str:
+        checkpoint_path = self.workspaces.paths(run_id).events / (
+            f'{agent.value}-recovery-checkpoint.json'
+        )
+        if not checkpoint_path.is_file():
+            return ''
+        checkpoint = json.loads(checkpoint_path.read_text(encoding='utf-8'))
+        return (
+            'This is a fresh OpenCode session after an interrupted or failed '
+            'turn. The worktree and authoritative workflow state were preserved. '
+            'Use this compact checkpoint and inspect the existing worktree before '
+            'continuing:\n'
+            + json.dumps(checkpoint, indent=2, sort_keys=True)
+            + '\n\nCurrent bounded task:\n'
+        )
+
     def _run_agent_turn(
         self,
         *,
@@ -382,6 +524,11 @@ class ResearchOrchestrator:
             if agent == AgentName.HONEYDEW
             else run.beaker_session_id
         )
+        if existing_session is None:
+            prompt = self._recovery_context(
+                run_id=run_id,
+                agent=agent,
+            ) + prompt
         session = self.runtime.ensure_session(
             run_id=run_id,
             agent=agent,
@@ -519,6 +666,12 @@ class ResearchOrchestrator:
                     'status': 'failed',
                     'error': str(exc),
                 },
+            )
+            self._rotate_agent_session(
+                run_id=run_id,
+                agent=agent,
+                expected_kind=expected_kind,
+                error=str(exc),
             )
             raise
 
@@ -1108,8 +1261,8 @@ class ResearchOrchestrator:
                 return
             self.workspaces.freeze_protocol(action.run_id)
             if self._contract_binding_compatible(action.run_id):
-                self._transition(action.run_id, RunState.BEAKER_IMPLEMENTING)
-                self._beaker_implement(action.run_id)
+                self._transition(action.run_id, RunState.BEAKER_PLANNING)
+                self._beaker_plan(action.run_id)
             else:
                 self._transition(
                     action.run_id,
@@ -1530,11 +1683,71 @@ class ResearchOrchestrator:
             raise WorkflowError(
                 'promoted contract remains incompatible with the protocol'
             )
-        self._transition(action.run_id, RunState.BEAKER_IMPLEMENTING)
-        self._beaker_implement(action.run_id)
+        self._transition(action.run_id, RunState.BEAKER_PLANNING)
+        self._beaker_plan(action.run_id)
+
+    def _beaker_plan(self, run_id: str) -> None:
+        run = self.store.get_run(run_id)
+        task_context = ''
+        if run.task_definition:
+            task_context = (
+                ' This is an imported task; inspect `benchmark-task/problem.md` '
+                'and `benchmark-task/eval_agent_prompt.md` as binding inputs.'
+            )
+        _, result = self._run_agent_turn(
+            run_id=run_id,
+            agent=AgentName.BEAKER,
+            prompt=(
+                'Read the approved read-only program.md and inspect the existing '
+                'worktree. Write implementation-plan.md containing a concise, '
+                'task-specific sequence of independently checkable implementation '
+                'steps, the files likely to change, lightweight local checks, and '
+                'the intended experiment-matrix shape. Preserve freedom to revise '
+                'the plan when repository evidence requires it. Do not implement '
+                'the experiment in this turn, request actions, or execute cluster '
+                'work. Return exactly that file with purpose "implementation" and '
+                'kind "implementation_plan".'
+                + task_context
+            ),
+            expected_kind=TurnKind.IMPLEMENTATION_PLAN,
+            input_event={
+                'protocol_path': run.protocol_path,
+                'protocol_version': run.protocol_version,
+            },
+        )
+        plans = [
+            item
+            for item in result.produced_files
+            if item.path == 'implementation-plan.md'
+            and item.purpose == 'implementation'
+        ]
+        if len(plans) != 1 or result.requested_actions:
+            raise WorkflowError(
+                'Beaker planning must produce implementation-plan.md and no actions'
+            )
+        plan_path = Path(run.beaker_workspace) / 'implementation-plan.md'
+        if not plan_path.is_file():
+            raise WorkflowError('Beaker did not create implementation-plan.md')
+        digest = sha256(plan_path.read_bytes()).hexdigest()
+        self._event(
+            run_id,
+            source='beaker',
+            event_type='agent.plan_created',
+            payload={
+                'path': 'implementation-plan.md',
+                'sha256': digest,
+            },
+        )
+        self._transition(run_id, RunState.BEAKER_IMPLEMENTING)
+        self._beaker_implement(run_id)
 
     def _beaker_implement(self, run_id: str) -> None:
         run = self.store.get_run(run_id)
+        plan_path = Path(run.beaker_workspace) / 'implementation-plan.md'
+        if not plan_path.is_file():
+            self._transition(run_id, RunState.BEAKER_PLANNING)
+            self._beaker_plan(run_id)
+            return
         task_context = ''
         if run.task_definition:
             source = run.task_definition['source_subdirectory']
@@ -1561,8 +1774,10 @@ class ResearchOrchestrator:
                 )
             )
         prompt = (
-            'Read the approved read-only program.md. Implement the bounded '
-            'experiment in your isolated worktree, run lightweight tests, and '
+            'Read the approved read-only program.md and implementation-plan.md. '
+            'Execute the task-specific plan in your isolated worktree, adapting '
+            'it when repository evidence requires. Finish the bounded experiment '
+            'runner, run the listed lightweight checks, and '
             'propose one submit_experiment_matrix action. The action arguments '
             'must match the ExperimentMatrix schema and must not contain an '
             'evaluation entry point, Kubernetes manifest, contract file, or '
@@ -2410,6 +2625,11 @@ class ResearchOrchestrator:
             self._backfill_local_artifacts(run.run_id)
         recovered: list[str] = []
         for run in self.store.list_active_runs():
+            running_turns = [
+                turn
+                for turn in self.store.list_turns(run.run_id)
+                if turn.status == 'running'
+            ]
             interrupted = self.store.mark_running_turns_interrupted(run.run_id)
             if interrupted:
                 self._event(
@@ -2418,6 +2638,30 @@ class ResearchOrchestrator:
                     event_type='run.recovered',
                     payload={'interrupted_turns': interrupted},
                 )
+                started_events = {
+                    str(event.payload.get('turn_id')): event
+                    for event in self.store.list_events(run.run_id)
+                    if event.event_type == 'agent.turn_started'
+                }
+                for turn in running_turns:
+                    event = started_events.get(turn.turn_id)
+                    raw_kind = (
+                        event.payload.get('kind')
+                        if event is not None
+                        else TurnKind.IMPLEMENTATION_PROPOSAL.value
+                    )
+                    try:
+                        expected_kind = TurnKind(str(raw_kind))
+                    except ValueError:
+                        expected_kind = TurnKind.IMPLEMENTATION_PROPOSAL
+                    self._rotate_agent_session(
+                        run_id=run.run_id,
+                        agent=turn.agent,
+                        expected_kind=expected_kind,
+                        error=(
+                            'orchestrator restarted during active agent turn'
+                        ),
+                    )
             try:
                 self._recover_run(run.run_id)
             except Exception as exc:
@@ -2426,6 +2670,7 @@ class ResearchOrchestrator:
                     RunState.HONEYDEW_DRAFTING_PROTOCOL,
                     RunState.BEAKER_DRAFTING_CONTRACT,
                     RunState.HONEYDEW_REVIEWING_CONTRACT,
+                    RunState.BEAKER_PLANNING,
                     RunState.BEAKER_IMPLEMENTING,
                     RunState.HONEYDEW_REVIEWING,
                     RunState.BEAKER_REVISING,
@@ -2491,6 +2736,7 @@ class ResearchOrchestrator:
         run = self.store.get_run(run_id)
         state = run.state
         contract_sensitive_states = {
+            RunState.BEAKER_PLANNING,
             RunState.BEAKER_IMPLEMENTING,
             RunState.HONEYDEW_REVIEWING,
             RunState.BEAKER_REVISING,
@@ -2559,6 +2805,8 @@ class ResearchOrchestrator:
             ]
             if approved:
                 self._promote_contract_candidate(approved[-1])
+        elif state == RunState.BEAKER_PLANNING:
+            self._beaker_plan(run_id)
         elif state == RunState.BEAKER_IMPLEMENTING:
             pending = [
                 action

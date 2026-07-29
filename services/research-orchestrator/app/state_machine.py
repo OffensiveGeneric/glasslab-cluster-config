@@ -21,7 +21,7 @@ TRANSITIONS: dict[RunState, set[RunState]] = {
     RunState.AWAITING_PROTOCOL_APPROVAL: {
         RunState.HONEYDEW_DRAFTING_PROTOCOL,
         RunState.BEAKER_DRAFTING_CONTRACT,
-        RunState.BEAKER_IMPLEMENTING,
+        RunState.BEAKER_PLANNING,
         RunState.PAUSED,
         RunState.CANCELLED,
         RunState.FAILED,
@@ -44,6 +44,14 @@ TRANSITIONS: dict[RunState, set[RunState]] = {
     },
     RunState.AWAITING_CONTRACT_PROMOTION: {
         RunState.BEAKER_DRAFTING_CONTRACT,
+        RunState.BEAKER_PLANNING,
+        RunState.PAUSED,
+        RunState.CANCELLED,
+        RunState.FAILED,
+        RunState.TIMED_OUT,
+    },
+    RunState.BEAKER_PLANNING: {
+        RunState.BEAKER_DRAFTING_CONTRACT,
         RunState.BEAKER_IMPLEMENTING,
         RunState.PAUSED,
         RunState.CANCELLED,
@@ -51,6 +59,7 @@ TRANSITIONS: dict[RunState, set[RunState]] = {
         RunState.TIMED_OUT,
     },
     RunState.BEAKER_IMPLEMENTING: {
+        RunState.BEAKER_PLANNING,
         RunState.BEAKER_DRAFTING_CONTRACT,
         RunState.BEAKER_REVISING,
         RunState.HONEYDEW_REVIEWING,

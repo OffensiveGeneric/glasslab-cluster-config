@@ -28,8 +28,9 @@ def test_valid_and_invalid_state_transitions() -> None:
     )
     validate_transition(
         RunState.AWAITING_CONTRACT_PROMOTION,
-        RunState.BEAKER_IMPLEMENTING,
+        RunState.BEAKER_PLANNING,
     )
+    validate_transition(RunState.BEAKER_PLANNING, RunState.BEAKER_IMPLEMENTING)
     with pytest.raises(InvalidTransition):
         validate_transition(RunState.CREATED, RunState.COMPLETE)
     with pytest.raises(InvalidTransition):

@@ -89,7 +89,7 @@ CREATED -> PREPARING -> HONEYDEW_DRAFTING_PROTOCOL
   -> AWAITING_PROTOCOL_APPROVAL
   -> BEAKER_DRAFTING_CONTRACT -> HONEYDEW_REVIEWING_CONTRACT
   -> AWAITING_CONTRACT_PROMOTION
-  -> BEAKER_IMPLEMENTING -> HONEYDEW_REVIEWING
+  -> BEAKER_PLANNING -> BEAKER_IMPLEMENTING -> HONEYDEW_REVIEWING
   -> BEAKER_REVISING (when requested)
   -> AWAITING_EXECUTION_APPROVAL
   -> JOB_QUEUED -> JOB_RUNNING
@@ -347,7 +347,8 @@ At startup the service:
 
 1. marks interrupted active turns for audit,
 2. reloads nonterminal runs,
-3. reconnects recorded OpenCode sessions when possible,
+3. rotates any interrupted agent session and writes a compact recovery
+   checkpoint while preserving the worktree,
 4. reconciles `JOB_QUEUED` and `JOB_RUNNING` jobs, and
 5. advances workflows only after authoritative evidence is stored.
 
@@ -355,8 +356,18 @@ Cancellation aborts active OpenCode turns and requests cancellation for every
 nonterminal job. Prior events are retained.
 
 Pause records the exact state to resume. If recovery after resume fails, the
-orchestrator records the failed turn and returns the run to `PAUSED` with the
-failure reason instead of leaving it stranded in an active state.
+orchestrator records the failed turn, terminates that agent's OpenCode process,
+clears the stale session ID, writes
+`events/<agent>-recovery-checkpoint.json`, and returns the run to `PAUSED`.
+Resume creates a fresh OpenCode session, injects the compact checkpoint, and
+continues from the unchanged worktree. Successful sessions remain reusable
+across normal turns.
+
+Beaker implementation is split into two bounded turns. `BEAKER_PLANNING`
+produces a task-specific `implementation-plan.md`; `BEAKER_IMPLEMENTING`
+executes that plan and may adapt it when repository evidence requires. The
+orchestrator does not impose a generated runner scaffold or a fixed model
+architecture.
 
 ## Discord
 

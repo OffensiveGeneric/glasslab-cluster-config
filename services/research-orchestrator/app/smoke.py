@@ -69,6 +69,12 @@ def run_smoke() -> dict[str, object]:
                 root / 'trusted-contracts' / 'catalog.json'
             ),
             shared_mount_root=str(root),
+            task_bundle_root=str(root / 'task-bundles'),
+            task_asset_root=str(root / 'task-assets'),
+            dataset_upload_root=str(root / 'dataset-uploads'),
+            benchmark_dataset_catalog_path=str(
+                root / 'datasets' / 'catalog.json'
+            ),
             one_active_run=True,
             maximum_parallel_jobs=2,
         )

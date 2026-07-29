@@ -208,6 +208,10 @@ runs live readiness checks.
 Implemented and live:
 
 - separate Honeydew and Beaker OpenCode sessions and workspaces
+- fresh-session recovery after failed or interrupted agent turns, with compact
+  persisted checkpoints and unchanged worktrees
+- a bounded Beaker planning turn before implementation, without a fixed
+  experiment scaffold
 - durable state, actions, jobs, artifacts, and append-only events
 - protocol, evaluator-promotion, execution, and final-report approval gates
 - Discord start, task-start, dataset upload, approval, rejection, pause,
@@ -221,7 +225,7 @@ Implemented and live:
 
 Validated:
 
-- 66 research-orchestrator tests
+- 67 research-orchestrator tests
 - 159 workflow-api tests
 - mocked complete research workflow
 - live OpenCode/Qwen structured task compilation
