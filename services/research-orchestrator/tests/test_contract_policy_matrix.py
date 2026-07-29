@@ -77,6 +77,22 @@ def test_action_policy_decisions() -> None:
             reason='Bypass the control plane.',
         ),
     ) == PolicyClassification.DENY
+    denied = policy.build_record(
+        run_id='run-policy-denial',
+        proposed_by=AgentName.BEAKER,
+        action=RequestedAction(
+            type='submit_experiment_matrix',
+            arguments={
+                **_matrix().model_dump(mode='json'),
+                'runner_image': 'example.invalid/untrusted:latest',
+            },
+            reason='Run this image.',
+        ),
+        ordinal=1,
+    )
+    assert denied.approval_status.value == 'denied'
+    assert 'not permitted' in denied.reason
+    assert RUNNER_IMAGE in denied.reason
 
 
 def test_evaluation_contract_modification_is_rejected(tmp_path, orchestrator_bundle) -> None:

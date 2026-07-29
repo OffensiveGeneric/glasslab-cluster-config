@@ -582,6 +582,14 @@ class ResearchOrchestrator:
             'must match the ExperimentMatrix schema and must not contain an '
             'evaluation entry point, Kubernetes manifest, contract file, or '
             'contract override. Do not execute cluster work.'
+            f'\n\nPermitted runner images: '
+            f'{json.dumps(sorted(self.policy.permitted_images))}'
+            '\nResource ceilings: '
+            f'cpu={self.policy.maximum_cpu}, '
+            f'memory_gib={self.policy.maximum_memory_gib}, '
+            f'gpus={self.policy.maximum_gpus}, '
+            'maximum_parallel_jobs='
+            f'{self.policy.maximum_parallel_jobs}.'
         )
         turn, result = self._run_agent_turn(
             run_id=run_id,
@@ -599,16 +607,39 @@ class ResearchOrchestrator:
             result=result,
             turn_number=self.store.get_run(run_id).turn_number,
         )
-        if not any(
+        pending = any(
             action.type == 'submit_experiment_matrix'
             and action.approval_status == ApprovalStatus.PENDING
             for action in actions
-        ):
-            raise WorkflowError(
-                'Beaker did not produce a valid pending experiment matrix'
+        )
+        if not pending:
+            feedback = self._matrix_revision_feedback(actions)
+            self._transition(run_id, RunState.BEAKER_REVISING)
+            self._beaker_revise(
+                run_id,
+                feedback=feedback,
             )
+            return
         self._transition(run_id, RunState.HONEYDEW_REVIEWING)
         self._honeydew_review(run_id, implementation_turn_id=turn.turn_id)
+
+    @staticmethod
+    def _matrix_revision_feedback(actions: list[ActionRecord]) -> str:
+        denied = [
+            action.reason
+            for action in actions
+            if action.type == 'submit_experiment_matrix'
+            and action.approval_status == ApprovalStatus.DENIED
+        ]
+        if denied:
+            return (
+                'The orchestrator policy denied the proposed experiment '
+                f'matrix: {"; ".join(denied)}'
+            )
+        return (
+            'No valid submit_experiment_matrix action was returned. Propose '
+            'exactly one matrix that satisfies the supplied policy bounds.'
+        )
 
     def _latest_pending_matrix_action(self, run_id: str) -> ActionRecord:
         matches = [
@@ -686,6 +717,14 @@ class ResearchOrchestrator:
             'Revise the implementation and experiment matrix in response to '
             'the review below. Run local checks and return a replacement '
             'submit_experiment_matrix action. Do not execute cluster work.\n\n'
+            f'Permitted runner images: '
+            f'{json.dumps(sorted(self.policy.permitted_images))}\n'
+            'Resource ceilings: '
+            f'cpu={self.policy.maximum_cpu}, '
+            f'memory_gib={self.policy.maximum_memory_gib}, '
+            f'gpus={self.policy.maximum_gpus}, '
+            'maximum_parallel_jobs='
+            f'{self.policy.maximum_parallel_jobs}.\n\n'
             f'Review feedback:\n{feedback}'
         )
         turn, result = self._run_agent_turn(
@@ -701,12 +740,17 @@ class ResearchOrchestrator:
             result=result,
             turn_number=self.store.get_run(run_id).turn_number,
         )
-        if not any(
+        pending = any(
             item.type == 'submit_experiment_matrix'
             and item.approval_status == ApprovalStatus.PENDING
             for item in actions
-        ):
-            raise WorkflowError('Beaker revision lacks a valid experiment matrix')
+        )
+        if not pending:
+            self._beaker_revise(
+                run_id,
+                feedback=self._matrix_revision_feedback(actions),
+            )
+            return
         self._transition(run_id, RunState.HONEYDEW_REVIEWING)
         self._honeydew_review(run_id, implementation_turn_id=turn.turn_id)
 

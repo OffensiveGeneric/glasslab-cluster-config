@@ -62,29 +62,48 @@ class ActionPolicy:
         proposed_by: AgentName,
         action: RequestedAction,
     ) -> PolicyClassification:
+        return self.evaluate(
+            proposed_by=proposed_by,
+            action=action,
+        )[0]
+
+    def evaluate(
+        self,
+        *,
+        proposed_by: AgentName,
+        action: RequestedAction,
+    ) -> tuple[PolicyClassification, str | None]:
         if action.type in self.DENIED_ACTIONS:
-            return PolicyClassification.DENY
+            return PolicyClassification.DENY, (
+                f'action type {action.type!r} is denied'
+            )
         try:
             reject_contract_overrides(action.arguments)
-        except ContractIntegrityError:
-            return PolicyClassification.DENY
+        except ContractIntegrityError as exc:
+            return PolicyClassification.DENY, str(exc)
         if action.type in self.AUTOMATIC_ACTIONS:
-            return PolicyClassification.AUTOMATIC
+            return PolicyClassification.AUTOMATIC, None
         if action.type == 'draft_protocol':
-            return (
-                PolicyClassification.AUTOMATIC
-                if proposed_by == AgentName.HONEYDEW
-                else PolicyClassification.DENY
+            if proposed_by == AgentName.HONEYDEW:
+                return PolicyClassification.AUTOMATIC, None
+            return PolicyClassification.DENY, (
+                'only Honeydew may draft or update program.md'
             )
         if action.type == 'submit_validation_job':
-            return PolicyClassification.HONEYDEW_APPROVAL
+            return PolicyClassification.HONEYDEW_APPROVAL, None
         if action.type == 'submit_experiment_matrix':
             try:
                 matrix = ExperimentMatrix.model_validate(action.arguments)
-            except ValidationError:
-                return PolicyClassification.DENY
+            except ValidationError as exc:
+                return PolicyClassification.DENY, (
+                    f'experiment matrix schema validation failed: {exc}'
+                )
             if matrix.runner_image not in self.permitted_images:
-                return PolicyClassification.DENY
+                allowed = ', '.join(sorted(self.permitted_images))
+                return PolicyClassification.DENY, (
+                    f'runner image {matrix.runner_image!r} is not permitted; '
+                    f'allowed images: {allowed}'
+                )
             resources = matrix.resources
             if (
                 resources.cpu > self.maximum_cpu
@@ -92,11 +111,19 @@ class ActionPolicy:
                 or resources.gpus > self.maximum_gpus
                 or matrix.maximum_parallel_jobs > self.maximum_parallel_jobs
             ):
-                return PolicyClassification.DENY
-            return PolicyClassification.HONEYDEW_AND_HUMAN_APPROVAL
+                return PolicyClassification.DENY, (
+                    'requested resources exceed policy ceilings: '
+                    f'cpu<={self.maximum_cpu}, '
+                    f'memory_gib<={self.maximum_memory_gib}, '
+                    f'gpus<={self.maximum_gpus}, '
+                    f'maximum_parallel_jobs<={self.maximum_parallel_jobs}'
+                )
+            return PolicyClassification.HONEYDEW_AND_HUMAN_APPROVAL, None
         if action.type in self.HUMAN_ACTIONS:
-            return PolicyClassification.HUMAN_APPROVAL
-        return PolicyClassification.DENY
+            return PolicyClassification.HUMAN_APPROVAL, None
+        return PolicyClassification.DENY, (
+            f'action type {action.type!r} is not recognized'
+        )
 
     def build_record(
         self,
@@ -106,7 +133,7 @@ class ActionPolicy:
         action: RequestedAction,
         ordinal: int,
     ) -> ActionRecord:
-        classification = self.classify(
+        classification, policy_reason = self.evaluate(
             proposed_by=proposed_by,
             action=action,
         )
@@ -135,6 +162,10 @@ class ActionPolicy:
             arguments=action.arguments,
             policy_classification=classification,
             approval_status=status,
-            reason=action.reason,
+            reason=(
+                f'{action.reason} Policy denial: {policy_reason}'
+                if policy_reason
+                else action.reason
+            ),
             idempotency_key=idempotency_key,
         )

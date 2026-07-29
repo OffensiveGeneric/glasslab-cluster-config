@@ -14,6 +14,10 @@ def test_valid_and_invalid_state_transitions() -> None:
         RunState.HONEYDEW_REVIEWING,
         RunState.AWAITING_EXECUTION_APPROVAL,
     )
+    validate_transition(
+        RunState.BEAKER_IMPLEMENTING,
+        RunState.BEAKER_REVISING,
+    )
     with pytest.raises(InvalidTransition):
         validate_transition(RunState.CREATED, RunState.COMPLETE)
     with pytest.raises(InvalidTransition):

@@ -18,6 +18,21 @@ from app.workspaces import WorkspaceManager
 from conftest import RUNNER_IMAGE
 
 
+class DeniedThenValidRuntime(ScriptedMockRuntime):
+    def run_turn(self, **kwargs):
+        if (
+            kwargs['agent'].value == 'beaker'
+            and 'Implement the bounded' in kwargs['prompt']
+        ):
+            allowed_image = self.runner_image
+            self.runner_image = 'example.invalid/untrusted:latest'
+            try:
+                return super().run_turn(**kwargs)
+            finally:
+                self.runner_image = allowed_image
+        return super().run_turn(**kwargs)
+
+
 def _pending_action(store, run_id: str, action_type: str):
     return next(
         action
@@ -99,6 +114,38 @@ def test_idempotent_job_submission(orchestrator_bundle) -> None:
     stored, created = store.create_job_if_absent(job)
     assert created is False
     assert stored.job_id == job.job_id
+
+
+def test_policy_denial_returns_beaker_to_revision(
+    orchestrator_bundle,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    engine.runtime = DeniedThenValidRuntime(runner_image=RUNNER_IMAGE)
+    run = engine.create_run(
+        RunCreateRequest(
+            objective='Revise a policy-denied matrix without failing the run.'
+        )
+    )
+    protocol = _pending_action(store, run.run_id, 'approve_protocol')
+    engine.approve_action(
+        protocol.action_id,
+        reviewer='test-human',
+        reason='Protocol accepted.',
+    )
+    run = store.get_run(run.run_id)
+    assert run.state == RunState.AWAITING_EXECUTION_APPROVAL
+    denied = [
+        action
+        for action in store.list_actions(run.run_id)
+        if action.approval_status == ApprovalStatus.DENIED
+    ]
+    assert len(denied) == 1
+    assert 'not permitted' in denied[0].reason
+    assert any(
+        event.event_type == 'run.state_changed'
+        and event.payload.get('to') == RunState.BEAKER_REVISING.value
+        for event in store.list_events(run.run_id)
+    )
 
 
 def test_restart_recovery_from_job_running(orchestrator_bundle) -> None:

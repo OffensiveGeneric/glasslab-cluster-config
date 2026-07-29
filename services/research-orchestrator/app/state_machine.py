@@ -26,6 +26,7 @@ TRANSITIONS: dict[RunState, set[RunState]] = {
         RunState.TIMED_OUT,
     },
     RunState.BEAKER_IMPLEMENTING: {
+        RunState.BEAKER_REVISING,
         RunState.HONEYDEW_REVIEWING,
         RunState.PAUSED,
         RunState.CANCELLED,
