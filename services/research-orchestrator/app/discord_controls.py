@@ -562,23 +562,62 @@ class DiscordControlGateway:
                 channel_id=str(interaction.channel_id),
                 run_id=run_id,
             )
-            updated = await asyncio.to_thread(
-                execute_discord_run_control,
-                self.engine,
-                operation=operation,
-                run_id=run.run_id,
-                actor=actor,
-                reason=reason,
-            )
             await self._respond(
                 interaction,
-                f'Run `{updated.run_id}` is now {updated.state.value}.',
+                (
+                    f'{operation.capitalize()} request accepted for '
+                    f'`{run.run_id}`. The authoritative result will follow.'
+                ),
             )
+            task = asyncio.create_task(
+                self._execute_run_control(
+                    interaction=interaction,
+                    operation=operation,
+                    run_id=run.run_id,
+                    actor=actor,
+                    reason=reason,
+                )
+            )
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
         except Exception as exc:
             await self._respond(
                 interaction,
                 f'Run {operation} failed: {exc}',
             )
+
+    async def _execute_run_control(
+        self,
+        *,
+        interaction: discord.Interaction,
+        operation: str,
+        run_id: str,
+        actor: DiscordControlActor,
+        reason: str | None,
+    ) -> None:
+        try:
+            updated = await asyncio.to_thread(
+                execute_discord_run_control,
+                self.engine,
+                operation=operation,
+                run_id=run_id,
+                actor=actor,
+                reason=reason,
+            )
+            await interaction.followup.send(
+                f'Run `{updated.run_id}` is now {updated.state.value}.',
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except Exception as exc:
+            try:
+                await interaction.followup.send(
+                    f'Run {operation} failed: {exc}',
+                    ephemeral=True,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except discord.HTTPException:
+                return
 
     async def _on_dataset_upload(
         self,
