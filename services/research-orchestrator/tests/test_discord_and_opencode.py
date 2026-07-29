@@ -292,6 +292,30 @@ def test_discord_control_dispatch_records_immutable_identity() -> None:
     engine.reject_action.assert_not_called()
 
 
+def test_discord_rejection_passes_human_revision_feedback() -> None:
+    engine = Mock()
+    actor = DiscordControlActor(
+        user_id='142100176322953216',
+        display_name='Tyler',
+        guild_id='guild-1',
+        role_ids=frozenset(),
+    )
+
+    execute_discord_action(
+        engine,
+        operation='reject',
+        action_id='action-1',
+        actor=actor,
+        reason='Use the fixed 80/20 split and available GPU hardware.',
+    )
+
+    engine.reject_action.assert_called_once_with(
+        'action-1',
+        reviewer='discord:142100176322953216:Tyler',
+        reason='Use the fixed 80/20 split and available GPU hardware.',
+    )
+
+
 def test_discord_gateway_registers_component_handler() -> None:
     gateway = DiscordControlGateway(
         engine=Mock(),

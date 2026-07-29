@@ -812,6 +812,14 @@ class ResearchOrchestrator:
         reason: str,
     ) -> ActionRecord:
         with self._advance_lock:
+            existing = self.store.get_action(action_id)
+            if existing.approval_status == ApprovalStatus.REJECTED:
+                self._resume_rejected_action(existing, feedback=reason)
+                return self.store.get_action(action_id)
+            if existing.approval_status != ApprovalStatus.PENDING:
+                raise WorkflowError(
+                    f'action is not pending: {existing.approval_status.value}'
+                )
             action = self.store.update_action(
                 action_id,
                 approval_status=ApprovalStatus.REJECTED,
@@ -828,28 +836,42 @@ class ResearchOrchestrator:
                     'reason': reason,
                 },
             )
-            run = self.store.get_run(action.run_id)
-            if action.type == 'approve_protocol':
-                self._transition(
-                    action.run_id,
-                    RunState.HONEYDEW_DRAFTING_PROTOCOL,
-                )
-                self._draft_protocol(action.run_id, feedback=reason)
-            elif action.type == 'submit_experiment_matrix':
-                self._transition(action.run_id, RunState.BEAKER_REVISING)
-                self._beaker_revise(action.run_id, feedback=reason)
-            elif action.type == 'accept_final_report':
-                self._transition(
-                    action.run_id,
-                    RunState.HONEYDEW_WRITING_REPORT,
-                )
-                self._write_report(action.run_id, feedback=reason)
-            elif run.state not in TERMINAL_STATES:
-                self._fail_run(
-                    action.run_id,
-                    WorkflowError(f'unhandled rejected action: {action.type}'),
-                )
+            self._resume_rejected_action(action, feedback=reason)
             return action
+
+    def _resume_rejected_action(
+        self,
+        action: ActionRecord,
+        *,
+        feedback: str,
+    ) -> None:
+        run = self.store.get_run(action.run_id)
+        if action.type == 'approve_protocol':
+            if run.state != RunState.AWAITING_PROTOCOL_APPROVAL:
+                return
+            self._transition(
+                action.run_id,
+                RunState.HONEYDEW_DRAFTING_PROTOCOL,
+            )
+            self._draft_protocol(action.run_id, feedback=feedback)
+        elif action.type == 'submit_experiment_matrix':
+            if run.state != RunState.AWAITING_EXECUTION_APPROVAL:
+                return
+            self._transition(action.run_id, RunState.BEAKER_REVISING)
+            self._beaker_revise(action.run_id, feedback=feedback)
+        elif action.type == 'accept_final_report':
+            if run.state != RunState.AWAITING_FINAL_ACCEPTANCE:
+                return
+            self._transition(
+                action.run_id,
+                RunState.HONEYDEW_WRITING_REPORT,
+            )
+            self._write_report(action.run_id, feedback=feedback)
+        elif run.state not in TERMINAL_STATES:
+            self._fail_run(
+                action.run_id,
+                WorkflowError(f'unhandled rejected action: {action.type}'),
+            )
 
     def _beaker_implement(self, run_id: str) -> None:
         run = self.store.get_run(run_id)

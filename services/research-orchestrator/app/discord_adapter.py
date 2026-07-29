@@ -292,6 +292,23 @@ class DiscordRenderer:
                 components=components,
             )
         if event_type in {'action.approved', 'action.rejected'}:
+            if event_type == 'action.rejected':
+                return DiscordMessage(
+                    'Orchestrator',
+                    '\n'.join(
+                        [
+                            '**Action rejected**',
+                            '',
+                            f"Action: `{payload.get('action_id')}`",
+                            f"Reviewer: {payload.get('reviewer', 'unknown')}",
+                            f"Revision requested: {payload.get('reason', 'none')}",
+                            (
+                                'The run will return to the responsible agent '
+                                'for a revised proposal.'
+                            ),
+                        ]
+                    ),
+                )
             return DiscordMessage(
                 'Orchestrator',
                 f"{event_type}: {payload.get('action_id')}",

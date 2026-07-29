@@ -96,6 +96,66 @@ def _complete_jobs(engine, store, cluster, run_id: str):
     return engine.reconcile_run(run_id)
 
 
+def test_protocol_rejection_redrafts_with_feedback(
+    orchestrator_bundle,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(objective='Compare two bounded methods.')
+    )
+    original = _pending_action(store, run.run_id, 'approve_protocol')
+
+    engine.reject_action(
+        original.action_id,
+        reviewer='test-human',
+        reason='Use the fixed 80/20 split.',
+    )
+
+    revised = store.get_run(run.run_id)
+    assert revised.state == RunState.AWAITING_PROTOCOL_APPROVAL
+    assert revised.protocol_version == 2
+    assert store.get_action(original.action_id).approval_status == (
+        ApprovalStatus.REJECTED
+    )
+    replacement = _pending_action(
+        store,
+        run.run_id,
+        'approve_protocol',
+    )
+    assert replacement.action_id != original.action_id
+
+
+def test_rejected_protocol_action_resumes_after_partial_failure(
+    orchestrator_bundle,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(objective='Recover a partially rejected protocol.')
+    )
+    original = _pending_action(store, run.run_id, 'approve_protocol')
+    store.update_action(
+        original.action_id,
+        approval_status=ApprovalStatus.REJECTED,
+        reviewer='test-human',
+        reason='Initial rejection was recorded.',
+    )
+
+    engine.reject_action(
+        original.action_id,
+        reviewer='test-human',
+        reason='Use the available hardware and fixed split.',
+    )
+
+    recovered = store.get_run(run.run_id)
+    assert recovered.state == RunState.AWAITING_PROTOCOL_APPROVAL
+    assert recovered.protocol_version == 2
+    assert _pending_action(
+        store,
+        run.run_id,
+        'approve_protocol',
+    ).action_id != original.action_id
+
+
 def test_mocked_complete_workflow_and_agent_isolation(orchestrator_bundle) -> None:
     _, store, cluster, runtime, engine = orchestrator_bundle
     run = _advance_to_jobs(engine, store)

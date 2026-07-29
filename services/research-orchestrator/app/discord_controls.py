@@ -57,18 +57,19 @@ def execute_discord_action(
     operation: str,
     action_id: str,
     actor: DiscordControlActor,
+    reason: str | None = None,
 ) -> None:
     if operation == 'approve':
         engine.approve_action(
             action_id,
             reviewer=actor.reviewer,
-            reason='Approved through Discord controls.',
+            reason=reason or 'Approved through Discord controls.',
         )
     elif operation == 'reject':
         engine.reject_action(
             action_id,
             reviewer=actor.reviewer,
-            reason='Rejected through Discord controls.',
+            reason=reason or 'Rejected through Discord controls.',
         )
     else:
         raise ValueError(f'unsupported Discord operation: {operation}')
@@ -293,6 +294,16 @@ class DiscordControlGateway:
             )
             return
 
+        if operation == 'reject':
+            await interaction.response.send_modal(
+                RejectActionModal(
+                    gateway=self,
+                    action_id=action_id,
+                    actor=actor,
+                )
+            )
+            return
+
         await self._respond(
             interaction,
             (
@@ -306,6 +317,7 @@ class DiscordControlGateway:
                 operation=operation,
                 action_id=action_id,
                 actor=actor,
+                reason=None,
             )
         )
         self._tasks.add(task)
@@ -318,6 +330,7 @@ class DiscordControlGateway:
         operation: str,
         action_id: str,
         actor: DiscordControlActor,
+        reason: str | None,
     ) -> None:
         try:
             await asyncio.to_thread(
@@ -326,6 +339,7 @@ class DiscordControlGateway:
                 operation=operation,
                 action_id=action_id,
                 actor=actor,
+                reason=reason,
             )
         except Exception as exc:
             try:
@@ -336,3 +350,64 @@ class DiscordControlGateway:
                 )
             except discord.HTTPException:
                 return
+
+    async def submit_rejection(
+        self,
+        *,
+        interaction: discord.Interaction,
+        action_id: str,
+        actor: DiscordControlActor,
+        reason: str,
+    ) -> None:
+        await self._respond(
+            interaction,
+            (
+                'Reject request received with revision feedback. '
+                'The authoritative result will be posted in this thread.'
+            ),
+        )
+        task = asyncio.create_task(
+            self._execute(
+                interaction=interaction,
+                operation='reject',
+                action_id=action_id,
+                actor=actor,
+                reason=reason,
+            )
+        )
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+
+class RejectActionModal(discord.ui.Modal):
+    def __init__(
+        self,
+        *,
+        gateway: DiscordControlGateway,
+        action_id: str,
+        actor: DiscordControlActor,
+    ) -> None:
+        super().__init__(title='Reject research action')
+        self.gateway = gateway
+        self.action_id = action_id
+        self.actor = actor
+        self.feedback = discord.ui.TextInput(
+            label='Required revision',
+            style=discord.TextStyle.paragraph,
+            placeholder=(
+                'Describe what Honeydew or Beaker must correct before '
+                'requesting approval again.'
+            ),
+            min_length=5,
+            max_length=1000,
+            required=True,
+        )
+        self.add_item(self.feedback)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await self.gateway.submit_rejection(
+            interaction=interaction,
+            action_id=self.action_id,
+            actor=self.actor,
+            reason=str(self.feedback.value).strip(),
+        )
