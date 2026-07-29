@@ -14,7 +14,7 @@ import httpx
 from pydantic import ValidationError
 
 from .config import Settings
-from .schemas import AgentName, AgentTurnResult
+from .schemas import AgentName, AgentTurnResult, ProducedFile
 
 
 class OpenCodeRuntimeError(RuntimeError):
@@ -101,6 +101,121 @@ def extract_structured_output(body: dict[str, Any]) -> Any | None:
     if structured is not None:
         return structured
     return info.get('structured_output')
+
+
+def _decode_json_field(value: Any, expected_type: type) -> Any:
+    if not isinstance(value, str):
+        return value
+    try:
+        decoded = json.loads(value)
+    except json.JSONDecodeError:
+        return value
+    return decoded if isinstance(decoded, expected_type) else value
+
+
+def normalize_structured_output(structured: Any) -> Any:
+    """Adapt known Qwen/OpenCode JSON-schema encoding quirks."""
+    if not isinstance(structured, dict):
+        return structured
+    normalized = dict(structured)
+    for field, expected_type in (
+        ('evaluation_contract_proposal', dict),
+        ('claims', list),
+        ('requested_actions', list),
+        ('produced_files', list),
+    ):
+        if field in normalized:
+            normalized[field] = _decode_json_field(
+                normalized[field],
+                expected_type,
+            )
+
+    proposal = normalized.get('evaluation_contract_proposal')
+    if isinstance(proposal, dict):
+        proposal = dict(proposal)
+        primary = proposal.get('primary_metric')
+        if isinstance(primary, str):
+            proposal['primary_metric'] = {
+                'name': primary,
+                'direction': proposal.pop(
+                    'primary_metric_direction',
+                    'maximize',
+                ),
+                'minimum_effect': proposal.pop('minimum_effect', 0.0),
+            }
+        normalized['evaluation_contract_proposal'] = proposal
+    return normalized
+
+
+def materialize_declared_workspace_files(
+    *,
+    structured: dict[str, Any],
+    workspace: Path,
+    agent: AgentName,
+) -> dict[str, Any]:
+    """Handle bounded local file requests emitted through structured output."""
+    actions = structured.get('requested_actions')
+    produced = structured.get('produced_files')
+    if not isinstance(actions, list) or not isinstance(produced, list):
+        return structured
+
+    declared: dict[str, ProducedFile] = {}
+    for item in produced:
+        try:
+            parsed = ProducedFile.model_validate(item)
+        except ValidationError:
+            continue
+        declared[parsed.path] = parsed
+
+    allowed_purposes = (
+        {'protocol', 'report', 'analysis', 'other'}
+        if agent == AgentName.HONEYDEW
+        else {'implementation', 'analysis', 'other'}
+    )
+    root = workspace.resolve()
+    remaining: list[Any] = []
+    for action in actions:
+        if not isinstance(action, dict):
+            remaining.append(action)
+            continue
+        action_type = action.get('type')
+        if action_type == 'transition':
+            continue
+        if action_type != 'write_file':
+            remaining.append(action)
+            continue
+        arguments = action.get('arguments')
+        if not isinstance(arguments, dict):
+            remaining.append(action)
+            continue
+        relative_path = arguments.get('path')
+        content = arguments.get('content')
+        declaration = declared.get(relative_path)
+        if (
+            declaration is None
+            or declaration.purpose not in allowed_purposes
+            or not isinstance(content, str)
+        ):
+            remaining.append(action)
+            continue
+        destination = workspace / declaration.path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        parent = destination.parent.resolve()
+        if not parent.is_relative_to(root) or destination.is_symlink():
+            remaining.append(action)
+            continue
+        destination.write_text(content, encoding='utf-8')
+    normalized = dict(structured)
+    normalized['requested_actions'] = remaining
+    return normalized
+
+
+def _validation_summary(exc: ValidationError) -> str:
+    details: list[str] = []
+    for error in exc.errors(include_url=False, include_input=False)[:8]:
+        location = '.'.join(str(part) for part in error['loc'])
+        details.append(f"{location}: {error['msg']}")
+    return '; '.join(details)
 
 
 @dataclass
@@ -395,6 +510,13 @@ class OpenCodeProcessRuntime(AgentRuntime):
                             raise OpenCodeRuntimeError(
                                 'OpenCode turn did not return structured output'
                             ) from exc
+                    structured = normalize_structured_output(structured)
+                    if isinstance(structured, dict):
+                        structured = materialize_declared_workspace_files(
+                            structured=structured,
+                            workspace=workspace,
+                            agent=agent,
+                        )
                     try:
                         return (
                             AgentTurnResult.model_validate(structured),
@@ -408,17 +530,20 @@ class OpenCodeProcessRuntime(AgentRuntime):
                             raise
                         current_prompt = (
                             'Correct only the structured result from your '
-                            'previous response. Do not run tools or edit files. '
+                            'previous response. You may use a workspace file '
+                            'tool only when a declared produced file is missing. '
                             'Return a complete object matching the supplied '
-                            'JSON schema. Remove any requested action that is '
-                            'not required for this turn. The independent '
+                            'JSON schema. Nested objects and arrays must be JSON '
+                            'values, not JSON-encoded strings. Remove local '
+                            'write_file and transition requests after applying '
+                            'them. The independent '
                             f'validator reported:\n{exc}'
                         )
             except ValidationError as exc:
                 raise OpenCodeRuntimeError(
                     'OpenCode structured output remained invalid after '
                     f'{self.settings.opencode_structured_repair_attempts} '
-                    'repair attempt(s)'
+                    f'repair attempt(s): {_validation_summary(exc)}'
                 ) from exc
         raise OpenCodeRuntimeError('OpenCode turn ended without a result')
 

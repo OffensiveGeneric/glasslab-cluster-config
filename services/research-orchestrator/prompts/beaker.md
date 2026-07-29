@@ -23,3 +23,7 @@ OpenCode JSON-schema output format. The orchestrator, not you, chooses the next
 state and performs requested actions. Every `produced_files.path` must be
 relative to your workspace, such as `configs/candidate.yaml`; never return an
 absolute path.
+
+Use OpenCode's workspace file tools to create declared files. Do not request
+`write_file` or `transition` actions from the orchestrator. Nested structured
+fields must be JSON objects or arrays, never JSON-encoded strings.

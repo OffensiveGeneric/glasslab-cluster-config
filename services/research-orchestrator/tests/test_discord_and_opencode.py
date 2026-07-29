@@ -19,9 +19,11 @@ from app.discord_controls import (
 from app.opencode_runtime import (
     OpenCodeProcessRuntime,
     extract_structured_output,
+    materialize_declared_workspace_files,
     normalize_opencode_event,
+    normalize_structured_output,
 )
-from app.schemas import AgentName, EventRecord
+from app.schemas import AgentName, AgentTurnResult, EventRecord
 
 
 def test_discord_renderer_has_no_live_api_dependency() -> None:
@@ -489,6 +491,97 @@ def test_extracts_current_and_legacy_opencode_structured_output() -> None:
     assert extract_structured_output(current) == {'kind': 'protocol_draft'}
     assert extract_structured_output(legacy) == {'kind': 'protocol_draft'}
     assert extract_structured_output({'info': {}}) is None
+
+
+def test_normalizes_live_qwen_nested_json_strings() -> None:
+    normalized = normalize_structured_output(
+        {
+            'kind': 'protocol_draft',
+            'summary': 'Draft complete.',
+            'evaluation_contract_proposal': json.dumps(
+                {
+                    'evaluator_type': 'cifar100-unseen-v1',
+                    'primary_metric': 'test_unseen_global_recall_at_1',
+                    'primary_metric_direction': 'maximize',
+                    'minimum_effect': 0.02,
+                    'required_artifacts': ['metrics.json'],
+                    'budget_mode': 'wallclock',
+                    'max_wallclock_minutes': 60,
+                    'resource_constraints': {
+                        'cpu': 4,
+                        'memory_gib': 16,
+                        'gpus': 1,
+                        'wallclock_minutes': 60,
+                    },
+                    'rationale': 'Compare the methods under one budget.',
+                }
+            ),
+            'requested_actions': '[]',
+            'produced_files': [
+                {'path': 'program.md', 'purpose': 'protocol'}
+            ],
+        }
+    )
+
+    result = AgentTurnResult.model_validate(normalized)
+    assert result.evaluation_contract_proposal is not None
+    assert result.evaluation_contract_proposal.primary_metric.name == (
+        'test_unseen_global_recall_at_1'
+    )
+    assert result.evaluation_contract_proposal.primary_metric.minimum_effect == 0.02
+
+
+def test_materializes_only_declared_agent_workspace_file(tmp_path) -> None:
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    structured = {
+        'produced_files': [{'path': 'program.md', 'purpose': 'protocol'}],
+        'requested_actions': [
+            {
+                'type': 'write_file',
+                'arguments': {
+                    'path': 'program.md',
+                    'content': '# Protocol\n',
+                },
+            },
+            {
+                'type': 'write_file',
+                'arguments': {
+                    'path': '../outside.md',
+                    'content': 'not allowed',
+                },
+            },
+            {'type': 'transition', 'arguments': {'to_state': 'COMPLETE'}},
+        ],
+    }
+
+    normalized = materialize_declared_workspace_files(
+        structured=structured,
+        workspace=workspace,
+        agent=AgentName.HONEYDEW,
+    )
+
+    assert (workspace / 'program.md').read_text() == '# Protocol\n'
+    assert not (tmp_path / 'outside.md').exists()
+    assert len(normalized['requested_actions']) == 1
+    assert normalized['requested_actions'][0]['arguments']['path'] == '../outside.md'
+
+
+def test_discord_failed_run_includes_authoritative_cause() -> None:
+    message = DiscordRenderer().render(
+        EventRecord(
+            sequence_number=9,
+            run_id='run-1',
+            source='orchestrator',
+            event_type='run.failed',
+            payload={'error': 'Structured output field was invalid.'},
+        )
+    )
+
+    assert message is not None
+    assert '**Run failed**' in message.content
+    assert 'Structured output field was invalid.' in message.content
+    assert message.is_status is True
 
 
 def test_opencode_writable_runtime_directories_are_per_agent(

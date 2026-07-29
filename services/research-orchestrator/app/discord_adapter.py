@@ -334,11 +334,27 @@ class DiscordRenderer:
             'run.paused',
             'run.cancelled',
             'run.completed',
-            'run.failed',
         }:
             return DiscordMessage(
                 'Orchestrator',
                 event_type.replace('.', ' ').capitalize(),
+                is_status=True,
+            )
+        if event_type == 'run.failed':
+            error = str(payload.get('error', 'No failure detail was recorded.'))
+            return DiscordMessage(
+                'Orchestrator',
+                '\n'.join(
+                    [
+                        '**Run failed**',
+                        '',
+                        f'Cause: {error}',
+                        (
+                            'No cluster job is implied by this status; inspect '
+                            'the run events to identify the last completed stage.'
+                        ),
+                    ]
+                ),
                 is_status=True,
             )
         return None
