@@ -2512,10 +2512,15 @@ class ResearchOrchestrator:
                 'the implementation. Read the rejected base config'
                 + (f' `{base_config}`' if base_config else '')
                 + ' and only the directly relevant protocol or source files. '
-                'Correct every validator error exactly, run the narrowest '
-                'applicable check, and stop. Do not browse unrelated repository '
-                'files or redesign working code unless an error explicitly names '
-                'that code.\n'
+                'Every backticked config_path in the validator errors is an '
+                'exact dotted path from the root of that config. For example, '
+                '`experiment_dimensions.model` must be written beneath the '
+                'top-level `experiment_dimensions` key, not beneath '
+                '`methodology` or another wrapper. Correct every validator error '
+                'exactly, then read back each required dotted path and run the '
+                'narrowest applicable check before returning the replacement '
+                'action. Do not browse unrelated repository files or redesign '
+                'working code unless an error explicitly names that code.\n'
             )
         prompt = (
             'Revise the implementation and experiment matrix in response to '
