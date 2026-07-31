@@ -2194,6 +2194,12 @@ class ResearchOrchestrator:
                     for item in completed.stdout.split(b'\0')
                     if item
                 )
+        relative_paths = {
+            relative
+            for relative in relative_paths
+            if '__pycache__' not in Path(relative).parts
+            and Path(relative).suffix not in {'.pyc', '.pyo'}
+        }
         try:
             return self.workspaces.create_review_snapshot(
                 run_id=run_id,
