@@ -1008,7 +1008,9 @@ class ResearchOrchestrator:
             'and dependent variables, controls, baselines, source references, '
             'required artifacts, evaluation criteria, budgets, stopping '
             'conditions, and explicit approval gates. Return it as a produced '
-            'file with purpose "protocol". Also populate '
+            'file with purpose "protocol". The produced_files metadata does not '
+            'create the file: use OpenCode\'s workspace file tool to write '
+            '`program.md`, then read it back before returning. Also populate '
             'evaluation_contract_proposal with the scientific evaluator type, '
             'primary metric and direction, minimum meaningful effect, '
             'guardrails, required artifacts, budget policy, resource ceilings, '
@@ -1039,6 +1041,62 @@ class ResearchOrchestrator:
         ]
         if len(protocol_files) != 1:
             raise WorkflowError('Honeydew must produce exactly one protocol file')
+        protocol_path = Path(run.honeydew_workspace) / protocol_files[0].path
+        if not protocol_path.is_file():
+            self._event(
+                run_id,
+                source='orchestrator',
+                event_type='agent.file_repair_requested',
+                payload={
+                    'agent': AgentName.HONEYDEW.value,
+                    'path': protocol_files[0].path,
+                    'reason': (
+                        'The structured response declared the protocol, but no '
+                        'workspace file existed.'
+                    ),
+                },
+            )
+            _, repaired = self._run_agent_turn(
+                run_id=run_id,
+                agent=AgentName.HONEYDEW,
+                prompt=(
+                    'Focused workspace repair. Your previous structured response '
+                    f'declared `{protocol_files[0].path}`, but the authoritative '
+                    'workspace does not contain that file. Write it now using '
+                    'OpenCode\'s workspace file tool, then read it back. Do not '
+                    'redesign the protocol or request actions. Return kind '
+                    '`protocol_draft`, declare exactly that file with purpose '
+                    '`protocol`, and only claim completion after verifying the '
+                    'file exists.'
+                ),
+                expected_kind=TurnKind.PROTOCOL_DRAFT,
+                input_event={
+                    'repair': 'missing_workspace_file',
+                    'path': protocol_files[0].path,
+                },
+            )
+            repaired_protocols = [
+                item
+                for item in repaired.produced_files
+                if item.path == protocol_files[0].path
+                and item.purpose == 'protocol'
+            ]
+            if len(repaired_protocols) != 1 or repaired.requested_actions:
+                raise WorkflowError(
+                    'Honeydew protocol repair must produce the declared file '
+                    'and no actions'
+                )
+            if not protocol_path.is_file():
+                raise WorkflowError(
+                    'Honeydew did not create the protocol after one focused '
+                    'repair turn'
+                )
+            self._event(
+                run_id,
+                source='honeydew',
+                event_type='agent.file_repair_completed',
+                payload={'path': protocol_files[0].path},
+            )
         proposal = result.evaluation_contract_proposal
         if proposal is None:
             raise WorkflowError(

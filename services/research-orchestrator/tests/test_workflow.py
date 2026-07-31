@@ -100,6 +100,33 @@ class MissingPlanThenRepairRuntime(ScriptedMockRuntime):
         return result
 
 
+class MissingProtocolThenRepairRuntime(ScriptedMockRuntime):
+    def __init__(self, *, runner_image: str) -> None:
+        super().__init__(runner_image=runner_image)
+        self.removed_first_protocol = False
+
+    def run_turn(self, **kwargs):
+        if (
+            kwargs['agent'] == AgentName.HONEYDEW
+            and kwargs['prompt'].startswith('Focused workspace repair.')
+        ):
+            return super().run_turn(
+                **{
+                    **kwargs,
+                    'prompt': 'Draft a concrete program.md focused repair.',
+                }
+            )
+        result = super().run_turn(**kwargs)
+        if (
+            kwargs['agent'] == AgentName.HONEYDEW
+            and 'Draft a concrete program.md' in kwargs['prompt']
+            and not self.removed_first_protocol
+        ):
+            (kwargs['workspace'] / 'program.md').unlink()
+            self.removed_first_protocol = True
+        return result
+
+
 class PauseDuringImplementationRuntime(ScriptedMockRuntime):
     def __init__(self, *, runner_image: str) -> None:
         super().__init__(runner_image=runner_image)
@@ -557,6 +584,28 @@ def test_missing_beaker_plan_file_gets_one_focused_repair(
     assert 'agent.file_repair_requested' in event_types
     assert 'agent.file_repair_completed' in event_types
     assert runtime.turn_counts[AgentName.BEAKER] == 3
+
+
+def test_missing_honeydew_protocol_file_gets_one_focused_repair(
+    orchestrator_bundle,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    runtime = MissingProtocolThenRepairRuntime(runner_image=RUNNER_IMAGE)
+    engine.runtime = runtime
+
+    run = engine.create_run(
+        RunCreateRequest(objective='Repair a missing authoritative protocol file.')
+    )
+
+    current = store.get_run(run.run_id)
+    assert current.state == RunState.AWAITING_PROTOCOL_APPROVAL
+    assert Path(current.protocol_path or '').is_file()
+    event_types = {
+        event.event_type for event in store.list_events(run.run_id)
+    }
+    assert 'agent.file_repair_requested' in event_types
+    assert 'agent.file_repair_completed' in event_types
+    assert runtime.turn_counts[AgentName.HONEYDEW] == 2
 
 
 def test_idempotent_job_submission(orchestrator_bundle) -> None:
