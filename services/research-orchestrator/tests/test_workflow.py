@@ -525,6 +525,50 @@ def test_idempotent_job_submission(orchestrator_bundle) -> None:
     assert stored.job_id == job.job_id
 
 
+def test_submitted_queued_job_is_inspected_without_resubmission(
+    orchestrator_bundle,
+    monkeypatch,
+) -> None:
+    _, store, cluster, _, engine = orchestrator_bundle
+    original_submit = cluster.submit
+    submission_calls = []
+
+    def submit_as_accepted(spec):
+        submission_calls.append(spec.idempotency_key)
+        submission = original_submit(spec)
+        accepted = submission.__class__(
+            external_run_id=submission.external_run_id,
+            job_name=submission.job_name,
+            kubernetes_uid=submission.kubernetes_uid,
+            status=JobStatus.QUEUED,
+        )
+        cluster.submissions[spec.idempotency_key] = accepted
+        cluster.snapshots[accepted.external_run_id] = (
+            cluster.snapshots[accepted.external_run_id].__class__(
+                status=JobStatus.QUEUED
+            )
+        )
+        return accepted
+
+    monkeypatch.setattr(cluster, 'submit', submit_as_accepted)
+    run = _advance_to_jobs(engine, store)
+    jobs = store.list_jobs(run.run_id)
+    assert all(job.status == JobStatus.QUEUED for job in jobs)
+    assert all(job.external_run_id is not None for job in jobs)
+
+    engine.reconcile_run(run.run_id)
+    engine.reconcile_run(run.run_id)
+
+    assert submission_calls == [job.idempotency_key for job in jobs]
+    assert len(
+        [
+            event
+            for event in store.list_events(run.run_id)
+            if event.event_type == 'job.submitted'
+        ]
+    ) == len(jobs)
+
+
 def test_policy_denial_returns_beaker_to_revision(
     orchestrator_bundle,
 ) -> None:

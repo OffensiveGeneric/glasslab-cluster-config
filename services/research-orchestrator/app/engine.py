@@ -2423,16 +2423,26 @@ class ResearchOrchestrator:
 
     def _fill_job_capacity(self, run_id: str) -> None:
         run = self.store.get_run(run_id)
-        active = self.store.list_jobs(
+        capacity_jobs = self.store.list_jobs(
             run_id,
             statuses={
+                JobStatus.QUEUED,
                 JobStatus.SUBMITTING,
                 JobStatus.RUNNING,
                 JobStatus.UNKNOWN,
             },
         )
+        active = [
+            job
+            for job in capacity_jobs
+            if job.status != JobStatus.QUEUED or job.external_run_id
+        ]
         slots = max(0, run.maximum_parallel_jobs - len(active))
-        queued = self.store.list_jobs(run_id, statuses={JobStatus.QUEUED})
+        queued = [
+            job
+            for job in capacity_jobs
+            if job.status == JobStatus.QUEUED and not job.external_run_id
+        ]
         for job in queued[:slots]:
             submitting = self.store.update_job(
                 job.model_copy(update={'status': JobStatus.SUBMITTING})
@@ -2518,7 +2528,7 @@ class ResearchOrchestrator:
                 },
             )
             for job in jobs:
-                if job.status == JobStatus.QUEUED:
+                if job.status == JobStatus.QUEUED and not job.external_run_id:
                     continue
                 if not job.external_run_id:
                     try:
