@@ -141,6 +141,90 @@ class WorkspaceManager:
             shutil.copy2(protocol, target)
             target.chmod(0o444)
 
+    def create_review_snapshot(
+        self,
+        *,
+        run_id: str,
+        relative_paths: list[str],
+        maximum_files: int = 128,
+        maximum_bytes: int = 4 * 1024 * 1024,
+    ) -> tuple[Path, list[dict[str, object]]]:
+        paths = self.paths(run_id)
+        source_root = paths.beaker.resolve()
+        destination_root = paths.honeydew / '.glasslab-review'
+        if destination_root.is_symlink():
+            raise WorkspaceError('review snapshot destination is a symlink')
+        if destination_root.exists():
+            shutil.rmtree(destination_root)
+        destination_root.mkdir(parents=True)
+
+        manifest: list[dict[str, object]] = []
+        total_bytes = 0
+        for relative in sorted(set(relative_paths)):
+            relative_path = Path(relative)
+            if relative_path.is_absolute() or '..' in relative_path.parts:
+                raise WorkspaceError(
+                    f'review snapshot path is not relative: {relative}'
+                )
+            unresolved_source = source_root / relative_path
+            path_cursor = source_root
+            contains_symlink = False
+            for part in relative_path.parts:
+                path_cursor /= part
+                if path_cursor.is_symlink():
+                    contains_symlink = True
+                    break
+            if contains_symlink:
+                raise WorkspaceError(
+                    f'review snapshot source traverses a symlink: {relative}'
+                )
+            source = unresolved_source.resolve()
+            if not source.is_relative_to(source_root):
+                raise WorkspaceError(
+                    f'review snapshot path escapes Beaker workspace: {relative}'
+                )
+            if not source.is_file():
+                raise WorkspaceError(
+                    f'review snapshot source is not a real file: {relative}'
+                )
+            size = source.stat().st_size
+            if len(manifest) >= maximum_files:
+                raise WorkspaceError('review snapshot exceeds file limit')
+            if total_bytes + size > maximum_bytes:
+                raise WorkspaceError('review snapshot exceeds byte limit')
+
+            destination = destination_root / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+            destination.chmod(0o444)
+            digest = sha256(destination.read_bytes()).hexdigest()
+            manifest.append(
+                {
+                    'path': relative_path.as_posix(),
+                    'size_bytes': size,
+                    'sha256': digest,
+                }
+            )
+            total_bytes += size
+
+        manifest_path = destination_root / 'manifest.json'
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    'schema_version': 'glasslab-review-snapshot-v1',
+                    'source_agent': AgentName.BEAKER.value,
+                    'files': manifest,
+                    'total_bytes': total_bytes,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + '\n',
+            encoding='utf-8',
+        )
+        manifest_path.chmod(0o444)
+        return destination_root, manifest
+
     def write_recovery_checkpoint(
         self,
         *,

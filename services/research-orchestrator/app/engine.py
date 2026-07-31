@@ -656,7 +656,6 @@ class ResearchOrchestrator:
                     'message_to_other_agent': result.message_to_other_agent,
                 },
             )
-            return completed, result
         except Exception as exc:
             failed = turn.model_copy(
                 update={
@@ -683,6 +682,13 @@ class ResearchOrchestrator:
                 error=str(exc),
             )
             raise
+        current = self.store.get_run(run_id)
+        if current.state == RunState.PAUSED or current.state in TERMINAL_STATES:
+            raise WorkflowError(
+                'workflow advancement stopped after agent turn because run is '
+                f'{current.state.value}'
+            )
+        return completed, result
 
     def _record_requested_actions(
         self,
@@ -2041,13 +2047,35 @@ class ResearchOrchestrator:
         implementation_turn_id: str,
     ) -> None:
         action = self._latest_pending_matrix_action(run_id)
+        snapshot_path, snapshot_manifest = self._create_methodology_review_snapshot(
+            run_id=run_id,
+            action=action,
+        )
         prompt = (
             'Review Beaker\'s implementation and proposed experiment matrix. '
             'Check controls, confounds, data leakage, comparability, resource '
             'bounds, required artifacts, and alignment with program.md and the '
-            'immutable evaluation contract. Set done=true only when the matrix '
-            'is methodologically acceptable. Do not submit the job.\n\n'
+            'immutable evaluation contract. Beaker\'s files are available as a '
+            'bounded snapshot under `.glasslab-review/` in your workspace. Read '
+            '`.glasslab-review/manifest.json`, the candidate config, and the '
+            'included implementation files before deciding. The snapshot is a '
+            'copy for review; editing it cannot modify Beaker\'s worktree. Set '
+            'done=true only when the matrix is methodologically acceptable. Do '
+            'not submit the job.\n\n'
+            'Review snapshot manifest:\n'
+            f'{json.dumps(snapshot_manifest, indent=2, sort_keys=True)}\n\n'
             f'Proposed matrix:\n{json.dumps(action.arguments, indent=2, sort_keys=True)}'
+        )
+        self._event(
+            run_id,
+            source='orchestrator',
+            event_type='agent.review_snapshot_created',
+            payload={
+                'implementation_turn_id': implementation_turn_id,
+                'action_id': action.action_id,
+                'path': str(snapshot_path),
+                'files': snapshot_manifest,
+            },
         )
         turn, result = self._run_agent_turn(
             run_id=run_id,
@@ -2116,6 +2144,65 @@ class ResearchOrchestrator:
                 human_approval_ready=True,
             ),
         )
+
+    def _create_methodology_review_snapshot(
+        self,
+        *,
+        run_id: str,
+        action: ActionRecord,
+    ) -> tuple[Path, list[dict[str, object]]]:
+        run = self.store.get_run(run_id)
+        matrix = ExperimentMatrix.model_validate(action.arguments)
+        workspace = Path(run.beaker_workspace).resolve()
+        relative_paths = {
+            matrix.base_config,
+            'implementation-plan.md',
+        }
+        if run.task_definition:
+            source = (
+                workspace
+                / str(run.task_definition['source_subdirectory'])
+            ).resolve()
+            if not source.is_relative_to(workspace) or not source.is_dir():
+                raise WorkflowError(
+                    'imported task source directory is missing from Beaker workspace'
+                )
+            relative_paths.update(
+                path.relative_to(workspace).as_posix()
+                for path in source.rglob('*')
+                if path.is_file() and not path.is_symlink()
+            )
+        else:
+            for command in (
+                ['git', 'diff', '--name-only', '-z', 'HEAD'],
+                ['git', 'ls-files', '--others', '--exclude-standard', '-z'],
+            ):
+                completed = subprocess.run(
+                    command,
+                    cwd=workspace,
+                    capture_output=True,
+                    check=False,
+                    timeout=10,
+                )
+                if completed.returncode != 0:
+                    raise WorkflowError(
+                        completed.stderr.decode(errors='replace').strip()
+                        or 'failed to enumerate Beaker review files'
+                    )
+                relative_paths.update(
+                    item.decode(errors='strict')
+                    for item in completed.stdout.split(b'\0')
+                    if item
+                )
+        try:
+            return self.workspaces.create_review_snapshot(
+                run_id=run_id,
+                relative_paths=list(relative_paths),
+            )
+        except Exception as exc:
+            raise WorkflowError(
+                f'failed to create Honeydew review snapshot: {exc}'
+            ) from exc
 
     def _matrix_preflight_error(
         self,

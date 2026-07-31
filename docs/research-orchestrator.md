@@ -138,7 +138,12 @@ runs/<run-id>/
 
 The worktree manager creates two detached Git worktrees from the one approved
 repository. The approved protocol is copied read-only into each worktree.
-Artifacts are copied through path-containment checks.
+Artifacts are copied through path-containment checks. Before methodology
+review, the orchestrator copies the proposed config, implementation plan, and
+bounded implementation files into Honeydew's `.glasslab-review/` directory.
+The snapshot rejects symlinks and path escapes, enforces file and byte limits,
+records SHA-256 digests, and is read-only. Honeydew therefore reviews Beaker's
+actual candidate without gaining write access to Beaker's worktree.
 
 The OpenCode adapter starts one authenticated `opencode serve` child process
 per agent. Each process receives a separate workspace, XDG configuration and
@@ -365,7 +370,9 @@ Resume creates a fresh OpenCode session, injects the compact checkpoint, and
 continues from the unchanged worktree. Successful sessions remain reusable
 across normal turns. Resume also detects older paused records whose latest
 failed turn still references the attached session and rotates them before
-recovery.
+recovery. A pause or cancellation received while an agent turn is completing
+is rechecked after the turn output is stored; the output remains auditable, but
+the orchestrator does not record requested actions or start another turn.
 
 The run-level runtime ceiling measures active workflow time. The orchestrator
 accumulates elapsed active seconds when a run is paused, stops the clock while
@@ -606,12 +613,14 @@ Manually tested:
   `/research-resume`
 - live immutable dataset upload, durable lookup, and SHA-256 readback
 - live resume of a paused Adult run into a new Beaker implementation turn
+- distributed Qwen inference across the cabled `.17` and `.18` exo pair
 
 Not yet tested:
 
 - full Adult, Wine, or Fashion-MNIST benchmark completion on live GPUs/CPUs
 - research-orchestrator submission of an experiment Kubernetes Job; the active
-  Adult run has not yet returned a structured matrix proposal
+  Adult run has returned a structured matrix but has not passed methodology
+  review and human execution approval
 - full generic `/task-start` execution through final report acceptance
 - automatic public asset ingestion against a real new task
 

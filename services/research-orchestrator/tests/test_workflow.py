@@ -10,7 +10,7 @@ import pytest
 from app.contracts import EvaluationContractResolver
 from app.contract_candidates import ContractCandidateManager
 from app.discord_adapter import DisabledDiscordAdapter
-from app.engine import ResearchOrchestrator
+from app.engine import ResearchOrchestrator, WorkflowError
 from app.main import create_app
 from app.mock_runtime import ScriptedMockRuntime
 from app.policy import ActionPolicy
@@ -79,6 +79,28 @@ class FailOnceImplementationRuntime(ScriptedMockRuntime):
                 raise RuntimeError('mock implementation timeout')
             self.recovery_prompt = kwargs['prompt']
         return super().run_turn(**kwargs)
+
+
+class PauseDuringImplementationRuntime(ScriptedMockRuntime):
+    def __init__(self, *, runner_image: str) -> None:
+        super().__init__(runner_image=runner_image)
+        self.engine: ResearchOrchestrator | None = None
+
+    def run_turn(self, **kwargs):
+        result = super().run_turn(**kwargs)
+        if (
+            self.engine is not None
+            and kwargs['agent'] == AgentName.BEAKER
+            and (
+                'Implement the bounded' in kwargs['prompt']
+                or 'Execute the task-specific plan' in kwargs['prompt']
+            )
+        ):
+            self.engine.pause_run(
+                kwargs['run_id'],
+                requested_by='test-mid-turn',
+            )
+        return result
 
 
 class NewContractRuntime(ScriptedMockRuntime):
@@ -636,6 +658,78 @@ def test_failed_resume_returns_run_to_paused_state(
     assert event.event_type == 'run.paused'
     assert event.payload['requested_by'] == 'orchestrator'
     assert 'mock resumed turn timeout' in event.payload['reason']
+
+
+def test_pause_during_agent_turn_stops_workflow_advancement(
+    orchestrator_bundle,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    runtime = PauseDuringImplementationRuntime(runner_image=RUNNER_IMAGE)
+    runtime.engine = engine
+    engine.runtime = runtime
+    run = engine.create_run(
+        RunCreateRequest(
+            objective='Stop advancement when paused during implementation.'
+        )
+    )
+    protocol = _pending_action(store, run.run_id, 'approve_protocol')
+
+    with pytest.raises(
+        WorkflowError,
+        match='workflow advancement stopped after agent turn',
+    ):
+        engine.approve_action(
+            protocol.action_id,
+            reviewer='test-human',
+            reason='Protocol accepted.',
+        )
+
+    paused = store.get_run(run.run_id)
+    assert paused.state == RunState.PAUSED
+    assert paused.resume_state == RunState.BEAKER_IMPLEMENTING
+    assert not any(
+        action.type == 'submit_experiment_matrix'
+        for action in store.list_actions(run.run_id)
+    )
+    assert runtime.turn_counts[AgentName.HONEYDEW] == 1
+
+
+def test_honeydew_receives_read_only_beaker_review_snapshot(
+    orchestrator_bundle,
+) -> None:
+    _, store, _, runtime, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(
+            objective='Review the actual implementation before execution.'
+        )
+    )
+    protocol = _pending_action(store, run.run_id, 'approve_protocol')
+    engine.approve_action(
+        protocol.action_id,
+        reviewer='test-human',
+        reason='Protocol accepted.',
+    )
+
+    review_root = Path(run.honeydew_workspace) / '.glasslab-review'
+    manifest = json.loads((review_root / 'manifest.json').read_text())
+    reviewed_paths = {item['path'] for item in manifest['files']}
+    assert 'configs/baseline.yaml' in reviewed_paths
+    assert 'experiment.py' in reviewed_paths
+    assert 'implementation-plan.md' in reviewed_paths
+    assert (review_root / 'experiment.py').read_text() == (
+        'print("bounded mock experiment")\n'
+    )
+    assert (review_root / 'experiment.py').stat().st_mode & 0o222 == 0
+    honeydew_prompt = next(
+        prompt
+        for agent, prompt in reversed(runtime.prompts)
+        if agent == AgentName.HONEYDEW and 'Review Beaker' in prompt
+    )
+    assert '.glasslab-review/manifest.json' in honeydew_prompt
+    assert any(
+        event.event_type == 'agent.review_snapshot_created'
+        for event in store.list_events(run.run_id)
+    )
 
 
 def test_failed_turn_resumes_with_fresh_session_and_checkpoint(
