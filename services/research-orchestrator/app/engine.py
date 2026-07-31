@@ -1014,7 +1014,15 @@ class ResearchOrchestrator:
             'guardrails, required artifacts, budget policy, resource ceilings, '
             'and rationale. Propose data and metrics only. Do not propose '
             'executable paths, container images, commands, or checksums; those '
-            'remain controlled by the orchestrator.'
+            'remain controlled by the orchestrator. The experiment workload '
+            'must emit metrics and evidence only. `evaluation.json`, '
+            '`rubric_score`, and `integrity_pass` are evaluator-owned outputs: '
+            'the protocol may require them as final artifacts, but must not '
+            'instruct Beaker or workload code to create, format, read, or score '
+            'them. When the installed contract declares methodology '
+            'requirements, only entries with mode `comparison` are experiment '
+            'axes. Entries with mode `decision` require one justified choice; '
+            'do not invent an ablation or improvement hypothesis for them.'
             + task_context
         )
         if feedback:

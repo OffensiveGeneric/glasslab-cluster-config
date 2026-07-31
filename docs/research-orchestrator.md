@@ -334,6 +334,10 @@ workload references to evaluator-owned `evaluation.json`, `rubric_score`, and
 runs the evaluator and owns evaluation output. Honeydew's structured approval
 cannot bypass these checks.
 
+The same ownership rule applies during protocol generation. A protocol may
+list evaluator output as a final artifact, but it cannot assign creation,
+formatting, reading, or scoring of that output to Beaker or workload code.
+
 The preflight report records the exact expanded job count, checks performed,
 configured comparisons, configured decisions, and blocking findings. Discord
 renders that report before showing approval controls.
