@@ -746,6 +746,9 @@ def test_imported_task_prompt_uses_exact_dataset_binding_names(
     implementation_prompt = captured['prompt']
     assert 'keyed by each exact declared dataset `name`' in implementation_prompt
     assert 'Do not assume generic keys such as `train` or `test`' in implementation_prompt
+    assert '"adult_train": "/mnt/datasets/adult_train"' in implementation_prompt
+    assert 'Run a loader-only smoke check' in implementation_prompt
+    assert 'Do not run the full benchmark' in implementation_prompt
 
 
 def test_contract_preflight_returns_beaker_to_revision(

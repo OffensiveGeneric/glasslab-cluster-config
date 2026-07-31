@@ -1912,6 +1912,10 @@ class ResearchOrchestrator:
         task_context = ''
         if run.task_definition:
             source = run.task_definition['source_subdirectory']
+            dataset_binding_example = {
+                dataset['name']: f'/mnt/datasets/{dataset["name"]}'
+                for dataset in run.task_definition['datasets']
+            }
             task_context = (
                 '\nThis is an imported benchmark task. Read '
                 '`benchmark-task/problem.md`, `benchmark-task/eval_agent_prompt.md`, '
@@ -1924,6 +1928,14 @@ class ResearchOrchestrator:
                 'roles. Do not assume generic keys such as `train` or `test` '
                 'unless those are the declared names. Write all outputs beneath '
                 '`GLASSLAB_OUTPUT_DIR`, and make no network calls. Use the '
+                'following object shape in the loader (paths are illustrative):\n'
+                + json.dumps(dataset_binding_example, indent=2, sort_keys=True)
+                + '\nRun a loader-only smoke check by setting that environment '
+                'variable to tiny local fixture paths and verifying each '
+                'declared name resolves. Do not run the full benchmark, '
+                'hyperparameter search, bootstrap evaluation, or generate '
+                'dataset-sized local fixtures; those belong in the approved '
+                'cluster job. Use the '
                 'exact preselected runner image and resource request:\n'
                 + json.dumps(
                     {
