@@ -61,6 +61,16 @@ TRANSITIONS: dict[RunState, set[RunState]] = {
     RunState.BEAKER_IMPLEMENTING: {
         RunState.BEAKER_PLANNING,
         RunState.BEAKER_DRAFTING_CONTRACT,
+        RunState.BEAKER_FINALIZING,
+        RunState.BEAKER_REVISING,
+        RunState.HONEYDEW_REVIEWING,
+        RunState.PAUSED,
+        RunState.CANCELLED,
+        RunState.FAILED,
+        RunState.TIMED_OUT,
+    },
+    RunState.BEAKER_FINALIZING: {
+        RunState.BEAKER_DRAFTING_CONTRACT,
         RunState.BEAKER_REVISING,
         RunState.HONEYDEW_REVIEWING,
         RunState.PAUSED,

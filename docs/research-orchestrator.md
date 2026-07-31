@@ -89,7 +89,9 @@ CREATED -> PREPARING -> HONEYDEW_DRAFTING_PROTOCOL
   -> AWAITING_PROTOCOL_APPROVAL
   -> BEAKER_DRAFTING_CONTRACT -> HONEYDEW_REVIEWING_CONTRACT
   -> AWAITING_CONTRACT_PROMOTION
-  -> BEAKER_PLANNING -> BEAKER_IMPLEMENTING -> HONEYDEW_REVIEWING
+  -> BEAKER_PLANNING -> BEAKER_IMPLEMENTING
+  -> BEAKER_FINALIZING (interrupted imported tasks with a runner checkpoint)
+  -> HONEYDEW_REVIEWING
   -> BEAKER_REVISING (when requested)
   -> AWAITING_EXECUTION_APPROVAL
   -> JOB_QUEUED -> JOB_RUNNING
@@ -370,6 +372,12 @@ produces a task-specific `implementation-plan.md`; `BEAKER_IMPLEMENTING`
 executes that plan and may adapt it when repository evidence requires. The
 orchestrator does not impose a generated runner scaffold or a fixed model
 architecture.
+
+If an imported-task implementation turn is interrupted after creating its
+required `run.py`, recovery enters `BEAKER_FINALIZING`. That bounded turn
+preserves the existing implementation, runs only narrow local checks, repairs
+concrete blockers, and proposes the experiment matrix. It does not restart the
+broad implementation task or execute the full benchmark locally.
 
 ## Discord
 

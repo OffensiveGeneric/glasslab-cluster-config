@@ -19,6 +19,14 @@ def test_valid_and_invalid_state_transitions() -> None:
         RunState.BEAKER_REVISING,
     )
     validate_transition(
+        RunState.BEAKER_IMPLEMENTING,
+        RunState.BEAKER_FINALIZING,
+    )
+    validate_transition(
+        RunState.BEAKER_FINALIZING,
+        RunState.HONEYDEW_REVIEWING,
+    )
+    validate_transition(
         RunState.AWAITING_PROTOCOL_APPROVAL,
         RunState.HONEYDEW_DRAFTING_PROTOCOL,
     )

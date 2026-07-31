@@ -679,6 +679,62 @@ def test_failed_turn_resumes_with_fresh_session_and_checkpoint(
     assert 'implementation-plan.md' in runtime.recovery_prompt
 
 
+def test_imported_task_resume_finalizes_existing_runner(
+    orchestrator_bundle,
+) -> None:
+    _, store, _, runtime, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(
+            objective='Resume an imported task from its completed runner.'
+        )
+    )
+    source_subdirectory = 'benchmark-workspace/adult-income'
+    source = Path(run.beaker_workspace) / source_subdirectory
+    source.mkdir(parents=True)
+    (source / 'run.py').write_text('print("preserved implementation")\n')
+    (Path(run.beaker_workspace) / 'implementation-plan.md').write_text(
+        '# Existing implementation plan\n'
+    )
+    task_definition = {
+        'source_subdirectory': source_subdirectory,
+        'runner_image': RUNNER_IMAGE,
+        'resources': {
+            'cpu': 1,
+            'memory_gib': 1,
+            'gpus': 0,
+            'wallclock_minutes': 5,
+        },
+        'required_artifacts': ['metrics.json'],
+        'datasets': [],
+    }
+    paused = run.model_copy(
+        update={
+            'state': RunState.PAUSED,
+            'resume_state': RunState.BEAKER_IMPLEMENTING,
+            'task_definition': task_definition,
+        }
+    )
+    store.replace_run(paused, expected_version=run.version)
+
+    resumed = engine.resume_run(run.run_id, requested_by='test-human')
+
+    assert resumed.state == RunState.AWAITING_EXECUTION_APPROVAL
+    finalizing_event = next(
+        event
+        for event in store.list_events(run.run_id)
+        if event.event_type == 'run.state_changed'
+        and event.payload['to'] == RunState.BEAKER_FINALIZING.value
+    )
+    assert finalizing_event.payload['from'] == RunState.BEAKER_IMPLEMENTING.value
+    assert runtime.turn_counts[AgentName.BEAKER] == 1
+    matrix = _pending_action(
+        store,
+        run.run_id,
+        'submit_experiment_matrix',
+    )
+    assert matrix.honeydew_approved is True
+
+
 def test_deterministic_matrix_execution_failure_requests_revision(
     orchestrator_bundle,
     monkeypatch,

@@ -1808,6 +1808,85 @@ class ResearchOrchestrator:
             result=result,
             turn_number=self.store.get_run(run_id).turn_number,
         )
+        self._advance_after_matrix_proposal(
+            run_id=run_id,
+            implementation_turn_id=turn.turn_id,
+            actions=actions,
+        )
+
+    def _beaker_finalize(self, run_id: str) -> None:
+        run = self.store.get_run(run_id)
+        if not self._has_imported_task_implementation(run):
+            self._transition(run_id, RunState.BEAKER_IMPLEMENTING)
+            self._beaker_implement(run_id)
+            return
+        task = run.task_definition
+        assert task is not None
+        prompt = (
+            'Finalize the existing imported benchmark implementation after an '
+            'interrupted implementation turn. Inspect implementation-plan.md and '
+            f'`{task["source_subdirectory"]}/run.py` as the preserved checkpoint. '
+            'Do not redesign or broadly rewrite the solution and do not run the '
+            'full benchmark. Run only narrow local validation such as Python '
+            'compilation and the smallest available smoke check. Fix concrete '
+            'blocking defects you observe, create the base configuration if it is '
+            'missing, and return exactly one submit_experiment_matrix action. The '
+            'action must match the ExperimentMatrix schema and must not contain an '
+            'evaluation entry point, Kubernetes manifest, contract file, or '
+            'contract override. Do not execute cluster work.\n\n'
+            'Use exactly this imported-task execution boundary:\n'
+            + json.dumps(
+                {
+                    'runner_image': task['runner_image'],
+                    'resources': task['resources'],
+                    'required_artifacts': task['required_artifacts'],
+                    'datasets': task['datasets'],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + '\n\nPermitted runner images: '
+            + json.dumps(sorted(self.policy.permitted_images))
+            + '\nResource ceilings: '
+            f'cpu={self.policy.maximum_cpu}, '
+            f'memory_gib={self.policy.maximum_memory_gib}, '
+            f'gpus={self.policy.maximum_gpus}, '
+            'maximum_parallel_jobs='
+            f'{self.policy.maximum_parallel_jobs}.'
+        )
+        turn, result = self._run_agent_turn(
+            run_id=run_id,
+            agent=AgentName.BEAKER,
+            prompt=prompt,
+            expected_kind=TurnKind.IMPLEMENTATION_PROPOSAL,
+            input_event={
+                'protocol_path': run.protocol_path,
+                'protocol_version': run.protocol_version,
+                'checkpoint': (
+                    f'{task["source_subdirectory"]}/run.py'
+                ),
+                'recovery_mode': 'finalize_existing_implementation',
+            },
+        )
+        actions = self._record_requested_actions(
+            run_id=run_id,
+            agent=AgentName.BEAKER,
+            result=result,
+            turn_number=self.store.get_run(run_id).turn_number,
+        )
+        self._advance_after_matrix_proposal(
+            run_id=run_id,
+            implementation_turn_id=turn.turn_id,
+            actions=actions,
+        )
+
+    def _advance_after_matrix_proposal(
+        self,
+        *,
+        run_id: str,
+        implementation_turn_id: str,
+        actions: list[ActionRecord],
+    ) -> None:
         pending = any(
             action.type == 'submit_experiment_matrix'
             and action.approval_status == ApprovalStatus.PENDING
@@ -1822,7 +1901,25 @@ class ResearchOrchestrator:
             )
             return
         self._transition(run_id, RunState.HONEYDEW_REVIEWING)
-        self._honeydew_review(run_id, implementation_turn_id=turn.turn_id)
+        self._honeydew_review(
+            run_id,
+            implementation_turn_id=implementation_turn_id,
+        )
+
+    @staticmethod
+    def _has_imported_task_implementation(run: RunRecord) -> bool:
+        if not run.task_definition:
+            return False
+        workspace = Path(run.beaker_workspace).resolve()
+        source = (
+            workspace / str(run.task_definition['source_subdirectory'])
+        ).resolve()
+        entrypoint = source / 'run.py'
+        return (
+            source.is_relative_to(workspace)
+            and entrypoint.is_file()
+            and not entrypoint.is_symlink()
+        )
 
     @staticmethod
     def _matrix_revision_feedback(actions: list[ActionRecord]) -> str:
@@ -2571,6 +2668,10 @@ class ResearchOrchestrator:
                 AgentName.BEAKER,
                 TurnKind.IMPLEMENTATION_PROPOSAL,
             ),
+            RunState.BEAKER_FINALIZING: (
+                AgentName.BEAKER,
+                TurnKind.IMPLEMENTATION_PROPOSAL,
+            ),
             RunState.HONEYDEW_REVIEWING: (
                 AgentName.HONEYDEW,
                 TurnKind.METHODOLOGY_REVIEW,
@@ -2745,6 +2846,7 @@ class ResearchOrchestrator:
                     RunState.HONEYDEW_REVIEWING_CONTRACT,
                     RunState.BEAKER_PLANNING,
                     RunState.BEAKER_IMPLEMENTING,
+                    RunState.BEAKER_FINALIZING,
                     RunState.HONEYDEW_REVIEWING,
                     RunState.BEAKER_REVISING,
                     RunState.BEAKER_ANALYZING,
@@ -2811,6 +2913,7 @@ class ResearchOrchestrator:
         contract_sensitive_states = {
             RunState.BEAKER_PLANNING,
             RunState.BEAKER_IMPLEMENTING,
+            RunState.BEAKER_FINALIZING,
             RunState.HONEYDEW_REVIEWING,
             RunState.BEAKER_REVISING,
             RunState.AWAITING_EXECUTION_APPROVAL,
@@ -2893,8 +2996,13 @@ class ResearchOrchestrator:
                     run_id,
                     implementation_turn_id='recovered',
                 )
+            elif self._has_imported_task_implementation(run):
+                self._transition(run_id, RunState.BEAKER_FINALIZING)
+                self._beaker_finalize(run_id)
             else:
                 self._beaker_implement(run_id)
+        elif state == RunState.BEAKER_FINALIZING:
+            self._beaker_finalize(run_id)
         elif state == RunState.HONEYDEW_REVIEWING:
             self._honeydew_review(
                 run_id,

@@ -166,6 +166,7 @@ class ScriptedMockRuntime(AgentRuntime):
         if agent == AgentName.BEAKER and (
             'Implement the bounded' in prompt
             or 'Execute the task-specific plan' in prompt
+            or 'Finalize the existing imported benchmark' in prompt
             or 'Revise the implementation' in prompt
         ):
             (workspace / 'experiment.py').write_text(
