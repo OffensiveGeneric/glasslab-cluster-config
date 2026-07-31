@@ -8,7 +8,7 @@ package permissions.
 | --- | --- | --- |
 | Public gateway | personal Unix account | enter the lab network over SSH |
 | Provisioner | matching personal Unix account | work in the canonical checkout |
-| Canonical checkout | `glasslab` group | read and write the shared repository tree |
+| Canonical checkout | `glasslab` group | inspect and operate the live checkout when authorized |
 | Local Docker daemon | `docker` group, explicitly approved | build and test images on the provisioner |
 | GitHub repository | personal GitHub collaborator | push branches and trigger workflows |
 | GHCR publication | GitHub Actions `GITHUB_TOKEN` | publish approved service images |
@@ -37,6 +37,25 @@ Host glasslab-provisioner
 
 Public keys should be installed on both hosts. Password reuse between the
 gateway and provisioner is not the account synchronization mechanism.
+
+## Development Checkouts
+
+Contributors must develop in separate clones under their own home directories.
+Do not use `/home/glasslab/cluster-config` as a shared development worktree;
+simultaneous branches, builds, and generated files would interfere with each
+other and with live rollouts.
+
+After authenticating the GitHub CLI, create a personal checkout:
+
+```bash
+cd ~
+gh repo clone OffensiveGeneric/glasslab-cluster-config cluster-config
+cd ~/cluster-config
+git switch -c <personal-feature-branch>
+```
+
+The checkout under `/home/glasslab/cluster-config` remains the clean canonical
+apply and validation tree.
 
 ## Building And Publishing Images
 
