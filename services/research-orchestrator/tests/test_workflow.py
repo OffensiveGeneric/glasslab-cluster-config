@@ -692,6 +692,7 @@ def test_contract_preflight_returns_beaker_to_revision(
     assert '`configs/baseline.yaml`' in revision_prompt
     assert 'exact dotted path from the root' in revision_prompt
     assert 'not beneath `methodology`' in revision_prompt
+    assert 'do not add `description` or `values` metadata wrappers' in revision_prompt
 
 
 def test_transient_approved_action_failure_is_persisted_and_pauses_run(

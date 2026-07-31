@@ -264,6 +264,39 @@ def test_adult_preflight_distinguishes_comparisons_from_decisions(
     }
 
 
+def test_adult_preflight_rejects_metadata_wrapped_methodology_values(
+    orchestrator_bundle,
+) -> None:
+    _, _, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        request=RunCreateRequest(objective='Reject ambiguous methodology values.')
+    )
+    workspace = Path(run.beaker_workspace)
+    config = workspace / 'configs' / 'candidate.yaml'
+    config.write_text(
+        'experiment_dimensions:\n'
+        '  model:\n'
+        '    description: compare models\n'
+        '    values: [logistic_regression, random_forest]\n'
+    )
+    contract = engine.contracts.resolve(
+        'ml-benchmark-adult-income-v1',
+        '1.1.0',
+    )
+    report = preflight_matrix(
+        run=run,
+        matrix=_matrix().model_copy(
+            update={'base_config': 'configs/candidate.yaml'}
+        ),
+        contract=contract,
+    )
+    assert not report.passed
+    assert any(
+        'must directly contain a scalar or list of values' in error
+        for error in report.errors
+    )
+
+
 def test_preflight_rejects_workload_owned_evaluation_output(
     orchestrator_bundle,
 ) -> None:

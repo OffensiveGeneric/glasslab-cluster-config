@@ -150,15 +150,21 @@ def preflight_matrix(
 
     for requirement in requirements:
         try:
-            values = _distinct_strings(
-                _config_value(config, requirement.config_path)
-            )
+            configured_value = _config_value(config, requirement.config_path)
         except KeyError:
             errors.append(
                 f'missing methodology setting `{requirement.config_path}`: '
                 f'{requirement.description}'
             )
             continue
+        if isinstance(configured_value, dict):
+            errors.append(
+                f'`{requirement.config_path}` must directly contain a scalar '
+                'or list of values, not a metadata object; do not wrap values '
+                'beneath `description` or `values`'
+            )
+            continue
+        values = _distinct_strings(configured_value)
         count = len(values)
         if count < requirement.minimum_distinct_values:
             errors.append(
