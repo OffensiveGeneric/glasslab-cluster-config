@@ -1840,19 +1840,33 @@ class ResearchOrchestrator:
             return
         task = run.task_definition
         assert task is not None
+        config_path = Path(run.beaker_workspace) / 'configs' / 'candidate.yaml'
+        matrix_only = config_path.is_file() and not config_path.is_symlink()
+        if matrix_only:
+            task_instruction = (
+                'Finalize the existing imported benchmark structured handoff. '
+                'The preserved runner and configs/candidate.yaml already exist '
+                'from the previous bounded turn. Do not use any tools, inspect '
+                'files, edit files, rerun checks, or repeat implementation work. '
+                'Return one implementation_proposal result containing exactly '
+                'one submit_experiment_matrix action in the required shape below.'
+            )
+        else:
+            task_instruction = (
+                'Finalize the existing imported benchmark implementation after '
+                'an interrupted implementation turn. Inspect '
+                'implementation-plan.md and '
+                f'`{task["source_subdirectory"]}/run.py` as the preserved '
+                'checkpoint. Do not redesign or broadly rewrite the solution and '
+                'do not run the full benchmark. Run only narrow local validation '
+                'such as Python compilation and the smallest available smoke '
+                'check. Fix concrete blocking defects you observe, create '
+                'configs/candidate.yaml if it is missing, and return exactly one '
+                'submit_experiment_matrix action. Do not execute cluster work.'
+            )
         prompt = (
-            'Finalize the existing imported benchmark implementation after an '
-            'interrupted implementation turn. Inspect implementation-plan.md and '
-            f'`{task["source_subdirectory"]}/run.py` as the preserved checkpoint. '
-            'Do not redesign or broadly rewrite the solution and do not run the '
-            'full benchmark. Run only narrow local validation such as Python '
-            'compilation and the smallest available smoke check. Fix concrete '
-            'blocking defects you observe, create the base configuration if it is '
-            'missing, and return exactly one submit_experiment_matrix action. The '
-            'action must match the ExperimentMatrix schema and must not contain an '
-            'evaluation entry point, Kubernetes manifest, contract file, or '
-            'contract override. Do not execute cluster work.\n\n'
-            'Use exactly this imported-task execution boundary:\n'
+            task_instruction
+            + '\n\nUse exactly this imported-task execution boundary:\n'
             + json.dumps(
                 {
                     'runner_image': task['runner_image'],
@@ -1892,7 +1906,11 @@ class ResearchOrchestrator:
                 'checkpoint': (
                     f'{task["source_subdirectory"]}/run.py'
                 ),
-                'recovery_mode': 'finalize_existing_implementation',
+                'recovery_mode': (
+                    'emit_existing_matrix'
+                    if matrix_only
+                    else 'finalize_existing_implementation'
+                ),
             },
         )
         actions = self._record_requested_actions(

@@ -693,6 +693,9 @@ def test_imported_task_resume_finalizes_existing_runner(
     source = Path(run.beaker_workspace) / source_subdirectory
     source.mkdir(parents=True)
     (source / 'run.py').write_text('print("preserved implementation")\n')
+    config = Path(run.beaker_workspace) / 'configs' / 'candidate.yaml'
+    config.parent.mkdir(exist_ok=True)
+    config.write_text('candidate: true\n')
     (Path(run.beaker_workspace) / 'implementation-plan.md').write_text(
         '# Existing implementation plan\n'
     )
@@ -736,6 +739,12 @@ def test_imported_task_resume_finalizes_existing_runner(
     )
     assert finalizing_event.payload['from'] == RunState.BEAKER_IMPLEMENTING.value
     assert runtime.turn_counts[AgentName.BEAKER] == 1
+    beaker_prompt = next(
+        prompt
+        for agent, prompt in runtime.prompts
+        if agent == AgentName.BEAKER
+    )
+    assert 'Do not use any tools' in beaker_prompt
     assert resumed.active_runtime_seconds < resumed.maximum_runtime_seconds
     matrix = _pending_action(
         store,
