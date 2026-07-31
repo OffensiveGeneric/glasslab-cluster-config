@@ -1799,6 +1799,15 @@ class ResearchOrchestrator:
             f'gpus={self.policy.maximum_gpus}, '
             'maximum_parallel_jobs='
             f'{self.policy.maximum_parallel_jobs}.'
+            '\n\nRequired submit_experiment_matrix action shape:\n'
+            + json.dumps(
+                self._matrix_action_template(run),
+                indent=2,
+                sort_keys=True,
+            )
+            + '\nKeep reason beside type and arguments. Put the ExperimentMatrix '
+            'fields directly in arguments; do not add a matrix or evaluator_type '
+            'wrapper.'
             + task_context
         )
         turn, result = self._run_agent_turn(
@@ -1862,6 +1871,15 @@ class ResearchOrchestrator:
             f'gpus={self.policy.maximum_gpus}, '
             'maximum_parallel_jobs='
             f'{self.policy.maximum_parallel_jobs}.'
+            '\n\nRequired submit_experiment_matrix action shape:\n'
+            + json.dumps(
+                self._matrix_action_template(run),
+                indent=2,
+                sort_keys=True,
+            )
+            + '\nKeep reason beside type and arguments. Put the ExperimentMatrix '
+            'fields directly in arguments; do not add a matrix or evaluator_type '
+            'wrapper.'
         )
         turn, result = self._run_agent_turn(
             run_id=run_id,
@@ -1929,6 +1947,45 @@ class ResearchOrchestrator:
             and entrypoint.is_file()
             and not entrypoint.is_symlink()
         )
+
+    def _matrix_action_template(self, run: RunRecord) -> dict[str, Any]:
+        if run.task_definition:
+            task = run.task_definition
+            runner_image = str(task['runner_image'])
+            resources = dict(task['resources'])
+            required_artifacts = list(task['required_artifacts'])
+        else:
+            runner_image = sorted(self.policy.permitted_images)[0]
+            resources = {
+                'cpu': min(1.0, self.policy.maximum_cpu),
+                'memory_gib': min(2.0, self.policy.maximum_memory_gib),
+                'gpus': 0,
+                'wallclock_minutes': 30,
+            }
+            required_artifacts = ['metrics.json']
+        return {
+            'type': 'submit_experiment_matrix',
+            'arguments': {
+                'base_config': 'configs/candidate.yaml',
+                'variants': [
+                    {
+                        'name': 'candidate',
+                        'overrides': {},
+                    }
+                ],
+                'seeds': [17],
+                'maximum_parallel_jobs': min(
+                    1,
+                    self.policy.maximum_parallel_jobs,
+                ),
+                'runner_image': runner_image,
+                'resources': resources,
+                'required_artifacts': required_artifacts,
+            },
+            'reason': (
+                'Run the bounded candidate for methodology and human review.'
+            ),
+        }
 
     @staticmethod
     def _matrix_revision_feedback(actions: list[ActionRecord]) -> str:
@@ -2117,6 +2174,15 @@ class ResearchOrchestrator:
             f'gpus={self.policy.maximum_gpus}, '
             'maximum_parallel_jobs='
             f'{self.policy.maximum_parallel_jobs}.\n\n'
+            'Required submit_experiment_matrix action shape:\n'
+            + json.dumps(
+                self._matrix_action_template(run),
+                indent=2,
+                sort_keys=True,
+            )
+            + '\nKeep reason beside type and arguments. Put the ExperimentMatrix '
+            'fields directly in arguments; do not add a matrix or evaluator_type '
+            'wrapper.\n\n'
             f'Review feedback:\n{feedback}'
             + task_context
         )

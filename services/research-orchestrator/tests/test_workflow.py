@@ -18,6 +18,7 @@ from app.schemas import (
     AgentName,
     AgentTurnResult,
     ApprovalStatus,
+    ExperimentMatrix,
     JobStatus,
     RequestedAction,
     RunCreateRequest,
@@ -707,6 +708,11 @@ def test_imported_task_resume_finalizes_existing_runner(
         'required_artifacts': ['metrics.json'],
         'datasets': [],
     }
+    template = engine._matrix_action_template(
+        run.model_copy(update={'task_definition': task_definition})
+    )
+    assert template['reason']
+    ExperimentMatrix.model_validate(template['arguments'])
     paused = run.model_copy(
         update={
             'state': RunState.PAUSED,
