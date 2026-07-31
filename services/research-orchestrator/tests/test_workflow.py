@@ -81,6 +81,23 @@ class FailOnceImplementationRuntime(ScriptedMockRuntime):
         return super().run_turn(**kwargs)
 
 
+class MissingPlanThenRepairRuntime(ScriptedMockRuntime):
+    def __init__(self, *, runner_image: str) -> None:
+        super().__init__(runner_image=runner_image)
+        self.removed_first_plan = False
+
+    def run_turn(self, **kwargs):
+        result = super().run_turn(**kwargs)
+        if (
+            kwargs['agent'] == AgentName.BEAKER
+            and 'Write implementation-plan.md' in kwargs['prompt']
+            and not self.removed_first_plan
+        ):
+            (kwargs['workspace'] / 'implementation-plan.md').unlink()
+            self.removed_first_plan = True
+        return result
+
+
 class PauseDuringImplementationRuntime(ScriptedMockRuntime):
     def __init__(self, *, runner_image: str) -> None:
         super().__init__(runner_image=runner_image)
@@ -510,6 +527,34 @@ def test_mocked_complete_workflow_and_agent_isolation(orchestrator_bundle) -> No
     assert len(turns) == 7
     assert all(turn.status == 'completed' for turn in turns)
     assert runtime.turn_counts
+
+
+def test_missing_beaker_plan_file_gets_one_focused_repair(
+    orchestrator_bundle,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    runtime = MissingPlanThenRepairRuntime(runner_image=RUNNER_IMAGE)
+    engine.runtime = runtime
+    run = engine.create_run(
+        RunCreateRequest(objective='Repair a missing authoritative plan file.')
+    )
+    protocol = _pending_action(store, run.run_id, 'approve_protocol')
+
+    engine.approve_action(
+        protocol.action_id,
+        reviewer='test-human',
+        reason='Protocol accepted.',
+    )
+
+    current = store.get_run(run.run_id)
+    assert current.state == RunState.AWAITING_EXECUTION_APPROVAL
+    assert (Path(current.beaker_workspace) / 'implementation-plan.md').is_file()
+    event_types = {
+        event.event_type for event in store.list_events(run.run_id)
+    }
+    assert 'agent.file_repair_requested' in event_types
+    assert 'agent.file_repair_completed' in event_types
+    assert runtime.turn_counts[AgentName.BEAKER] == 3
 
 
 def test_idempotent_job_submission(orchestrator_bundle) -> None:

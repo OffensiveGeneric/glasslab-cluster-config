@@ -1744,7 +1744,11 @@ class ResearchOrchestrator:
             agent=AgentName.BEAKER,
             prompt=(
                 'Read the approved read-only program.md and inspect the existing '
-                'worktree. Write implementation-plan.md containing a concise, '
+                'worktree. Write implementation-plan.md using OpenCode\'s '
+                'workspace file tool before returning structured output, then read '
+                'the file back to verify it exists. A produced_files declaration '
+                'is metadata and does not create the file. The file must contain '
+                'a concise, '
                 'task-specific sequence of independently checkable implementation '
                 'steps, the files likely to change, lightweight local checks, and '
                 'the intended experiment-matrix shape. Preserve freedom to revise '
@@ -1772,7 +1776,61 @@ class ResearchOrchestrator:
             )
         plan_path = Path(run.beaker_workspace) / 'implementation-plan.md'
         if not plan_path.is_file():
-            raise WorkflowError('Beaker did not create implementation-plan.md')
+            self._event(
+                run_id,
+                source='orchestrator',
+                event_type='agent.file_repair_requested',
+                payload={
+                    'agent': AgentName.BEAKER.value,
+                    'path': 'implementation-plan.md',
+                    'reason': (
+                        'The structured response declared the plan, but no '
+                        'workspace file existed.'
+                    ),
+                },
+            )
+            _, repaired = self._run_agent_turn(
+                run_id=run_id,
+                agent=AgentName.BEAKER,
+                prompt=(
+                    'Focused workspace repair. Your previous structured response '
+                    'declared `implementation-plan.md`, but the authoritative '
+                    'workspace does not contain that file. Write '
+                    'implementation-plan.md now using OpenCode\'s workspace file '
+                    'tool, then read it back. Do not implement experiment code, '
+                    'request actions, or repeat methodology work. Return kind '
+                    '`implementation_plan`, declare exactly that file with purpose '
+                    '`implementation`, and only claim completion after verifying '
+                    'the file exists.'
+                ),
+                expected_kind=TurnKind.IMPLEMENTATION_PLAN,
+                input_event={
+                    'repair': 'missing_workspace_file',
+                    'path': 'implementation-plan.md',
+                },
+            )
+            repaired_plans = [
+                item
+                for item in repaired.produced_files
+                if item.path == 'implementation-plan.md'
+                and item.purpose == 'implementation'
+            ]
+            if len(repaired_plans) != 1 or repaired.requested_actions:
+                raise WorkflowError(
+                    'Beaker plan repair must produce implementation-plan.md '
+                    'and no actions'
+                )
+            if not plan_path.is_file():
+                raise WorkflowError(
+                    'Beaker did not create implementation-plan.md after one '
+                    'focused repair turn'
+                )
+            self._event(
+                run_id,
+                source='beaker',
+                event_type='agent.file_repair_completed',
+                payload={'path': 'implementation-plan.md'},
+            )
         digest = sha256(plan_path.read_bytes()).hexdigest()
         self._event(
             run_id,
