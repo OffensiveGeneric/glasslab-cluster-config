@@ -11,7 +11,7 @@ It can also mean making `.44` reachable and usable from outside the lab without 
 Keep:
 
 - `.44` as the canonical apply and validation host
-- `.44` as the bastion for deeper lab access
+- `glasslab.org` as the public SSH gateway
 - live cluster claims grounded in checks from `.44`
 
 But also support:
@@ -25,8 +25,8 @@ That preserves the current trust model while reducing the practical friction of 
 The currently working remote path is:
 
 - home client
-- `glasslab@glasslab.org`
-- `glasslab@192.168.1.44`
+- `gr66ss-glasslab@glasslab.org` (`glasslab-gateway`)
+- `gr66ss-glasslab@192.168.1.44` (`glasslab-provisioner`)
 
 From `.44`, the operator can then reach:
 
@@ -37,15 +37,14 @@ From `.44`, the operator can then reach:
 Thin helper wrappers now exist in the repo so this hop does not need to be rebuilt by hand every time:
 
 ```bash
-export GLASSLAB_BASTION_PASS='...'
-export GLASSLAB_PROVISIONER_PASS='...'
-
-./scripts/remote-44.sh hostname
-./scripts/k44.sh get pods -n glasslab-v2
+./scripts/run-on-provisioner.sh hostname
+./scripts/kube-on-provisioner.sh get pods -n glasslab-v2
 ./scripts/check-openclaw-turn.sh
 ```
 
-These helpers do not change the control model. They only standardize the bastion -> `.44` path for repeatable rollouts and log inspection.
+These helpers use the configured key-based `glasslab-provisioner` SSH alias,
+whose `ProxyJump` traverses `glasslab-gateway`. They standardize the remote
+path for repeatable rollouts and log inspection.
 
 ## Why This Matters
 
@@ -72,8 +71,8 @@ The remote hop does not by itself solve:
 
 - secret backup
 - secret rotation
-- durable operator identity beyond password-based access
-- replacing `.44` with a different bastion or admin model
+- contributor identity reconciliation across managed hosts
+- replacing the gateway or provisioner with a different admin model
 
 Those remain separate infrastructure questions.
 

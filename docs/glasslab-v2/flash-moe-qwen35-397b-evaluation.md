@@ -4,7 +4,8 @@ This note records the first successful bootstrap and smoke-test pass for the `fl
 
 ## What Was Completed
 
-Validated from `glasslab-bastion -> glasslab-44 -> .21`:
+Validated through the path now named
+`glasslab-gateway -> glasslab-provisioner -> .21`:
 
 - the Hugging Face snapshot for `mlx-community/Qwen3.5-397B-A17B-4bit` completed
 - tokenizer export completed

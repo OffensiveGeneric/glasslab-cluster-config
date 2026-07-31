@@ -14,6 +14,7 @@ secondary, compatibility-only, or historical.
 Read these first:
 
 - `README.md`
+- `docs/access-topology.md`
 - `docs/glasslab-v2/current/README.md`
 - `docs/glasslab-v2/system-map-2026-07.md`
 - `docs/glasslab-v2/ci-policy-2026-07.md`
@@ -92,7 +93,7 @@ under the full commit SHA. If a change affects a live service, wait for the `Pub
 workflow, then roll that exact commit from `.44`:
 
 ```bash
-ssh glasslab-44
+ssh glasslab-provisioner
 cd /home/glasslab/cluster-config
 ./scripts/rollout-research-services.sh --sync
 ```

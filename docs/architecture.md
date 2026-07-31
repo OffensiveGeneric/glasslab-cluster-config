@@ -2,7 +2,11 @@
 
 This lab keeps infrastructure and Kubernetes roles separated.
 
-- `192.168.1.44` (`glasslab-PXE-01`) is the PXE host, bastion, Ansible control machine, Git sync point, and kubectl workstation.
+- `glasslab.org` (hostname `glasslab`) is the public SSH gateway.
+- `192.168.1.44` (`glasslab-PXE-01`) is the internal PXE provisioner,
+  Ansible control machine, Git sync point, image-build host, and `kubectl`
+  workstation. It is reached through the gateway and is not itself the
+  gateway.
 - `192.168.1.49` (`cp01`) is the active Kubernetes control plane.
 - `192.168.1.48` (`node01`) is a general Kubernetes worker with a usable NVIDIA Quadro P4000.
 - `192.168.1.11` (`node02`) is a Kubernetes worker with a usable NVIDIA RTX A4000.

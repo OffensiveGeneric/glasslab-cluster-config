@@ -3,15 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if [[ $# -eq 0 ]]; then
-  cat <<'USAGE' >&2
-Usage: k44.sh <kubectl args...>
+printf '%s\n' \
+  'k44.sh is deprecated; use kube-on-provisioner.sh instead.' >&2
 
-Examples:
-  k44.sh get pods -n glasslab-v2
-  k44.sh -n glasslab-v2 logs deploy/glasslab-workflow-api --tail=100
-USAGE
-  exit 2
-fi
-
-exec "$SCRIPT_DIR/remote-44.sh" kubectl "$@"
+exec "$SCRIPT_DIR/kube-on-provisioner.sh" "$@"

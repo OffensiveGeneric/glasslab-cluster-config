@@ -133,10 +133,15 @@ If you need historical context:
 
 Important distinction:
 
+- `glasslab.org` is the public SSH gateway
 - the canonical live environment is the provisioner at `192.168.1.44`
+- the gateway and provisioner are separate machines
 - this laptop checkout is a working client and Git copy
 - ignored secrets, runtime bundles, imported images, and some operational truth
   still live only on `.44`
+
+See [docs/access-topology.md](docs/access-topology.md) for canonical host and
+SSH names.
 
 So:
 

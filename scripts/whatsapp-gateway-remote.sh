@@ -15,4 +15,4 @@ USAGE
 fi
 
 REMOTE_SCRIPT="/home/glasslab/cluster-config/scripts/whatsapp-gateway-cli.sh"
-exec ssh glasslab-44 bash "$REMOTE_SCRIPT" "$@"
+exec ssh glasslab-provisioner bash "$REMOTE_SCRIPT" "$@"
