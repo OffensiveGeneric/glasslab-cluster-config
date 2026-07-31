@@ -418,6 +418,7 @@ class RunRecord(BaseModel):
     reports_path: str
     current_agent: AgentName | None = None
     turn_number: int = 0
+    methodology_revision_count: int = Field(default=0, ge=0)
     discord_thread_id: str | None = None
     discord_status_message_id: str | None = None
     maximum_turns: int

@@ -150,6 +150,21 @@ def test_discord_matrix_waits_for_honeydew_before_showing_controls() -> None:
         'objective': 'Compare naive and semi-hard triplet mining.',
         'reason': 'The matrix requires methodology and human approval.',
         'effect': 'Authorize bounded cluster submission.',
+        'preflight': {
+            'passed': True,
+            'job_count': 6,
+            'checks': [
+                'candidate config parsed',
+                'deterministic expansion produces 6 jobs',
+            ],
+            'comparisons': {
+                'miner': ['naive', 'semi_hard'],
+            },
+            'decisions': {
+                'encoding': ['one_hot'],
+            },
+            'errors': [],
+        },
         'arguments': {
             'variants': [
                 {'name': 'naive-mining', 'overrides': {}},
@@ -182,6 +197,8 @@ def test_discord_matrix_waits_for_honeydew_before_showing_controls() -> None:
     assert proposed.components is None
     assert '6 jobs' in proposed.content
     assert '1 GPU' in proposed.content
+    assert '**Deterministic preflight**' in proposed.content
+    assert 'miner=[naive, semi_hard]' in proposed.content
 
     requested = renderer.render(
         EventRecord(

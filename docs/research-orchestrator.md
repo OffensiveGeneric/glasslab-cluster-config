@@ -68,7 +68,9 @@ publish artifacts.
 
 The evaluation contract is repository-controlled and immutable to both agents.
 It fixes the evaluator entry point, schemas, required artifacts, resource
-limits, and optional digest-pinned image.
+limits, optional digest-pinned image, and machine-checkable methodology
+requirements. Methodology requirements distinguish comparisons, which need
+multiple configured values, from decisions, which need one explicit choice.
 
 When an approved protocol requires a harness that is not installed, Beaker may
 draft a contract candidate in its isolated worktree. The orchestrator validates
@@ -324,9 +326,24 @@ idempotency key.
 
 Before an experiment matrix can reach human approval, deterministic preflight
 also verifies that its base configuration exists in Beaker's worktree, the
-evaluation-contract digest is unchanged, and every requested resource fits the
-contract's own ceilings. Honeydew's structured approval cannot bypass these
-checks.
+evaluation-contract digest is unchanged, every requested resource fits the
+contract's own ceilings, and the config satisfies the contract's declared
+comparisons and decisions. It syntax-checks Python workspace code and rejects
+workload references to evaluator-owned `evaluation.json`, `rubric_score`, and
+`integrity_pass`. Workloads emit metrics and evidence; the immutable wrapper
+runs the evaluator and owns evaluation output. Honeydew's structured approval
+cannot bypass these checks.
+
+The preflight report records the exact expanded job count, checks performed,
+configured comparisons, configured decisions, and blocking findings. Discord
+renders that report before showing approval controls.
+
+Honeydew rejection feedback is passed to Beaker with the complete structured
+claim list and evidence references. Automatic methodology repair is limited by
+`GLASSLAB_ORCHESTRATOR_MAXIMUM_METHODOLOGY_REVISIONS`, two by default.
+Exceeding the limit pauses at `BEAKER_REVISING` and emits
+`methodology.human_resolution_requested` instead of consuming the remaining
+turn budget in an unbounded review loop.
 
 Approval and execution are separate audited facts. If an approved action cannot
 execute, the orchestrator records `action.execution_failed` with the error,

@@ -7,6 +7,39 @@
   "expected_output_schema": "output.schema.json",
   "manifest": {
     "description": "Deterministic integrity and evidence gate for the UCI Adult benchmark.",
+    "methodology_requirements": [
+      {
+        "requirement_id": "model_families",
+        "config_path": "experiment_dimensions.model",
+        "mode": "comparison",
+        "minimum_distinct_values": 2,
+        "description": "Compare at least one linear and one non-linear model family."
+      },
+      {
+        "requirement_id": "missing_data_strategy",
+        "config_path": "experiment_dimensions.missing_strategy",
+        "mode": "decision",
+        "minimum_distinct_values": 1,
+        "maximum_distinct_values": 1,
+        "description": "Choose and justify one explicit missing-data strategy."
+      },
+      {
+        "requirement_id": "fnlwgt_handling",
+        "config_path": "experiment_dimensions.include_fnlwgt",
+        "mode": "decision",
+        "minimum_distinct_values": 1,
+        "maximum_distinct_values": 1,
+        "description": "Choose whether to exclude fnlwgt or justify its use."
+      },
+      {
+        "requirement_id": "categorical_encoding",
+        "config_path": "experiment_dimensions.encoding",
+        "mode": "decision",
+        "minimum_distinct_values": 1,
+        "maximum_distinct_values": 1,
+        "description": "Choose and document an encoding appropriate to the model families."
+      }
+    ],
     "primary_metric": "rubric_score",
     "primary_metric_direction": "maximize",
     "required_metric_keys": ["accuracy", "balanced_accuracy", "precision", "recall", "f1", "roc_auc", "headline_ci_low", "headline_ci_high", "bootstrap_resamples", "test_rows"]

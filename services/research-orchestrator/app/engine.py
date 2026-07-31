@@ -17,6 +17,7 @@ from .datasets import DatasetIngestionManager
 from .matrix import expand_experiment_matrix
 from .opencode_runtime import AgentRuntime
 from .policy import ActionPolicy
+from .preflight import MatrixPreflightReport, preflight_matrix
 from .schemas import (
     ActionRecord,
     AgentName,
@@ -825,6 +826,21 @@ class ResearchOrchestrator:
                     'sha256': candidate.sha256,
                 }
                 payload['contract_candidate'] = candidate.metadata
+        if action.type == 'submit_experiment_matrix':
+            try:
+                payload['preflight'] = self._matrix_preflight_report(
+                    run_id=action.run_id,
+                    action=action,
+                ).model_dump(mode='json')
+            except Exception as exc:
+                payload['preflight'] = {
+                    'passed': False,
+                    'job_count': 0,
+                    'checks': [],
+                    'comparisons': {},
+                    'decisions': {},
+                    'errors': [str(exc)],
+                }
         if action.type == 'approve_protocol':
             payload['protocol_version'] = run.protocol_version
         return payload
@@ -1407,7 +1423,13 @@ class ResearchOrchestrator:
             'JSON schemas, and concise test vectors or tests. The descriptor '
             'must contain only the EvaluationContractDescriptor fields, set '
             'container_image_digest to null, and put both primary_metric and '
-            'primary_metric_direction in manifest. execution_wrapper and '
+            'primary_metric_direction in manifest. When the binding task '
+            'requires explicit methodological choices or comparisons, encode '
+            'them as manifest.methodology_requirements entries with '
+            'requirement_id, config_path, mode (`decision` or `comparison`), '
+            'minimum_distinct_values, optional maximum_distinct_values, and '
+            'description. Do not turn a required choice into a comparison. '
+            'execution_wrapper and '
             'evaluation_entry_point must each be a relative path to a real '
             'Python file inside the candidate directory, not a command or '
             'module reference. Do not write '
@@ -1796,7 +1818,10 @@ class ResearchOrchestrator:
             'propose one submit_experiment_matrix action. The action arguments '
             'must match the ExperimentMatrix schema and must not contain an '
             'evaluation entry point, Kubernetes manifest, contract file, or '
-            'contract override. Do not execute cluster work.'
+            'contract override. Do not execute cluster work. The workload must '
+            'emit metrics and evidence only. Do not create, read, or score '
+            '`evaluation.json`, `rubric_score`, or `integrity_pass`; those '
+            'outputs belong exclusively to the immutable evaluation contract.'
             f'\n\nPermitted runner images: '
             f'{json.dumps(sorted(self.policy.permitted_images))}'
             '\nResource ceilings: '
@@ -1872,6 +1897,9 @@ class ResearchOrchestrator:
             )
         prompt = (
             task_instruction
+            + '\n\nThe workload must emit metrics and evidence only. Do not '
+            'create, read, or score `evaluation.json`, `rubric_score`, or '
+            '`integrity_pass`; the immutable contract owns those outputs.'
             + '\n\nUse exactly this imported-task execution boundary:\n'
             + json.dumps(
                 {
@@ -1945,8 +1973,7 @@ class ResearchOrchestrator:
         )
         if not pending:
             feedback = self._matrix_revision_feedback(actions)
-            self._transition(run_id, RunState.BEAKER_REVISING)
-            self._beaker_revise(
+            self._request_methodology_revision(
                 run_id,
                 feedback=feedback,
             )
@@ -2047,6 +2074,36 @@ class ResearchOrchestrator:
         implementation_turn_id: str,
     ) -> None:
         action = self._latest_pending_matrix_action(run_id)
+        preflight = self._matrix_preflight_report(
+            run_id=run_id,
+            action=action,
+        )
+        if not preflight.passed:
+            rejection_reason = (
+                'Deterministic matrix preflight failed: '
+                + '; '.join(preflight.errors)
+            )
+            self.store.update_action(
+                action.action_id,
+                approval_status=ApprovalStatus.REJECTED,
+                reviewer='orchestrator',
+                reason=rejection_reason,
+            )
+            self._event(
+                run_id,
+                source='orchestrator',
+                event_type='action.rejected',
+                payload={
+                    'action_id': action.action_id,
+                    'reason': rejection_reason,
+                    'preflight': preflight.model_dump(mode='json'),
+                },
+            )
+            self._request_methodology_revision(
+                run_id,
+                feedback=rejection_reason,
+            )
+            return
         snapshot_path, snapshot_manifest = self._create_methodology_review_snapshot(
             run_id=run_id,
             action=action,
@@ -2061,7 +2118,13 @@ class ResearchOrchestrator:
             'included implementation files before deciding. The snapshot is a '
             'copy for review; editing it cannot modify Beaker\'s worktree. Set '
             'done=true only when the matrix is methodologically acceptable. Do '
-            'not submit the job.\n\n'
+            'not submit the job. The deterministic preflight below is '
+            'authoritative about which settings are required comparisons and '
+            'which are one-time methodological decisions. Do not turn a '
+            '`decision` into a required experiment axis unless the binding '
+            'task explicitly requires that comparison.\n\n'
+            'Deterministic preflight:\n'
+            f'{preflight.model_dump_json(indent=2)}\n\n'
             'Review snapshot manifest:\n'
             f'{json.dumps(snapshot_manifest, indent=2, sort_keys=True)}\n\n'
             f'Proposed matrix:\n{json.dumps(action.arguments, indent=2, sort_keys=True)}'
@@ -2087,16 +2150,8 @@ class ResearchOrchestrator:
                 'action_id': action.action_id,
             },
         )
-        preflight_error = self._matrix_preflight_error(
-            run_id=run_id,
-            action=action,
-        )
-        if not result.done or preflight_error:
-            rejection_reason = (
-                f'Deterministic matrix preflight failed: {preflight_error}'
-                if preflight_error
-                else result.summary
-            )
+        if not result.done:
+            rejection_reason = result.summary
             self.store.update_action(
                 action.action_id,
                 approval_status=ApprovalStatus.REJECTED,
@@ -2112,13 +2167,10 @@ class ResearchOrchestrator:
                     'reason': rejection_reason,
                 },
             )
-            self._transition(run_id, RunState.BEAKER_REVISING)
-            feedback = result.message_to_other_agent.strip()
-            if preflight_error:
-                feedback = (
-                    f'{feedback}\n\n' if feedback else ''
-                ) + rejection_reason
-            self._beaker_revise(run_id, feedback=feedback or rejection_reason)
+            self._request_methodology_revision(
+                run_id,
+                feedback=self._methodology_feedback(result),
+            )
             return
         approved_action = self.store.mark_action_honeydew_approved(
             action.action_id,
@@ -2210,17 +2262,18 @@ class ResearchOrchestrator:
                 f'failed to create Honeydew review snapshot: {exc}'
             ) from exc
 
-    def _matrix_preflight_error(
+    def _matrix_preflight_report(
         self,
         *,
         run_id: str,
         action: ActionRecord,
-    ) -> str | None:
+    ) -> MatrixPreflightReport:
+        errors: list[str] = []
         try:
             matrix = ExperimentMatrix.model_validate(action.arguments)
             run = self.store.get_run(run_id)
             if not self._contract_binding_compatible(run_id):
-                return (
+                errors.append(
                     'installed evaluation contract is incompatible with the '
                     'approved protocol; promote a matching contract first'
                 )
@@ -2230,7 +2283,7 @@ class ResearchOrchestrator:
                 not base_config.is_relative_to(workspace)
                 or not base_config.is_file()
             ):
-                return (
+                errors.append(
                     'base_config does not exist inside the Beaker workspace: '
                     f'{matrix.base_config}'
                 )
@@ -2238,12 +2291,12 @@ class ResearchOrchestrator:
                 expected_image = str(run.task_definition['runner_image'])
                 expected_resources = run.task_definition['resources']
                 if matrix.runner_image != expected_image:
-                    return (
+                    errors.append(
                         'imported benchmark requires runner_image '
                         f'{expected_image}'
                     )
                 if matrix.resources.model_dump(mode='json') != expected_resources:
-                    return (
+                    errors.append(
                         'imported benchmark resources must exactly match the '
                         'preselected task resource profile'
                     )
@@ -2252,16 +2305,117 @@ class ResearchOrchestrator:
                 run.evaluation_contract_version,
             )
             if contract.digest != run.evaluation_contract_digest:
-                return 'evaluation contract changed after run creation'
+                errors.append('evaluation contract changed after run creation')
             expand_experiment_matrix(
                 run_id=run_id,
                 action_id=action.action_id,
                 matrix=matrix,
                 contract=contract,
             )
+            report = preflight_matrix(
+                run=run,
+                matrix=matrix,
+                contract=contract,
+            )
+            if errors:
+                return report.model_copy(
+                    update={
+                        'passed': False,
+                        'errors': [*errors, *report.errors],
+                    }
+                )
+            return report
         except ValueError as exc:
-            return str(exc)
-        return None
+            errors.append(str(exc))
+        return MatrixPreflightReport(
+            passed=False,
+            job_count=0,
+            errors=errors,
+        )
+
+    def _matrix_preflight_error(
+        self,
+        *,
+        run_id: str,
+        action: ActionRecord,
+    ) -> str | None:
+        report = self._matrix_preflight_report(
+            run_id=run_id,
+            action=action,
+        )
+        return '; '.join(report.errors) if report.errors else None
+
+    @staticmethod
+    def _methodology_feedback(result: AgentTurnResult) -> str:
+        sections = [result.summary]
+        if result.claims:
+            sections.append(
+                'Concrete findings:\n'
+                + '\n'.join(
+                    f'- {claim.text}'
+                    + (
+                        f' Evidence: {", ".join(claim.evidence)}'
+                        if claim.evidence
+                        else ''
+                    )
+                    for claim in result.claims
+                )
+            )
+        if result.message_to_other_agent.strip():
+            sections.append(result.message_to_other_agent.strip())
+        return '\n\n'.join(section for section in sections if section)
+
+    def _request_methodology_revision(
+        self,
+        run_id: str,
+        *,
+        feedback: str,
+    ) -> None:
+        run = self.store.get_run(run_id)
+        revision_count = run.methodology_revision_count + 1
+        run = self.store.replace_run(
+            run.model_copy(
+                update={'methodology_revision_count': revision_count}
+            ),
+            expected_version=run.version,
+        )
+        if run.state != RunState.BEAKER_REVISING:
+            self._transition(run_id, RunState.BEAKER_REVISING)
+        self._event(
+            run_id,
+            source='orchestrator',
+            event_type='methodology.revision_requested',
+            payload={
+                'revision_count': revision_count,
+                'maximum_revisions': (
+                    self.settings.maximum_methodology_revisions
+                ),
+                'feedback': feedback,
+            },
+        )
+        if revision_count > self.settings.maximum_methodology_revisions:
+            self._event(
+                run_id,
+                source='orchestrator',
+                event_type='methodology.human_resolution_requested',
+                payload={
+                    'revision_count': revision_count,
+                    'maximum_revisions': (
+                        self.settings.maximum_methodology_revisions
+                    ),
+                    'feedback': feedback,
+                },
+            )
+            self.pause_run(
+                run_id,
+                requested_by='orchestrator',
+                reason=(
+                    'Methodology review exceeded the automatic revision '
+                    'limit. Human resolution is required.'
+                ),
+            )
+            return
+        self._beaker_revise(run_id, feedback=feedback)
 
     def _beaker_revise(self, run_id: str, *, feedback: str) -> None:
         run = self.store.get_run(run_id)
@@ -2277,6 +2431,10 @@ class ResearchOrchestrator:
             'Revise the implementation and experiment matrix in response to '
             'the review below. Run local checks and return a replacement '
             'submit_experiment_matrix action. Do not execute cluster work.\n\n'
+            'The workload must emit metrics and evidence only. Remove any '
+            'workload code that creates, reads, or scores `evaluation.json`, '
+            '`rubric_score`, or `integrity_pass`; the immutable contract owns '
+            'those outputs.\n\n'
             f'Permitted runner images: '
             f'{json.dumps(sorted(self.policy.permitted_images))}\n'
             'Resource ceilings: '
@@ -2316,7 +2474,7 @@ class ResearchOrchestrator:
             for item in actions
         )
         if not pending:
-            self._beaker_revise(
+            self._request_methodology_revision(
                 run_id,
                 feedback=self._matrix_revision_feedback(actions),
             )

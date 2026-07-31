@@ -15,11 +15,14 @@ from app.contracts import (
 )
 from app.matrix import MatrixExpansionError, expand_experiment_matrix
 from app.policy import ActionPolicy
+from app.preflight import preflight_matrix
 from app.schemas import (
     AgentName,
     ExperimentMatrix,
     PolicyClassification,
     RequestedAction,
+    RunCreateRequest,
+    RunState,
 )
 
 from conftest import RUNNER_IMAGE
@@ -209,3 +212,127 @@ def test_experiment_matrix_expansion_is_deterministic(orchestrator_bundle) -> No
             matrix=oversized,
             contract=contract,
         )
+
+
+def test_adult_preflight_distinguishes_comparisons_from_decisions(
+    orchestrator_bundle,
+) -> None:
+    _, _, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        request=RunCreateRequest(
+            objective='Validate the Adult methodology preflight contract.'
+        )
+    )
+    workspace = Path(run.beaker_workspace)
+    config = workspace / 'configs' / 'candidate.yaml'
+    config.write_text(
+        'experiment_dimensions:\n'
+        '  model: [logistic_regression, random_forest]\n'
+        '  missing_strategy: [impute_unknown]\n'
+        '  include_fnlwgt: [false]\n'
+        '  encoding: [one_hot]\n'
+    )
+    source = workspace / 'benchmark-workspace' / 'adult-income'
+    source.mkdir(parents=True)
+    (source / 'run.py').write_text('print("emit metrics and evidence")\n')
+    run = run.model_copy(
+        update={
+            'task_definition': {
+                'source_subdirectory': 'benchmark-workspace/adult-income',
+            }
+        }
+    )
+    contract = engine.contracts.resolve(
+        'ml-benchmark-adult-income-v1',
+        '1.0.0',
+    )
+    report = preflight_matrix(
+        run=run,
+        matrix=_matrix().model_copy(
+            update={'base_config': 'configs/candidate.yaml'}
+        ),
+        contract=contract,
+    )
+    assert report.passed
+    assert report.comparisons == {
+        'model_families': ['logistic_regression', 'random_forest']
+    }
+    assert report.decisions == {
+        'missing_data_strategy': ['impute_unknown'],
+        'fnlwgt_handling': ['False'],
+        'categorical_encoding': ['one_hot'],
+    }
+
+
+def test_preflight_rejects_workload_owned_evaluation_output(
+    orchestrator_bundle,
+) -> None:
+    _, _, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        request=RunCreateRequest(
+            objective='Reject workload code that impersonates the evaluator.'
+        )
+    )
+    workspace = Path(run.beaker_workspace)
+    config = workspace / 'configs' / 'candidate.yaml'
+    config.write_text(
+        'experiment_dimensions:\n'
+        '  model: [logistic_regression, random_forest]\n'
+        '  missing_strategy: [impute_unknown]\n'
+        '  include_fnlwgt: [false]\n'
+        '  encoding: [one_hot]\n'
+    )
+    source = workspace / 'benchmark-workspace' / 'adult-income'
+    source.mkdir(parents=True)
+    (source / 'run.py').write_text(
+        'open("evaluation.json", "w").write(\'{"rubric_score": 100}\')\n'
+    )
+    report = preflight_matrix(
+        run=run.model_copy(
+            update={
+                'task_definition': {
+                    'source_subdirectory': 'benchmark-workspace/adult-income',
+                }
+            }
+        ),
+        matrix=_matrix().model_copy(
+            update={'base_config': 'configs/candidate.yaml'}
+        ),
+        contract=engine.contracts.resolve(
+            'ml-benchmark-adult-income-v1',
+            '1.0.0',
+        ),
+    )
+    assert not report.passed
+    assert 'evaluator-owned output' in report.errors[0]
+
+
+def test_methodology_revision_limit_pauses_for_human_resolution(
+    orchestrator_bundle,
+    monkeypatch,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    engine.settings.maximum_methodology_revisions = 2
+    run = engine.create_run(
+        request=RunCreateRequest(
+            objective='Bound repeated methodology review disagreements.'
+        )
+    )
+    store.replace_run(
+        run.model_copy(update={'state': RunState.HONEYDEW_REVIEWING}),
+        expected_version=run.version,
+    )
+    monkeypatch.setattr(engine, '_beaker_revise', lambda *_args, **_kwargs: None)
+
+    engine._request_methodology_revision(run.run_id, feedback='first')
+    engine._request_methodology_revision(run.run_id, feedback='second')
+    engine._request_methodology_revision(run.run_id, feedback='third')
+
+    paused = store.get_run(run.run_id)
+    assert paused.state == RunState.PAUSED
+    assert paused.resume_state == RunState.BEAKER_REVISING
+    assert paused.methodology_revision_count == 3
+    assert any(
+        event.event_type == 'methodology.human_resolution_requested'
+        for event in store.list_events(run.run_id)
+    )

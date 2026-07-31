@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     ]
 
     maximum_turns: int = 20
+    maximum_methodology_revisions: int = 2
     maximum_runtime_seconds: int = 86400
     maximum_cpu: float = 8.0
     maximum_memory_gib: float = 32.0
