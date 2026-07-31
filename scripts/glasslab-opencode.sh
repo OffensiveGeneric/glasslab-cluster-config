@@ -22,7 +22,7 @@ if [[ -z "$OPENCODE_BIN" ]]; then
   fi
 fi
 
-API_BASE="${GLASSLAB_EXO_API_BASE:-http://192.168.1.18:52415}"
+API_BASE="${GLASSLAB_EXO_API_BASE:-http://192.168.1.17:52415}"
 MODEL="${GLASSLAB_OPENCODE_MODEL:-mlx-community/Qwen3-Coder-Next-4bit}"
 
 if [[ ! -x "$HELPER" ]]; then

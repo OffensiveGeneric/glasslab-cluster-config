@@ -153,7 +153,7 @@ names are not persisted directly.
 The current deployment configuration points both runtimes at:
 
 ```text
-http://192.168.1.18:52415/v1
+http://192.168.1.17:52415/v1
 mlx-community/Qwen3-Coder-Next-4bit
 ```
 

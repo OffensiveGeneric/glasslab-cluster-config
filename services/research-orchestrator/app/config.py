@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     opencode_start_timeout_seconds: float = 15.0
     opencode_turn_timeout_seconds: float = 1800.0
     opencode_structured_repair_attempts: int = 1
-    qwen_base_url: str = 'http://192.168.1.18:52415/v1'
+    qwen_base_url: str = 'http://192.168.1.17:52415/v1'
     qwen_model_name: str = 'mlx-community/Qwen3-Coder-Next-4bit'
     opencode_runtime_image: str = (
         'ghcr.io/offensivegeneric/glasslab-research-orchestrator:0.1.0'
