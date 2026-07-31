@@ -285,7 +285,6 @@ These constraints explain most of the weirdness in the repo.
 
 The provisioner is simultaneously:
 
-- bastion
 - Ansible control host
 - `kubectl` workstation
 - image build point
@@ -293,6 +292,9 @@ The provisioner is simultaneously:
 - place where some runtime state is materialized
 
 That is why so much operational truth sits there.
+
+The public SSH gateway at `glasslab.org` is a separate machine. It provides
+the hop into the lab but does not own these provisioner responsibilities.
 
 ### Constraint 2: No Clean Shared Storage Yet
 
