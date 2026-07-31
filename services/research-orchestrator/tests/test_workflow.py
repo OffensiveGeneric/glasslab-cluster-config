@@ -650,9 +650,10 @@ def test_contract_preflight_returns_beaker_to_revision(
     orchestrator_bundle,
 ) -> None:
     _, store, _, _, engine = orchestrator_bundle
-    engine.runtime = ContractOversizedThenValidRuntime(
+    runtime = ContractOversizedThenValidRuntime(
         runner_image=RUNNER_IMAGE
     )
+    engine.runtime = runtime
     run = engine.create_run(
         RunCreateRequest(
             objective='Reject a matrix that exceeds the evaluation contract.'
@@ -681,6 +682,14 @@ def test_contract_preflight_returns_beaker_to_revision(
         'submit_experiment_matrix',
     )
     assert pending.honeydew_approved is True
+    revision_prompt = next(
+        prompt
+        for agent, prompt in runtime.prompts
+        if agent == AgentName.BEAKER
+        and 'focused deterministic-preflight correction' in prompt
+    )
+    assert 'Do not browse unrelated repository files' in revision_prompt
+    assert '`configs/baseline.yaml`' in revision_prompt
 
 
 def test_transient_approved_action_failure_is_persisted_and_pauses_run(

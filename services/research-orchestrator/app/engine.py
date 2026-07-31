@@ -2493,11 +2493,36 @@ class ResearchOrchestrator:
                 'datasets come only from the provided bindings, and the '
                 'preselected image/resources must not change.'
             )
+        preflight_focus = ''
+        if feedback.startswith('Deterministic matrix preflight failed:'):
+            rejected_matrices = [
+                action
+                for action in self.store.list_actions(run_id)
+                if action.type == 'submit_experiment_matrix'
+                and action.approval_status == ApprovalStatus.REJECTED
+            ]
+            base_config = (
+                str(rejected_matrices[-1].arguments.get('base_config', ''))
+                if rejected_matrices
+                else ''
+            )
+            preflight_focus = (
+                '\nThis is a focused deterministic-preflight correction, not '
+                'a new implementation pass. The validator has already inspected '
+                'the implementation. Read the rejected base config'
+                + (f' `{base_config}`' if base_config else '')
+                + ' and only the directly relevant protocol or source files. '
+                'Correct every validator error exactly, run the narrowest '
+                'applicable check, and stop. Do not browse unrelated repository '
+                'files or redesign working code unless an error explicitly names '
+                'that code.\n'
+            )
         prompt = (
             'Revise the implementation and experiment matrix in response to '
             'the review below. Run local checks and return a replacement '
             'submit_experiment_matrix action. Do not execute cluster work.\n\n'
-            'The workload must emit metrics and evidence only. Remove any '
+            + preflight_focus
+            + 'The workload must emit metrics and evidence only. Remove any '
             'workload code that creates, reads, or scores `evaluation.json`, '
             '`rubric_score`, or `integrity_pass`; the immutable contract owns '
             'those outputs.\n\n'
