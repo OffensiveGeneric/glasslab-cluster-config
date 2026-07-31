@@ -87,7 +87,7 @@ RUNTIME_PROFILES = {
         workload_id='workspace-cpu-ml-v1',
         runner_image=(
             'ghcr.io/offensivegeneric/'
-            'glasslab-research-workspace-runner:benchmark-cpu-v1'
+            'glasslab-research-workspace-runner:benchmark-cpu-v2'
         ),
         resources={
             'cpu': 4,

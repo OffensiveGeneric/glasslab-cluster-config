@@ -7,7 +7,9 @@ The runner:
 
 - verifies SHA-256 digests for task, source, and every exposed dataset
 - rejects archive path traversal and archive links
-- exposes resolved, read-only dataset bindings to the workspace
+- exposes resolved, read-only dataset bindings through
+  `GLASSLAB_DATASET_BINDINGS_JSON`, `GLASSLAB_DATASET_<NORMALIZED_NAME>`, and
+  the compatibility alias `<NORMALIZED_NAME>_PATH`
 - executes one declared command under a wall-clock timeout
 - writes a terminal artifact bundle even when verification or execution fails
 - fails a nominally successful command when required artifacts are absent
