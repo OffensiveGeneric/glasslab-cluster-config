@@ -3484,14 +3484,17 @@ class ResearchOrchestrator:
             feedback = rejected[-1].reason if rejected else 'Resume the bounded revision.'
             self._beaker_revise(run_id, feedback=feedback)
         elif state == RunState.AWAITING_EXECUTION_APPROVAL:
-            approved = [
+            matrix_actions = [
                 action
                 for action in self.store.list_actions(run_id)
                 if action.type == 'submit_experiment_matrix'
-                and action.approval_status == ApprovalStatus.APPROVED
             ]
-            if approved:
-                self._submit_matrix(approved[-1])
+            if (
+                matrix_actions
+                and matrix_actions[-1].approval_status
+                == ApprovalStatus.APPROVED
+            ):
+                self._submit_matrix(matrix_actions[-1])
         elif state in {RunState.JOB_QUEUED, RunState.JOB_RUNNING}:
             self.reconcile_run(run_id)
         elif state == RunState.BEAKER_ANALYZING:

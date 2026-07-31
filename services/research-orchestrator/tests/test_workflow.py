@@ -17,10 +17,12 @@ from app.policy import ActionPolicy
 from app.schemas import (
     AgentName,
     AgentTurnResult,
+    ActionRecord,
     ApprovalStatus,
     ExperimentMatrix,
     JobStatus,
     RequestedAction,
+    PolicyClassification,
     RunCreateRequest,
     RunState,
     TurnKind,
@@ -1048,6 +1050,60 @@ def test_restart_recovery_from_job_running(orchestrator_bundle) -> None:
     recovered = restarted_store.get_run(run.run_id)
     assert recovered.state == RunState.AWAITING_FINAL_ACCEPTANCE
     assert len(restarted_store.list_artifacts(run.run_id)) == 5
+
+
+def test_recovery_does_not_replay_stale_approved_matrix(
+    orchestrator_bundle,
+    monkeypatch,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(objective='Do not replay an obsolete matrix approval.')
+    )
+    run = store.replace_run(
+        run.model_copy(update={'state': RunState.AWAITING_EXECUTION_APPROVAL}),
+        expected_version=run.version,
+    )
+    old = store.save_action(
+        ActionRecord(
+            run_id=run.run_id,
+            proposed_by=AgentName.BEAKER,
+            type='submit_experiment_matrix',
+            arguments={},
+            policy_classification=(
+                PolicyClassification.HONEYDEW_AND_HUMAN_APPROVAL
+            ),
+            approval_status=ApprovalStatus.APPROVED,
+            reason='Old approved matrix.',
+            idempotency_key='old-matrix',
+        )
+    )
+    latest = store.save_action(
+        ActionRecord(
+            run_id=run.run_id,
+            proposed_by=AgentName.BEAKER,
+            type='submit_experiment_matrix',
+            arguments={},
+            policy_classification=(
+                PolicyClassification.HONEYDEW_AND_HUMAN_APPROVAL
+            ),
+            approval_status=ApprovalStatus.PENDING,
+            reason='Replacement matrix awaiting approval.',
+            idempotency_key='latest-matrix',
+        )
+    )
+    submitted: list[str] = []
+    monkeypatch.setattr(
+        engine,
+        '_submit_matrix',
+        lambda action: submitted.append(action.action_id),
+    )
+
+    engine._recover_run(run.run_id)
+
+    assert old.action_id != latest.action_id
+    assert submitted == []
+    assert store.get_run(run.run_id).state == RunState.AWAITING_EXECUTION_APPROVAL
 
 
 def test_recovery_backfills_protocol_artifact_from_event(
