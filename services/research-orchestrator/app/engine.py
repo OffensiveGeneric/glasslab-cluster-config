@@ -1860,7 +1860,11 @@ class ResearchOrchestrator:
                 'and the frozen `program.md`. Put the complete executable '
                 f'solution under `{source}/`, including `run.py`. The run must '
                 'use only dataset paths supplied through '
-                '`GLASSLAB_DATASET_BINDINGS_JSON`, write all outputs beneath '
+                '`GLASSLAB_DATASET_BINDINGS_JSON`. That JSON object is keyed '
+                'by each exact declared dataset `name`, not by its `role`; use '
+                'the dataset list below to bind names to train, test, or other '
+                'roles. Do not assume generic keys such as `train` or `test` '
+                'unless those are the declared names. Write all outputs beneath '
                 '`GLASSLAB_OUTPUT_DIR`, and make no network calls. Use the '
                 'exact preselected runner image and resource request:\n'
                 + json.dumps(

@@ -11,6 +11,7 @@ from app.schemas import TaskAssetProposal, TaskSpecProposal
 from app.datasets import DatasetIngestionManager
 from app.storage import SqliteStore
 from app.task_bundles import (
+    FIXED_WORKLOAD_RUNNER_IMAGES,
     RUNTIME_PROFILES,
     TaskBundleError,
     TaskBundleManager,
@@ -69,6 +70,42 @@ def test_import_task_bundle_is_immutable_and_idempotent(tmp_path: Path) -> None:
     assert first.compilation_source == 'honeydew-task-spec'
     assert first.workload_id == 'workspace-cpu-ml-v1'
     assert first.datasets == []
+
+
+def test_loading_persisted_task_rebinds_fixed_workload_runner(
+    tmp_path: Path,
+) -> None:
+    manager = _manager(tmp_path)
+    content = _archive()
+    proposal = TaskSpecProposal(
+        schema_version='glasslab-task-spec-v1',
+        display_name='Persisted CPU Task',
+        runtime_profile='cpu-ml-standard-v1',
+        rationale='Exercise deployment-policy rebinding.',
+    )
+    record = manager.compile(
+        manager.stage_archive(filename='task.zip', content=content),
+        proposal,
+    )
+    metadata_path = Path(record.archive_path).with_name('task.json')
+    metadata_path.chmod(0o644)
+    metadata_path.write_text(
+        record.model_copy(
+            update={
+                'workload_id': 'benchmark-workspace-cpu-v1',
+                'runner_image': (
+                    'ghcr.io/offensivegeneric/'
+                    'glasslab-research-workspace-runner:benchmark-cpu-v1'
+                ),
+            }
+        ).model_dump_json(indent=2)
+    )
+
+    loaded = manager.get(record.task_id, record.digest)
+
+    assert loaded.runner_image == FIXED_WORKLOAD_RUNNER_IMAGES[
+        'benchmark-workspace-cpu-v1'
+    ]
 
 
 def test_import_task_bundle_rejects_path_traversal(tmp_path: Path) -> None:

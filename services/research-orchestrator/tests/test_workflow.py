@@ -648,6 +648,57 @@ def test_policy_denial_returns_beaker_to_revision(
     )
 
 
+def test_imported_task_prompt_uses_exact_dataset_binding_names(
+    orchestrator_bundle,
+    monkeypatch,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(objective='Use exact imported dataset binding names.')
+    )
+    current = store.get_run(run.run_id)
+    task = {
+        'source_subdirectory': 'research-workspace/task',
+        'runner_image': RUNNER_IMAGE,
+        'resources': {
+            'cpu': 1,
+            'memory_gib': 1,
+            'gpus': 0,
+            'wallclock_minutes': 5,
+        },
+        'required_artifacts': ['metrics.json'],
+        'datasets': [
+            {
+                'name': 'adult_train',
+                'role': 'train',
+                'uri': 's3://datasets/adult.data',
+                'sha256': 'a' * 64,
+                'contains_labels': True,
+            }
+        ],
+    }
+    store.replace_run(
+        current.model_copy(update={'task_definition': task}),
+        expected_version=current.version,
+    )
+    plan = Path(current.beaker_workspace) / 'implementation-plan.md'
+    plan.write_text('# Plan\n')
+    captured: dict[str, str] = {}
+
+    def capture_turn(**kwargs):
+        captured['prompt'] = kwargs['prompt']
+        raise RuntimeError('prompt captured')
+
+    monkeypatch.setattr(engine, '_run_agent_turn', capture_turn)
+
+    with pytest.raises(RuntimeError, match='prompt captured'):
+        engine._beaker_implement(run.run_id)
+
+    implementation_prompt = captured['prompt']
+    assert 'keyed by each exact declared dataset `name`' in implementation_prompt
+    assert 'Do not assume generic keys such as `train` or `test`' in implementation_prompt
+
+
 def test_contract_preflight_returns_beaker_to_revision(
     orchestrator_bundle,
 ) -> None:
