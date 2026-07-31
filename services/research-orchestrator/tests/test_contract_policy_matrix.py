@@ -244,7 +244,7 @@ def test_adult_preflight_distinguishes_comparisons_from_decisions(
     )
     contract = engine.contracts.resolve(
         'ml-benchmark-adult-income-v1',
-        '1.0.0',
+        '1.1.0',
     )
     report = preflight_matrix(
         run=run,
@@ -300,7 +300,7 @@ def test_preflight_rejects_workload_owned_evaluation_output(
         ),
         contract=engine.contracts.resolve(
             'ml-benchmark-adult-income-v1',
-            '1.0.0',
+            '1.1.0',
         ),
     )
     assert not report.passed

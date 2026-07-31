@@ -338,6 +338,11 @@ The preflight report records the exact expanded job count, checks performed,
 configured comparisons, configured decisions, and blocking findings. Discord
 renders that report before showing approval controls.
 
+The original Adult benchmark contract remains immutable at `1.0.0`.
+Methodology declarations were added as `ml-benchmark-adult-income-v1@1.1.0`;
+new Adult task runs use the newer binding while historical runs retain their
+recorded `1.0.0` digest.
+
 Honeydew rejection feedback is passed to Beaker with the complete structured
 claim list and evidence references. Automatic methodology repair is limited by
 `GLASSLAB_ORCHESTRATOR_MAXIMUM_METHODOLOGY_REVISIONS`, two by default.
