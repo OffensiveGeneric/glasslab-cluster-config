@@ -367,6 +367,12 @@ across normal turns. Resume also detects older paused records whose latest
 failed turn still references the attached session and rotates them before
 recovery.
 
+The run-level runtime ceiling measures active workflow time. The orchestrator
+accumulates elapsed active seconds when a run is paused, stops the clock while
+it remains `PAUSED`, and starts it again on resume. Operator review time in
+explicit approval states remains part of active runtime unless the run is
+paused.
+
 Beaker implementation is split into two bounded turns. `BEAKER_PLANNING`
 produces a task-specific `implementation-plan.md`; `BEAKER_IMPLEMENTING`
 executes that plan and may adapt it when repository evidence requires. The

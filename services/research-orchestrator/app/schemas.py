@@ -423,6 +423,8 @@ class RunRecord(BaseModel):
     maximum_turns: int
     maximum_runtime_seconds: int
     maximum_parallel_jobs: int
+    active_runtime_seconds: float = Field(default=0.0, ge=0.0)
+    active_since: datetime | None = None
     resume_state: RunState | None = None
     version: int = 1
     created_at: datetime

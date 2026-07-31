@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import timedelta
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -219,6 +218,7 @@ class ResearchOrchestrator:
                     or self.settings.maximum_parallel_jobs,
                     self.settings.maximum_parallel_jobs,
                 ),
+                active_since=now,
                 created_at=now,
                 updated_at=now,
             )
@@ -354,13 +354,22 @@ class ResearchOrchestrator:
                 payload={'reason': 'maximum turn count reached'},
             )
             raise WorkflowError('maximum turn count reached')
-        if utc_now() > run.created_at + timedelta(seconds=run.maximum_runtime_seconds):
+        active_runtime = run.active_runtime_seconds
+        if run.active_since is not None:
+            active_runtime += max(
+                0.0,
+                (utc_now() - run.active_since).total_seconds(),
+            )
+        if active_runtime > run.maximum_runtime_seconds:
             self._transition(
                 run.run_id,
                 RunState.TIMED_OUT,
-                payload={'reason': 'maximum runtime reached'},
+                payload={
+                    'reason': 'maximum active runtime reached',
+                    'active_runtime_seconds': active_runtime,
+                },
             )
-            raise WorkflowError('maximum runtime reached')
+            raise WorkflowError('maximum active runtime reached')
 
     def _write_recovery_checkpoint(
         self,
@@ -2589,10 +2598,21 @@ class ResearchOrchestrator:
         if run.state in TERMINAL_STATES or run.state == RunState.PAUSED:
             return run
         self._abort_agent_turns(run)
+        now = utc_now()
+        active_runtime = run.active_runtime_seconds
+        if run.active_since is not None:
+            active_runtime += max(
+                0.0,
+                (now - run.active_since).total_seconds(),
+            )
         paused = self._transition(
             run_id,
             RunState.PAUSED,
-            updates={'resume_state': run.state},
+            updates={
+                'resume_state': run.state,
+                'active_runtime_seconds': active_runtime,
+                'active_since': None,
+            },
         )
         self._event(
             run_id,
@@ -2623,7 +2643,10 @@ class ResearchOrchestrator:
             resumed = self._transition(
                 run_id,
                 target,
-                updates={'resume_state': None},
+                updates={
+                    'resume_state': None,
+                    'active_since': utc_now(),
+                },
             )
             self._event(
                 run_id,

@@ -712,6 +712,9 @@ def test_imported_task_resume_finalizes_existing_runner(
             'state': RunState.PAUSED,
             'resume_state': RunState.BEAKER_IMPLEMENTING,
             'task_definition': task_definition,
+            'maximum_runtime_seconds': 60,
+            'active_runtime_seconds': 1.0,
+            'active_since': None,
         }
     )
     store.replace_run(paused, expected_version=run.version)
@@ -727,6 +730,7 @@ def test_imported_task_resume_finalizes_existing_runner(
     )
     assert finalizing_event.payload['from'] == RunState.BEAKER_IMPLEMENTING.value
     assert runtime.turn_counts[AgentName.BEAKER] == 1
+    assert resumed.active_runtime_seconds < resumed.maximum_runtime_seconds
     matrix = _pending_action(
         store,
         run.run_id,
