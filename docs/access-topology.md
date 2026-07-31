@@ -64,4 +64,5 @@ glasslab account` when it is unavoidable.
 - Kubernetes workers are not normal contributor login targets. Research work
   should enter through the orchestrator and bounded job APIs.
 - Ansible runs from the provisioner and currently manages the control plane and
-  workers. Contributor identity reconciliation is not implemented yet.
+  workers. Contributor access on the provisioner is described in
+  [contributor-access.md](contributor-access.md).

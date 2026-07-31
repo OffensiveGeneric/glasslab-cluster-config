@@ -15,6 +15,7 @@ Read these first:
 
 - `README.md`
 - `docs/access-topology.md`
+- `docs/contributor-access.md`
 - `docs/glasslab-v2/current/README.md`
 - `docs/glasslab-v2/system-map-2026-07.md`
 - `docs/glasslab-v2/ci-policy-2026-07.md`

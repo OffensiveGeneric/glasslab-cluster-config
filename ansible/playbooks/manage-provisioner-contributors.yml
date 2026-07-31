@@ -1,0 +1,59 @@
+---
+- name: Manage trusted contributor access on the provisioner
+  hosts: provisioner
+  gather_facts: false
+  become: true
+  vars:
+    glasslab_contributors: []
+  pre_tasks:
+    - name: Require an explicit contributor list
+      ansible.builtin.assert:
+        that:
+          - glasslab_contributors | length > 0
+        fail_msg: >-
+          Pass glasslab_contributors from a local vars file. Do not commit
+          contributor keys or password material to the repository.
+
+  tasks:
+    - name: Install contributor command-line tools
+      ansible.builtin.apt:
+        name:
+          - gh
+        state: present
+        update_cache: true
+
+    - name: Ensure contributor accounts exist with approved groups
+      ansible.builtin.user:
+        name: "{{ item.username }}"
+        comment: "{{ item.comment | default('Glasslab contributor') }}"
+        shell: /bin/bash
+        create_home: true
+        groups: "{{ ['glasslab'] + (['docker'] if item.docker_access | default(false) else []) }}"
+        append: true
+        state: present
+      loop: "{{ glasslab_contributors }}"
+      loop_control:
+        label: "{{ item.username }}"
+
+    - name: Create contributor SSH directories
+      ansible.builtin.file:
+        path: "/home/{{ item.username }}/.ssh"
+        state: directory
+        owner: "{{ item.username }}"
+        group: "{{ item.username }}"
+        mode: '0700'
+      loop: "{{ glasslab_contributors }}"
+      loop_control:
+        label: "{{ item.username }}"
+
+    - name: Install contributor public keys
+      ansible.builtin.copy:
+        dest: "/home/{{ item.username }}/.ssh/authorized_keys"
+        content: "{{ (item.authorized_keys | default([])) | join('\n') }}\n"
+        owner: "{{ item.username }}"
+        group: "{{ item.username }}"
+        mode: '0600'
+      when: item.authorized_keys | default([]) | length > 0
+      loop: "{{ glasslab_contributors }}"
+      loop_control:
+        label: "{{ item.username }}"
