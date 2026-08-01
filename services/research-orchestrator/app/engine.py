@@ -2593,7 +2593,16 @@ class ResearchOrchestrator:
                 '\nPreserve the imported benchmark boundary: all executable '
                 f'files stay under `{run.task_definition["source_subdirectory"]}`, '
                 'datasets come only from the provided bindings, and the '
-                'preselected image/resources must not change.'
+                'preselected image/resources must not change. The OpenCode '
+                'runtime is not the approved experiment-runner image and may '
+                'lack workload dependencies. Attempt each local command only '
+                'once. If a check fails with ModuleNotFoundError, do not install '
+                'packages, repeat the command, or inspect outputs that were not '
+                'created. Run dependency-free checks such as Python compilation, '
+                'record that the dependency-backed smoke check is deferred to '
+                'the approved runner, and complete the structured handoff. Any '
+                'claim evidence must use an allowed artifact://, git://, '
+                'event://, job://, or contract:// URI rather than a bare path.'
             )
         preflight_focus = ''
         if feedback.startswith('Deterministic matrix preflight failed:'):

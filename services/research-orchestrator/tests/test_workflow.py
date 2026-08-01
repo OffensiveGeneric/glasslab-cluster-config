@@ -752,6 +752,52 @@ def test_imported_task_prompt_uses_exact_dataset_binding_names(
     assert '`metrics.json` document root' in implementation_prompt
 
 
+def test_imported_task_revision_does_not_retry_missing_dependencies(
+    orchestrator_bundle,
+    monkeypatch,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(objective='Revise an imported benchmark safely.')
+    )
+    current = store.get_run(run.run_id)
+    store.replace_run(
+        current.model_copy(
+            update={
+                'task_definition': {
+                    'source_subdirectory': 'benchmark-workspace/task',
+                    'runner_image': RUNNER_IMAGE,
+                    'resources': {
+                        'cpu': 1,
+                        'memory_gib': 1,
+                        'gpus': 0,
+                        'wallclock_minutes': 5,
+                    },
+                    'required_artifacts': ['metrics.json'],
+                    'datasets': [],
+                }
+            }
+        ),
+        expected_version=current.version,
+    )
+    captured: dict[str, str] = {}
+
+    def capture_turn(**kwargs):
+        captured['prompt'] = kwargs['prompt']
+        raise RuntimeError('prompt captured')
+
+    monkeypatch.setattr(engine, '_run_agent_turn', capture_turn)
+
+    with pytest.raises(RuntimeError, match='prompt captured'):
+        engine._beaker_revise(run.run_id, feedback='Fix the smoke check.')
+
+    revision_prompt = captured['prompt']
+    assert 'Attempt each local command only once' in revision_prompt
+    assert 'If a check fails with ModuleNotFoundError' in revision_prompt
+    assert 'do not install packages, repeat the command' in revision_prompt
+    assert 'artifact://, git://, event://, job://, or contract://' in revision_prompt
+
+
 def test_contract_preflight_returns_beaker_to_revision(
     orchestrator_bundle,
 ) -> None:
