@@ -234,7 +234,19 @@ def test_adult_preflight_distinguishes_comparisons_from_decisions(
     )
     source = workspace / 'benchmark-workspace' / 'adult-income'
     source.mkdir(parents=True)
-    (source / 'run.py').write_text('print("emit metrics and evidence")\n')
+    (source / 'run.py').write_text(
+        'import json\n'
+        'metrics = {\n'
+        '    "accuracy": 0.9, "balanced_accuracy": 0.8,\n'
+        '    "precision": 0.8, "recall": 0.8, "f1": 0.8,\n'
+        '    "roc_auc": 0.9, "headline_ci_low": 0.85,\n'
+        '    "headline_ci_high": 0.95, "bootstrap_resamples": 1000,\n'
+        '    "test_rows": 16281,\n'
+        '}\n'
+        'payload = {**metrics, "models": {}}\n'
+        'with open("metrics.json", "w") as handle:\n'
+        '    json.dump(payload, handle)\n'
+    )
     run = run.model_copy(
         update={
             'task_definition': {
@@ -262,6 +274,54 @@ def test_adult_preflight_distinguishes_comparisons_from_decisions(
         'fnlwgt_handling': ['False'],
         'categorical_encoding': ['one_hot'],
     }
+
+
+def test_adult_preflight_rejects_nested_only_metrics_json(
+    orchestrator_bundle,
+) -> None:
+    _, _, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        request=RunCreateRequest(objective='Reject nested-only contract metrics.')
+    )
+    workspace = Path(run.beaker_workspace)
+    config = workspace / 'configs' / 'candidate.yaml'
+    config.write_text(
+        'experiment_dimensions:\n'
+        '  model: [logistic_regression, random_forest]\n'
+        '  missing_strategy: [impute_unknown]\n'
+        '  include_fnlwgt: [false]\n'
+        '  encoding: [one_hot]\n'
+    )
+    source = workspace / 'benchmark-workspace' / 'adult-income'
+    source.mkdir(parents=True)
+    (source / 'run.py').write_text(
+        'import json\n'
+        'metrics = {"gradient_boosted": {"metrics": {"accuracy": 0.9}}}\n'
+        'with open("metrics.json", "w") as handle:\n'
+        '    json.dump(metrics, handle)\n'
+    )
+    report = preflight_matrix(
+        run=run.model_copy(
+            update={
+                'task_definition': {
+                    'source_subdirectory': 'benchmark-workspace/adult-income',
+                }
+            }
+        ),
+        matrix=_matrix().model_copy(
+            update={'base_config': 'configs/candidate.yaml'}
+        ),
+        contract=engine.contracts.resolve(
+            'ml-benchmark-adult-income-v1',
+            '1.1.0',
+        ),
+    )
+
+    assert not report.passed
+    assert any(
+        'serializes metrics.json without required root key(s)' in error
+        for error in report.errors
+    )
 
 
 def test_adult_preflight_rejects_metadata_wrapped_methodology_values(
@@ -337,7 +397,7 @@ def test_preflight_rejects_workload_owned_evaluation_output(
         ),
     )
     assert not report.passed
-    assert 'evaluator-owned output' in report.errors[0]
+    assert any('evaluator-owned output' in error for error in report.errors)
 
 
 def test_methodology_revision_limit_pauses_for_human_resolution(

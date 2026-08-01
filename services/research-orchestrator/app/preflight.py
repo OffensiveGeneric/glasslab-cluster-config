@@ -70,7 +70,119 @@ def _load_config(path: Path) -> dict[str, Any]:
     return parsed
 
 
-def _source_errors(source: Path) -> list[str]:
+def _dict_keys(
+    expression: ast.expr,
+    assignments: dict[str, ast.expr],
+    subscript_keys: dict[str, set[str]],
+    *,
+    resolving: frozenset[str] = frozenset(),
+) -> set[str]:
+    if isinstance(expression, ast.Name):
+        if expression.id in resolving:
+            return set()
+        assigned = assignments.get(expression.id)
+        keys = set(subscript_keys.get(expression.id, set()))
+        if assigned is not None:
+            keys.update(
+                _dict_keys(
+                    assigned,
+                    assignments,
+                    subscript_keys,
+                    resolving=resolving | {expression.id},
+                )
+            )
+        return keys
+    if not isinstance(expression, ast.Dict):
+        return set()
+    keys: set[str] = set()
+    for key, value in zip(expression.keys, expression.values, strict=True):
+        if key is None:
+            keys.update(
+                _dict_keys(
+                    value,
+                    assignments,
+                    subscript_keys,
+                    resolving=resolving,
+                )
+            )
+        elif isinstance(key, ast.Constant) and isinstance(key.value, str):
+            keys.add(key.value)
+    return keys
+
+
+def _metrics_root_errors(
+    tree: ast.AST,
+    *,
+    relative: str,
+    required_metric_keys: list[str],
+) -> list[str]:
+    if not required_metric_keys:
+        return []
+    assignments: dict[str, ast.expr] = {}
+    subscript_keys: dict[str, set[str]] = {}
+    metric_handles: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+            if isinstance(target, ast.Name):
+                assignments[target.id] = node.value
+            elif (
+                isinstance(target, ast.Subscript)
+                and isinstance(target.value, ast.Name)
+                and isinstance(target.slice, ast.Constant)
+                and isinstance(target.slice.value, str)
+            ):
+                subscript_keys.setdefault(target.value.id, set()).add(
+                    target.slice.value
+                )
+        if not isinstance(node, ast.With):
+            continue
+        for item in node.items:
+            if (
+                not isinstance(item.optional_vars, ast.Name)
+                or not isinstance(item.context_expr, ast.Call)
+                or not item.context_expr.args
+            ):
+                continue
+            target_text = ast.unparse(item.context_expr.args[0])
+            if 'metrics.json' in target_text:
+                metric_handles.add(item.optional_vars.id)
+
+    serialized_keys: set[str] = set()
+    found_serialization = False
+    for node in ast.walk(tree):
+        if (
+            not isinstance(node, ast.Call)
+            or not isinstance(node.func, ast.Attribute)
+            or node.func.attr != 'dump'
+            or len(node.args) < 2
+            or not isinstance(node.args[1], ast.Name)
+            or node.args[1].id not in metric_handles
+        ):
+            continue
+        found_serialization = True
+        serialized_keys.update(
+            _dict_keys(node.args[0], assignments, subscript_keys)
+        )
+    if not found_serialization:
+        return [
+            f'{relative} does not have a statically verifiable JSON write to '
+            'metrics.json'
+        ]
+    missing = sorted(set(required_metric_keys) - serialized_keys)
+    if not missing:
+        return []
+    return [
+        f'{relative} serializes metrics.json without required root key(s): '
+        + ', '.join(missing)
+    ]
+
+
+def _source_errors(
+    source: Path,
+    *,
+    required_metric_keys: list[str],
+) -> list[str]:
     errors: list[str] = []
     if not source.is_dir():
         return ['imported task source directory is missing']
@@ -89,12 +201,21 @@ def _source_errors(source: Path) -> list[str]:
         relative = path.relative_to(source).as_posix()
         if path.suffix.lower() == '.py':
             try:
-                ast.parse(text, filename=relative)
+                tree = ast.parse(text, filename=relative)
             except SyntaxError as exc:
                 errors.append(
                     f'Python syntax check failed for {relative}:{exc.lineno}: '
                     f'{exc.msg}'
                 )
+            else:
+                if path.name == 'run.py':
+                    errors.extend(
+                        _metrics_root_errors(
+                            tree,
+                            relative=relative,
+                            required_metric_keys=required_metric_keys,
+                        )
+                    )
         reserved = sorted(
             literal for literal in EVALUATOR_OWNED_LITERALS if literal in text
         )
@@ -196,7 +317,15 @@ def preflight_matrix(
         if not source.is_relative_to(workspace):
             errors.append('imported task source directory escapes the workspace')
         else:
-            source_findings = _source_errors(source)
+            source_findings = _source_errors(
+                source,
+                required_metric_keys=list(
+                    contract.descriptor.manifest.get(
+                        'required_metric_keys',
+                        [],
+                    )
+                ),
+            )
             errors.extend(source_findings)
             if not source_findings:
                 checks.append(
