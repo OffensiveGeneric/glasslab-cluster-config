@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     opencode_start_port: int = 4210
     opencode_start_timeout_seconds: float = 15.0
     opencode_turn_timeout_seconds: float = 1800.0
+    opencode_repeated_tool_limit: int = 6
     opencode_structured_repair_attempts: int = 1
     qwen_base_url: str = 'http://192.168.1.17:52415/v1'
     qwen_model_name: str = 'mlx-community/Qwen3-Coder-Next-4bit'

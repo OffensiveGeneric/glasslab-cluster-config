@@ -641,6 +641,48 @@ def test_opencode_event_normalization() -> None:
     ) is None
 
 
+def test_opencode_completed_tool_signatures_ignore_incomplete_calls() -> None:
+    messages = [
+        {
+            'parts': [
+                {
+                    'type': 'tool',
+                    'tool': 'read',
+                    'state': {
+                        'status': 'completed',
+                        'input': {'filePath': '/workspace/run.py', 'offset': 15},
+                    },
+                },
+                {
+                    'type': 'tool',
+                    'tool': 'read',
+                    'state': {
+                        'status': 'pending',
+                        'input': {'filePath': '/workspace/other.py'},
+                    },
+                },
+            ]
+        },
+        {
+            'parts': [
+                {
+                    'type': 'tool',
+                    'tool': 'read',
+                    'state': {
+                        'status': 'completed',
+                        'input': {'offset': 15, 'filePath': '/workspace/run.py'},
+                    },
+                }
+            ]
+        },
+    ]
+
+    signatures = OpenCodeProcessRuntime._completed_tool_signatures(messages)
+
+    assert len(signatures) == 2
+    assert signatures[0] == signatures[1]
+
+
 def test_extracts_current_and_legacy_opencode_structured_output() -> None:
     current = {'info': {'structured': {'kind': 'protocol_draft'}}}
     legacy = {'info': {'structured_output': {'kind': 'protocol_draft'}}}
