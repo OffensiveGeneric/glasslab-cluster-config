@@ -627,7 +627,7 @@ class OpenCodeProcessRuntime(AgentRuntime):
         raise OpenCodeRuntimeError('OpenCode turn ended without a result')
 
     @staticmethod
-    def _completed_tool_signatures(messages: list[dict[str, Any]]) -> list[str]:
+    def _terminal_tool_signatures(messages: list[dict[str, Any]]) -> list[str]:
         signatures: list[str] = []
         for message in messages:
             for part in message.get('parts', []):
@@ -636,7 +636,7 @@ class OpenCodeProcessRuntime(AgentRuntime):
                 state = part.get('state')
                 if (
                     not isinstance(state, dict)
-                    or state.get('status') != 'completed'
+                    or state.get('status') not in {'completed', 'error'}
                 ):
                     continue
                 signatures.append(
@@ -682,7 +682,7 @@ class OpenCodeProcessRuntime(AgentRuntime):
                         response.raise_for_status()
                         messages = response.json()
                     if isinstance(messages, list):
-                        signatures = self._completed_tool_signatures(messages)
+                        signatures = self._terminal_tool_signatures(messages)
                         limit = self.settings.opencode_repeated_tool_limit
                         if (
                             limit > 1
@@ -691,7 +691,7 @@ class OpenCodeProcessRuntime(AgentRuntime):
                         ):
                             reason = (
                                 'OpenCode turn aborted after '
-                                f'{limit} identical completed tool calls'
+                                f'{limit} identical terminal tool calls'
                             )
                 except (httpx.HTTPError, ValueError):
                     continue

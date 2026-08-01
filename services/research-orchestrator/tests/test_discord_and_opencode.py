@@ -641,7 +641,7 @@ def test_opencode_event_normalization() -> None:
     ) is None
 
 
-def test_opencode_completed_tool_signatures_ignore_incomplete_calls() -> None:
+def test_opencode_terminal_tool_signatures_ignore_incomplete_calls() -> None:
     messages = [
         {
             'parts': [
@@ -669,7 +669,7 @@ def test_opencode_completed_tool_signatures_ignore_incomplete_calls() -> None:
                     'type': 'tool',
                     'tool': 'read',
                     'state': {
-                        'status': 'completed',
+                        'status': 'error',
                         'input': {'offset': 15, 'filePath': '/workspace/run.py'},
                     },
                 }
@@ -677,7 +677,7 @@ def test_opencode_completed_tool_signatures_ignore_incomplete_calls() -> None:
         },
     ]
 
-    signatures = OpenCodeProcessRuntime._completed_tool_signatures(messages)
+    signatures = OpenCodeProcessRuntime._terminal_tool_signatures(messages)
 
     assert len(signatures) == 2
     assert signatures[0] == signatures[1]
