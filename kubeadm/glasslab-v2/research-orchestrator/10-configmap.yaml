@@ -7,6 +7,7 @@ data:
   GLASSLAB_ORCHESTRATOR_DATABASE_PATH: /mnt/artifacts/research-orchestrator/state/orchestrator.db
   GLASSLAB_ORCHESTRATOR_WORKSPACE_ROOT: /mnt/artifacts/research-orchestrator/runs
   GLASSLAB_ORCHESTRATOR_ARTIFACT_ROOT: /mnt/artifacts/research-orchestrator/artifacts
+  GLASSLAB_ORCHESTRATOR_EVIDENCE_EXCERPT_MAX_BYTES: "32768"
   GLASSLAB_ORCHESTRATOR_APPROVED_REPO_PATH: /mnt/artifacts/research-orchestrator/approved-repo
   GLASSLAB_ORCHESTRATOR_APPROVED_REPO_REF: main
   GLASSLAB_ORCHESTRATOR_EVALUATION_CONTRACT_ROOT: /app/evaluation-contracts

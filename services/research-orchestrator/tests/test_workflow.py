@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from pathlib import Path
 from threading import Event
 
@@ -19,6 +20,7 @@ from app.schemas import (
     AgentTurnResult,
     ActionRecord,
     ApprovalStatus,
+    ArtifactRecord,
     ExperimentMatrix,
     JobStatus,
     RequestedAction,
@@ -31,6 +33,90 @@ from app.storage import SqliteStore
 from app.workspaces import WorkspaceManager
 
 from conftest import RUNNER_IMAGE
+
+
+def test_evidence_snapshot_projects_bounded_verified_artifact_contents(
+    orchestrator_bundle,
+) -> None:
+    settings, store, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(objective='Diagnose an authoritative job failure.')
+    )
+    log_path = Path(settings.shared_mount_root) / 'artifacts/job-1/runner.log'
+    log_path.parent.mkdir(parents=True)
+    log_content = (
+        'unimportant prefix that should be truncated\n'
+        'ValueError: feature names should match fit\n'
+    ).encode()
+    log_path.write_bytes(log_content)
+    store.save_artifact(
+        ArtifactRecord(
+            run_id=run.run_id,
+            type='runner_log',
+            uri='artifacts/job-1/runner.log',
+            sha256=sha256(log_content).hexdigest(),
+        )
+    )
+    status_path = Path(settings.shared_mount_root) / 'artifacts/job-1/status.json'
+    status_content = b'{"status":"failed","exit_code":1}'
+    status_path.write_bytes(status_content)
+    store.save_artifact(
+        ArtifactRecord(
+            run_id=run.run_id,
+            type='status',
+            uri='artifacts/job-1/status.json',
+            sha256=sha256(status_content).hexdigest(),
+        )
+    )
+    engine.settings.evidence_excerpt_max_bytes = 48
+
+    contents = engine._evidence_snapshot(run.run_id)['artifact_contents']
+
+    log = next(item for item in contents if item['type'] == 'runner_log')
+    assert log['digest_verified'] is True
+    assert log['truncated'] is True
+    assert log['excerpt_position'] == 'tail'
+    assert 'ValueError: feature names should match fit' in log['content']
+    status = next(item for item in contents if item['type'] == 'status')
+    assert status['content'] == {'status': 'failed', 'exit_code': 1}
+
+
+def test_evidence_snapshot_rejects_mismatched_or_escaping_artifacts(
+    orchestrator_bundle,
+) -> None:
+    settings, store, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(objective='Reject untrusted artifact evidence.')
+    )
+    status_path = Path(settings.shared_mount_root) / 'status.json'
+    status_path.write_text('{"status":"complete"}')
+    store.save_artifact(
+        ArtifactRecord(
+            run_id=run.run_id,
+            type='status',
+            uri='status.json',
+            sha256='0' * 64,
+        )
+    )
+    store.save_artifact(
+        ArtifactRecord(
+            run_id=run.run_id,
+            type='status',
+            uri='../status.json',
+            sha256='0' * 64,
+        )
+    )
+
+    contents = engine._evidence_snapshot(run.run_id)['artifact_contents']
+
+    assert contents == [
+        {
+            'uri': 'artifact://status.json',
+            'type': 'status',
+            'sha256': '0' * 64,
+            'content_unavailable': 'artifact digest mismatch',
+        }
+    ]
 
 
 class DeniedThenValidRuntime(ScriptedMockRuntime):

@@ -3021,6 +3021,7 @@ class ResearchOrchestrator:
             return self.store.get_run(run_id)
 
     def _evidence_snapshot(self, run_id: str) -> dict[str, Any]:
+        artifacts = self.store.list_artifacts(run_id)
         return {
             'jobs': [
                 job.model_dump(mode='json')
@@ -3028,8 +3029,70 @@ class ResearchOrchestrator:
             ],
             'artifacts': [
                 artifact.model_dump(mode='json')
-                for artifact in self.store.list_artifacts(run_id)
+                for artifact in artifacts
             ],
+            'artifact_contents': [
+                excerpt
+                for artifact in artifacts
+                if (excerpt := self._artifact_evidence_excerpt(artifact))
+                is not None
+            ],
+        }
+
+    def _artifact_evidence_excerpt(
+        self,
+        artifact: ArtifactRecord,
+    ) -> dict[str, Any] | None:
+        relative = Path(artifact.uri)
+        if relative.name not in {
+            'runner.log',
+            'status.json',
+            'evaluation.json',
+            'metrics.json',
+            'report.md',
+        }:
+            return None
+        shared_root = Path(self.settings.shared_mount_root).resolve()
+        path = (shared_root / relative).resolve()
+        if not path.is_relative_to(shared_root) or not path.is_file():
+            return None
+        digest = sha256()
+        with path.open('rb') as handle:
+            while chunk := handle.read(1024 * 1024):
+                digest.update(chunk)
+        if digest.hexdigest() != artifact.sha256:
+            return {
+                'uri': f'artifact://{artifact.uri}',
+                'type': artifact.type,
+                'sha256': artifact.sha256,
+                'content_unavailable': 'artifact digest mismatch',
+            }
+        maximum = self.settings.evidence_excerpt_max_bytes
+        size = path.stat().st_size
+        with path.open('rb') as handle:
+            if relative.name == 'runner.log' and size > maximum:
+                handle.seek(-maximum, 2)
+            content = handle.read(maximum)
+        text = content.decode('utf-8', errors='replace')
+        parsed: Any = text
+        if relative.suffix == '.json' and size <= maximum:
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                parsed = text
+        return {
+            'uri': f'artifact://{artifact.uri}',
+            'type': artifact.type,
+            'sha256': artifact.sha256,
+            'digest_verified': True,
+            'size_bytes': size,
+            'truncated': size > maximum,
+            'excerpt_position': (
+                'tail'
+                if relative.name == 'runner.log' and size > maximum
+                else 'head'
+            ),
+            'content': parsed,
         }
 
     def _analyze_results(self, run_id: str) -> None:

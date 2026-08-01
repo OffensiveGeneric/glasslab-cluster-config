@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     database_path: str = '/tmp/glasslab-research-orchestrator/orchestrator.db'
     workspace_root: str = '/tmp/glasslab-research-orchestrator/runs'
     artifact_root: str = '/tmp/glasslab-research-orchestrator/artifacts'
+    evidence_excerpt_max_bytes: int = 32 * 1024
     approved_repo_path: str = '/workspace/cluster-config'
     approved_repo_ref: str = 'main'
     evaluation_contract_root: str = str(SERVICE_ROOT / 'evaluation-contracts')
