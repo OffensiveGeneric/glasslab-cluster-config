@@ -1912,6 +1912,13 @@ class ResearchOrchestrator:
         task_context = ''
         if run.task_definition:
             source = run.task_definition['source_subdirectory']
+            contract = self.contracts.resolve(
+                run.evaluation_contract_id,
+                run.evaluation_contract_version,
+            )
+            required_metric_keys = list(
+                contract.descriptor.manifest.get('required_metric_keys', [])
+            )
             dataset_binding_example = {
                 dataset['name']: f'/mnt/datasets/{dataset["name"]}'
                 for dataset in run.task_definition['datasets']
@@ -1936,6 +1943,14 @@ class ResearchOrchestrator:
                 'hyperparameter search, bootstrap evaluation, or generate '
                 'dataset-sized local fixtures; those belong in the approved '
                 'cluster job. Use the '
+                '`metrics.json` document root for every evaluator-required '
+                'metric key listed below. For multi-model workloads, place the '
+                'selected headline model values at the root; nested per-model '
+                'details may be additional fields but do not satisfy the root '
+                'contract. Include row counts, bootstrap counts, and confidence '
+                'bounds at the root when named here:\n'
+                + json.dumps(required_metric_keys, indent=2)
+                + '\nUse the '
                 'exact preselected runner image and resource request:\n'
                 + json.dumps(
                     {
@@ -2248,6 +2263,14 @@ class ResearchOrchestrator:
             run_id=run_id,
             action=action,
         )
+        run = self.store.get_run(run_id)
+        contract = self.contracts.resolve(
+            run.evaluation_contract_id,
+            run.evaluation_contract_version,
+        )
+        required_metric_keys = list(
+            contract.descriptor.manifest.get('required_metric_keys', [])
+        )
         prompt = (
             'Review Beaker\'s implementation and proposed experiment matrix. '
             'Check controls, confounds, data leakage, comparability, resource '
@@ -2262,7 +2285,12 @@ class ResearchOrchestrator:
             'authoritative about which settings are required comparisons and '
             'which are one-time methodological decisions. Do not turn a '
             '`decision` into a required experiment axis unless the binding '
-            'task explicitly requires that comparison.\n\n'
+            'task explicitly requires that comparison. Inspect the actual '
+            'metrics serialization code and reject the matrix unless every '
+            'evaluator-required metric key below is emitted at the document '
+            'root of `metrics.json`; nested copies do not satisfy the contract.\n'
+            'Required root metric keys:\n'
+            f'{json.dumps(required_metric_keys, indent=2)}\n\n'
             'Deterministic preflight:\n'
             f'{preflight.model_dump_json(indent=2)}\n\n'
             'Review snapshot manifest:\n'

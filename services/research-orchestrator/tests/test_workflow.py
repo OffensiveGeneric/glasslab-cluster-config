@@ -749,6 +749,7 @@ def test_imported_task_prompt_uses_exact_dataset_binding_names(
     assert '"adult_train": "/mnt/datasets/adult_train"' in implementation_prompt
     assert 'Run a loader-only smoke check' in implementation_prompt
     assert 'Do not run the full benchmark' in implementation_prompt
+    assert '`metrics.json` document root' in implementation_prompt
 
 
 def test_contract_preflight_returns_beaker_to_revision(
@@ -798,6 +799,12 @@ def test_contract_preflight_returns_beaker_to_revision(
     assert 'exact dotted path from the root' in revision_prompt
     assert 'not beneath `methodology`' in revision_prompt
     assert 'do not add `description` or `values` metadata wrappers' in revision_prompt
+    assert any(
+        agent == AgentName.HONEYDEW
+        and 'Required root metric keys:' in prompt
+        and 'nested copies do not satisfy the contract' in prompt
+        for agent, prompt in runtime.prompts
+    )
 
 
 def test_transient_approved_action_failure_is_persisted_and_pauses_run(
