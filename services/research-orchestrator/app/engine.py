@@ -3049,6 +3049,8 @@ class ResearchOrchestrator:
             'status.json',
             'evaluation.json',
             'metrics.json',
+            'metrics.csv',
+            'fairness.csv',
             'report.md',
         }:
             return None

@@ -117,6 +117,26 @@ def test_evidence_snapshot_projects_bounded_verified_artifact_contents(
     status = next(item for item in contents if item['type'] == 'status')
     assert status['content'] == {'status': 'failed', 'exit_code': 1}
 
+    fairness_path = (
+        Path(settings.shared_mount_root) / 'artifacts/job-1/fairness.csv'
+    )
+    fairness_content = b'group,accuracy\nA,0.75\n'
+    fairness_path.write_bytes(fairness_content)
+    store.save_artifact(
+        ArtifactRecord(
+            run_id=run.run_id,
+            type='fairness_table',
+            uri='artifacts/job-1/fairness.csv',
+            sha256=sha256(fairness_content).hexdigest(),
+        )
+    )
+    contents = engine._evidence_snapshot(run.run_id)['artifact_contents']
+    fairness = next(
+        item for item in contents if item['type'] == 'fairness_table'
+    )
+    assert fairness['digest_verified'] is True
+    assert fairness['content'] == 'group,accuracy\nA,0.75\n'
+
 
 def test_evidence_snapshot_rejects_mismatched_or_escaping_artifacts(
     orchestrator_bundle,
