@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 from hashlib import sha256
 from pathlib import Path
 from threading import Event
@@ -28,11 +29,47 @@ from app.schemas import (
     RunCreateRequest,
     RunState,
     TurnKind,
+    utc_now,
 )
 from app.storage import SqliteStore
 from app.workspaces import WorkspaceManager
 
 from conftest import RUNNER_IMAGE
+
+
+def test_human_approval_states_stop_active_runtime_clock(
+    orchestrator_bundle,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(objective='Exclude human review from active runtime.')
+    )
+    assert run.state == RunState.AWAITING_PROTOCOL_APPROVAL
+    assert run.active_since is None
+
+    writing = store.replace_run(
+        run.model_copy(
+            update={
+                'state': RunState.HONEYDEW_WRITING_REPORT,
+                'active_runtime_seconds': 5.0,
+                'active_since': utc_now() - timedelta(seconds=100),
+            }
+        ),
+        expected_version=run.version,
+    )
+    waiting = store.transition_run(
+        writing.run_id,
+        RunState.AWAITING_FINAL_ACCEPTANCE,
+    )
+    assert 104 <= waiting.active_runtime_seconds <= 107
+    assert waiting.active_since is None
+
+    revising = store.transition_run(
+        waiting.run_id,
+        RunState.HONEYDEW_WRITING_REPORT,
+    )
+    assert revising.active_since is not None
+    assert revising.active_runtime_seconds == waiting.active_runtime_seconds
 
 
 def test_evidence_snapshot_projects_bounded_verified_artifact_contents(
