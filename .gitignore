@@ -16,3 +16,4 @@ __pycache__/
 .venv/
 kubeadm/agent-stack/12-agent-secrets.yaml
 kubeadm/glasslab-v2/secrets/*.local.yaml
+.idea/
