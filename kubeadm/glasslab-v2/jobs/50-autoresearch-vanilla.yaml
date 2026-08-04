@@ -21,27 +21,27 @@ spec:
               cd /app/autoresearch
               OUT="/mnt/artifacts/autoresearch-${GLASSLAB_RUNNER_EXPERIMENT_ID}"
               mkdir -p "$OUT"
-              if grep -q "fa3.flash_attn_func" train.py; then
-                echo "Patching train.py: FA3 -> scaled_dot_product_attention"
-                python3 - <<'PYEOF'
-import pathlib
-p = pathlib.Path("train.py")
-s = p.read_text()
-s = s.replace(
-    "fa3.flash_attn_func(q, k, v, causal=True, window_size=window_size)",
-    "torch.nn.functional.scaled_dot_product_attention("
-    "q.transpose(1,2), k.transpose(1,2), v.transpose(1,2), is_causal=True).transpose(1,2)"
-)
-p.write_text(s)
-print("patch applied")
-PYEOF
+
+              OLD='fa3.flash_attn_func(q, k, v, causal=True, window_size=window_size)'
+              NEW='torch.nn.functional.scaled_dot_product_attention(q.transpose(1,2), k.transpose(1,2), v.transpose(1,2), is_causal=True).transpose(1,2)'
+              if grep -qF "$OLD" train.py; then
+                python3 -c "import sys,pathlib; p=pathlib.Path('train.py'); p.write_text(p.read_text().replace(sys.argv[1], sys.argv[2])); print('patch applied')" "$OLD" "$NEW"
+              elif grep -q "scaled_dot_product_attention" train.py; then
+                echo "train.py already patched; continuing"
+              else
+                echo "ERROR: expected FA3 call-site not found in train.py; refusing to run unpatched" >&2
+                exit 1
               fi
+
               echo "=== prepare.py ==="
               uv run prepare.py 2>&1 | tee "$OUT/prepare.log"
+
               echo "=== train.py ==="
               uv run train.py 2>&1 | tee "$OUT/train.log"
+
               grep -i "val_bpb" "$OUT/train.log" | tail -5 > "$OUT/val_bpb.txt" || true
               cp -f results.tsv "$OUT/results.tsv" 2>/dev/null || true
+
               echo "=== output dir ==="
               ls -lh "$OUT"
               echo "val_bpb summary:"
