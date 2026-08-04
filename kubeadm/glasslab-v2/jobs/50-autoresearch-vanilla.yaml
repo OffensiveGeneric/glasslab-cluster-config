@@ -1,0 +1,70 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: autoresearch-vanilla
+  namespace: glasslab-v2
+spec:
+  template:
+    spec:
+      containers:
+        - name: autoresearch
+          image: ghcr.io/offensivegeneric/glasslab-autoresearch:vanilla-v0
+          env:
+            - name: GLASSLAB_RUNNER_EXPERIMENT_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          command: ["bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              cd /app/autoresearch
+              OUT="/mnt/artifacts/autoresearch-${GLASSLAB_RUNNER_EXPERIMENT_ID}"
+              mkdir -p "$OUT"
+              if grep -q "fa3.flash_attn_func" train.py; then
+                echo "Patching train.py: FA3 -> scaled_dot_product_attention"
+                python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("train.py")
+s = p.read_text()
+s = s.replace(
+    "fa3.flash_attn_func(q, k, v, causal=True, window_size=window_size)",
+    "torch.nn.functional.scaled_dot_product_attention("
+    "q.transpose(1,2), k.transpose(1,2), v.transpose(1,2), is_causal=True).transpose(1,2)"
+)
+p.write_text(s)
+print("patch applied")
+PYEOF
+              fi
+              echo "=== prepare.py ==="
+              uv run prepare.py 2>&1 | tee "$OUT/prepare.log"
+              echo "=== train.py ==="
+              uv run train.py 2>&1 | tee "$OUT/train.log"
+              grep -i "val_bpb" "$OUT/train.log" | tail -5 > "$OUT/val_bpb.txt" || true
+              cp -f results.tsv "$OUT/results.tsv" 2>/dev/null || true
+              echo "=== output dir ==="
+              ls -lh "$OUT"
+              echo "val_bpb summary:"
+              cat "$OUT/val_bpb.txt" || echo "no val_bpb line captured -- check train.log"
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+              memory: "16Gi"
+              cpu: "4"
+            requests:
+              memory: "8Gi"
+              cpu: "2"
+          volumeMounts:
+            - name: artifacts
+              mountPath: /mnt/artifacts
+      restartPolicy: Never
+      nodeSelector:
+        glasslab.io/gpu-vendor: nvidia
+      imagePullSecrets:
+        - name: glasslab-ghcr-pull
+      volumes:
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: glasslab-shared-artifacts
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 86400
