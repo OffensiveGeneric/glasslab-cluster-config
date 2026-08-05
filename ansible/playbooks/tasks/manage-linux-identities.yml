@@ -22,7 +22,7 @@
          (['sudo'] if 'infrastructure_admin' in item.roles else [])) | join(',')
       }}
     append: false
-    password_lock: true
+    password_lock: "{{ item.password_locked }}"
     state: present
   loop: "{{ glasslab_active_identity_users }}"
   loop_control:
@@ -128,11 +128,11 @@
 - name: Flush SSH configuration changes before finishing the host
   ansible.builtin.meta: flush_handlers
 
-- name: Verify active Linux accounts are key-only
+- name: Verify requested Linux password locks
   ansible.builtin.command: "passwd -S {{ item.username }}"
   register: glasslab_linux_password_status
   changed_when: false
-  failed_when: "' L ' not in glasslab_linux_password_status.stdout"
+  failed_when: "item.password_locked and ' L ' not in glasslab_linux_password_status.stdout"
   loop: "{{ glasslab_active_identity_users }}"
   loop_control:
     label: "{{ item.username }}"

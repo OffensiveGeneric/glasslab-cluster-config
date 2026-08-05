@@ -69,9 +69,10 @@ cd /home/glasslab/cluster-config
 ```
 
 The play runs one host at a time. It sets the exact approved SSH keys and role
-groups, locks Linux passwords, validates sudoers and sshd configuration, and
-keeps exo shared files group-writable. A second `check` run should report no
-changes except where a platform tool cannot report idempotence.
+groups, enforces each account's staged password-lock setting, validates sudoers
+and sshd configuration, and keeps exo shared files group-writable. A second
+`check` run should report no changes except where a platform tool cannot report
+idempotence.
 
 ## Add Or Change A Contributor
 
@@ -80,10 +81,22 @@ changes except where a platform tool cannot report idempotence.
    `glasslab_identity_managed_usernames`.
 3. Assign only required targets and roles.
 4. Run the check command, review the diff, then apply.
-5. Have the contributor verify each intended SSH alias and run `id`.
+5. Initially set `password_locked: false` when adopting an account that
+   already uses password authentication.
+6. Have the contributor verify each intended SSH alias and run `id`.
+7. Have the contributor force a key-only test from every active client:
+
+   ```bash
+   ssh -o PreferredAuthentications=publickey \
+     -o PasswordAuthentication=no <alias>
+   ```
+
+8. After those tests are recorded, change `password_locked` to `true` in a
+   separate reviewed change and apply again.
 
 Do not accept a private key, add a shared password, or put a GitHub token in
-Ansible variables.
+Ansible variables. Installing a public key is not sufficient evidence that the
+contributor's current SSH client possesses and offers the matching private key.
 
 ## Revoke Access
 
