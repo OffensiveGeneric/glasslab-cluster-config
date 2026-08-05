@@ -110,6 +110,24 @@ def _dict_keys(
     return keys
 
 
+def _references_metrics_json(
+    expression: ast.expr,
+    assignments: dict[str, ast.expr],
+    *,
+    resolving: frozenset[str] = frozenset(),
+) -> bool:
+    if isinstance(expression, ast.Name):
+        if expression.id in resolving:
+            return False
+        assigned = assignments.get(expression.id)
+        return assigned is not None and _references_metrics_json(
+            assigned,
+            assignments,
+            resolving=resolving | {expression.id},
+        )
+    return 'metrics.json' in ast.unparse(expression)
+
+
 def _metrics_root_errors(
     tree: ast.AST,
     *,
@@ -135,6 +153,12 @@ def _metrics_root_errors(
                 subscript_keys.setdefault(target.value.id, set()).add(
                     target.slice.value
                 )
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.value is not None
+        ):
+            assignments[node.target.id] = node.value
         if not isinstance(node, ast.With):
             continue
         for item in node.items:
@@ -144,8 +168,10 @@ def _metrics_root_errors(
                 or not item.context_expr.args
             ):
                 continue
-            target_text = ast.unparse(item.context_expr.args[0])
-            if 'metrics.json' in target_text:
+            if _references_metrics_json(
+                item.context_expr.args[0],
+                assignments,
+            ):
                 metric_handles.add(item.optional_vars.id)
 
     serialized_keys: set[str] = set()
