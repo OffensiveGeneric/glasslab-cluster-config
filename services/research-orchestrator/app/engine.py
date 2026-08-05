@@ -8,6 +8,8 @@ from threading import RLock
 from typing import Any
 from uuid import uuid4, uuid5, NAMESPACE_URL
 
+from .analysis_notebook import write_analysis_notebook
+from .artifact_delivery import ArtifactDeliveryError
 from .cluster import ClusterExecutor
 from .config import Settings
 from .contract_candidates import ContractCandidateManager
@@ -2955,6 +2957,7 @@ class ResearchOrchestrator:
                     )
                 )
                 if snapshot.status in JOB_TERMINAL_STATUSES:
+                    recorded_artifacts: list[ArtifactRecord] = []
                     for artifact in snapshot.artifacts:
                         artifact_id = uuid5(
                             NAMESPACE_URL,
@@ -2963,7 +2966,7 @@ class ResearchOrchestrator:
                                 f'{artifact.sha256}'
                             ),
                         ).hex
-                        self.store.save_artifact(
+                        recorded = self.store.save_artifact(
                             ArtifactRecord(
                                 artifact_id=artifact_id,
                                 run_id=run_id,
@@ -2985,6 +2988,7 @@ class ResearchOrchestrator:
                                 },
                             )
                         )
+                        recorded_artifacts.append(recorded)
                         self._event(
                             run_id,
                             source='cluster',
@@ -3010,6 +3014,12 @@ class ResearchOrchestrator:
                             'exit_information': updated.exit_information,
                         },
                     )
+                    if updated.status == JobStatus.SUCCEEDED:
+                        self._generate_analysis_notebook(
+                            run_id=run_id,
+                            job=updated,
+                            source_artifacts=recorded_artifacts,
+                        )
                 elif snapshot.status == JobStatus.RUNNING:
                     self._event(
                         run_id,
@@ -3019,6 +3029,64 @@ class ResearchOrchestrator:
                     )
             self._fill_job_capacity(run_id)
             return self.store.get_run(run_id)
+
+    def _generate_analysis_notebook(
+        self,
+        *,
+        run_id: str,
+        job: JobRecord,
+        source_artifacts: list[ArtifactRecord],
+    ) -> None:
+        run = self.store.get_run(run_id)
+        destination = Path(run.reports_path) / 'analysis.ipynb'
+        try:
+            digest, provenance = write_analysis_notebook(
+                destination=destination,
+                run_id=run_id,
+                job_id=job.job_id,
+                artifacts=source_artifacts,
+                shared_mount_root=self.settings.shared_mount_root,
+            )
+        except (ArtifactDeliveryError, OSError, ValueError) as exc:
+            self._event(
+                run_id,
+                source='orchestrator',
+                event_type='artifact.generation_failed',
+                payload={
+                    'type': 'analysis_notebook',
+                    'job_id': job.job_id,
+                    'error': str(exc),
+                },
+            )
+            return
+
+        uri = f'artifact://{run_id}/reports/analysis.ipynb'
+        artifact = self._save_local_artifact(
+            run_id=run_id,
+            artifact_type='analysis_notebook',
+            uri=uri,
+            digest=digest,
+            metadata={
+                'path': str(destination),
+                'job_id': job.job_id,
+                'derived_from': provenance,
+                'authoritative': False,
+            },
+        )
+        self._event(
+            run_id,
+            source='orchestrator',
+            event_type='artifact.recorded',
+            payload={
+                'artifact_id': artifact.artifact_id,
+                'type': artifact.type,
+                'uri': artifact.uri,
+                'path': str(destination),
+                'sha256': artifact.sha256,
+                'job_id': job.job_id,
+                'authoritative': False,
+            },
+        )
 
     def _evidence_snapshot(self, run_id: str) -> dict[str, Any]:
         artifacts = self.store.list_artifacts(run_id)

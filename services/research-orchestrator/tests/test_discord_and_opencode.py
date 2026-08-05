@@ -362,6 +362,7 @@ def test_discord_gateway_registers_component_handler() -> None:
     for command_name in (
         'research-pause',
         'research-resume',
+        'research-artifacts',
         'dataset-upload',
     ):
         assert gateway.tree.get_command(
