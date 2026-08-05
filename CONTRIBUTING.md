@@ -45,9 +45,28 @@ The default check mirrors the default CI signal:
 - Python syntax for services
 - workflow-api core tests
 
+## Pull Request Flow
+
+Create one branch for one coherent change and open a pull request into `main`.
+Continue pushing revisions to the same branch; GitHub updates the pull request
+automatically.
+
+`main` is protected. A merge requires:
+
+- the always-running `Glasslab PR Gate` check
+- one approval from someone other than the author
+- all review conversations resolved
+- a current approval after material revisions
+
+Use squash merge, then delete the feature branch. Direct administrator pushes
+are an incident-recovery bypass, not a normal development path.
+
 ## CI Lanes
 
-Default GitHub checks are intentionally small and path-aware.
+Every pull request runs the four reusable CI lanes below. Their results are
+combined into the required `Glasslab PR Gate` check. Path-aware copies still
+run after relevant changes land on `main`, and compatibility tests remain
+manual.
 
 | Lane | Purpose |
 | --- | --- |
