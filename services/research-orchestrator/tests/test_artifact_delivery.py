@@ -117,6 +117,22 @@ def test_bundle_contains_successful_verified_results_and_manifest(tmp_path) -> N
     assert manifest['artifacts'][0]['sha256'] == artifacts[0].sha256
 
 
+def test_reader_resolves_workflow_api_artifacts_bucket_prefix(tmp_path) -> None:
+    content = b'{"score": 0.75}\n'
+    path = tmp_path / 'external-run-1' / 'metrics.json'
+    path.parent.mkdir()
+    path.write_bytes(content)
+    artifact = ArtifactRecord(
+        run_id='run-1',
+        job_id='job-1',
+        type='metrics.json',
+        uri='artifacts/external-run-1/metrics.json',
+        sha256=sha256(content).hexdigest(),
+    )
+
+    assert VerifiedArtifactReader(str(tmp_path)).resolve(artifact) == path
+
+
 def test_analysis_notebook_embeds_verified_metrics_and_tables(tmp_path) -> None:
     metrics = _artifact(
         tmp_path,

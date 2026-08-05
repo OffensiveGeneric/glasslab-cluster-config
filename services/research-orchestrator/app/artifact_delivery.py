@@ -38,6 +38,10 @@ class VerifiedArtifactReader:
             candidates.append(self.root / relative)
         elif not uri.startswith(('s3://', 'job://', 'contract://')):
             candidates.append(Path(uri) if uri.startswith('/') else self.root / uri)
+            # workflow-api artifact references historically include the
+            # logical bucket name even though the mounted PVC is that bucket.
+            if uri.startswith('artifacts/'):
+                candidates.append(self.root / uri.removeprefix('artifacts/'))
 
         for candidate in candidates:
             resolved = candidate.resolve()
@@ -187,4 +191,3 @@ def build_run_artifact_bundle(
         content=payload,
         artifact_count=len(delivered),
     )
-
