@@ -33,6 +33,18 @@ Host glasslab-provisioner
   User <same-personal-user>
   IdentityFile ~/.ssh/<personal-key>
   ProxyJump glasslab-gateway
+
+Host glasslab-exo17
+  HostName 192.168.1.17
+  User <same-personal-user>
+  IdentityFile ~/.ssh/<personal-key>
+  ProxyJump glasslab-gateway
+
+Host glasslab-exo18
+  HostName 192.168.1.18
+  User <same-personal-user>
+  IdentityFile ~/.ssh/<personal-key>
+  ProxyJump glasslab-gateway
 ```
 
 Public keys should be installed on both hosts. Password reuse between the
@@ -89,25 +101,18 @@ short-lived `GITHUB_TOKEN`.
 
 ## Provisioning Accounts
 
-Provisioner accounts are managed with:
+Gateway, provisioner, and exo personal accounts are managed from one committed
+identity ledger. See [Identity Management](identity-management.md) for the
+role model, revocation procedure, and recovery boundary.
+
+Run from the canonical checkout on the provisioner:
 
 ```bash
-cd /home/glasslab/cluster-config/ansible
-ansible-playbook -i inventory/hosts.yml \
-  playbooks/manage-provisioner-contributors.yml \
-  -e @/path/to/contributors.local.yml
+cd /home/glasslab/cluster-config
+./scripts/manage-identities.sh check
+./scripts/manage-identities.sh apply
 ```
 
-Example local variables:
-
-```yaml
-glasslab_contributors:
-  - username: denic
-    comment: Denise Cakoni
-    docker_access: true
-    authorized_keys:
-      - ssh-ed25519 AAAA... deni-personal
-```
-
-Keep the real variables file outside Git. It contains personal public keys and
-the explicit list of people receiving root-equivalent Docker access.
+Public keys and role assignments live in
+`ansible/group_vars/identity_hosts.yml`. Private keys, passwords, and access
+tokens must not be added there.

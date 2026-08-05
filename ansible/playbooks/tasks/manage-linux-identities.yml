@@ -1,0 +1,138 @@
+---
+- name: Require the provisioner collaboration groups
+  ansible.builtin.getent:
+    database: group
+    key: "{{ item }}"
+    fail_key: true
+  loop:
+    - glasslab
+    - docker
+  when: identity_scope == 'provisioner'
+
+- name: Create active personal accounts with exact role groups
+  ansible.builtin.user:
+    name: "{{ item.username }}"
+    comment: "{{ item.display_name }}"
+    shell: /bin/bash
+    create_home: true
+    groups: >-
+      {{
+        ((['glasslab'] if identity_scope == 'provisioner' and 'lab_contributor' in item.roles else []) +
+         (['docker'] if identity_scope == 'provisioner' and 'container_builder' in item.roles else []) +
+         (['sudo'] if 'infrastructure_admin' in item.roles else [])) | join(',')
+      }}
+    append: false
+    password_lock: true
+    state: present
+  loop: "{{ glasslab_active_identity_users }}"
+  loop_control:
+    label: "{{ item.username }}"
+
+- name: Create personal SSH directories
+  ansible.builtin.file:
+    path: "/home/{{ item.username }}/.ssh"
+    state: directory
+    owner: "{{ item.username }}"
+    group: "{{ item.username }}"
+    mode: '0700'
+  loop: "{{ glasslab_active_identity_users }}"
+  loop_control:
+    label: "{{ item.username }}"
+
+- name: Install the exact approved personal SSH keys
+  ansible.builtin.copy:
+    dest: "/home/{{ item.username }}/.ssh/authorized_keys"
+    content: "{{ item.authorized_keys | join('\n') }}\n"
+    owner: "{{ item.username }}"
+    group: "{{ item.username }}"
+    mode: '0600'
+  loop: "{{ glasslab_active_identity_users }}"
+  loop_control:
+    label: "{{ item.username }}"
+
+- name: Grant audited passwordless sudo to infrastructure administrators
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/90-glasslab-identity-{{ item.username }}"
+    content: "{{ item.username }} ALL=(ALL:ALL) NOPASSWD: ALL\n"
+    owner: root
+    group: root
+    mode: '0440'
+    validate: /usr/sbin/visudo -cf %s
+  when: "'infrastructure_admin' in item.roles"
+  loop: "{{ glasslab_active_identity_users }}"
+  loop_control:
+    label: "{{ item.username }}"
+
+- name: Remove managed sudo grants from non-administrators
+  ansible.builtin.file:
+    path: "/etc/sudoers.d/90-glasslab-identity-{{ item }}"
+    state: absent
+  when: >-
+    item not in (glasslab_active_identity_users |
+      selectattr('roles', 'contains', 'infrastructure_admin') |
+      map(attribute='username') | list)
+  loop: "{{ glasslab_identity_managed_usernames }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Remove superseded per-user sudoers files
+  ansible.builtin.file:
+    path: "/etc/sudoers.d/90-{{ item.username }}"
+    state: absent
+  loop: "{{ glasslab_active_identity_users }}"
+  loop_control:
+    label: "{{ item.username }}"
+
+- name: Check whether disabled managed accounts exist
+  ansible.builtin.command: "getent passwd {{ item }}"
+  changed_when: false
+  failed_when: false
+  loop: "{{ glasslab_disabled_identity_usernames }}"
+  register: glasslab_disabled_linux_accounts
+  loop_control:
+    label: "{{ item }}"
+
+- name: Lock disabled managed accounts and remove role groups
+  ansible.builtin.user:
+    name: "{{ item.item }}"
+    shell: /usr/sbin/nologin
+    groups: ''
+    append: false
+    password_lock: true
+    state: present
+  when: item.rc == 0
+  loop: "{{ glasslab_disabled_linux_accounts.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Remove SSH authorization from disabled managed accounts
+  ansible.builtin.file:
+    path: "/home/{{ item.item }}/.ssh/authorized_keys"
+    state: absent
+  when: item.rc == 0
+  loop: "{{ glasslab_disabled_linux_accounts.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Publish managed gateway users to sshd AllowUsers
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/60-glasslab-identities.conf
+    content: "AllowUsers {{ glasslab_active_identity_usernames | join(' ') }}\n"
+    owner: root
+    group: root
+    mode: '0644'
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Reload sshd
+  when: identity_scope == 'gateway'
+
+- name: Flush SSH configuration changes before finishing the host
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify active Linux accounts are key-only
+  ansible.builtin.command: "passwd -S {{ item.username }}"
+  register: glasslab_linux_password_status
+  changed_when: false
+  failed_when: "' L ' not in glasslab_linux_password_status.stdout"
+  loop: "{{ glasslab_active_identity_users }}"
+  loop_control:
+    label: "{{ item.username }}"

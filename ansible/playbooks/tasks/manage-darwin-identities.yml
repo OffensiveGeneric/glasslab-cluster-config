@@ -1,0 +1,134 @@
+---
+- name: Create the shared exo collaboration group
+  ansible.builtin.group:
+    name: "{{ glasslab_exo_shared_group }}"
+    state: present
+
+- name: Keep the legacy service account in the shared exo group
+  ansible.builtin.user:
+    name: glasslab
+    groups:
+      - "{{ glasslab_exo_shared_group }}"
+    append: true
+    state: present
+
+- name: Create active personal macOS accounts with exact role groups
+  ansible.builtin.user:
+    name: "{{ item.username }}"
+    uid: "{{ item.darwin_uid }}"
+    comment: "{{ item.display_name }}"
+    group: staff
+    groups: >-
+      {{
+        ([glasslab_exo_shared_group, 'com.apple.access_ssh'] +
+         (['admin'] if 'infrastructure_admin' in item.roles else [])) | join(',')
+      }}
+    append: false
+    home: "/Users/{{ item.username }}"
+    shell: /bin/zsh
+    create_home: true
+    hidden: false
+    state: present
+  loop: "{{ glasslab_active_identity_users }}"
+  loop_control:
+    label: "{{ item.username }}"
+
+- name: Create personal macOS SSH directories
+  ansible.builtin.file:
+    path: "/Users/{{ item.username }}/.ssh"
+    state: directory
+    owner: "{{ item.username }}"
+    group: staff
+    mode: '0700'
+  loop: "{{ glasslab_active_identity_users }}"
+  loop_control:
+    label: "{{ item.username }}"
+
+- name: Install the exact approved personal macOS SSH keys
+  ansible.builtin.copy:
+    dest: "/Users/{{ item.username }}/.ssh/authorized_keys"
+    content: "{{ item.authorized_keys | join('\n') }}\n"
+    owner: "{{ item.username }}"
+    group: staff
+    mode: '0600'
+  loop: "{{ glasslab_active_identity_users }}"
+  loop_control:
+    label: "{{ item.username }}"
+
+- name: Grant audited passwordless sudo to macOS infrastructure administrators
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/90-glasslab-identity-{{ item.username }}"
+    content: "{{ item.username }} ALL=(ALL) NOPASSWD: ALL\n"
+    owner: root
+    group: wheel
+    mode: '0440'
+    validate: /usr/sbin/visudo -cf %s
+  when: "'infrastructure_admin' in item.roles"
+  loop: "{{ glasslab_active_identity_users }}"
+  loop_control:
+    label: "{{ item.username }}"
+
+- name: Remove managed macOS sudo grants from non-administrators
+  ansible.builtin.file:
+    path: "/etc/sudoers.d/90-glasslab-identity-{{ item }}"
+    state: absent
+  when: >-
+    item not in (glasslab_active_identity_users |
+      selectattr('roles', 'contains', 'infrastructure_admin') |
+      map(attribute='username') | list)
+  loop: "{{ glasslab_identity_managed_usernames }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Check whether disabled managed macOS accounts exist
+  ansible.builtin.command: "dscl . -read /Users/{{ item }}"
+  register: glasslab_disabled_darwin_accounts
+  changed_when: false
+  failed_when: false
+  loop: "{{ glasslab_disabled_identity_usernames }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Disable shell access and remove role groups from disabled macOS accounts
+  ansible.builtin.user:
+    name: "{{ item.item }}"
+    groups: ''
+    append: false
+    shell: /usr/bin/false
+    state: present
+  when: item.rc == 0
+  loop: "{{ glasslab_disabled_darwin_accounts.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Remove SSH authorization from disabled managed macOS accounts
+  ansible.builtin.file:
+    path: "/Users/{{ item.item }}/.ssh/authorized_keys"
+    state: absent
+  when: item.rc == 0
+  loop: "{{ glasslab_disabled_darwin_accounts.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Give the exo group ownership of shared workspaces
+  ansible.builtin.file:
+    path: "{{ item }}"
+    owner: glasslab
+    group: "{{ glasslab_exo_shared_group }}"
+    mode: 'g+rwX'
+    recurse: true
+  loop: "{{ glasslab_exo_shared_paths }}"
+
+- name: Preserve group inheritance on shared workspace directories
+  ansible.builtin.shell: >-
+    find {{ item | quote }} -type d ! -perm -2000 -exec chmod g+s {} +
+  register: glasslab_exo_setgid
+  changed_when: glasslab_exo_setgid.stdout | length > 0
+  loop: "{{ glasslab_exo_shared_paths }}"
+
+- name: Verify active macOS accounts have SSH authorization
+  ansible.builtin.command: "test -s /Users/{{ item.username }}/.ssh/authorized_keys"
+  changed_when: false
+  loop: "{{ glasslab_active_identity_users }}"
+  loop_control:
+    label: "{{ item.username }}"
