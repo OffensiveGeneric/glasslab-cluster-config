@@ -1,12 +1,7 @@
 name: CI Scripts
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - "scripts/**/*.sh"
-      - "scripts/*.sh"
-      - ".github/workflows/ci-scripts.yml"
+  workflow_call:
   push:
     branches: [main]
     paths:
