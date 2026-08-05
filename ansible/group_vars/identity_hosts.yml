@@ -33,6 +33,7 @@ glasslab_identity_users:
       - lab_contributor
       - exo_contributor
       - container_builder
+      - kubernetes_observer
     authorized_keys:
       - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPf4zU2Goac9RK6Yvz+dx14Jfg4wYP46GCs1NG2ba3KA denick@Mac
 
@@ -48,9 +49,17 @@ glasslab_identity_users:
       - lab_contributor
       - exo_contributor
       - container_builder
+      - kubernetes_observer
     authorized_keys:
       - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBDiZFcFbKimUVq5WOjd13e4ElYUsBSvVSbg7tVwA0gp tristanc@glasslab
 
 glasslab_exo_shared_group: glasslab-exo
 glasslab_exo_shared_paths:
   - /Users/glasslab/exo-clean
+
+glasslab_kubernetes_admin_kubeconfig: /home/glasslab/.kube/config
+glasslab_kubernetes_observer_namespaces:
+  - glasslab-v2
+  - glasslab-agents
+glasslab_kubernetes_client_certificate_seconds: 31536000
+glasslab_kubernetes_client_renew_before_seconds: 2592000
