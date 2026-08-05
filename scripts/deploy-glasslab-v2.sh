@@ -18,6 +18,7 @@ Deploy the core Glasslab v2 services by default:
 - MinIO
 - bounded stage-agent services
 - workflow-api
+- research-orchestrator
 Example manifests ending in .example.yaml are never applied.
 USAGE
 }
@@ -84,3 +85,4 @@ apply_yaml_dir "$MANIFEST_ROOT/assessment-agent"
 apply_yaml_dir "$MANIFEST_ROOT/design-agent"
 apply_yaml_dir "$MANIFEST_ROOT/schedule-worker"
 apply_yaml_dir "$MANIFEST_ROOT/workflow-api"
+apply_yaml_dir "$MANIFEST_ROOT/research-orchestrator"

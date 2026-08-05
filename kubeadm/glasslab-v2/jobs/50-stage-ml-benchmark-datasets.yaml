@@ -1,0 +1,165 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: stage-ml-benchmark-datasets
+  namespace: glasslab-v2
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: stage-ml-benchmark-datasets
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      containers:
+        - name: stage
+          image: python:3.11-slim
+          imagePullPolicy: IfNotPresent
+          command:
+            - python3
+            - -c
+            - |
+              import gzip
+              from hashlib import sha256
+              import json
+              from pathlib import Path
+              import struct
+              from urllib.request import urlopen
+              import zipfile
+
+              datasets = Path('/mnt/datasets/benchmarks')
+              artifacts = Path('/mnt/artifacts/research-orchestrator/datasets')
+              datasets.mkdir(parents=True, exist_ok=True)
+              artifacts.mkdir(parents=True, exist_ok=True)
+
+              def download(url, path):
+                  path.parent.mkdir(parents=True, exist_ok=True)
+                  data = urlopen(url, timeout=120).read()
+                  if not data:
+                      raise RuntimeError(f'empty dataset response: {url}')
+                  path.write_bytes(data)
+                  return data
+
+              adult_train = datasets / 'adult' / 'adult.data'
+              adult_test = datasets / 'adult' / 'adult.test'
+              wine = datasets / 'wine' / 'wine.data'
+              download(
+                  'https://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.data',
+                  adult_train,
+              )
+              download(
+                  'https://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.test',
+                  adult_test,
+              )
+              download(
+                  'https://archive.ics.uci.edu/ml/machine-learning-databases/wine/wine.data',
+                  wine,
+              )
+              if len([line for line in adult_train.read_text().splitlines() if line.strip()]) != 32561:
+                  raise RuntimeError('adult.data row count mismatch')
+              if len([line for line in adult_test.read_text().splitlines()[1:] if line.strip()]) != 16281:
+                  raise RuntimeError('adult.test row count mismatch')
+              if len([line for line in wine.read_text().splitlines() if line.strip()]) != 178:
+                  raise RuntimeError('wine.data row count mismatch')
+
+              fashion_root = datasets / 'fashion-mnist'
+              members = {
+                  'train-images-idx3-ubyte.gz': (
+                      'https://raw.githubusercontent.com/zalandoresearch/fashion-mnist/master/data/fashion/train-images-idx3-ubyte.gz',
+                      60000,
+                  ),
+                  'train-labels-idx1-ubyte.gz': (
+                      'https://raw.githubusercontent.com/zalandoresearch/fashion-mnist/master/data/fashion/train-labels-idx1-ubyte.gz',
+                      60000,
+                  ),
+                  't10k-images-idx3-ubyte.gz': (
+                      'https://raw.githubusercontent.com/zalandoresearch/fashion-mnist/master/data/fashion/t10k-images-idx3-ubyte.gz',
+                      10000,
+                  ),
+                  't10k-labels-idx1-ubyte.gz': (
+                      'https://raw.githubusercontent.com/zalandoresearch/fashion-mnist/master/data/fashion/t10k-labels-idx1-ubyte.gz',
+                      10000,
+                  ),
+              }
+              downloaded = {}
+              for name, (url, expected_count) in members.items():
+                  data = download(url, fashion_root / name)
+                  raw = gzip.decompress(data)
+                  count = struct.unpack('>I', raw[4:8])[0]
+                  if count != expected_count:
+                      raise RuntimeError(f'{name} item count mismatch')
+                  downloaded[name] = data
+              archive = fashion_root / 'fashion-mnist-raw.zip'
+              with zipfile.ZipFile(archive, 'w', zipfile.ZIP_STORED) as handle:
+                  for name in sorted(downloaded):
+                      info = zipfile.ZipInfo(name)
+                      info.date_time = (1980, 1, 1, 0, 0, 0)
+                      info.external_attr = 0o100444 << 16
+                      handle.writestr(info, downloaded[name])
+
+              def entry(path, uri, role, contains_labels):
+                  return {
+                      'uri': uri,
+                      'sha256': sha256(path.read_bytes()).hexdigest(),
+                      'role': role,
+                      'contains_labels': contains_labels,
+                  }
+
+              catalog = {
+                  'adult_train': entry(
+                      adult_train,
+                      's3://datasets/benchmarks/adult/adult.data',
+                      'train',
+                      True,
+                  ),
+                  'adult_test': entry(
+                      adult_test,
+                      's3://datasets/benchmarks/adult/adult.test',
+                      'test',
+                      True,
+                  ),
+                  'wine': entry(
+                      wine,
+                      's3://datasets/benchmarks/wine/wine.data',
+                      'input',
+                      True,
+                  ),
+                  'fashion_mnist': entry(
+                      archive,
+                      's3://datasets/benchmarks/fashion-mnist/fashion-mnist-raw.zip',
+                      'input',
+                      True,
+                  ),
+              }
+              (artifacts / 'catalog.json').write_text(
+                  json.dumps(catalog, indent=2, sort_keys=True) + '\n'
+              )
+              print(json.dumps(catalog, indent=2, sort_keys=True))
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: datasets
+              mountPath: /mnt/datasets
+            - name: artifacts
+              mountPath: /mnt/artifacts
+      volumes:
+        - name: datasets
+          persistentVolumeClaim:
+            claimName: glasslab-shared-datasets
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: glasslab-shared-artifacts

@@ -1,0 +1,101 @@
+{
+  "workflow_id": "research-workspace-cpu-v1",
+  "display_name": "Research Workspace CPU v1",
+  "workflow_family": "research-workspace",
+  "description": "Execute one digest-pinned research task and source bundle in a bounded CPU workspace with declared datasets, outputs, and evaluation evidence.",
+  "required_inputs": [
+    {
+      "name": "workspace",
+      "input_type": "artifact_bundle",
+      "required": true,
+      "description": "Immutable task and source bundle references plus the workspace command."
+    },
+    {
+      "name": "dataset_bindings",
+      "input_type": "artifact_bundle",
+      "required": false,
+      "description": "Digest-pinned, read-only dataset bindings exposed to the frozen workspace."
+    }
+  ],
+  "allowed_models": [
+    "agent-generated-python"
+  ],
+  "runner_image": "ghcr.io/offensivegeneric/glasslab-research-workspace-runner:0.1.0",
+  "evaluator_type": "rubric-gated-v1",
+  "expected_artifacts": {
+    "required": [
+      "run_manifest.json",
+      "config.json",
+      "metrics.json",
+      "artifacts_index.json",
+      "report.md",
+      "status.json",
+      "logs/",
+      "source.zip"
+    ],
+    "optional": [
+      "task.zip",
+      "plots/",
+      "tables/",
+      "environment.json",
+      "analysis_notebook.ipynb"
+    ]
+  },
+  "resource_profile": {
+    "profile_name": "cpu-research-medium",
+    "requests": {
+      "cpu": "1",
+      "memory": "2Gi",
+      "ephemeral-storage": "2Gi"
+    },
+    "limits": {
+      "cpu": "4",
+      "memory": "8Gi",
+      "ephemeral-storage": "8Gi"
+    },
+    "node_selector": {}
+  },
+  "approval_tier": "tier-2-approved-execution",
+  "execution_status": "ready",
+  "submission_backend": "kubernetes",
+  "execution_blockers": [],
+  "runtime_requirements": {
+    "gpu": false,
+    "required_python_packages": [
+      "numpy",
+      "pandas",
+      "scipy",
+      "scikit-learn",
+      "matplotlib",
+      "seaborn",
+      "joblib"
+    ],
+    "modalities": [
+      "tabular",
+      "classical-machine-learning"
+    ],
+    "dataset_layouts": [
+      "files",
+      "archive",
+      "artifact-bundle"
+    ],
+    "purpose": "bounded execution of agent-generated CPU research workspaces"
+  },
+  "experiment_type": "research-workspace-job",
+  "workload_id": "research-workspace-cpu-v1",
+  "schema_ref": "glasslab-investigation-workspace-v1",
+  "default_entrypoint": [
+    "python3",
+    "-m",
+    "runner"
+  ],
+  "allow_custom_image": false,
+  "allow_custom_entrypoint": false,
+  "metric_contract": {
+    "primary_metric": "rubric_score",
+    "higher_is_better": true,
+    "required_guardrails": [
+      "integrity_pass"
+    ]
+  }
+}

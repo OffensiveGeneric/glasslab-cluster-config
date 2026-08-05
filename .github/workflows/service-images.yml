@@ -1,0 +1,79 @@
+name: Publish Service Images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "services/common/**"
+      - "services/workflow-api/**"
+      - "services/workflow-registry/**"
+      - "services/research-orchestrator/**"
+      - ".github/workflows/service-images.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: service-images-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  workflow-api:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: services/workflow-api/Dockerfile
+          push: true
+          tags: ghcr.io/offensivegeneric/glasslab-workflow-api:${{ github.sha }}
+          build-args: |
+            GLASSLAB_GIT_SHA=${{ github.sha }}
+            GLASSLAB_BUILD_SOURCE=github:${{ github.run_id }}
+          cache-from: type=gha,scope=workflow-api
+          cache-to: type=gha,mode=max,scope=workflow-api
+
+  research-orchestrator:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish
+        uses: docker/build-push-action@v5
+        with:
+          context: services/research-orchestrator
+          file: services/research-orchestrator/Dockerfile
+          push: true
+          tags: ghcr.io/offensivegeneric/glasslab-research-orchestrator:${{ github.sha }}
+          build-args: |
+            GLASSLAB_GIT_SHA=${{ github.sha }}
+            GLASSLAB_BUILD_SOURCE=github:${{ github.run_id }}
+          cache-from: type=gha,scope=research-orchestrator
+          cache-to: type=gha,mode=max,scope=research-orchestrator

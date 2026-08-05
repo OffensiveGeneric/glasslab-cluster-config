@@ -11,11 +11,11 @@ Usage:
   research-session-remote.sh note "text"
   research-session-remote.sh op
 
-Run the deterministic research-session CLI on the canonical .44 provisioner.
+Run the deterministic research-session CLI on the canonical provisioner.
 USAGE
   exit 2
 fi
 
 REMOTE_SCRIPT="/home/glasslab/cluster-config/scripts/research-session-cli.sh"
 
-exec ssh glasslab-44 "$REMOTE_SCRIPT" "$@"
+exec ssh glasslab-provisioner "$REMOTE_SCRIPT" "$@"

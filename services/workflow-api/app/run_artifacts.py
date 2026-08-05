@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from hashlib import sha256
 import json
 import re
 from pathlib import Path
@@ -20,6 +21,14 @@ MEDIA_TYPES = {
 }
 
 LOG_LINE_RE = re.compile(r'^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) (?P<level>[A-Z]+) (?P<logger>[^ ]+) (?P<message>.*)$')
+
+
+def file_sha256(path: Path) -> str:
+    digest = sha256()
+    with path.open('rb') as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def artifact_run_dir(settings: Settings, run_id: str) -> Path:
@@ -45,6 +54,8 @@ def build_artifacts_from_directory(settings: Settings, run_id: str) -> Artifacts
         return None
     artifacts: list[ArtifactIndexEntry] = []
     for path in sorted(root.rglob('*')):
+        if path.is_symlink() or not _path_is_within(path, root):
+            continue
         relative = path.relative_to(root).as_posix()
         if path.is_dir():
             artifacts.append(
@@ -57,6 +68,8 @@ def build_artifacts_from_directory(settings: Settings, run_id: str) -> Artifacts
                 )
             )
             continue
+        if not path.is_file():
+            continue
         artifacts.append(
             ArtifactIndexEntry(
                 name=relative,
@@ -64,6 +77,7 @@ def build_artifacts_from_directory(settings: Settings, run_id: str) -> Artifacts
                 media_type=MEDIA_TYPES.get(path.suffix.lower(), 'application/octet-stream'),
                 required=relative in {'run_manifest.json', 'config.json', 'metrics.json', 'artifacts_index.json', 'report.md', 'status.json', 'logs/runner.log'},
                 size_bytes=path.stat().st_size,
+                sha256=file_sha256(path),
                 description='Discovered from shared artifacts volume',
             )
         )
@@ -91,6 +105,65 @@ def load_logs_from_disk(settings: Settings, run_id: str) -> list[LogEntry]:
     if not log_path.exists():
         return []
     return [parse_log_line(line) for line in log_path.read_text().splitlines() if line.strip()]
+
+
+def load_terminal_bundle(
+    settings: Settings,
+    record: RunRecord,
+) -> tuple[RunStatus, dict[str, object], dict[str, str], ArtifactsIndex]:
+    run_id = record.run_id
+    root = artifact_run_dir(settings, run_id)
+    disk_status = load_status_from_disk(settings, run_id)
+    if disk_status is None:
+        raise ValueError('terminal bundle is missing status.json')
+    if disk_status.run_id != run_id:
+        raise ValueError('terminal bundle status.json run_id does not match the run')
+    if disk_status.status not in {'succeeded', 'failed', 'rejected'}:
+        raise ValueError('terminal bundle status is not terminal')
+
+    expected = record.manifest.expected_artifacts
+    required = [str(name) for name in expected.get('required', [])]
+    missing: list[str] = []
+    for name in required:
+        path = root / name.rstrip('/')
+        if path.is_symlink():
+            missing.append(name)
+            continue
+        if name.endswith('/'):
+            exists = path.is_dir()
+        else:
+            exists = path.is_file()
+        if not exists or not _path_is_within(path, root):
+            missing.append(name)
+    if disk_status.status == 'succeeded' and missing:
+        raise ValueError(
+            'successful terminal bundle is missing required artifacts: '
+            + ', '.join(sorted(missing))
+        )
+
+    metrics: dict[str, object] = {}
+    metrics_path = root / 'metrics.json'
+    if metrics_path.is_file() and _path_is_within(metrics_path, root):
+        payload = json.loads(metrics_path.read_text())
+        if not isinstance(payload, dict):
+            raise ValueError('metrics.json must contain a JSON object')
+        metrics = payload
+
+    artifacts = build_artifacts_from_directory(settings, run_id)
+    if artifacts is None:
+        raise ValueError('terminal bundle artifact directory is missing')
+    refs = {
+        entry.name: entry.path
+        for entry in artifacts.artifacts
+        if entry.name and _path_is_within(root / entry.name.rstrip('/'), root)
+    }
+    return disk_status, metrics, refs, artifacts
+
+
+def _path_is_within(path: Path, root: Path) -> bool:
+    resolved_root = root.resolve()
+    resolved_path = path.resolve()
+    return resolved_path == resolved_root or resolved_path.is_relative_to(resolved_root)
 
 
 def resolve_run_status(record: RunRecord, settings: Settings, submitter: JobSubmitter) -> RunStatus:

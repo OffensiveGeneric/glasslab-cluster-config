@@ -13,7 +13,9 @@ Use this README with three buckets in mind:
 
 Current architectural reality:
 
-- sessions are becoming the primary product object
+- investigations are the primary product aggregate
+- sessions remain the working context used by intake, planning, and current
+  command adapters
 - skills/stages mutate session-owned state
 - workflow families are increasingly execution templates, not the whole ontology
 - mutating `latest` routes are still present for compatibility, but should not
@@ -23,6 +25,7 @@ What is committed here:
 
 - API contracts
 - store/backend selection behavior
+- investigation, plan-approval, and evidence-link records
 - session/skill route definitions
 - execution-preflight and job-submission behavior
 - source-document storage defaults
@@ -115,7 +118,23 @@ first config surfaces now reserved are:
 - `GLASSLAB_WORKFLOW_API_INTERPRETATION_AGENT_URL`
 - `GLASSLAB_WORKFLOW_API_INTERPRETATION_AGENT_TIMEOUT_SECONDS`
 
-Primary session-oriented operator endpoints:
+Investigation aggregate endpoints:
+
+- `POST /investigations`
+- `GET /investigations/{investigation_id}/context`
+- `POST /investigations/{investigation_id}/hypotheses`
+- `POST /investigations/{investigation_id}/plans`
+- `POST /investigations/{investigation_id}/plan-approvals`
+- `POST /investigations/{investigation_id}/runs`
+- `POST /investigations/{investigation_id}/claims`
+
+Investigations are independent of compatibility research sessions. They
+preserve the research question, exploratory or confirmatory mode, hypothesis
+history, immutable execution graphs, approved plan hashes, stage-scoped runs,
+and content-hashed evidence-backed claims. See
+`docs/glasslab-v2/investigation-api-v1.md`.
+
+Compatibility session-oriented operator endpoints:
 
 - `POST /research-sessions`
 - `GET /research-sessions/{session_id}/context`
@@ -127,8 +146,8 @@ Primary session-oriented operator endpoints:
 - `POST /research-sessions/{session_id}/decisions/current`
 - `POST /research-sessions/{session_id}/transitions/advance-autoresearch`
 
-Compatibility aliases remain available under `/research-sessions/latest/...`, but
-the primary product story should be explicit session id or sender-pinned session.
+Aliases remain available under `/research-sessions/latest/...` while existing
+callers migrate. They are not the investigation data model.
 
 Supporting paper/source-intake endpoints:
 

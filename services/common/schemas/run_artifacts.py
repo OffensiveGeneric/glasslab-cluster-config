@@ -91,6 +91,12 @@ class ArtifactIndexEntry(BaseModel):
     media_type: str
     required: bool = True
     size_bytes: int | None = None
+    sha256: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        pattern=r'^[0-9a-f]{64}$',
+    )
     description: str | None = None
 
 

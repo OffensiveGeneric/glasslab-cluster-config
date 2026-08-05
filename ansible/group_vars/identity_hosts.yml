@@ -1,0 +1,49 @@
+---
+# This is the authoritative personal-account ledger. Public keys are safe to
+# commit; passwords and private keys must never be added here.
+glasslab_identity_managed_usernames:
+  - gr66ss-glasslab
+  - denic
+  - tristanc
+
+glasslab_identity_users:
+  - username: gr66ss-glasslab
+    display_name: Glasslab infrastructure administrator
+    state: present
+    targets: [gateway, provisioner, exo]
+    darwin_uid: 502
+    roles:
+      - lab_contributor
+      - exo_contributor
+      - container_builder
+      - infrastructure_admin
+    authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMnJx725BnCLWPiaHr1S1xpTCgjb30uVKRUVDSA3k6YX gr66ss-glasslab
+
+  - username: denic
+    display_name: Denise Cakoni
+    state: present
+    targets: [gateway, provisioner, exo]
+    darwin_uid: 503
+    roles:
+      - lab_contributor
+      - exo_contributor
+      - container_builder
+    authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPf4zU2Goac9RK6Yvz+dx14Jfg4wYP46GCs1NG2ba3KA denick@Mac
+
+  - username: tristanc
+    display_name: Tristan C
+    state: present
+    targets: [gateway, provisioner, exo]
+    darwin_uid: 504
+    roles:
+      - lab_contributor
+      - exo_contributor
+      - container_builder
+    authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBDiZFcFbKimUVq5WOjd13e4ElYUsBSvVSbg7tVwA0gp tristanc@glasslab
+
+glasslab_exo_shared_group: glasslab-exo
+glasslab_exo_shared_paths:
+  - /Users/glasslab/exo-clean

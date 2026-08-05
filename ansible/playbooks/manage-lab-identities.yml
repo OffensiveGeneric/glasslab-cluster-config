@@ -1,0 +1,69 @@
+---
+- name: Manage personal Glasslab identities
+  hosts: identity_hosts
+  gather_facts: true
+  become: true
+  serial: 1
+  vars_files:
+    - ../group_vars/identity_hosts.yml
+  pre_tasks:
+    - name: Validate identity host configuration
+      ansible.builtin.assert:
+        that:
+          - identity_scope in ['gateway', 'provisioner', 'exo']
+          - glasslab_identity_managed_usernames | length > 0
+          - glasslab_identity_users | map(attribute='username') | unique | length == glasslab_identity_users | length
+          - glasslab_identity_users | map(attribute='username') | difference(glasslab_identity_managed_usernames) | length == 0
+          - glasslab_identity_managed_usernames | difference(glasslab_identity_users | map(attribute='username') | list) | length == 0
+        fail_msg: Identity inventory or the managed-user ledger is invalid.
+
+    - name: Validate each identity record
+      ansible.builtin.assert:
+        that:
+          - item.state in ['present', 'disabled']
+          - item.targets | difference(['gateway', 'provisioner', 'exo']) | length == 0
+          - item.roles | difference(['lab_contributor', 'exo_contributor', 'container_builder', 'infrastructure_admin']) | length == 0
+          - item.state == 'disabled' or item.authorized_keys | length > 0
+          - "'exo' not in item.targets or item.darwin_uid is defined"
+        fail_msg: "Identity record for {{ item.username }} is invalid."
+      loop: "{{ glasslab_identity_users }}"
+      loop_control:
+        label: "{{ item.username }}"
+
+    - name: Build the active user list for this host
+      ansible.builtin.set_fact:
+        glasslab_active_identity_users: "{{ (glasslab_active_identity_users | default([])) + [item] }}"
+      when:
+        - item.state == 'present'
+        - identity_scope in item.targets
+      loop: "{{ glasslab_identity_users }}"
+      loop_control:
+        label: "{{ item.username }}"
+
+    - name: Finalize active and disabled usernames for this host
+      ansible.builtin.set_fact:
+        glasslab_active_identity_users: "{{ glasslab_active_identity_users | default([]) }}"
+        glasslab_active_identity_usernames: "{{ glasslab_active_identity_users | default([]) | map(attribute='username') | list }}"
+        glasslab_disabled_identity_usernames: >-
+          {{ glasslab_identity_managed_usernames | difference(
+             glasslab_active_identity_users | default([]) | map(attribute='username') | list) }}
+
+  tasks:
+    - name: Apply Linux identity policy
+      ansible.builtin.include_tasks: tasks/manage-linux-identities.yml
+      when: ansible_system == 'Linux'
+
+    - name: Apply macOS identity policy
+      ansible.builtin.include_tasks: tasks/manage-darwin-identities.yml
+      when: ansible_system == 'Darwin'
+
+    - name: Reject unsupported identity hosts
+      ansible.builtin.fail:
+        msg: "Identity management does not support {{ ansible_system }}."
+      when: ansible_system not in ['Linux', 'Darwin']
+
+  handlers:
+    - name: Reload sshd
+      ansible.builtin.service:
+        name: ssh
+        state: reloaded

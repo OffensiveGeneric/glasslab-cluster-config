@@ -68,6 +68,7 @@ run_shell() {
     scripts/check-before-push.sh \
     scripts/glasslab-opencode.sh \
     scripts/research-session-cli.sh \
+    scripts/smoke-test-research-orchestrator.sh \
     scripts/submit-learning-task.sh \
     scripts/submit-sample-experiment.sh
 }
@@ -94,7 +95,7 @@ PY
 }
 
 run_workflow_api_tests() {
-  printf '[check-before-push] running workflow-api core tests\n'
+  printf '[check-before-push] running core service tests\n'
   (
     cd services/workflow-api
     PYTHONPATH=../..:. pytest \
@@ -104,6 +105,33 @@ run_workflow_api_tests() {
       tests/test_run_artifacts.py \
       tests/test_schedule_execution.py \
       tests/test_validation.py \
+      -q
+  )
+  (
+    cd services/research-workspace-runner
+    PYTHONPATH=. pytest \
+      -p no:cacheprovider \
+      tests/test_runner.py \
+      -q
+  )
+  (
+    cd services/research-orchestrator
+    contract_test_root="$(mktemp -d)"
+    trap 'chmod -R u+w "$contract_test_root" 2>/dev/null || true; rm -rf "$contract_test_root"' EXIT
+    GLASSLAB_ORCHESTRATOR_DATABASE_PATH="$contract_test_root/orchestrator.db" \
+    GLASSLAB_ORCHESTRATOR_WORKSPACE_ROOT="$contract_test_root/runs" \
+    GLASSLAB_ORCHESTRATOR_ARTIFACT_ROOT="$contract_test_root/artifacts" \
+    GLASSLAB_ORCHESTRATOR_PROMOTED_CONTRACT_ROOT="$contract_test_root/bundles" \
+    GLASSLAB_ORCHESTRATOR_SEALED_CONTRACT_CANDIDATE_ROOT="$contract_test_root/contract-candidates" \
+    GLASSLAB_ORCHESTRATOR_TRUSTED_CONTRACT_CATALOG_PATH="$contract_test_root/catalog.json" \
+    GLASSLAB_ORCHESTRATOR_SHARED_MOUNT_ROOT="$contract_test_root" \
+    GLASSLAB_ORCHESTRATOR_TASK_BUNDLE_ROOT="$contract_test_root/task-bundles" \
+    GLASSLAB_ORCHESTRATOR_TASK_ASSET_ROOT="$contract_test_root/task-assets" \
+    GLASSLAB_ORCHESTRATOR_DATASET_UPLOAD_ROOT="$contract_test_root/dataset-uploads" \
+    GLASSLAB_ORCHESTRATOR_BENCHMARK_DATASET_CATALOG_PATH="$contract_test_root/datasets/catalog.json" \
+    PYTHONPATH=. pytest \
+      -p no:cacheprovider \
+      tests \
       -q
   )
 }

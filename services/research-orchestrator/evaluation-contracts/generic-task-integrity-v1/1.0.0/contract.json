@@ -1,0 +1,22 @@
+{
+  "container_image_digest": null,
+  "contract_id": "generic-task-integrity-v1",
+  "evaluation_entry_point": "evaluator.py",
+  "execution_wrapper": "run_contract.py",
+  "expected_input_schema": "input.schema.json",
+  "expected_output_schema": "output.schema.json",
+  "manifest": {
+    "description": "Deterministic artifact and metric-key integrity gate for compiled research tasks.",
+    "primary_metric": "rubric_score",
+    "primary_metric_direction": "maximize",
+    "required_metric_keys": []
+  },
+  "required_artifacts": ["metrics.json", "evaluation.json", "report.md"],
+  "resource_constraints": {
+    "cpu": 8.0,
+    "gpus": 1,
+    "memory_gib": 32.0,
+    "wallclock_minutes": 240
+  },
+  "version": "1.0.0"
+}

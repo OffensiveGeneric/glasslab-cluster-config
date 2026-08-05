@@ -10,11 +10,13 @@ ignored `.44`-local file at:
 kubeadm/glasslab-v2/secrets/15-workflow-api.local.yaml
 ```
 
-Use the guarded rollout helper from the canonical `.44` checkout instead:
+The `Publish Service Images` workflow builds the image on merges to `main`.
+Use the guarded rollout helper from the canonical `.44` checkout after that
+workflow succeeds:
 
 ```bash
 cd /home/glasslab/cluster-config
-./scripts/rollout-workflow-api-live.sh --sync
+./scripts/rollout-research-services.sh --sync --service workflow-api
 ```
 
 Current prerequisite boundary for execution preflight and run submission:

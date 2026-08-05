@@ -13,6 +13,8 @@ on:
           - whatsapp-gateway
           - research-ingress
           - research-command-router
+          - research-orchestrator
+          - research-workspace-runner
           - runner
       push:
         description: "Push image to GHCR"
@@ -67,6 +69,16 @@ jobs:
               echo "dockerfile=services/research-command-router/Dockerfile" >> "$GITHUB_OUTPUT"
               echo "image=ghcr.io/${REPO_OWNER}/glasslab-research-command-router" >> "$GITHUB_OUTPUT"
               ;;
+            research-orchestrator)
+              echo "context=services/research-orchestrator" >> "$GITHUB_OUTPUT"
+              echo "dockerfile=services/research-orchestrator/Dockerfile" >> "$GITHUB_OUTPUT"
+              echo "image=ghcr.io/${REPO_OWNER}/glasslab-research-orchestrator" >> "$GITHUB_OUTPUT"
+              ;;
+            research-workspace-runner)
+              echo "context=." >> "$GITHUB_OUTPUT"
+              echo "dockerfile=services/research-workspace-runner/Dockerfile" >> "$GITHUB_OUTPUT"
+              echo "image=ghcr.io/${REPO_OWNER}/glasslab-research-workspace-runner" >> "$GITHUB_OUTPUT"
+              ;;
             runner)
               echo "context=services/runner" >> "$GITHUB_OUTPUT"
               echo "dockerfile=services/runner/Dockerfile.gpu" >> "$GITHUB_OUTPUT"
@@ -82,7 +94,7 @@ jobs:
             TAG=$(echo "${{ inputs.tag }}" | tr '[:upper:]' '[:lower:]')
             echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           else
-            echo "tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            echo "tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Set up Docker Buildx
@@ -106,4 +118,3 @@ jobs:
           build-args: |
             GLASSLAB_GIT_SHA=${{ github.sha }}
             GLASSLAB_BUILD_SOURCE=github:${{ github.run_id }}
-

@@ -10,7 +10,6 @@ It is meant to complement `live-state-2026-03-24.md` by keeping the host invento
 
 - role:
   - PXE / provisioner host
-  - bastion
   - canonical repo checkout
   - `kubectl` admin workstation
 - validated state:
@@ -150,7 +149,7 @@ These hosts are not Kubernetes workers.
 
 As of the end of the 2026-03-24 session:
 
-- `.44`: canonical admin / deploy / bastion host
+- `.44`: canonical provisioner, admin, and deploy host
 - `node01`: current v2 service host
 - `node02`: still occupied by legacy in-cluster `vllm`
 - `node05`: NATS and completed workload landing area

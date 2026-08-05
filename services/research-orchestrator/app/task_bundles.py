@@ -1,0 +1,588 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from hashlib import sha256
+import ipaddress
+import json
+import os
+from pathlib import Path, PurePosixPath
+import shutil
+import socket
+from typing import Any
+from urllib.parse import urljoin, urlparse
+from uuid import uuid4
+import zipfile
+
+import httpx
+from pydantic import BaseModel, ConfigDict, Field
+
+from .schemas import TaskAssetProposal, TaskSpecProposal
+
+
+class TaskBundleError(ValueError):
+    pass
+
+
+class DatasetAsset(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    name: str
+    uri: str
+    sha256: str = Field(pattern=r'^[a-f0-9]{64}$')
+    role: str
+    contains_labels: bool = False
+
+
+class TaskBundleRecord(BaseModel):
+    """Compiled task. The execution fields are policy output, not model output."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    schema_version: str = 'glasslab-task-bundle-v1'
+    compilation_source: str = 'legacy'
+    task_id: str
+    display_name: str
+    digest: str = Field(pattern=r'^[a-f0-9]{64}$')
+    archive_uri: str
+    archive_path: str
+    problem_path: str
+    evaluator_prompt_path: str
+    workload_id: str
+    experiment_type: str
+    runner_image: str
+    command: list[str]
+    source_subdirectory: str
+    default_contract_id: str
+    default_contract_version: str
+    resources: dict[str, Any]
+    required_artifacts: list[str]
+    datasets: list[DatasetAsset]
+    task_spec: dict[str, Any] | None = None
+    missing_inputs: list[str] = Field(default_factory=list)
+
+
+class TaskPreflight(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    task_id: str
+    digest: str
+    compiled: bool
+    assets_ready: bool
+    runtime_ready: bool
+    evaluator_ready: bool
+    missing_inputs: list[str]
+    blocking_issues: list[str]
+    ready: bool
+
+
+@dataclass(frozen=True)
+class RuntimeProfile:
+    workload_id: str
+    runner_image: str
+    resources: dict[str, Any]
+
+
+RUNTIME_PROFILES = {
+    'cpu-ml-standard-v1': RuntimeProfile(
+        workload_id='workspace-cpu-ml-v1',
+        runner_image=(
+            'ghcr.io/offensivegeneric/'
+            'glasslab-research-workspace-runner:benchmark-cpu-v2'
+        ),
+        resources={
+            'cpu': 4,
+            'memory_gib': 8,
+            'gpus': 0,
+            'wallclock_minutes': 60,
+        },
+    ),
+    'gpu-ml-standard-v1': RuntimeProfile(
+        workload_id='workspace-gpu-ml-v1',
+        runner_image=(
+            'ghcr.io/offensivegeneric/'
+            'glasslab-research-workspace-runner:benchmark-gpu-v1'
+        ),
+        resources={
+            'cpu': 8,
+            'memory_gib': 32,
+            'gpus': 1,
+            'wallclock_minutes': 240,
+        },
+    ),
+}
+
+# The workflow registry owns these fixed images. Persisted task metadata keeps
+# the scientific bundle immutable, while execution binds to current deployment
+# policy when the task is loaded.
+FIXED_WORKLOAD_RUNNER_IMAGES = {
+    'benchmark-workspace-cpu-v1': (
+        'ghcr.io/offensivegeneric/'
+        'glasslab-research-workspace-runner:benchmark-cpu-v2'
+    ),
+    'workspace-cpu-ml-v1': RUNTIME_PROFILES['cpu-ml-standard-v1'].runner_image,
+    'workspace-gpu-ml-v1': RUNTIME_PROFILES['gpu-ml-standard-v1'].runner_image,
+}
+
+BASE_REQUIRED_ARTIFACTS = (
+    'run_manifest.json',
+    'config.json',
+    'metrics.json',
+    'evaluation.json',
+    'artifacts_index.json',
+    'report.md',
+    'status.json',
+    'logs/',
+    'source.zip',
+)
+
+
+@dataclass(frozen=True)
+class StagedTaskBundle:
+    filename: str
+    digest: str
+    root: Path
+    archive_path: Path
+    problem_path: Path
+    evaluator_prompt_path: Path
+
+
+class TaskAssetFetcher:
+    """Fetch immutable assets while rejecting non-public HTTPS targets."""
+
+    def __init__(
+        self,
+        *,
+        root: str,
+        shared_mount_root: str,
+        maximum_bytes: int,
+    ) -> None:
+        self.root = Path(root).resolve()
+        self.shared_mount_root = Path(shared_mount_root).resolve()
+        self.maximum_bytes = maximum_bytes
+
+    @staticmethod
+    def _validate_url(url: str) -> None:
+        try:
+            parsed = urlparse(url)
+            port = parsed.port
+        except ValueError as exc:
+            raise TaskBundleError('task asset URL is malformed') from exc
+        if (
+            parsed.scheme != 'https'
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or port not in {None, 443}
+        ):
+            raise TaskBundleError('task assets require a public HTTPS URL')
+        try:
+            addresses = socket.getaddrinfo(
+                parsed.hostname,
+                443,
+                type=socket.SOCK_STREAM,
+            )
+        except OSError as exc:
+            raise TaskBundleError(
+                f'cannot resolve task asset host: {parsed.hostname}'
+            ) from exc
+        for address in addresses:
+            ip = ipaddress.ip_address(address[4][0])
+            if not ip.is_global:
+                raise TaskBundleError(
+                    f'task asset host resolves to a non-public address: {ip}'
+                )
+
+    def fetch(
+        self,
+        *,
+        task_digest: str,
+        proposal: TaskAssetProposal,
+    ) -> DatasetAsset:
+        if not proposal.source_url:
+            raise TaskBundleError(f'asset has no source URL: {proposal.name}')
+        destination = self.root / task_digest / proposal.name
+        metadata = destination / 'asset.json'
+        if metadata.is_file():
+            return DatasetAsset.model_validate_json(metadata.read_text())
+        staging = self.root / '.staging' / uuid4().hex
+        staging.mkdir(parents=True, exist_ok=False)
+        asset_path = staging / 'asset'
+        current_url = proposal.source_url
+        try:
+            with httpx.Client(follow_redirects=False, timeout=60) as client:
+                for _ in range(6):
+                    self._validate_url(current_url)
+                    with client.stream('GET', current_url) as response:
+                        if response.status_code in {301, 302, 303, 307, 308}:
+                            location = response.headers.get('location')
+                            if not location:
+                                raise TaskBundleError(
+                                    'task asset redirect has no location'
+                                )
+                            current_url = urljoin(current_url, location)
+                            continue
+                        response.raise_for_status()
+                        size = 0
+                        digest = sha256()
+                        with asset_path.open('wb') as output:
+                            for chunk in response.iter_bytes():
+                                size += len(chunk)
+                                if size > self.maximum_bytes:
+                                    raise TaskBundleError(
+                                        f'task asset exceeds {self.maximum_bytes} bytes'
+                                    )
+                                digest.update(chunk)
+                                output.write(chunk)
+                        if size == 0:
+                            raise TaskBundleError(
+                                f'task asset is empty: {proposal.name}'
+                            )
+                        break
+                else:
+                    raise TaskBundleError('task asset redirected too many times')
+        except httpx.HTTPError as exc:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise TaskBundleError(
+                f'task asset download failed for {proposal.name}: {exc}'
+            ) from exc
+        except Exception:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+        actual_digest = digest.hexdigest()
+        if (
+            proposal.expected_sha256
+            and actual_digest != proposal.expected_sha256
+        ):
+            shutil.rmtree(staging, ignore_errors=True)
+            raise TaskBundleError(
+                f'task asset checksum mismatch for {proposal.name}'
+            )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists():
+            shutil.rmtree(staging)
+        else:
+            os.replace(staging, destination)
+        uri = (
+            's3://artifacts/'
+            + (destination / 'asset')
+            .relative_to(self.shared_mount_root)
+            .as_posix()
+        )
+        record = DatasetAsset(
+            name=proposal.name,
+            uri=uri,
+            sha256=actual_digest,
+            role=proposal.role,
+            contains_labels=proposal.contains_labels,
+        )
+        metadata.write_text(record.model_dump_json(indent=2) + '\n')
+        asset_path = destination / 'asset'
+        asset_path.chmod(0o444)
+        metadata.chmod(0o444)
+        destination.chmod(0o555)
+        return record
+
+
+class TaskBundleManager:
+    MAX_ARCHIVE_BYTES = 16 * 1024 * 1024
+    MAX_FILES = 256
+    MAX_EXPANDED_BYTES = 64 * 1024 * 1024
+
+    def __init__(
+        self,
+        *,
+        root: str,
+        shared_mount_root: str,
+        dataset_catalog_path: str,
+        task_asset_root: str | None = None,
+        maximum_asset_bytes: int = 2 * 1024 * 1024 * 1024,
+        ingested_datasets=None,
+    ) -> None:
+        self.root = Path(root).resolve()
+        self.shared_mount_root = Path(shared_mount_root).resolve()
+        # Retained so old deployments and records remain configuration-compatible.
+        self.dataset_catalog_path = Path(dataset_catalog_path).resolve()
+        self.assets = TaskAssetFetcher(
+            root=task_asset_root or str(self.root.parent / 'task-assets'),
+            shared_mount_root=shared_mount_root,
+            maximum_bytes=maximum_asset_bytes,
+        )
+        self.ingested_datasets = ingested_datasets
+
+    def stage_archive(self, *, filename: str, content: bytes) -> StagedTaskBundle:
+        if not content or len(content) > self.MAX_ARCHIVE_BYTES:
+            raise TaskBundleError('task archive has an invalid size')
+        digest = sha256(content).hexdigest()
+        staging = self.root / '.staging' / uuid4().hex
+        staging.mkdir(parents=True, exist_ok=False)
+        archive_path = staging / 'task.zip'
+        archive_path.write_bytes(content)
+        try:
+            with zipfile.ZipFile(archive_path) as handle:
+                files = [item for item in handle.infolist() if not item.is_dir()]
+                if not files or len(files) > self.MAX_FILES:
+                    raise TaskBundleError('task archive file count is invalid')
+                expanded = 0
+                for member in files:
+                    path = PurePosixPath(member.filename)
+                    mode = member.external_attr >> 16
+                    if (
+                        path.is_absolute()
+                        or '..' in path.parts
+                        or mode & 0o170000 == 0o120000
+                    ):
+                        raise TaskBundleError(
+                            f'unsafe task archive member: {member.filename}'
+                        )
+                    expanded += member.file_size
+                if expanded > self.MAX_EXPANDED_BYTES:
+                    raise TaskBundleError('task archive expands too large')
+                problem_members = [
+                    item
+                    for item in files
+                    if PurePosixPath(item.filename).name == 'problem.md'
+                ]
+                evaluator_members = [
+                    item
+                    for item in files
+                    if PurePosixPath(item.filename).name == 'eval_agent_prompt.md'
+                ]
+                if len(problem_members) != 1 or len(evaluator_members) > 1:
+                    raise TaskBundleError(
+                        'task archive requires one problem.md and at most one '
+                        'eval_agent_prompt.md'
+                    )
+                normalized = staging / 'normalized'
+                normalized.mkdir()
+                problem = normalized / 'problem.md'
+                evaluator = normalized / 'eval_agent_prompt.md'
+                problem.write_bytes(handle.read(problem_members[0]))
+                evaluator.write_bytes(
+                    handle.read(evaluator_members[0])
+                    if evaluator_members
+                    else b'# Evaluation notes\n\nNo supplied evaluator rubric.\n'
+                )
+        except zipfile.BadZipFile as exc:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise TaskBundleError('task must be a ZIP archive') from exc
+        except Exception:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+        try:
+            problem.read_text(encoding='utf-8')
+            evaluator.read_text(encoding='utf-8')
+        except UnicodeDecodeError as exc:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise TaskBundleError(
+                'problem and evaluator prompt must be UTF-8 text'
+            ) from exc
+        return StagedTaskBundle(
+            filename=Path(filename).name,
+            digest=digest,
+            root=staging,
+            archive_path=archive_path,
+            problem_path=problem,
+            evaluator_prompt_path=evaluator,
+        )
+
+    @staticmethod
+    def _task_id(display_name: str, digest: str) -> str:
+        del display_name
+        return f'task-{digest[:16]}'
+
+    def find_by_digest(self, digest: str) -> TaskBundleRecord | None:
+        for record in self.list():
+            if record.digest == digest:
+                return record
+        return None
+
+    def compile(
+        self,
+        staged: StagedTaskBundle,
+        proposal: TaskSpecProposal,
+    ) -> TaskBundleRecord:
+        profile = RUNTIME_PROFILES[proposal.runtime_profile]
+        task_id = self._task_id(proposal.display_name, staged.digest)
+        destination = self.root / task_id / staged.digest
+        metadata_path = destination / 'task.json'
+        if metadata_path.is_file():
+            shutil.rmtree(staged.root, ignore_errors=True)
+            return TaskBundleRecord.model_validate_json(metadata_path.read_text())
+
+        datasets: list[DatasetAsset] = []
+        missing = list(proposal.missing_inputs)
+        for asset in proposal.assets:
+            if asset.approved_uri:
+                if self.ingested_datasets is None:
+                    missing.append(
+                        f'ingested dataset registry is unavailable: {asset.name}'
+                    )
+                    continue
+                try:
+                    datasets.append(
+                        self.ingested_datasets.resolve(
+                            asset.approved_uri,
+                            name=asset.name,
+                            role=asset.role,
+                            contains_labels=asset.contains_labels,
+                            expected_sha256=asset.expected_sha256,
+                        )
+                    )
+                except TaskBundleError as exc:
+                    missing.append(str(exc))
+                continue
+            if not asset.source_url:
+                missing.append(
+                    f'asset `{asset.name}` has no approved URI or source URL'
+                )
+                continue
+            try:
+                datasets.append(
+                    self.assets.fetch(
+                        task_digest=staged.digest,
+                        proposal=asset,
+                    )
+                )
+            except TaskBundleError as exc:
+                missing.append(str(exc))
+        required_artifacts = list(
+            dict.fromkeys(
+                [
+                    *BASE_REQUIRED_ARTIFACTS,
+                    *proposal.required_artifacts,
+                ]
+            )
+        )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists():
+            shutil.rmtree(staged.root)
+        else:
+            os.replace(staged.root, destination)
+        record = TaskBundleRecord(
+            schema_version='glasslab-task-bundle-v2',
+            compilation_source='honeydew-task-spec',
+            task_id=task_id,
+            display_name=proposal.display_name,
+            digest=staged.digest,
+            archive_uri=(
+                's3://artifacts/'
+                + (destination / 'task.zip')
+                .relative_to(self.shared_mount_root)
+                .as_posix()
+            ),
+            archive_path=str(destination / 'task.zip'),
+            problem_path=str(destination / 'normalized' / 'problem.md'),
+            evaluator_prompt_path=str(
+                destination / 'normalized' / 'eval_agent_prompt.md'
+            ),
+            workload_id=profile.workload_id,
+            experiment_type='research-workspace-job',
+            runner_image=profile.runner_image,
+            command=['python3', 'run.py'],
+            source_subdirectory=f'research-workspace/{task_id}',
+            default_contract_id='generic-task-integrity-v1',
+            default_contract_version='1.0.0',
+            resources=profile.resources,
+            required_artifacts=required_artifacts,
+            datasets=datasets,
+            task_spec=proposal.model_dump(mode='json'),
+            missing_inputs=list(dict.fromkeys(missing)),
+        )
+        metadata_path.write_text(record.model_dump_json(indent=2) + '\n')
+        for path in destination.rglob('*'):
+            path.chmod(0o555 if path.is_dir() else 0o444)
+        return record
+
+    def discard_staged(self, staged: StagedTaskBundle) -> None:
+        shutil.rmtree(staged.root, ignore_errors=True)
+
+    def preflight(
+        self,
+        record: TaskBundleRecord,
+        *,
+        permitted_images: set[str],
+        evaluator_ready: bool,
+    ) -> TaskPreflight:
+        issues = list(record.missing_inputs)
+        asset_issues: list[str] = []
+        if record.runner_image not in permitted_images:
+            issues.append('compiled runtime image is not permitted')
+        if not evaluator_ready:
+            issues.append('compiled evaluation contract is not installed')
+        archive = Path(record.archive_path).resolve()
+        archive_ready = not (
+            not archive.is_relative_to(self.root)
+            or not archive.is_file()
+            or self._file_sha256(archive) != record.digest
+        )
+        if not archive_ready:
+            issues.append('task archive is unavailable or failed checksum verification')
+        for asset in record.datasets:
+            if not asset.uri.startswith(('s3://artifacts/', 's3://datasets/')):
+                asset_issues.append(f'asset URI is not approved: {asset.name}')
+            if asset.uri.startswith('s3://artifacts/'):
+                relative = asset.uri.removeprefix('s3://artifacts/')
+                path = (self.shared_mount_root / relative).resolve()
+                if (
+                    not path.is_relative_to(self.shared_mount_root)
+                    or not path.is_file()
+                    or self._file_sha256(path) != asset.sha256
+                ):
+                    asset_issues.append(
+                        f'asset is unavailable or failed checksum verification: '
+                        f'{asset.name}'
+                    )
+        issues.extend(asset_issues)
+        return TaskPreflight(
+            task_id=record.task_id,
+            digest=record.digest,
+            compiled=archive_ready,
+            assets_ready=not record.missing_inputs and not asset_issues,
+            runtime_ready=record.runner_image in permitted_images,
+            evaluator_ready=evaluator_ready,
+            missing_inputs=record.missing_inputs,
+            blocking_issues=issues,
+            ready=not issues and evaluator_ready,
+        )
+
+    @staticmethod
+    def _file_sha256(path: Path) -> str:
+        digest = sha256()
+        with path.open('rb') as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def get(self, task_id: str, digest: str | None = None) -> TaskBundleRecord:
+        task_root = (self.root / task_id).resolve()
+        if not task_root.is_relative_to(self.root) or not task_root.is_dir():
+            raise TaskBundleError(f'task bundle is not imported: {task_id}')
+        candidates = sorted(
+            (path for path in task_root.iterdir() if path.is_dir()),
+            key=lambda path: path.stat().st_mtime_ns,
+            reverse=True,
+        )
+        if digest:
+            candidates = [path for path in candidates if path.name == digest]
+        if not candidates:
+            raise TaskBundleError(f'task bundle digest is not imported: {task_id}')
+        record = TaskBundleRecord.model_validate_json(
+            (candidates[0] / 'task.json').read_text()
+        )
+        runner_image = FIXED_WORKLOAD_RUNNER_IMAGES.get(record.workload_id)
+        if runner_image and runner_image != record.runner_image:
+            record = record.model_copy(update={'runner_image': runner_image})
+        return record
+
+    def list(self) -> list[TaskBundleRecord]:
+        records: list[TaskBundleRecord] = []
+        if not self.root.is_dir():
+            return records
+        for task_root in sorted(self.root.iterdir()):
+            if not task_root.is_dir() or task_root.name.startswith('.'):
+                continue
+            try:
+                records.append(self.get(task_root.name))
+            except (OSError, ValueError):
+                continue
+        return records

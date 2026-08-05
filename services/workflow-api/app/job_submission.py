@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
+from hashlib import sha256
 import json
+from pathlib import Path, PurePosixPath
 import re
 
 from typing import Any
@@ -76,6 +78,123 @@ def _sanitize_label(value: str) -> str:
 def _build_job_name(manifest: RunManifest) -> str:
     prefix = _sanitize_label(manifest.workflow_id).replace('.', '-')
     return f"{prefix}-{manifest.run_id[:8]}"[:63]
+
+
+def resolve_evaluation_contract(
+    manifest: RunManifest,
+    settings: Settings,
+) -> dict[str, str] | None:
+    requested = manifest.config_payload.get('evaluation_contract')
+    if requested is None:
+        return None
+    if not isinstance(requested, dict):
+        raise ValueError('evaluation_contract must be an object')
+    allowed_keys = {'contract_id', 'version', 'digest'}
+    if set(requested) != allowed_keys:
+        raise ValueError(
+            'evaluation_contract may contain only contract_id, version, and digest'
+        )
+    contract_id = str(requested.get('contract_id', '')).strip()
+    version = str(requested.get('version', '')).strip()
+    digest = str(requested.get('digest', '')).strip().lower()
+    key = f'{contract_id}@{version}'
+    catalog = dict(settings.evaluation_contracts)
+    if settings.evaluation_contract_catalog_path:
+        catalog_path = Path(settings.evaluation_contract_catalog_path)
+        if catalog_path.is_file():
+            try:
+                dynamic = json.loads(catalog_path.read_text(encoding='utf-8'))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ValueError('trusted evaluation contract catalog is invalid') from exc
+            if not isinstance(dynamic, dict):
+                raise ValueError('trusted evaluation contract catalog must be an object')
+            catalog.update(dynamic)
+    trusted = catalog.get(key)
+    if trusted is None:
+        raise ValueError(f'evaluation contract is not trusted: {key}')
+    common = {
+        'contract_id',
+        'version',
+        'digest',
+        'execution_wrapper',
+        'evaluation_entry_point',
+    }
+    image_keys = common | {'container_image_digest'}
+    bundle_keys = common | {'bundle_path'}
+    if frozenset(trusted) not in {frozenset(image_keys), frozenset(bundle_keys)}:
+        raise ValueError(f'trusted evaluation contract is malformed: {key}')
+    if (
+        trusted['contract_id'] != contract_id
+        or trusted['version'] != version
+        or trusted['digest'].lower() != digest
+    ):
+        raise ValueError(f'evaluation contract identity or digest mismatch: {key}')
+    if 'container_image_digest' in trusted:
+        image = trusted['container_image_digest']
+        if '@sha256:' not in image:
+            raise ValueError(f'evaluation contract image is not digest-pinned: {key}')
+    else:
+        relative = PurePosixPath(trusted['bundle_path'])
+        if (
+            relative.is_absolute()
+            or '..' in relative.parts
+            or relative.as_posix() in {'', '.'}
+        ):
+            raise ValueError(f'evaluation contract has unsafe bundle_path: {key}')
+        root = Path(settings.evaluation_contract_bundle_root).resolve()
+        bundle = (root / relative.as_posix()).resolve()
+        if not bundle.is_relative_to(root) or bundle.is_symlink() or not bundle.is_dir():
+            raise ValueError(f'evaluation contract bundle is unavailable: {key}')
+        digest_builder = sha256()
+        files = sorted(
+            path
+            for path in bundle.rglob('*')
+            if (
+                path.is_file()
+                and path.name != 'contract.sha256'
+                and '__pycache__' not in path.relative_to(bundle).parts
+                and path.suffix != '.pyc'
+            )
+        )
+        if not files:
+            raise ValueError(f'evaluation contract bundle is empty: {key}')
+        for path in files:
+            if path.is_symlink():
+                raise ValueError(f'evaluation contract bundle contains a symlink: {key}')
+            relative_file = path.relative_to(bundle).as_posix().encode()
+            content = path.read_bytes()
+            digest_builder.update(len(relative_file).to_bytes(8, 'big'))
+            digest_builder.update(relative_file)
+            digest_builder.update(len(content).to_bytes(8, 'big'))
+            digest_builder.update(content)
+        actual_digest = digest_builder.hexdigest()
+        checksum_path = bundle / 'contract.sha256'
+        descriptor_path = bundle / 'contract.json'
+        if not checksum_path.is_file() or not descriptor_path.is_file():
+            raise ValueError(f'evaluation contract bundle is incomplete: {key}')
+        if (
+            checksum_path.read_text(encoding='ascii').strip().lower() != digest
+            or actual_digest != digest
+        ):
+            raise ValueError(f'evaluation contract bundle digest mismatch: {key}')
+        try:
+            descriptor = json.loads(descriptor_path.read_text(encoding='utf-8'))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f'evaluation contract descriptor is invalid: {key}') from exc
+        if (
+            not isinstance(descriptor, dict)
+            or descriptor.get('contract_id') != contract_id
+            or descriptor.get('version') != version
+            or descriptor.get('execution_wrapper') != trusted['execution_wrapper']
+            or descriptor.get('evaluation_entry_point')
+            != trusted['evaluation_entry_point']
+        ):
+            raise ValueError(f'evaluation contract descriptor mismatch: {key}')
+    for field in ('execution_wrapper', 'evaluation_entry_point'):
+        path = PurePosixPath(trusted[field])
+        if path.is_absolute() or '..' in path.parts or path.as_posix() in {'', '.'}:
+            raise ValueError(f'evaluation contract has unsafe {field}: {key}')
+    return dict(trusted)
 
 
 def _build_runner_spec(manifest: RunManifest, settings: Settings) -> dict:
@@ -171,6 +290,109 @@ def _is_generic_experiment_manifest(manifest: RunManifest) -> bool:
     return bool(manifest.experiment_type or manifest.workload_id or manifest.entrypoint)
 
 
+def _active_deadline_seconds(manifest: RunManifest) -> int | None:
+    raw_minutes = manifest.budget.get('max_wallclock_minutes')
+    if raw_minutes is None:
+        return None
+    if (
+        not isinstance(raw_minutes, int)
+        or isinstance(raw_minutes, bool)
+        or raw_minutes < 1
+    ):
+        raise ValueError('budget.max_wallclock_minutes must be a positive integer')
+    return raw_minutes * 60
+
+
+def _is_research_workspace_manifest(manifest: RunManifest) -> bool:
+    return manifest.schema_ref in {
+        'glasslab-investigation-workspace-v1',
+        'glasslab-benchmark-workspace-v1',
+    }
+
+
+def _asset_volume_subpath(uri: str) -> tuple[str, str]:
+    if uri.startswith(('s3://datasets/', 's3://glasslab-datasets/')):
+        volume_name = 'dataset-volume'
+        relative = (
+            uri.removeprefix('s3://datasets/')
+            if uri.startswith('s3://datasets/')
+            else uri.removeprefix('s3://glasslab-datasets/')
+        )
+    elif uri.startswith('s3://artifacts/'):
+        volume_name = 'artifacts-volume'
+        relative = uri.removeprefix('s3://artifacts/')
+    else:
+        raise ValueError(
+            'research workspace assets must use an approved data or artifact URI'
+        )
+    path = PurePosixPath(relative)
+    if (
+        not relative
+        or path.as_posix() == '.'
+        or path.is_absolute()
+        or '..' in path.parts
+    ):
+        raise ValueError(f'research workspace asset URI has an invalid path: {uri}')
+    return volume_name, path.as_posix()
+
+
+def _research_workspace_asset_locations(
+    manifest: RunManifest,
+) -> list[tuple[str, str]]:
+    workspace = manifest.config_payload.get('workspace')
+    if not isinstance(workspace, dict):
+        raise ValueError('research workspace manifest is missing workspace config')
+    references: list[Any] = [
+        workspace.get('task_bundle'),
+        workspace.get('source_bundle'),
+    ]
+    dataset_contracts = manifest.config_payload.get('dataset_contracts', [])
+    if not isinstance(dataset_contracts, list):
+        raise ValueError('research workspace dataset_contracts must be a list')
+    references.extend(
+        contract.get('asset')
+        for contract in dataset_contracts
+        if isinstance(contract, dict)
+    )
+    locations: list[tuple[str, str]] = []
+    for reference in references:
+        if not isinstance(reference, dict):
+            raise ValueError('research workspace asset reference is missing')
+        uri = str(reference.get('uri', '')).strip()
+        locations.append(_asset_volume_subpath(uri))
+    return list(dict.fromkeys(locations))
+
+
+def _research_workspace_volume_mount_specs(
+    manifest: RunManifest,
+    settings: Settings,
+) -> list[dict[str, str | bool]]:
+    input_mounts: list[dict[str, str | bool]] = []
+    for volume_name, subpath in _research_workspace_asset_locations(manifest):
+        mount_root = (
+            settings.dataset_mount_path
+            if volume_name == 'dataset-volume'
+            else settings.artifacts_mount_path
+        )
+        input_mounts.append(
+            {
+                'name': volume_name,
+                'mount_path': f'{mount_root}/{subpath}',
+                'sub_path': subpath,
+                'read_only': True,
+            }
+        )
+    return [
+        *input_mounts,
+        {
+            'name': 'artifacts-volume',
+            'mount_path': f'{settings.artifacts_mount_path}/{manifest.run_id}',
+            'sub_path': manifest.run_id,
+            'read_only': False,
+        },
+    ]
+
+
 def resolve_dataset_uri(dataset_uri: str, settings: Settings) -> str:
     """Resolve dataset aliases that are backed by the mounted dataset plane."""
     if dataset_uri.startswith('s3://datasets/'):
@@ -179,12 +401,19 @@ def resolve_dataset_uri(dataset_uri: str, settings: Settings) -> str:
     if dataset_uri.startswith('s3://glasslab-datasets/'):
         path = dataset_uri.removeprefix('s3://glasslab-datasets/')
         return f'{settings.dataset_mount_path}/{path}'
+    if dataset_uri.startswith('s3://artifacts/'):
+        path = dataset_uri.removeprefix('s3://artifacts/')
+        return f'{settings.artifacts_mount_path}/{path}'
     return dataset_uri
 
 
 def validate_workflow_submission_support(workflow: Any, settings: Settings) -> list[str]:
     _, blockers = workflow_submission_ready(workflow)
     if blockers:
+        return blockers
+    if getattr(workflow, 'experiment_type', None):
+        if not list(getattr(workflow, 'default_entrypoint', []) or []):
+            blockers.append('generic workload is missing a default_entrypoint')
         return blockers
 
     placeholder_inputs: dict[str, Any] = {}
@@ -236,6 +465,7 @@ class KubernetesJobSubmitter(JobSubmitter):
         self.core_api = self.client.CoreV1Api()
 
     def submit_run(self, manifest: RunManifest) -> JobSubmissionReceipt:
+        evaluation_contract = resolve_evaluation_contract(manifest, self.settings)
         job_name = _build_job_name(manifest)
         labels = {
             'app.kubernetes.io/name': 'glasslab-v2-runner',
@@ -245,6 +475,11 @@ class KubernetesJobSubmitter(JobSubmitter):
         }
         if manifest.workload_id:
             labels['glasslab.io/workload-id'] = _sanitize_label(manifest.workload_id)
+        workspace_config = manifest.config_payload.get('workspace')
+        if isinstance(workspace_config, dict):
+            network_policy = str(workspace_config.get('network_policy', '')).strip()
+            if network_policy:
+                labels['glasslab.io/network-policy'] = _sanitize_label(network_policy)
 
         priority_class_name = ''
         if manifest.run_priority == 'autonomous':
@@ -307,9 +542,75 @@ class KubernetesJobSubmitter(JobSubmitter):
                 requests=manifest.resource_requests or None,
                 limits=manifest.resource_limits or None,
             ),
+            security_context=self.client.V1SecurityContext(
+                allow_privilege_escalation=False,
+                capabilities=self.client.V1Capabilities(drop=['ALL']),
+            ),
         )
         if manifest.entrypoint:
             container.command = manifest.entrypoint
+        original_entrypoint = list(container.command or [])
+        init_containers = None
+        if evaluation_contract:
+            contract_mount = '/evaluation-contract'
+            wrapper = f"{contract_mount}/{evaluation_contract['execution_wrapper']}"
+            evaluator = (
+                f"{contract_mount}/"
+                f"{evaluation_contract['evaluation_entry_point']}"
+            )
+            env.extend(
+                [
+                    self.client.V1EnvVar(
+                        name='GLASSLAB_EXPERIMENT_ENTRYPOINT_JSON',
+                        value=json.dumps(original_entrypoint),
+                    ),
+                    self.client.V1EnvVar(
+                        name='GLASSLAB_EVALUATION_ENTRY_POINT',
+                        value=evaluator,
+                    ),
+                    self.client.V1EnvVar(
+                        name='GLASSLAB_EVALUATION_CONTRACT_ID',
+                        value=evaluation_contract['contract_id'],
+                    ),
+                    self.client.V1EnvVar(
+                        name='GLASSLAB_EVALUATION_CONTRACT_VERSION',
+                        value=evaluation_contract['version'],
+                    ),
+                    self.client.V1EnvVar(
+                        name='GLASSLAB_EVALUATION_CONTRACT_DIGEST',
+                        value=evaluation_contract['digest'],
+                    ),
+                ]
+            )
+            container.env = env
+            container.command = ['python3', wrapper]
+            if 'container_image_digest' in evaluation_contract:
+                init_containers = [
+                    self.client.V1Container(
+                    name='evaluation-contract',
+                    image=evaluation_contract['container_image_digest'],
+                    image_pull_policy=self.settings.runner_image_pull_policy,
+                    command=[
+                        '/bin/sh',
+                        '-c',
+                        'cp -a /contract/. /contract-copy/',
+                    ],
+                    security_context=self.client.V1SecurityContext(
+                        allow_privilege_escalation=False,
+                        read_only_root_filesystem=True,
+                        run_as_non_root=True,
+                        capabilities=self.client.V1Capabilities(drop=['ALL']),
+                    ),
+                    volume_mounts=[
+                        self.client.V1VolumeMount(
+                            name='evaluation-contract',
+                            mount_path='/contract-copy',
+                        )
+                    ],
+                    )
+                ]
+
+        research_workspace = _is_research_workspace_manifest(manifest)
 
         runtime_class_name = None
         requested_gpu = manifest.resource_requests.get('nvidia.com/gpu') or manifest.resource_limits.get('nvidia.com/gpu')
@@ -319,11 +620,16 @@ class KubernetesJobSubmitter(JobSubmitter):
         pod_spec = self.client.V1PodSpec(
             restart_policy='Never',
             service_account_name=self.settings.runner_service_account_name,
+            automount_service_account_token=False,
             image_pull_secrets=[self.client.V1LocalObjectReference(name=self.settings.image_pull_secret_name)],
             containers=[container],
+            init_containers=init_containers,
             priority_class_name=priority_class_name or None,
             runtime_class_name=runtime_class_name,
             node_selector=manifest.node_selector or None,
+            security_context=self.client.V1PodSecurityContext(
+                seccomp_profile=self.client.V1SeccompProfile(type='RuntimeDefault'),
+            ),
             volumes=[
                 self.client.V1Volume(
                     name='dataset-volume',
@@ -337,25 +643,87 @@ class KubernetesJobSubmitter(JobSubmitter):
                         claim_name=self.settings.artifacts_pvc_name,
                     ),
                 ),
+                *(
+                    [
+                        self.client.V1Volume(
+                            name='evaluation-contract',
+                            **(
+                                {
+                                    'empty_dir': self.client.V1EmptyDirVolumeSource()
+                                }
+                                if 'container_image_digest' in evaluation_contract
+                                else {
+                                    'persistent_volume_claim': (
+                                        self.client.V1PersistentVolumeClaimVolumeSource(
+                                            claim_name=self.settings.artifacts_pvc_name,
+                                        )
+                                    )
+                                }
+                            ),
+                        )
+                    ]
+                    if evaluation_contract
+                    else []
+                ),
             ],
         )
 
-        container.volume_mounts = [
-            self.client.V1VolumeMount(
-                name='dataset-volume',
-                mount_path=self.settings.dataset_mount_path,
-                read_only=True,
-            ),
-            self.client.V1VolumeMount(
-                name='artifacts-volume',
-                mount_path=self.settings.artifacts_mount_path,
-            ),
-        ]
+        if research_workspace:
+            artifacts_root = Path(self.settings.artifacts_mount_path)
+            run_artifact_dir = artifacts_root / manifest.run_id
+            if run_artifact_dir.is_symlink():
+                raise ValueError('research workspace artifact directory cannot be a symlink')
+            run_artifact_dir.mkdir(parents=True, exist_ok=True)
+            container.volume_mounts = [
+                self.client.V1VolumeMount(**mount_spec)
+                for mount_spec in _research_workspace_volume_mount_specs(
+                    manifest,
+                    self.settings,
+                )
+            ]
+        else:
+            container.volume_mounts = [
+                self.client.V1VolumeMount(
+                    name='dataset-volume',
+                    mount_path=self.settings.dataset_mount_path,
+                    read_only=True,
+                ),
+                self.client.V1VolumeMount(
+                    name='artifacts-volume',
+                    mount_path=self.settings.artifacts_mount_path,
+                ),
+            ]
+        if evaluation_contract:
+            container.volume_mounts.append(
+                self.client.V1VolumeMount(
+                    name='evaluation-contract',
+                    mount_path='/evaluation-contract',
+                    read_only=True,
+                    **(
+                        {'sub_path': evaluation_contract['bundle_path']}
+                        if 'bundle_path' in evaluation_contract
+                        else {}
+                    ),
+                )
+            )
 
         job = self.client.V1Job(
-            metadata=self.client.V1ObjectMeta(name=job_name, labels=labels),
+            metadata=self.client.V1ObjectMeta(
+                name=job_name,
+                labels=labels,
+                annotations=(
+                    {
+                        'glasslab.io/evaluation-contract-digest': (
+                            evaluation_contract['digest']
+                        )
+                    }
+                    if evaluation_contract
+                    else None
+                ),
+            ),
             spec=self.client.V1JobSpec(
                 backoff_limit=self.settings.runner_backoff_limit,
+                active_deadline_seconds=_active_deadline_seconds(manifest),
                 ttl_seconds_after_finished=self.settings.runner_job_ttl_seconds,
                 template=self.client.V1PodTemplateSpec(
                     metadata=self.client.V1ObjectMeta(labels=labels),

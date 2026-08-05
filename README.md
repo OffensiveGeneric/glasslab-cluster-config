@@ -2,14 +2,16 @@
 
 Glasslab is a runner-first ML research system built on a home Kubernetes lab.
 
-The product is narrower than many of the older docs imply. The goal is not
-general agent chat. The goal is:
+The run fabric is deliberately narrow, but the product-level object is now an
+investigation. The goal is not general agent chat. The goal is:
 
-- keep a bounded research session
-- turn that session into a reviewable plan
+- keep a bounded investigation with explicit hypotheses
+- turn it into a reviewable plan
+- freeze an approved plan before execution
 - launch approved runs
 - compare outcomes
 - record a decision
+- link claims to exact run artifacts
 - propose the next bounded mutation
 
 ## Repo Layout
@@ -44,6 +46,16 @@ Useful service buckets:
 
 ## Canonical Product Direction
 
+The first bounded Honeydew/Beaker research workflow is documented in
+[`docs/research-orchestrator.md`](docs/research-orchestrator.md). It adds a
+durable outer research state machine around isolated OpenCode runtimes and the
+existing bounded cluster-execution service. The Titanic stack remains legacy
+v1 reference material.
+
+The current Discord and operator commands, arbitrary-task intake limits, and
+live progress are summarized in
+[`docs/research-orchestrator-command-surface.md`](docs/research-orchestrator-command-surface.md).
+
 The active product is `glasslab-v2`.
 
 The canonical local command path is:
@@ -75,35 +87,34 @@ There is no supported OpenClaw path in the current product.
 The intended primary loop is:
 
 ```text
-!new <goal>
-!add <source|note|dataset|baseline>
-!plan
-!check
-!run
-!compare
-!decide <keep|discard|revise>
-!next
+question
+  -> hypotheses
+  -> immutable execution-graph plan
+  -> explicit approval
+  -> dependency-checked bounded runs
+  -> verified evidence bundles
+  -> claim and next experiment
 ```
 
-Compatibility aliases may still exist:
-
-- `!start`
-- `!status`
-
-But the docs should teach the newer session/plan-oriented loop.
+OpenCode is the primary interactive surface. WhatsApp commands and
+research-session routes remain compatibility adapters; they are not the
+investigation data model.
 
 ## Start Here
 
 If you want the current source of truth:
 
+- [CONTRIBUTING.md](CONTRIBUTING.md)
 - [docs/glasslab-v2/current/README.md](docs/glasslab-v2/current/README.md)
 - [docs/glasslab-v2/canonical-stack-2026-04.md](docs/glasslab-v2/canonical-stack-2026-04.md)
 - [docs/glasslab-v2/system-map-2026-07.md](docs/glasslab-v2/system-map-2026-07.md)
 - [docs/glasslab-v2/learning-task-flow.md](docs/glasslab-v2/learning-task-flow.md)
+- [docs/glasslab-v2/investigation-api-v1.md](docs/glasslab-v2/investigation-api-v1.md)
 - [docs/glasslab-v2/local-model-command-surface.md](docs/glasslab-v2/local-model-command-surface.md)
 - [docs/glasslab-v2/deprecated-api-surface-2026-07.md](docs/glasslab-v2/deprecated-api-surface-2026-07.md)
 - [docs/glasslab-v2/ci-policy-2026-07.md](docs/glasslab-v2/ci-policy-2026-07.md)
 - [docs/glasslab-v2/command-surface-spec.md](docs/glasslab-v2/command-surface-spec.md)
+- [docs/research-orchestrator-command-surface.md](docs/research-orchestrator-command-surface.md)
 - [docs/glasslab-v2/router-and-backend-contract.md](docs/glasslab-v2/router-and-backend-contract.md)
 - [docs/glasslab-v2/deprecation-map-2026-04.md](docs/glasslab-v2/deprecation-map-2026-04.md)
 
@@ -122,10 +133,15 @@ If you need historical context:
 
 Important distinction:
 
+- `glasslab.org` is the public SSH gateway
 - the canonical live environment is the provisioner at `192.168.1.44`
+- the gateway and provisioner are separate machines
 - this laptop checkout is a working client and Git copy
 - ignored secrets, runtime bundles, imported images, and some operational truth
   still live only on `.44`
+
+See [docs/access-topology.md](docs/access-topology.md) for canonical host and
+SSH names.
 
 So:
 
@@ -140,6 +156,7 @@ Glasslab does not need more competing paths.
 It needs:
 
 - one canonical command surface
+- one canonical investigation record
 - one canonical record store
 - one canonical bounded experiment loop
 - one honest statement about what literature support currently is

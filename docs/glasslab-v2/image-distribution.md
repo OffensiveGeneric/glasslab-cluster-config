@@ -1,57 +1,79 @@
 # Image Distribution
 
-Glasslab v2 currently mixes pull-based upstream images with private GHCR paths for the custom backend and runner images.
+Glasslab's supported control-service image path is:
 
-## Current state
+```text
+merge to main
+    |
+    v
+Publish Service Images
+    |
+    +-- workflow-api:<full-commit-sha>
+    +-- research-orchestrator:<full-commit-sha>
+    |
+    v
+GHCR
+    |
+    v
+rollout-research-services.sh on .44
+    |
+    v
+Kubernetes pulls the exact reviewed image
+```
 
-- `workflow-api` is now targeted at `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.26-local`.
-- `generic-tabular-benchmark` runs use `ghcr.io/offensivegeneric/glasslab-tabular-runner:0.1.2`.
-- `literature-to-experiment` runs use `ghcr.io/offensivegeneric/glasslab-literature-runner:0.1.2`.
-- `gpu-experiment` runs use `ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.1`.
-- The first real execution path now depends on both images being pullable from private GHCR.
-- The steady-state path is now:
-  - build and push `workflow-api` with `scripts/push-workflow-api-image.sh`
-  - build and push the tabular runner with `scripts/push-tabular-runner-image.sh`
-  - create or refresh the in-cluster pull secret with `scripts/create-ghcr-pull-secret.sh`
-  - let Kubernetes pull the image on whichever worker schedules the pod
-- live validation on 2026-03-23 confirmed the deployment could pull and run on `node05` instead of `node03`
-- The old `.44` import helper still exists as an emergency fallback, not the primary deployment path.
-- Postgres, NATS, MinIO, and OpenClaw currently pull their images directly.
+## Publishing
 
-## Why node03 pinning existed
+`.github/workflows/service-images.yml` runs when either control service or its
+shared inputs change. It publishes both images as one release set:
 
-- The first live path predated any cluster pull secret.
-- Importing directly into `node03` containerd kept the initial bring-up deterministic.
-- That was a valid bring-up compromise, not a steady-state design.
+- `glasslab-workflow-api:<full-commit-sha>`
+- `glasslab-research-orchestrator:<full-commit-sha>`
 
-## Why the private GHCR path is better
+Publishing both ensures the default rollout and rollback commands always have
+a complete pair for the selected commit. Docker build caching keeps unchanged
+dependency layers reusable.
 
-- A reschedule no longer depends on node-local image import.
-- Rollback and disaster recovery can use a pullable artifact instead of remembered `ctr import` steps.
-- The same pattern can be reused for other private Glasslab images.
-- The cluster only needs read access to the package, not full GitHub repo access.
+Images use the full Git commit SHA. Mutable `latest` tags and manually chosen
+version counters are not part of the deployment contract.
 
-## Current private-registry strategy
+The manual Docker workflow remains available for diagnostics and explicit
+rebuilds. It is not the normal release path.
 
-1. Build and push `workflow-api` and the runner images to private GHCR.
-2. Maintain a `glasslab-ghcr-pull` Docker registry secret in the `glasslab-v2` namespace.
-3. Pin operator-managed images to explicit tags and then to digests once the release flow is stable.
-4. Keep the old import helper only as a break-glass fallback.
-5. Optionally add an internal registry mirror later if the lab wants faster pulls or less dependence on GitHub availability.
+## Deployment
 
-## Migration path
+The canonical `.44` checkout deploys an already-published commit:
 
-1. Log Docker into `ghcr.io` with a GitHub token that can write packages.
-2. Push `workflow-api` with `scripts/push-workflow-api-image.sh` and the runner with `scripts/push-tabular-runner-image.sh`.
-3. Create or refresh the pull secret with `scripts/create-ghcr-pull-secret.sh`.
-4. Update the Deployment to use the pushed image tag or digest.
-5. Validate that at least one non-`node03` worker can pull and start the image.
-6. Retire the manual import step from the primary runbook.
+```bash
+cd /home/glasslab/cluster-config
+./scripts/rollout-research-services.sh --sync
+```
 
-## Operator note
+The script:
 
-Current assumptions:
+1. refuses a tracked dirty checkout
+2. optionally fast-forwards to `origin/main`
+3. uses the checked-out full commit SHA as the image tag
+4. applies service configuration and policy manifests
+5. atomically renders each Deployment with the selected image
+6. waits for rollouts
+7. runs workflow-api and orchestrator readiness checks
 
-- the cluster needs a valid `glasslab-ghcr-pull` secret in `glasslab-v2`
-- image rebuilds should produce a new GHCR tag before rollout
-- the old import helper remains available if GHCR is temporarily unavailable or credentials need recovery
+Roll back by selecting a previously published commit:
+
+```bash
+./scripts/rollout-research-services.sh --tag <full-commit-sha>
+```
+
+## Credentials
+
+- GitHub Actions has write access only to the packages it publishes.
+- Kubernetes uses the namespace-local `glasslab-ghcr-pull` secret for read
+  access.
+- `.44` does not need a package-write token for a normal rollout.
+
+## Legacy fallback
+
+The local build, push, and containerd-import helpers remain break-glass tools
+for registry outages. They are not the contributor or normal deployment path.
+Node-local imports were useful during bring-up but make scheduling, rollback,
+and provenance depend on hidden machine state.

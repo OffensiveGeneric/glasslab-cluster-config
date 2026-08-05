@@ -1,0 +1,17 @@
+{
+  "container_image_digest": null,
+  "contract_id": "ml-benchmark-wine-clustering-v1",
+  "evaluation_entry_point": "evaluator.py",
+  "execution_wrapper": "run_contract.py",
+  "expected_input_schema": "input.schema.json",
+  "expected_output_schema": "output.schema.json",
+  "manifest": {
+    "description": "Deterministic integrity and evidence gate for the UCI Wine clustering benchmark.",
+    "primary_metric": "rubric_score",
+    "primary_metric_direction": "maximize",
+    "required_metric_keys": ["algorithm_count", "sample_count", "silhouette", "davies_bouldin", "adjusted_rand", "normalized_mutual_info", "stability_seeds", "pca_variance_2d"]
+  },
+  "required_artifacts": ["metrics.json", "evaluation.json", "report.md", "plots/clusters.png", "tables/comparison.csv"],
+  "resource_constraints": {"cpu": 4.0, "gpus": 0, "memory_gib": 8.0, "wallclock_minutes": 45},
+  "version": "1.0.0"
+}

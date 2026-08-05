@@ -51,7 +51,7 @@ Check:
 Example:
 
 ```bash
-ssh glasslab-44
+ssh glasslab-provisioner
 cd /home/glasslab/cluster-config
 grep -RIn "research-sessions/bootstrap" services/workflow-api/app
 kubectl -n glasslab-v2 get deploy glasslab-workflow-api -o wide

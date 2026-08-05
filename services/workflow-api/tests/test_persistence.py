@@ -14,6 +14,8 @@ import app.persistence as persistence_module
 from app.persistence import JsonFileRunStore, create_run_store
 from app.schemas import (
     ComparisonRecord,
+    InvestigationHypothesisRecord,
+    InvestigationRecord,
     OperationRecord,
     PaperIntakeQueueRecord,
     ResearchProblemRecord,
@@ -109,8 +111,27 @@ def test_json_store_persists_session_and_stage_metadata_across_restart(tmp_path:
         document_id=document.document_id,
         result_detail='stored session and stage metadata',
     )
+    investigation = InvestigationRecord(
+        investigation_id='investigation-1',
+        created_at=now,
+        updated_at=now,
+        status='planning',
+        title='Durable investigation state',
+        research_question='Does the durable investigation aggregate survive a store restart?',
+        research_mode='confirmatory',
+        hypotheses=[
+            InvestigationHypothesisRecord(
+                hypothesis_id='hypothesis-1',
+                statement='The investigation aggregate survives a JSON store restart.',
+                created_at=now,
+                submitted_by='glasslab-operator',
+            )
+        ],
+        submitted_by='glasslab-operator',
+    )
 
     store.save_research_session(session)
+    store.save_investigation(investigation)
     store.save_research_problem(problem)
     store.save_paper_intake_queue(queue)
     store.save_source_document(document)
@@ -123,6 +144,8 @@ def test_json_store_persists_session_and_stage_metadata_across_restart(tmp_path:
     assert reloaded_session is not None
     assert reloaded_session.session_id == session.session_id
     assert reloaded_session.latest_queue_id == queue.queue_id
+    assert reloaded.get_investigation(investigation.investigation_id) == investigation
+    assert reloaded.get_latest_investigation() == investigation
     assert reloaded.get_research_problem(problem.problem_id) == problem
     assert reloaded.get_paper_intake_queue(queue.queue_id) == queue
     assert reloaded.get_source_document(document.document_id) == document
@@ -230,12 +253,32 @@ def test_postgres_store_round_trips_through_psycopg_adapter(monkeypatch) -> None
         priorities=['durability'],
         submitted_by='glasslab-operator',
     )
+    investigation = InvestigationRecord(
+        investigation_id='investigation-1',
+        created_at=now,
+        updated_at=now,
+        status='planning',
+        title='Postgres investigation durability',
+        research_question='Does Postgres preserve the first-class investigation aggregate?',
+        research_mode='exploratory',
+        hypotheses=[
+            InvestigationHypothesisRecord(
+                hypothesis_id='hypothesis-1',
+                statement='Postgres preserves the investigation aggregate.',
+                created_at=now,
+                submitted_by='glasslab-operator',
+            )
+        ],
+        submitted_by='glasslab-operator',
+    )
     store.save_research_session(session)
+    store.save_investigation(investigation)
 
     reloaded = create_run_store('postgres', postgres_dsn='postgresql://test')
     reloaded_session = reloaded.get_latest_research_session()
     assert reloaded_session is not None
     assert reloaded_session.session_id == session.session_id
+    assert reloaded.get_latest_investigation() == investigation
 
 
 def test_postgres_store_round_trips_comparison_records(monkeypatch) -> None:

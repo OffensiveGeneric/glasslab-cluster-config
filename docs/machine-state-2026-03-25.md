@@ -10,7 +10,6 @@ It is meant to complement `live-state-2026-03-25.md` by keeping the current mach
 
 - role:
   - PXE / provisioner host
-  - bastion
   - canonical repo checkout
   - `kubectl` admin workstation
 - validated state:

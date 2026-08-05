@@ -1,0 +1,17 @@
+{
+  "container_image_digest": null,
+  "contract_id": "ml-benchmark-fashion-contrastive-v1",
+  "evaluation_entry_point": "evaluator.py",
+  "execution_wrapper": "run_contract.py",
+  "expected_input_schema": "input.schema.json",
+  "expected_output_schema": "output.schema.json",
+  "manifest": {
+    "description": "Deterministic integrity and evidence gate for the Fashion-MNIST contrastive benchmark.",
+    "primary_metric": "rubric_score",
+    "primary_metric_direction": "maximize",
+    "required_metric_keys": ["train_rows", "test_rows", "linear_probe_accuracy", "raw_linear_probe_accuracy", "knn_5_accuracy", "knn_20_accuracy", "retrieval_precision_at_10", "bootstrap_resamples", "embedding_dimension"]
+  },
+  "required_artifacts": ["metrics.json", "evaluation.json", "report.md", "plots/training_curve.png", "plots/embeddings.png", "tables/class_metrics.csv"],
+  "resource_constraints": {"cpu": 8.0, "gpus": 1, "memory_gib": 32.0, "wallclock_minutes": 240},
+  "version": "1.0.0"
+}

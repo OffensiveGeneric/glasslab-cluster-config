@@ -1,18 +1,21 @@
 FROM python:3.11-slim
-ARG GLASSLAB_GIT_SHA=unknown
-ARG GLASSLAB_BUILD_SOURCE=unspecified
-LABEL org.opencontainers.image.revision="${GLASSLAB_GIT_SHA}"
-LABEL io.glasslab.build-source="${GLASSLAB_BUILD_SOURCE}"
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
     PIP_DEFAULT_TIMEOUT=300 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    GLASSLAB_WORKFLOW_API_BUILD_SOURCE_REVISION=${GLASSLAB_GIT_SHA} \
-    GLASSLAB_WORKFLOW_API_BUILD_SOURCE_LABEL=${GLASSLAB_BUILD_SOURCE}
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 COPY services/workflow-api/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
+
+ARG GLASSLAB_GIT_SHA=unknown
+ARG GLASSLAB_BUILD_SOURCE=unspecified
+LABEL org.opencontainers.image.revision="${GLASSLAB_GIT_SHA}"
+LABEL org.opencontainers.image.source="https://github.com/OffensiveGeneric/glasslab-cluster-config"
+LABEL io.glasslab.build-source="${GLASSLAB_BUILD_SOURCE}"
+ENV \
+    GLASSLAB_WORKFLOW_API_BUILD_SOURCE_REVISION=${GLASSLAB_GIT_SHA} \
+    GLASSLAB_WORKFLOW_API_BUILD_SOURCE_LABEL=${GLASSLAB_BUILD_SOURCE}
 COPY services/common /app/services/common
 COPY services/workflow-registry /app/services/workflow-registry
 COPY services/workflow-api/app /app/app

@@ -28,25 +28,26 @@ Back them up separately. Git and `scripts/snapshot-provisioner-config.sh` do not
 ./scripts/seed-registry.sh
 ```
 
-5. Build and push the `workflow-api` image and bounded-agent images to private GHCR, then create or refresh the in-cluster pull secret.
+5. Confirm that the `Publish Service Images` workflow succeeded for the commit
+being deployed. It publishes `workflow-api` and `research-orchestrator` images
+under the full Git commit SHA.
 
 ```bash
-GHCR_TOKEN="$(gh auth token)" ./scripts/push-workflow-api-image.sh
-GHCR_TOKEN="$(gh auth token)" ./scripts/push-bounded-agent-images.sh
-GHCR_TOKEN="$(gh auth token)" ./scripts/create-ghcr-pull-secret.sh
+git rev-parse HEAD
+gh run list --workflow "Publish Service Images" --limit 5
 ```
 
 Current assumptions:
 - the `glasslab-v2` namespace contains a `glasslab-ghcr-pull` Docker registry secret
 - the shared PVCs `glasslab-shared-datasets` and `glasslab-shared-artifacts` exist and are `Bound`
-- the `workflow-api` Deployment pulls `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.8`
+- control-service images are pullable by full commit SHA
 - the bounded-agent Deployments pull:
   - `ghcr.io/offensivegeneric/glasslab-intake-agent:0.1.0`
   - `ghcr.io/offensivegeneric/glasslab-interpretation-agent:0.1.0`
   - `ghcr.io/offensivegeneric/glasslab-assessment-agent:0.1.0`
   - `ghcr.io/offensivegeneric/glasslab-design-agent:0.1.0`
   - `ghcr.io/offensivegeneric/glasslab-schedule-worker:0.1.0`
-- the old import helper remains available as a fallback if GHCR is unavailable
+- local push/import helpers are break-glass fallback paths
 
 Prereq check:
 
@@ -54,7 +55,7 @@ Prereq check:
 ./scripts/check-v2-run-prereqs.sh
 ```
 
-6. Apply the initial v2 core manifest tree.
+6. For initial infrastructure creation, apply the v2 core manifest tree.
 
 ```bash
 ./scripts/deploy-glasslab-v2.sh
@@ -70,7 +71,18 @@ It also applies the first explicit scheduling lanes:
 Current storage caveat:
 - Postgres and MinIO are still non-durable until the storage plan under `docs/glasslab-v2/storage-and-state.md` is implemented
 
-7. Verify rollout state and the workflow-api health endpoints.
+7. Roll out the CI-published control services. For routine updates this is the
+only deployment command required:
+
+```bash
+./scripts/rollout-research-services.sh --sync
+```
+
+Deploy one service with `--service workflow-api` or
+`--service research-orchestrator`. Roll back with
+`--tag <previous-full-commit-sha>`.
+
+8. Verify rollout state and health endpoints.
 
 ```bash
 ./scripts/smoke-test-v2.sh
@@ -93,7 +105,7 @@ kubectl -n glasslab-v2 rollout status deployment/glasslab-design-agent --timeout
 kubectl -n glasslab-v2 rollout status deployment/glasslab-schedule-worker --timeout=120s
 ```
 
-8. If the smoke test fails, inspect the namespace directly.
+9. If the smoke test fails, inspect the namespace directly.
 
 ```bash
 kubectl -n glasslab-v2 get pods -o wide
@@ -102,16 +114,16 @@ kubectl -n glasslab-v2 describe statefulset/glasslab-postgres
 kubectl -n glasslab-v2 logs deploy/glasslab-workflow-api --tail=200
 ```
 
-9. If the rollout fails with image pull errors, verify the private registry secret before falling back to a manual import.
+10. If the rollout fails with image pull errors, verify the private registry secret before falling back to a manual import.
 
 ```bash
 kubectl -n glasslab-v2 get secret glasslab-ghcr-pull
 kubectl -n glasslab-v2 describe pod -l app.kubernetes.io/name=glasslab-workflow-api
 ```
 
-10. Do not expose v2 publicly yet. Keep access internal until the deterministic WhatsApp/control path and backend policies are fully validated.
+11. Do not expose v2 publicly yet. Keep access internal until the command surface and backend policies are fully validated.
 
-11. Keep all bounded-agent feature flags disabled in `workflow-api` until each service has been deployed and tested one stage at a time.
+12. Keep all bounded-agent feature flags disabled in `workflow-api` until each service has been deployed and tested one stage at a time.
 
 Reference:
 
