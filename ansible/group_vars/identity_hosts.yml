@@ -10,6 +10,7 @@ glasslab_identity_users:
   - username: gr66ss-glasslab
     display_name: Glasslab infrastructure administrator
     state: present
+    password_locked: true
     targets: [gateway, provisioner, exo]
     darwin_uid: 502
     roles:
@@ -23,6 +24,9 @@ glasslab_identity_users:
   - username: denic
     display_name: Denise Cakoni
     state: present
+    # Keep the existing password during key onboarding. Set true only after a
+    # successful key-only login has been confirmed from every active client.
+    password_locked: false
     targets: [gateway, provisioner, exo]
     darwin_uid: 503
     roles:
@@ -35,6 +39,9 @@ glasslab_identity_users:
   - username: tristanc
     display_name: Tristan C
     state: present
+    # Keep the existing password during key onboarding. Set true only after a
+    # successful key-only login has been confirmed from every active client.
+    password_locked: false
     targets: [gateway, provisioner, exo]
     darwin_uid: 504
     roles:

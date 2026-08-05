@@ -50,6 +50,11 @@ Host glasslab-exo18
 Public keys should be installed on both hosts. Password reuse between the
 gateway and provisioner is not the account synchronization mechanism.
 
+Password retirement is staged. Existing passwords remain available until the
+contributor has demonstrated key-only login from every computer they actively
+use. An administrator then changes the account's committed
+`password_locked` setting and reapplies the identity playbook.
+
 ## Development Checkouts
 
 Contributors must develop in separate clones under their own home directories.
