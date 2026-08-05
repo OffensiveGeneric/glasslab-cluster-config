@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import io
 from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
 
+from .artifact_delivery import ArtifactBundle, build_run_artifact_bundle
 from .schemas import (
     ApprovalStatus,
     IngestedDatasetRecord,
@@ -174,6 +176,24 @@ def execute_discord_task_creation(
     )
 
 
+def execute_discord_artifact_export(
+    engine: ResearchOrchestrator,
+    *,
+    run_id: str,
+    maximum_bytes: int,
+    include_source: bool,
+) -> ArtifactBundle:
+    engine.store.get_run(run_id)
+    return build_run_artifact_bundle(
+        run_id=run_id,
+        artifacts=engine.store.list_artifacts(run_id),
+        jobs=engine.store.list_jobs(run_id),
+        shared_mount_root=engine.settings.shared_mount_root,
+        maximum_bytes=maximum_bytes,
+        include_source=include_source,
+    )
+
+
 # Compatibility name for callers that predate generic task compilation.
 execute_discord_benchmark_creation = execute_discord_task_creation
 
@@ -191,11 +211,13 @@ class DiscordControlGateway:
         admin_role_id: str | None,
         admin_user_ids: list[str],
         maximum_dataset_upload_bytes: int,
+        maximum_artifact_bundle_bytes: int = 24 * 1024 * 1024,
     ) -> None:
         self.engine = engine
         self.bot_token = bot_token
         self.channel_id = channel_id
         self.maximum_dataset_upload_bytes = maximum_dataset_upload_bytes
+        self.maximum_artifact_bundle_bytes = maximum_artifact_bundle_bytes
         self.policy = DiscordControlPolicy(
             guild_id=guild_id,
             admin_role_id=admin_role_id,
@@ -320,6 +342,26 @@ class DiscordControlGateway:
                 name=str(name),
                 role=str(role),
                 contains_labels=contains_labels,
+            )
+
+        @self.tree.command(
+            name='research-artifacts',
+            description='Download verified artifacts for a Glasslab research run.',
+            guild=self.guild,
+        )
+        @app_commands.describe(
+            run_id='Optional in a run thread; required from the main channel.',
+            include_source='Include frozen source and task ZIP files.',
+        )
+        async def research_artifacts(
+            interaction: discord.Interaction,
+            run_id: str | None = None,
+            include_source: bool = False,
+        ) -> None:
+            await self._on_research_artifacts(
+                interaction,
+                run_id=run_id,
+                include_source=include_source,
             )
 
     def _register_run_control_command(self, operation: str) -> None:
@@ -674,6 +716,57 @@ class DiscordControlGateway:
         except Exception as exc:
             await interaction.followup.send(
                 f'Dataset ingestion failed: {exc}',
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+
+    async def _on_research_artifacts(
+        self,
+        interaction: discord.Interaction,
+        *,
+        run_id: str | None,
+        include_source: bool,
+    ) -> None:
+        actor = self._actor(interaction)
+        if not self.policy.is_authorized(actor):
+            await self._respond(
+                interaction,
+                'You are not authorized to download Glasslab artifacts.',
+            )
+            return
+        try:
+            run = self._resolve_controlled_run(
+                channel_id=str(interaction.channel_id),
+                run_id=run_id,
+            )
+        except Exception as exc:
+            await self._respond(interaction, f'Artifact export failed: {exc}')
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            bundle = await asyncio.to_thread(
+                execute_discord_artifact_export,
+                self.engine,
+                run_id=run.run_id,
+                maximum_bytes=self.maximum_artifact_bundle_bytes,
+                include_source=include_source,
+            )
+            await interaction.followup.send(
+                (
+                    f'Digest-verified artifact bundle for `{run.run_id}` '
+                    f'({bundle.artifact_count} files).'
+                ),
+                file=discord.File(
+                    io.BytesIO(bundle.content),
+                    filename=bundle.filename,
+                ),
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except Exception as exc:
+            await interaction.followup.send(
+                f'Artifact export failed: {exc}',
                 ephemeral=True,
                 allowed_mentions=discord.AllowedMentions.none(),
             )

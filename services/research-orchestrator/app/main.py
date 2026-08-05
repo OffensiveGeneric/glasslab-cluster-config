@@ -169,6 +169,9 @@ def create_app(
             maximum_dataset_upload_bytes=(
                 settings.maximum_discord_dataset_upload_bytes
             ),
+            maximum_artifact_bundle_bytes=(
+                settings.maximum_discord_artifact_bundle_bytes
+            ),
         )
 
     @asynccontextmanager
