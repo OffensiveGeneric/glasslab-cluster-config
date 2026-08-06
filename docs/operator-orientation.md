@@ -1,5 +1,11 @@
 # Operator Orientation
 
+> **Historical orientation:** this document predates the deployed
+> Honeydew/Beaker research orchestrator and still describes OpenClaw as the
+> operator layer. For current agent and operator context, start with
+> [`../AGENTS.md`](../AGENTS.md) and
+> [`research-orchestrator-command-surface.md`](research-orchestrator-command-surface.md).
+
 This document is for one purpose: to let you remember what Glasslab is without reloading the whole repo into your head.
 
 It is not a deployment runbook. It is the map.
