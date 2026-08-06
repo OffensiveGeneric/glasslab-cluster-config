@@ -14,6 +14,7 @@ Current issues:
 
 ## P0: Restore The End-To-End Research Loop
 
+- [#104 Prevent missing Honeydew contract metadata from failing a run](https://github.com/OffensiveGeneric/glasslab-cluster-config/issues/104)
 - [#92 Add terminal research-run checkpoint retry](https://github.com/OffensiveGeneric/glasslab-cluster-config/issues/92)
 - [#100 Complete corrected Wine clustering run](https://github.com/OffensiveGeneric/glasslab-cluster-config/issues/100), blocked by #92
 
