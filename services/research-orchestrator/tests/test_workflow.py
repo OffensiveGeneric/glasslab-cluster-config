@@ -321,6 +321,31 @@ class MissingProtocolThenRepairRuntime(ScriptedMockRuntime):
         return result
 
 
+class MissingContractProposalThenRepairRuntime(ScriptedMockRuntime):
+    def __init__(self, *, runner_image: str) -> None:
+        super().__init__(runner_image=runner_image)
+        self.removed_first_proposal = False
+
+    def run_turn(self, **kwargs):
+        prompt = kwargs['prompt']
+        if 'Focused structured-output repair' in prompt:
+            return super().run_turn(
+                **{
+                    **kwargs,
+                    'prompt': 'Draft a concrete program.md',
+                }
+            )
+        result, message_id = super().run_turn(**kwargs)
+        if (
+            kwargs['agent'] == AgentName.HONEYDEW
+            and 'Draft a concrete program.md' in prompt
+            and not self.removed_first_proposal
+        ):
+            result.evaluation_contract_proposal = None
+            self.removed_first_proposal = True
+        return result, message_id
+
+
 class PauseDuringImplementationRuntime(ScriptedMockRuntime):
     def __init__(self, *, runner_image: str) -> None:
         super().__init__(runner_image=runner_image)
@@ -800,6 +825,53 @@ def test_missing_honeydew_protocol_file_gets_one_focused_repair(
     assert 'agent.file_repair_requested' in event_types
     assert 'agent.file_repair_completed' in event_types
     assert runtime.turn_counts[AgentName.HONEYDEW] == 2
+
+
+def test_missing_contract_proposal_gets_one_focused_repair(
+    orchestrator_bundle,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    runtime = MissingContractProposalThenRepairRuntime(runner_image=RUNNER_IMAGE)
+    engine.runtime = runtime
+
+    run = engine.create_run(
+        RunCreateRequest(objective='Repair missing contract proposal metadata.')
+    )
+
+    assert run.state == RunState.AWAITING_PROTOCOL_APPROVAL
+    proposal = next(
+        artifact
+        for artifact in store.list_artifacts(run.run_id)
+        if artifact.type == 'evaluation_contract_proposal'
+    )
+    assert proposal.metadata['origin'] == 'honeydew'
+    event_types = {
+        event.event_type for event in store.list_events(run.run_id)
+    }
+    assert 'agent.output_rejected' in event_types
+    assert 'agent.output_repaired' in event_types
+    assert runtime.turn_counts[AgentName.HONEYDEW] == 2
+
+
+def test_bound_legacy_contract_can_supply_missing_proposal(
+    orchestrator_bundle,
+) -> None:
+    _, _, _, _, engine = orchestrator_bundle
+    descriptor = engine.contracts.resolve(
+        'ml-benchmark-adult-income-v1',
+        '1.1.0',
+    ).descriptor
+
+    proposal = engine._proposal_from_bound_contract(descriptor)
+
+    assert proposal.evaluator_type == descriptor.contract_id
+    assert proposal.primary_metric.name == 'rubric_score'
+    assert proposal.primary_metric.direction == 'maximize'
+    assert proposal.required_artifacts == descriptor.required_artifacts
+    assert proposal.max_wallclock_minutes == 60
+    assert proposal.resource_constraints.model_dump() == (
+        descriptor.resource_constraints.model_dump()
+    )
 
 
 def test_idempotent_job_submission(orchestrator_bundle) -> None:
