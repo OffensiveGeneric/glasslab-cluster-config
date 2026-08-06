@@ -13,6 +13,9 @@ secondary, compatibility-only, or historical.
 
 Read these first:
 
+- `AGENTS.md`
+- `HANDOFF.md`
+- `TODO.md`
 - `README.md`
 - `docs/access-topology.md`
 - `docs/contributor-access.md`
@@ -50,6 +53,19 @@ The default check mirrors the default CI signal:
 Create one branch for one coherent change and open a pull request into `main`.
 Continue pushing revisions to the same branch; GitHub updates the pull request
 automatically.
+
+Start substantive work from a GitHub issue. The issue is the authoritative
+record for scope, status, acceptance criteria, dependencies, and discussion;
+`TODO.md` is only a short priority index. Before coding:
+
+1. Check for an existing issue.
+2. Create one with the work-item template if none exists.
+3. Apply one `priority:*`, one `state:*`, and the relevant `area:*` labels.
+4. Comment when taking ownership and link the working branch or pull request.
+
+Use `Closes #<issue>` in the pull request when the merge fully resolves the
+work. If it only contributes to a larger issue, use `Refs #<issue>` and leave
+the remaining acceptance criteria visible on the issue.
 
 `main` is protected. A merge requires:
 

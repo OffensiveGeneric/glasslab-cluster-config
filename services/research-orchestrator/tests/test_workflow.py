@@ -72,6 +72,57 @@ def test_human_approval_states_stop_active_runtime_clock(
     assert revising.active_runtime_seconds == waiting.active_runtime_seconds
 
 
+def test_failed_result_starts_a_fresh_methodology_revision_budget(
+    orchestrator_bundle,
+    monkeypatch,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(objective='Repair a failed executed experiment.')
+    )
+    verifying = store.replace_run(
+        run.model_copy(
+            update={
+                'state': RunState.HONEYDEW_VERIFYING,
+                'methodology_revision_count': 2,
+            }
+        ),
+        expected_version=run.version,
+    )
+    monkeypatch.setattr(
+        engine,
+        '_run_agent_turn',
+        lambda **_kwargs: (
+            None,
+            AgentTurnResult(
+                kind=TurnKind.VERIFICATION,
+                summary='The executed candidate needs a code repair.',
+                done=False,
+            ),
+        ),
+    )
+    monkeypatch.setattr(engine, '_beaker_revise', lambda *_args, **_kwargs: None)
+
+    engine._verify_results(verifying.run_id)
+
+    revising = store.get_run(verifying.run_id)
+    assert revising.state == RunState.BEAKER_REVISING
+    assert revising.methodology_revision_count == 0
+    reset = next(
+        event
+        for event in store.list_events(verifying.run_id)
+        if event.event_type == 'methodology.revision_budget_reset'
+    )
+    assert reset.payload['previous_revision_count'] == 2
+    assert reset.payload['revision_count'] == 0
+
+    engine._request_methodology_revision(
+        verifying.run_id,
+        feedback='The first post-execution repair remains incomplete.',
+    )
+    assert store.get_run(verifying.run_id).methodology_revision_count == 1
+
+
 def test_evidence_snapshot_projects_bounded_verified_artifact_contents(
     orchestrator_bundle,
 ) -> None:
@@ -268,6 +319,31 @@ class MissingProtocolThenRepairRuntime(ScriptedMockRuntime):
             (kwargs['workspace'] / 'program.md').unlink()
             self.removed_first_protocol = True
         return result
+
+
+class MissingContractProposalThenRepairRuntime(ScriptedMockRuntime):
+    def __init__(self, *, runner_image: str) -> None:
+        super().__init__(runner_image=runner_image)
+        self.removed_first_proposal = False
+
+    def run_turn(self, **kwargs):
+        prompt = kwargs['prompt']
+        if 'Focused structured-output repair' in prompt:
+            return super().run_turn(
+                **{
+                    **kwargs,
+                    'prompt': 'Draft a concrete program.md',
+                }
+            )
+        result, message_id = super().run_turn(**kwargs)
+        if (
+            kwargs['agent'] == AgentName.HONEYDEW
+            and 'Draft a concrete program.md' in prompt
+            and not self.removed_first_proposal
+        ):
+            result.evaluation_contract_proposal = None
+            self.removed_first_proposal = True
+        return result, message_id
 
 
 class PauseDuringImplementationRuntime(ScriptedMockRuntime):
@@ -751,6 +827,53 @@ def test_missing_honeydew_protocol_file_gets_one_focused_repair(
     assert runtime.turn_counts[AgentName.HONEYDEW] == 2
 
 
+def test_missing_contract_proposal_gets_one_focused_repair(
+    orchestrator_bundle,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    runtime = MissingContractProposalThenRepairRuntime(runner_image=RUNNER_IMAGE)
+    engine.runtime = runtime
+
+    run = engine.create_run(
+        RunCreateRequest(objective='Repair missing contract proposal metadata.')
+    )
+
+    assert run.state == RunState.AWAITING_PROTOCOL_APPROVAL
+    proposal = next(
+        artifact
+        for artifact in store.list_artifacts(run.run_id)
+        if artifact.type == 'evaluation_contract_proposal'
+    )
+    assert proposal.metadata['origin'] == 'honeydew'
+    event_types = {
+        event.event_type for event in store.list_events(run.run_id)
+    }
+    assert 'agent.output_rejected' in event_types
+    assert 'agent.output_repaired' in event_types
+    assert runtime.turn_counts[AgentName.HONEYDEW] == 2
+
+
+def test_bound_legacy_contract_can_supply_missing_proposal(
+    orchestrator_bundle,
+) -> None:
+    _, _, _, _, engine = orchestrator_bundle
+    descriptor = engine.contracts.resolve(
+        'ml-benchmark-adult-income-v1',
+        '1.1.0',
+    ).descriptor
+
+    proposal = engine._proposal_from_bound_contract(descriptor)
+
+    assert proposal.evaluator_type == descriptor.contract_id
+    assert proposal.primary_metric.name == 'rubric_score'
+    assert proposal.primary_metric.direction == 'maximize'
+    assert proposal.required_artifacts == descriptor.required_artifacts
+    assert proposal.max_wallclock_minutes == 60
+    assert proposal.resource_constraints.model_dump() == (
+        descriptor.resource_constraints.model_dump()
+    )
+
+
 def test_idempotent_job_submission(orchestrator_bundle) -> None:
     _, store, cluster, _, engine = orchestrator_bundle
     run = _advance_to_jobs(engine, store)
@@ -1192,7 +1315,11 @@ def test_imported_task_resume_finalizes_existing_runner(
     source_subdirectory = 'benchmark-workspace/adult-income'
     source = Path(run.beaker_workspace) / source_subdirectory
     source.mkdir(parents=True)
-    (source / 'run.py').write_text('print("preserved implementation")\n')
+    (source / 'run.py').write_text(
+        'import json\n'
+        'with open("metrics.json", "w") as handle:\n'
+        '    json.dump({"score": 1.0}, handle)\n'
+    )
     config = Path(run.beaker_workspace) / 'configs' / 'candidate.yaml'
     config.parent.mkdir(exist_ok=True)
     config.write_text('candidate: true\n')

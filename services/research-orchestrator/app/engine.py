@@ -28,6 +28,7 @@ from .schemas import (
     ArtifactRecord,
     ContractCandidateRequest,
     EvaluationContractDescriptor,
+    EvaluationContractProposal,
     ExperimentMatrix,
     JOB_TERMINAL_STATUSES,
     JobRecord,
@@ -1099,10 +1100,81 @@ class ResearchOrchestrator:
                 event_type='agent.file_repair_completed',
                 payload={'path': protocol_files[0].path},
             )
+        resolved_contract = self.contracts.resolve(
+            run.evaluation_contract_id,
+            run.evaluation_contract_version,
+        )
+        descriptor = resolved_contract.descriptor
         proposal = result.evaluation_contract_proposal
-        if proposal is None:
-            raise WorkflowError(
-                'Honeydew must return an evaluation contract proposal'
+        proposal_turn_id = turn.turn_id
+        proposal_origin = 'honeydew'
+        legacy_bound_task = bool(
+            run.task_definition
+            and run.task_definition.get('compilation_source') == 'legacy'
+        )
+        if proposal is None and legacy_bound_task:
+            proposal = self._proposal_from_bound_contract(descriptor)
+            proposal_origin = 'installed_contract'
+            self._event(
+                run_id,
+                source='orchestrator',
+                event_type='contract.proposal_bound',
+                payload={
+                    'turn_id': turn.turn_id,
+                    'contract_id': descriptor.contract_id,
+                    'contract_version': descriptor.version,
+                    'reason': (
+                        'The imported legacy task already has an immutable '
+                        'repository-controlled evaluation contract.'
+                    ),
+                },
+            )
+        elif proposal is None:
+            self._event(
+                run_id,
+                source='orchestrator',
+                event_type='agent.output_rejected',
+                payload={
+                    'turn_id': turn.turn_id,
+                    'expected_field': 'evaluation_contract_proposal',
+                    'repair_attempted': True,
+                },
+            )
+            proposal_turn, repaired = self._run_agent_turn(
+                run_id=run_id,
+                agent=AgentName.HONEYDEW,
+                prompt=(
+                    'Focused structured-output repair. Your protocol was '
+                    'written successfully, but the prior response omitted '
+                    '`evaluation_contract_proposal`. Do not edit program.md '
+                    'or request actions. Return kind `protocol_draft` and '
+                    'populate evaluation_contract_proposal with the scientific '
+                    'evaluator type, primary metric and direction, minimum '
+                    'meaningful effect, guardrails, required artifacts, budget '
+                    'policy, resource ceilings, and rationale. Do not include '
+                    'executable paths, commands, images, or checksums.'
+                ),
+                expected_kind=TurnKind.PROTOCOL_DRAFT,
+                input_event={
+                    'repair': 'missing_evaluation_contract_proposal',
+                    'protocol_turn_id': turn.turn_id,
+                },
+            )
+            proposal = repaired.evaluation_contract_proposal
+            if proposal is None or repaired.requested_actions:
+                raise WorkflowError(
+                    'Honeydew contract-proposal repair did not return the '
+                    'required bounded proposal'
+                )
+            proposal_turn_id = proposal_turn.turn_id
+            self._event(
+                run_id,
+                source='honeydew',
+                event_type='agent.output_repaired',
+                payload={
+                    'turn_id': proposal_turn.turn_id,
+                    'field': 'evaluation_contract_proposal',
+                },
             )
         proposal_resources = proposal.resource_constraints
         if (
@@ -1153,11 +1225,6 @@ class ResearchOrchestrator:
                 'turn_id': turn.turn_id,
             },
         )
-        resolved_contract = self.contracts.resolve(
-            run.evaluation_contract_id,
-            run.evaluation_contract_version,
-        )
-        descriptor = resolved_contract.descriptor
         technical_primary_metric = str(
             descriptor.manifest.get('primary_metric', '')
         )
@@ -1217,7 +1284,8 @@ class ResearchOrchestrator:
             digest=proposal_digest,
             metadata={
                 'path': str(proposal_path),
-                'turn_id': turn.turn_id,
+                'turn_id': proposal_turn_id,
+                'origin': proposal_origin,
                 'proposal': proposal_payload,
                 'technical_binding': technical_binding,
             },
@@ -1231,7 +1299,8 @@ class ResearchOrchestrator:
                 'uri': proposal_uri,
                 'path': str(proposal_path),
                 'sha256': proposal_digest,
-                'turn_id': turn.turn_id,
+                'turn_id': proposal_turn_id,
+                'origin': proposal_origin,
                 'proposal': proposal_payload,
                 'technical_binding': technical_binding,
             },
@@ -1242,6 +1311,34 @@ class ResearchOrchestrator:
             reason='Human approval is required before implementation.',
         )
         self._transition(run_id, RunState.AWAITING_PROTOCOL_APPROVAL)
+
+    @staticmethod
+    def _proposal_from_bound_contract(
+        descriptor: EvaluationContractDescriptor,
+    ) -> EvaluationContractProposal:
+        """Project an immutable legacy contract into the scientific proposal."""
+        resources = descriptor.resource_constraints
+        return EvaluationContractProposal.model_validate(
+            {
+                'evaluator_type': descriptor.contract_id,
+                'primary_metric': {
+                    'name': descriptor.manifest['primary_metric'],
+                    'direction': descriptor.manifest[
+                        'primary_metric_direction'
+                    ],
+                    'minimum_effect': 0.0,
+                },
+                'guardrails': [],
+                'required_artifacts': descriptor.required_artifacts,
+                'budget_mode': 'wallclock',
+                'max_wallclock_minutes': resources.wallclock_minutes,
+                'resource_constraints': resources.model_dump(mode='json'),
+                'rationale': (
+                    'This imported task is bound to an immutable '
+                    'repository-controlled evaluation contract.'
+                ),
+            }
+        )
 
     def approve_action(
         self,
@@ -1995,7 +2092,10 @@ class ResearchOrchestrator:
             )
             + '\nKeep reason beside type and arguments. Put the ExperimentMatrix '
             'fields directly in arguments; do not add a matrix or evaluator_type '
-            'wrapper.'
+            'wrapper. Matrix seeds create separate cluster jobs. If the workload '
+            'already runs an internal seed list for stability analysis, keep '
+            'that list in the implementation and use one outer matrix seed; do '
+            'not mirror the internal list into the matrix.'
             + task_context
         )
         turn, result = self._run_agent_turn(
@@ -2084,7 +2184,10 @@ class ResearchOrchestrator:
             )
             + '\nKeep reason beside type and arguments. Put the ExperimentMatrix '
             'fields directly in arguments; do not add a matrix or evaluator_type '
-            'wrapper.'
+            'wrapper. Matrix seeds create separate cluster jobs. If the workload '
+            'already runs an internal seed list for stability analysis, keep '
+            'that list in the implementation and use one outer matrix seed; do '
+            'not mirror the internal list into the matrix.'
         )
         turn, result = self._run_agent_turn(
             run_id=run_id,
@@ -2662,7 +2765,10 @@ class ResearchOrchestrator:
             )
             + '\nKeep reason beside type and arguments. Put the ExperimentMatrix '
             'fields directly in arguments; do not add a matrix or evaluator_type '
-            'wrapper.\n\n'
+            'wrapper. Matrix seeds create separate cluster jobs. If the workload '
+            'already runs an internal seed list for stability analysis, keep '
+            'that list in the implementation and use one outer matrix seed; do '
+            'not mirror the internal list into the matrix.\n\n'
             f'Review feedback:\n{feedback}'
             + task_context
         )
@@ -3205,6 +3311,14 @@ class ResearchOrchestrator:
             input_event=evidence,
         )
         if not result.done:
+            self.store.reset_methodology_revision_budget(
+                run_id,
+                reason=(
+                    'new cluster evidence requires a post-execution repair '
+                    'cycle'
+                ),
+            )
+            self._publish_latest(run_id)
             self._transition(run_id, RunState.BEAKER_REVISING)
             self._beaker_revise(
                 run_id,

@@ -264,8 +264,10 @@ def _source_errors(
     source: Path,
     *,
     required_metric_keys: list[str],
+    required_artifacts: list[str],
 ) -> list[str]:
     errors: list[str] = []
+    referenced_tokens: set[str] = set()
     if not source.is_dir():
         return ['imported task source directory is missing']
     for path in sorted(source.rglob('*')):
@@ -290,6 +292,12 @@ def _source_errors(
                     f'{exc.msg}'
                 )
             else:
+                referenced_tokens.update(
+                    node.value
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.Constant)
+                    and isinstance(node.value, str)
+                )
                 if path.name == 'run.py':
                     errors.extend(
                         _metrics_root_errors(
@@ -308,6 +316,20 @@ def _source_errors(
                 'while the immutable contract owns evaluation.json, '
                 'integrity_pass, and rubric_score'
             )
+    evaluator_owned = EVALUATOR_OWNED_LITERALS & set(required_artifacts)
+    for artifact in required_artifacts:
+        if artifact in evaluator_owned:
+            continue
+        parts = [part for part in Path(artifact).parts if part not in {'.', '/'}]
+        if all(
+            any(part == literal or artifact == literal for literal in referenced_tokens)
+            for part in parts
+        ):
+            continue
+        errors.append(
+            'workload source does not statically reference required artifact: '
+            f'{artifact}'
+        )
     return errors
 
 
@@ -407,12 +429,25 @@ def preflight_matrix(
                         [],
                     )
                 ),
+                required_artifacts=list(contract.descriptor.required_artifacts),
             )
             errors.extend(source_findings)
             if not source_findings:
                 checks.append(
                     'workspace syntax and evaluator-output ownership checks passed'
                 )
+
+    configured_seeds = config.get('seeds')
+    if (
+        isinstance(configured_seeds, list)
+        and len(configured_seeds) > 1
+        and configured_seeds == matrix.seeds
+    ):
+        errors.append(
+            'candidate config and outer experiment matrix contain the same '
+            'multi-seed list; internal stability seeds must run inside one job, '
+            'while matrix seeds create independent replicated jobs'
+        )
 
     job_count = len(matrix.variants) * len(matrix.seeds)
     checks.append(f'deterministic expansion produces {job_count} job(s)')

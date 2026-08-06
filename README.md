@@ -56,31 +56,22 @@ The current Discord and operator commands, arbitrary-task intake limits, and
 live progress are summarized in
 [`docs/research-orchestrator-command-surface.md`](docs/research-orchestrator-command-surface.md).
 
-The active product is `glasslab-v2`.
+The active product is the `glasslab-v2` research orchestrator.
 
-The canonical local command path is:
+The canonical human research path is:
 
-- `OpenCode`
-- exo OpenAI-compatible serving
-- repo-owned scripts
+- Discord
+- `research-orchestrator`
+- isolated Honeydew and Beaker OpenCode runtimes
+- exo OpenAI-compatible model serving
 - `workflow-api`
+- bounded Kubernetes Jobs
 
-The optional remote adapter path is:
-
-- `whatsapp-gateway`
-- `research-ingress`
-- `research-command-router`
-- `workflow-api`
-
-The canonical control plane is:
-
-- `workflow-api`
-
-The canonical bounded inference lane is:
-
-- exo OpenAI-compatible serving
-
-There is no supported OpenClaw path in the current product.
+OpenCode is the agents' inner tool-use runtime, not the durable workflow or
+human approval surface. `workflow-api` remains the canonical cluster execution
+control plane. WhatsApp, OpenClaw, and the older command-router path are
+compatibility or historical material rather than the current research front
+door.
 
 ## Primary Operator Loop
 
@@ -96,14 +87,17 @@ question
   -> claim and next experiment
 ```
 
-OpenCode is the primary interactive surface. WhatsApp commands and
-research-session routes remain compatibility adapters; they are not the
-investigation data model.
+Discord is the primary human surface. The research orchestrator's database and
+append-only event log are authoritative; Discord is their operator-facing
+projection. OpenCode remains internal to Honeydew and Beaker.
 
 ## Start Here
 
 If you want the current source of truth:
 
+- [AGENTS.md](AGENTS.md) for the concise coding-agent and contributor handoff
+- [HANDOFF.md](HANDOFF.md) for the summarized current implementation checkpoint
+- [TODO.md](TODO.md) for the prioritized index into the GitHub Issues work queue
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [docs/glasslab-v2/current/README.md](docs/glasslab-v2/current/README.md)
 - [docs/glasslab-v2/canonical-stack-2026-04.md](docs/glasslab-v2/canonical-stack-2026-04.md)
