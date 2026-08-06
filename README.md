@@ -96,6 +96,8 @@ projection. OpenCode remains internal to Honeydew and Beaker.
 If you want the current source of truth:
 
 - [AGENTS.md](AGENTS.md) for the concise coding-agent and contributor handoff
+- [HANDOFF.md](HANDOFF.md) for the summarized current implementation checkpoint
+- [TODO.md](TODO.md) for the prioritized index into the GitHub Issues work queue
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [docs/glasslab-v2/current/README.md](docs/glasslab-v2/current/README.md)
 - [docs/glasslab-v2/canonical-stack-2026-04.md](docs/glasslab-v2/canonical-stack-2026-04.md)

@@ -2,6 +2,8 @@
 
 This file is the first stop for coding agents working with Glasslab. Read it
 before inferring architecture from older documents or changing live systems.
+It contains stable operating rules. Read `HANDOFF.md` for summarized current
+state and `TODO.md` for links into the authoritative GitHub Issues work queue.
 
 ## Authority And Vocabulary
 
@@ -255,13 +257,15 @@ work around this release flow.
 
 ## Reading Order
 
-1. `README.md`
-2. `docs/research-orchestrator-command-surface.md`
-3. `docs/research-orchestrator.md`
-4. `docs/access-topology.md`
-5. `docs/contributor-access.md`
-6. `CONTRIBUTING.md`
-7. `docs/glasslab-v2/current/README.md`
+1. `HANDOFF.md`
+2. `TODO.md`
+3. `README.md`
+4. `docs/research-orchestrator-command-surface.md`
+5. `docs/research-orchestrator.md`
+6. `docs/access-topology.md`
+7. `docs/contributor-access.md`
+8. `CONTRIBUTING.md`
+9. `docs/glasslab-v2/current/README.md`
 
 For infrastructure work, additionally read the relevant Ansible playbooks and
 `docs/glasslab-v2/runbooks/`. For legacy behavior, read historical documents
