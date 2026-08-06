@@ -1,0 +1,68 @@
+name: Glasslab work item
+description: Propose a bounded implementation, validation, infrastructure, or documentation task
+title: ""
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        GitHub Issues are the Glasslab work queue. Keep one issue focused on one independently reviewable outcome.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is missing, broken, unclear, or unnecessarily manual?
+      placeholder: Describe the observed problem and who it affects.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Intended outcome
+      description: State the observable result, not only an implementation idea.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and constraints
+      description: Identify affected services, trust boundaries, live-cluster needs, and explicit exclusions.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Add a checkable list that another contributor can verify.
+      placeholder: |
+        - [ ] Behavior is implemented
+        - [ ] Automated tests cover the change
+        - [ ] Documentation reflects the new behavior
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and references
+      description: Link related runs, events, artifacts, logs, issues, PRs, or documentation. Do not paste secrets.
+    validations:
+      required: false
+  - type: dropdown
+    id: live_validation
+    attributes:
+      label: Live cluster validation
+      options:
+        - Not required
+        - Required from the provisioner
+        - Unknown; determine during implementation
+    validations:
+      required: true
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Submission checks
+      options:
+        - label: I checked for an existing issue covering the same outcome.
+          required: true
+        - label: This issue contains no credentials, tokens, or private dataset contents.
+          required: true
