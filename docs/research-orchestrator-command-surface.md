@@ -1,6 +1,6 @@
 # Research Orchestrator Command Surface
 
-Last verified: 2026-07-29
+Last verified: 2026-08-06
 
 This is the concise operator and contributor reference for the Honeydew/Beaker
 research workflow. The database and append-only event log are authoritative.
@@ -27,6 +27,61 @@ and do not require an ID.
 
 Discord does not currently expose list or status slash commands. Status is
 shown by the run thread's editable status message.
+
+## Intended End-To-End Run
+
+For a task ZIP, begin in the main configured Glasslab channel:
+
+```text
+/task-start archive:<attach ZIP> objective:<optional narrower objective>
+```
+
+The bot creates one public thread for the run. Continue from that thread:
+
+1. Honeydew drafts `program.md` and a logical evaluation-contract proposal.
+2. Read the protocol approval brief and use its Approve or Reject button.
+3. Beaker writes `implementation-plan.md`, the workload, candidate config, and
+   a normalized experiment matrix.
+4. Deterministic preflight runs before Honeydew reviews the implementation.
+   Rejected proposals return to Beaker with concrete feedback.
+5. Read the execution approval brief. It must state job count, variants,
+   seeds, resources, required artifacts, contract, and authorization scope.
+6. Approve to submit the bounded matrix through `workflow-api`. Agent turns are
+   idle while Kubernetes jobs run.
+7. Beaker analyzes authoritative job and artifact records. Honeydew verifies
+   the important claims against evaluator output and the approved protocol.
+8. Honeydew writes `report.md`; use the final acceptance control to complete
+   the run.
+9. Use `/research-artifacts` to download the verified result bundle.
+
+Approve and Reject are message buttons, not slash commands. An approval only
+authorizes the described action; it is not evidence that execution succeeded.
+
+For a question without an archive, use `/research-start`. Honeydew still begins
+with the protocol and evaluation contract. For local data, run
+`/dataset-upload` first and put the returned `glasslab-dataset://<sha256>`
+reference in `problem.md` or the objective.
+
+## Failure And Recovery Behavior
+
+- A deterministic preflight failure rejects the matrix before cluster work and
+  sends the exact errors back to Beaker.
+- A Kubernetes job failure is recorded as experimental evidence and normally
+  sends the workflow to Beaker analysis, followed by Honeydew verification.
+- If verification finds missing or invalid evidence, a fresh bounded revision
+  budget begins and Beaker receives the failure details.
+- `/research-pause` aborts an active model turn but preserves the worktree and
+  recovery checkpoint. `/research-resume` starts a fresh OpenCode session from
+  that checkpoint.
+- `FAILED`, `CANCELLED`, and `TIMED_OUT` are terminal. They cannot currently be
+  resumed. Retry-from-terminal-checkpoint is a known missing capability.
+- The run thread must receive a persisted follow-up for an execution or
+  interaction failure; an ephemeral Discord error is not sufficient.
+
+The workload emits metrics and evidence; the immutable evaluator owns
+`evaluation.json`, `integrity_pass`, and `rubric_score`. Matrix seeds create
+independent jobs. Do not copy an internal stability-seed list into the outer
+matrix when one job already executes that list.
 
 ## Result Artifacts
 
@@ -197,6 +252,36 @@ POST /actions/{action_id}/reject
 Do not put the operator token, Discord token, or webhook URL in documentation,
 Git, shell history, or screenshots.
 
+## Inspecting A Run
+
+Discord is the readable transcript, but the database, event log, job records,
+and artifact registry are authoritative. The service is `ClusterIP` only. From
+a contributor workstation, create a tunnel through the provisioner:
+
+```bash
+ssh -L 18080:127.0.0.1:18080 glasslab-provisioner \
+  'sudo -n env KUBECONFIG=/home/glasslab/.kube/config \
+   kubectl -n glasslab-v2 port-forward \
+   svc/glasslab-research-orchestrator 18080:8080'
+```
+
+In another terminal:
+
+```bash
+RUN=<run-id>
+curl -fsS "http://127.0.0.1:18080/runs/$RUN" | jq
+curl -fsS "http://127.0.0.1:18080/runs/$RUN/events" | jq
+curl -fsS "http://127.0.0.1:18080/runs/$RUN/artifacts" | jq
+curl -N "http://127.0.0.1:18080/runs/$RUN/events/stream"
+```
+
+The run's workspaces, protocol, reports, OpenCode data, and recovery checkpoints
+are stored beneath
+`/mnt/artifacts/research-orchestrator/runs/<run-id>/` in the orchestrator pod.
+Use `kubectl exec` from the provisioner to inspect them. The HTTP API does not
+yet expose a dedicated full-turn endpoint; normalized events are the stable
+external record, while raw OpenCode storage is an implementation detail.
+
 ## Deployment Commands
 
 GitHub Actions publishes a matched pair of immutable images under the full
@@ -246,7 +331,7 @@ Implemented and live:
 
 Validated:
 
-- 67 research-orchestrator tests
+- 98 research-orchestrator tests
 - 159 workflow-api tests
 - mocked complete research workflow
 - live OpenCode/Qwen structured task compilation
@@ -260,15 +345,18 @@ Validated:
 
 Benchmark milestone:
 
-- Adult Income run `406b2d800d3b4e9a90af79e6b1b0ab55` was created from
-  the pre-registered compatibility task.
-- Honeydew drafted its protocol and the protocol was approved.
-- The first Beaker implementation turn wrote experiment code but timed out
-  before returning its structured matrix proposal.
-- Pause/resume recovery started Beaker turn 3; no experiment Kubernetes Job
-  had been submitted at the time of this update.
-- This records a workflow milestone, not benchmark completion.
-- Wine and Fashion-MNIST are preflight-ready but have not completed live runs.
+- Adult Income run `cce710ceef97441685c777c8f19c767b` completed the
+  orchestrator workflow and final acceptance path.
+- Wine run `39101d9c9d3d4753bcd74e93e6106819` submitted cluster jobs. The
+  workload calculations completed, but the immutable evaluator rejected the
+  first results because `plots/clusters.png` was missing.
+- Honeydew identified the missing evidence and Beaker added the plot. Beaker's
+  final one-job replacement matrix passed deterministic preflight, but the
+  overall research run reached `TIMED_OUT` before Honeydew review and execution
+  approval.
+- This validates failure evidence, revision-budget reset, artifact preflight,
+  and one-job seed handling. It does not constitute a completed Wine result.
+- Fashion-MNIST is preflight-ready but has not completed a live run.
 
 The Adult, Wine, and Fashion-MNIST definitions are compatibility fixtures with
 pre-registered datasets and task-specific evaluators. The generic extension
@@ -281,6 +369,8 @@ path is `/task-start`, not another hardcoded task entry.
 - fixed approved repository and runtime profiles
 - no authenticated remote dataset download or private object-store browser
 - no Discord list or status commands
+- no first-class HTTP endpoint for complete structured turn inspection
+- no retry or clone operation from a terminal run checkpoint
 - no automatic Git push or pull request creation
 - no arbitrary SSH, `kubectl`, secret access, or container publication for
   either agent

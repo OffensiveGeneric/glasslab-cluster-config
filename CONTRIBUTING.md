@@ -13,6 +13,7 @@ secondary, compatibility-only, or historical.
 
 Read these first:
 
+- `AGENTS.md`
 - `README.md`
 - `docs/access-topology.md`
 - `docs/contributor-access.md`
