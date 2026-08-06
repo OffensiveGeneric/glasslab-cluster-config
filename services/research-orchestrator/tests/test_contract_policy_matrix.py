@@ -246,6 +246,9 @@ def test_adult_preflight_distinguishes_comparisons_from_decisions(
         'payload = {**metrics, "models": {}}\n'
         'with open("metrics.json", "w") as handle:\n'
         '    json.dump(payload, handle)\n'
+        'open("report.md", "w").write("report")\n'
+        'open("tables/metrics.csv", "w").write("metrics")\n'
+        'open("tables/fairness.csv", "w").write("fairness")\n'
     )
     run = run.model_copy(
         update={
@@ -358,6 +361,9 @@ def test_adult_preflight_accepts_assigned_path_and_annotated_metrics(
         'metrics_path = Path("output") / "metrics.json"\n'
         'with open(metrics_path, "w") as handle:\n'
         '    json.dump(metrics, handle)\n'
+        'Path("report.md").write_text("report")\n'
+        'Path("tables/metrics.csv").write_text("metrics")\n'
+        'Path("tables/fairness.csv").write_text("fairness")\n'
     )
     report = preflight_matrix(
         run=run.model_copy(
@@ -453,6 +459,86 @@ def test_preflight_rejects_workload_owned_evaluation_output(
     )
     assert not report.passed
     assert any('evaluator-owned output' in error for error in report.errors)
+
+
+def test_wine_preflight_rejects_missing_required_plot(
+    orchestrator_bundle,
+) -> None:
+    _, _, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        request=RunCreateRequest(objective='Catch missing evidence before execution.')
+    )
+    workspace = Path(run.beaker_workspace)
+    config = workspace / 'configs' / 'candidate.yaml'
+    config.write_text('seeds: [17]\n')
+    source = workspace / 'benchmark-workspace' / 'wine-clustering'
+    source.mkdir(parents=True)
+    (source / 'run.py').write_text(
+        'import json\n'
+        'metrics = {\n'
+        '  "algorithm_count": 4, "sample_count": 178,\n'
+        '  "silhouette": 0.2, "davies_bouldin": 1.0,\n'
+        '  "adjusted_rand": 0.8, "normalized_mutual_info": 0.8,\n'
+        '  "stability_seeds": 10, "pca_variance_2d": 0.6,\n'
+        '}\n'
+        'with open("metrics.json", "w") as handle:\n'
+        '  json.dump(metrics, handle)\n'
+        'open("report.md", "w").write("report")\n'
+        'open("tables/comparison.csv", "w").write("table")\n'
+    )
+    report = preflight_matrix(
+        run=run.model_copy(
+            update={
+                'task_definition': {
+                    'source_subdirectory': 'benchmark-workspace/wine-clustering',
+                }
+            }
+        ),
+        matrix=_matrix().model_copy(
+            update={
+                'base_config': 'configs/candidate.yaml',
+                'seeds': [17],
+            }
+        ),
+        contract=engine.contracts.resolve(
+            'ml-benchmark-wine-clustering-v1',
+            '1.0.0',
+        ),
+    )
+
+    assert not report.passed
+    assert (
+        'workload source does not statically reference required artifact: '
+        'plots/clusters.png'
+    ) in report.errors
+
+
+def test_preflight_rejects_duplicate_internal_and_matrix_seed_axes(
+    orchestrator_bundle,
+) -> None:
+    _, _, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        request=RunCreateRequest(objective='Avoid duplicate cluster work.')
+    )
+    workspace = Path(run.beaker_workspace)
+    config = workspace / 'configs' / 'candidate.yaml'
+    config.write_text('seeds: [17, 31, 49]\n')
+    report = preflight_matrix(
+        run=run,
+        matrix=_matrix().model_copy(
+            update={
+                'base_config': 'configs/candidate.yaml',
+                'seeds': [17, 31, 49],
+            }
+        ),
+        contract=engine.contracts.resolve('example-research-v1', '1.0.0'),
+    )
+
+    assert not report.passed
+    assert any(
+        'internal stability seeds must run inside one job' in error
+        for error in report.errors
+    )
 
 
 def test_methodology_revision_limit_pauses_for_human_resolution(

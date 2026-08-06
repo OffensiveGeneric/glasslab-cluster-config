@@ -1995,7 +1995,10 @@ class ResearchOrchestrator:
             )
             + '\nKeep reason beside type and arguments. Put the ExperimentMatrix '
             'fields directly in arguments; do not add a matrix or evaluator_type '
-            'wrapper.'
+            'wrapper. Matrix seeds create separate cluster jobs. If the workload '
+            'already runs an internal seed list for stability analysis, keep '
+            'that list in the implementation and use one outer matrix seed; do '
+            'not mirror the internal list into the matrix.'
             + task_context
         )
         turn, result = self._run_agent_turn(
@@ -2084,7 +2087,10 @@ class ResearchOrchestrator:
             )
             + '\nKeep reason beside type and arguments. Put the ExperimentMatrix '
             'fields directly in arguments; do not add a matrix or evaluator_type '
-            'wrapper.'
+            'wrapper. Matrix seeds create separate cluster jobs. If the workload '
+            'already runs an internal seed list for stability analysis, keep '
+            'that list in the implementation and use one outer matrix seed; do '
+            'not mirror the internal list into the matrix.'
         )
         turn, result = self._run_agent_turn(
             run_id=run_id,
@@ -2662,7 +2668,10 @@ class ResearchOrchestrator:
             )
             + '\nKeep reason beside type and arguments. Put the ExperimentMatrix '
             'fields directly in arguments; do not add a matrix or evaluator_type '
-            'wrapper.\n\n'
+            'wrapper. Matrix seeds create separate cluster jobs. If the workload '
+            'already runs an internal seed list for stability analysis, keep '
+            'that list in the implementation and use one outer matrix seed; do '
+            'not mirror the internal list into the matrix.\n\n'
             f'Review feedback:\n{feedback}'
             + task_context
         )

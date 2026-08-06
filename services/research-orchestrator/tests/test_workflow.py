@@ -1243,7 +1243,11 @@ def test_imported_task_resume_finalizes_existing_runner(
     source_subdirectory = 'benchmark-workspace/adult-income'
     source = Path(run.beaker_workspace) / source_subdirectory
     source.mkdir(parents=True)
-    (source / 'run.py').write_text('print("preserved implementation")\n')
+    (source / 'run.py').write_text(
+        'import json\n'
+        'with open("metrics.json", "w") as handle:\n'
+        '    json.dump({"score": 1.0}, handle)\n'
+    )
     config = Path(run.beaker_workspace) / 'configs' / 'candidate.yaml'
     config.parent.mkdir(exist_ok=True)
     config.write_text('candidate: true\n')
