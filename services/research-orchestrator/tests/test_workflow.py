@@ -72,6 +72,57 @@ def test_human_approval_states_stop_active_runtime_clock(
     assert revising.active_runtime_seconds == waiting.active_runtime_seconds
 
 
+def test_failed_result_starts_a_fresh_methodology_revision_budget(
+    orchestrator_bundle,
+    monkeypatch,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(objective='Repair a failed executed experiment.')
+    )
+    verifying = store.replace_run(
+        run.model_copy(
+            update={
+                'state': RunState.HONEYDEW_VERIFYING,
+                'methodology_revision_count': 2,
+            }
+        ),
+        expected_version=run.version,
+    )
+    monkeypatch.setattr(
+        engine,
+        '_run_agent_turn',
+        lambda **_kwargs: (
+            None,
+            AgentTurnResult(
+                kind=TurnKind.VERIFICATION,
+                summary='The executed candidate needs a code repair.',
+                done=False,
+            ),
+        ),
+    )
+    monkeypatch.setattr(engine, '_beaker_revise', lambda *_args, **_kwargs: None)
+
+    engine._verify_results(verifying.run_id)
+
+    revising = store.get_run(verifying.run_id)
+    assert revising.state == RunState.BEAKER_REVISING
+    assert revising.methodology_revision_count == 0
+    reset = next(
+        event
+        for event in store.list_events(verifying.run_id)
+        if event.event_type == 'methodology.revision_budget_reset'
+    )
+    assert reset.payload['previous_revision_count'] == 2
+    assert reset.payload['revision_count'] == 0
+
+    engine._request_methodology_revision(
+        verifying.run_id,
+        feedback='The first post-execution repair remains incomplete.',
+    )
+    assert store.get_run(verifying.run_id).methodology_revision_count == 1
+
+
 def test_evidence_snapshot_projects_bounded_verified_artifact_contents(
     orchestrator_bundle,
 ) -> None:

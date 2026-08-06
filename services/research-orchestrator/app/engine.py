@@ -3205,6 +3205,14 @@ class ResearchOrchestrator:
             input_event=evidence,
         )
         if not result.done:
+            self.store.reset_methodology_revision_budget(
+                run_id,
+                reason=(
+                    'new cluster evidence requires a post-execution repair '
+                    'cycle'
+                ),
+            )
+            self._publish_latest(run_id)
             self._transition(run_id, RunState.BEAKER_REVISING)
             self._beaker_revise(
                 run_id,

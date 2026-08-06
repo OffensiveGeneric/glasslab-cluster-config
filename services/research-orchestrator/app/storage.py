@@ -312,6 +312,62 @@ class SqliteStore:
                 )
         return updated
 
+    def reset_methodology_revision_budget(
+        self,
+        run_id: str,
+        *,
+        reason: str,
+    ) -> RunRecord:
+        with self.transaction() as connection:
+            row = connection.execute(
+                'SELECT payload, version FROM runs WHERE run_id = ?',
+                (run_id,),
+            ).fetchone()
+            if row is None:
+                raise RecordNotFound(run_id)
+            current = RunRecord.model_validate_json(row['payload'])
+            now = utc_now()
+            updated = current.model_copy(
+                update={
+                    'methodology_revision_count': 0,
+                    'version': int(row['version']) + 1,
+                    'updated_at': now,
+                }
+            )
+            cursor = connection.execute(
+                '''
+                UPDATE runs
+                SET state = ?, version = ?, payload = ?, updated_at = ?
+                WHERE run_id = ? AND version = ?
+                ''',
+                (
+                    updated.state.value,
+                    updated.version,
+                    _dump(updated),
+                    updated.updated_at.isoformat(),
+                    run_id,
+                    int(row['version']),
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ConcurrencyConflict(
+                    f'run was updated concurrently: {run_id}'
+                )
+            self._append_event_conn(
+                connection,
+                run_id=run_id,
+                source='orchestrator',
+                event_type='methodology.revision_budget_reset',
+                payload={
+                    'previous_revision_count': (
+                        current.methodology_revision_count
+                    ),
+                    'revision_count': 0,
+                    'reason': reason,
+                },
+            )
+        return updated
+
     def transition_run(
         self,
         run_id: str,
