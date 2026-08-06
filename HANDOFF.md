@@ -64,10 +64,10 @@ includes:
 
 The orchestrator test suite passed 98 tests for that release. GitHub CI passed.
 
-Documentation work is in PR #91 on branch
-`docs/contributor-agent-handoff`. It adds `AGENTS.md`, this handoff, `TODO.md`,
-and updates the current Discord/operator documentation. Do not treat it as
-merged until GitHub confirms it is on `main`.
+PR #91 merged the root `AGENTS.md` and current Discord/operator documentation.
+This summarized handoff and the issue-backed work queue are follow-up changes
+on branch `docs/contributor-agent-handoff`; do not treat them as merged until
+their follow-up pull request is on `main`.
 
 GitHub Issues are again the authoritative work queue. The active backlog was
 reset on 2026-08-06: obsolete OpenClaw, WhatsApp, literature, and old
