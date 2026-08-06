@@ -74,6 +74,7 @@ def _dict_keys(
     expression: ast.expr,
     assignments: dict[str, ast.expr],
     subscript_keys: dict[str, set[str]],
+    function_return_keys: dict[str, set[str]] | None = None,
     *,
     resolving: frozenset[str] = frozenset(),
 ) -> set[str]:
@@ -88,10 +89,17 @@ def _dict_keys(
                     assigned,
                     assignments,
                     subscript_keys,
+                    function_return_keys,
                     resolving=resolving | {expression.id},
                 )
             )
         return keys
+    if (
+        isinstance(expression, ast.Call)
+        and isinstance(expression.func, ast.Name)
+        and function_return_keys is not None
+    ):
+        return set(function_return_keys.get(expression.func.id, set()))
     if not isinstance(expression, ast.Dict):
         return set()
     keys: set[str] = set()
@@ -102,6 +110,7 @@ def _dict_keys(
                     value,
                     assignments,
                     subscript_keys,
+                    function_return_keys,
                     resolving=resolving,
                 )
             )
@@ -138,6 +147,7 @@ def _metrics_root_errors(
         return []
     assignments: dict[str, ast.expr] = {}
     subscript_keys: dict[str, set[str]] = {}
+    function_return_keys: dict[str, set[str]] = {}
     metric_handles: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign) and len(node.targets) == 1:
@@ -174,6 +184,47 @@ def _metrics_root_errors(
             ):
                 metric_handles.add(item.optional_vars.id)
 
+    for function in (
+        node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+    ):
+        local_assignments: dict[str, ast.expr] = {}
+        local_subscript_keys: dict[str, set[str]] = {}
+        returns: list[ast.expr] = []
+        for node in ast.walk(function):
+            if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                target = node.targets[0]
+                if isinstance(target, ast.Name):
+                    local_assignments[target.id] = node.value
+                elif (
+                    isinstance(target, ast.Subscript)
+                    and isinstance(target.value, ast.Name)
+                    and isinstance(target.slice, ast.Constant)
+                    and isinstance(target.slice.value, str)
+                ):
+                    local_subscript_keys.setdefault(
+                        target.value.id,
+                        set(),
+                    ).add(target.slice.value)
+            elif (
+                isinstance(node, ast.AnnAssign)
+                and isinstance(node.target, ast.Name)
+                and node.value is not None
+            ):
+                local_assignments[node.target.id] = node.value
+            elif isinstance(node, ast.Return) and node.value is not None:
+                returns.append(node.value)
+        returned_keys: set[str] = set()
+        for expression in returns:
+            returned_keys.update(
+                _dict_keys(
+                    expression,
+                    local_assignments,
+                    local_subscript_keys,
+                    function_return_keys,
+                )
+            )
+        function_return_keys[function.name] = returned_keys
+
     serialized_keys: set[str] = set()
     found_serialization = False
     for node in ast.walk(tree):
@@ -188,7 +239,12 @@ def _metrics_root_errors(
             continue
         found_serialization = True
         serialized_keys.update(
-            _dict_keys(node.args[0], assignments, subscript_keys)
+            _dict_keys(
+                node.args[0],
+                assignments,
+                subscript_keys,
+                function_return_keys,
+            )
         )
     if not found_serialization:
         return [
