@@ -340,12 +340,21 @@ def run_from_environment(env: Mapping[str, str] | None = None) -> int:
                 sort_keys=True,
             ),
         }
+        normalized_bindings: dict[str, str] = {}
         for name, path in resolved_bindings.items():
             normalized_name = ''.join(
                 char if char.isalnum() else '_'
                 for char in str(name).upper()
             )
+            previous = normalized_bindings.get(normalized_name)
+            if previous is not None:
+                raise ValueError(
+                    'dataset binding names collide after environment '
+                    f'normalization: {previous}, {name}'
+                )
+            normalized_bindings[normalized_name] = str(name)
             process_env[f'GLASSLAB_DATASET_{normalized_name}'] = str(path)
+            process_env[f'{normalized_name}_PATH'] = str(path)
 
         budget = manifest.get('budget', {})
         max_minutes = int(budget.get('max_wallclock_minutes', 0))

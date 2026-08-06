@@ -27,6 +27,7 @@ class ScriptedMockRuntime(AgentRuntime):
         self.turn_counts: defaultdict[AgentName, int] = defaultdict(int)
         self.aborted: list[tuple[str, AgentName, str]] = []
         self.released: list[tuple[str, AgentName]] = []
+        self.prompts: list[tuple[AgentName, str]] = []
 
     def ensure_session(
         self,
@@ -57,6 +58,7 @@ class ScriptedMockRuntime(AgentRuntime):
         prompt: str,
     ) -> tuple[AgentTurnResult, str | None]:
         self.turn_counts[agent] += 1
+        self.prompts.append((agent, prompt))
         message_id = f'mock-message-{uuid4().hex[:12]}'
         if agent == AgentName.BEAKER and 'Write implementation-plan.md' in prompt:
             (workspace / 'implementation-plan.md').write_text(
@@ -166,6 +168,7 @@ class ScriptedMockRuntime(AgentRuntime):
         if agent == AgentName.BEAKER and (
             'Implement the bounded' in prompt
             or 'Execute the task-specific plan' in prompt
+            or 'Finalize the existing imported benchmark' in prompt
             or 'Revise the implementation' in prompt
         ):
             (workspace / 'experiment.py').write_text(

@@ -37,7 +37,8 @@ The central story is:
 
 | IP | Name | Intended role |
 | --- | --- | --- |
-| `192.168.1.44` | `glasslab-PXE-01` | PXE, TFTP, HTTP provisioning, bastion, Ansible, kubectl, canonical repo checkout |
+| public | `glasslab.org` | public SSH gateway |
+| `192.168.1.44` | `glasslab-PXE-01` | PXE, TFTP, HTTP provisioning, Ansible, kubectl, canonical repo checkout |
 | `192.168.1.49` | `cp01` | Kubernetes control plane |
 | `192.168.1.48` | `node01` | Kubernetes worker and GPU candidate |
 | `192.168.1.11` | `node02` | Kubernetes worker with RTX A4000 GPU |

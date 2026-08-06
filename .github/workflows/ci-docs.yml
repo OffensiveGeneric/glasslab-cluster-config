@@ -1,15 +1,7 @@
 name: CI Docs
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - "README.md"
-      - "CONTRIBUTING.md"
-      - "docs/**/*.md"
-      - "scripts/check-doc-links.py"
-      - "scripts/check-before-push.sh"
-      - ".github/workflows/ci-docs.yml"
+  workflow_call:
   push:
     branches: [main]
     paths:

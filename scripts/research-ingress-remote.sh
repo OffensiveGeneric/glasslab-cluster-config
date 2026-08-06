@@ -13,6 +13,6 @@ fi
 REMOTE_SCRIPT="/home/glasslab/cluster-config/scripts/research-ingress-cli.sh"
 
 remote_cmd="$(printf '%q ' "$REMOTE_SCRIPT" "$@")"
-exec ssh glasslab-44 "bash -lc $(
+exec ssh glasslab-provisioner "bash -lc $(
   printf '%q' "$remote_cmd"
 )"

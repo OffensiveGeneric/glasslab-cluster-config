@@ -3,6 +3,14 @@ from __future__ import annotations
 from .schemas import RunState, TERMINAL_STATES
 
 
+HUMAN_WAIT_STATES = {
+    RunState.AWAITING_PROTOCOL_APPROVAL,
+    RunState.AWAITING_CONTRACT_PROMOTION,
+    RunState.AWAITING_EXECUTION_APPROVAL,
+    RunState.AWAITING_FINAL_ACCEPTANCE,
+}
+
+
 TRANSITIONS: dict[RunState, set[RunState]] = {
     RunState.CREATED: {RunState.PREPARING, RunState.CANCELLED, RunState.FAILED},
     RunState.PREPARING: {
@@ -60,6 +68,16 @@ TRANSITIONS: dict[RunState, set[RunState]] = {
     },
     RunState.BEAKER_IMPLEMENTING: {
         RunState.BEAKER_PLANNING,
+        RunState.BEAKER_DRAFTING_CONTRACT,
+        RunState.BEAKER_FINALIZING,
+        RunState.BEAKER_REVISING,
+        RunState.HONEYDEW_REVIEWING,
+        RunState.PAUSED,
+        RunState.CANCELLED,
+        RunState.FAILED,
+        RunState.TIMED_OUT,
+    },
+    RunState.BEAKER_FINALIZING: {
         RunState.BEAKER_DRAFTING_CONTRACT,
         RunState.BEAKER_REVISING,
         RunState.HONEYDEW_REVIEWING,

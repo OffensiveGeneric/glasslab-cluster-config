@@ -90,14 +90,15 @@ def build_engine(
         shared_mount_root=settings.shared_mount_root,
     )
     baked_root = SERVICE_ROOT / 'evaluation-contracts'
-    for contract_id in (
-        'generic-task-integrity-v1',
-        'ml-benchmark-adult-income-v1',
-        'ml-benchmark-wine-clustering-v1',
-        'ml-benchmark-fashion-contrastive-v1',
+    for contract_id, version in (
+        ('generic-task-integrity-v1', '1.0.0'),
+        ('ml-benchmark-adult-income-v1', '1.0.0'),
+        ('ml-benchmark-adult-income-v1', '1.1.0'),
+        ('ml-benchmark-wine-clustering-v1', '1.0.0'),
+        ('ml-benchmark-fashion-contrastive-v1', '1.0.0'),
     ):
         contract_candidates.install_repository_contract(
-            baked_root / contract_id / '1.0.0'
+            baked_root / contract_id / version
         )
     datasets = DatasetIngestionManager(
         store=store,
@@ -167,6 +168,9 @@ def create_app(
             admin_user_ids=settings.discord_admin_user_ids,
             maximum_dataset_upload_bytes=(
                 settings.maximum_discord_dataset_upload_bytes
+            ),
+            maximum_artifact_bundle_bytes=(
+                settings.maximum_discord_artifact_bundle_bytes
             ),
         )
 

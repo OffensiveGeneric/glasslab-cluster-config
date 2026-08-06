@@ -68,7 +68,9 @@ publish artifacts.
 
 The evaluation contract is repository-controlled and immutable to both agents.
 It fixes the evaluator entry point, schemas, required artifacts, resource
-limits, and optional digest-pinned image.
+limits, optional digest-pinned image, and machine-checkable methodology
+requirements. Methodology requirements distinguish comparisons, which need
+multiple configured values, from decisions, which need one explicit choice.
 
 When an approved protocol requires a harness that is not installed, Beaker may
 draft a contract candidate in its isolated worktree. The orchestrator validates
@@ -89,7 +91,9 @@ CREATED -> PREPARING -> HONEYDEW_DRAFTING_PROTOCOL
   -> AWAITING_PROTOCOL_APPROVAL
   -> BEAKER_DRAFTING_CONTRACT -> HONEYDEW_REVIEWING_CONTRACT
   -> AWAITING_CONTRACT_PROMOTION
-  -> BEAKER_PLANNING -> BEAKER_IMPLEMENTING -> HONEYDEW_REVIEWING
+  -> BEAKER_PLANNING -> BEAKER_IMPLEMENTING
+  -> BEAKER_FINALIZING (interrupted imported tasks with a runner checkpoint)
+  -> HONEYDEW_REVIEWING
   -> BEAKER_REVISING (when requested)
   -> AWAITING_EXECUTION_APPROVAL
   -> JOB_QUEUED -> JOB_RUNNING
@@ -136,7 +140,12 @@ runs/<run-id>/
 
 The worktree manager creates two detached Git worktrees from the one approved
 repository. The approved protocol is copied read-only into each worktree.
-Artifacts are copied through path-containment checks.
+Artifacts are copied through path-containment checks. Before methodology
+review, the orchestrator copies the proposed config, implementation plan, and
+bounded implementation files into Honeydew's `.glasslab-review/` directory.
+The snapshot rejects symlinks and path escapes, enforces file and byte limits,
+records SHA-256 digests, and is read-only. Honeydew therefore reviews Beaker's
+actual candidate without gaining write access to Beaker's worktree.
 
 The OpenCode adapter starts one authenticated `opencode serve` child process
 per agent. Each process receives a separate workspace, XDG configuration and
@@ -151,7 +160,7 @@ names are not persisted directly.
 The current deployment configuration points both runtimes at:
 
 ```text
-http://192.168.1.18:52415/v1
+http://192.168.1.17:52415/v1
 mlx-community/Qwen3-Coder-Next-4bit
 ```
 
@@ -317,9 +326,33 @@ idempotency key.
 
 Before an experiment matrix can reach human approval, deterministic preflight
 also verifies that its base configuration exists in Beaker's worktree, the
-evaluation-contract digest is unchanged, and every requested resource fits the
-contract's own ceilings. Honeydew's structured approval cannot bypass these
-checks.
+evaluation-contract digest is unchanged, every requested resource fits the
+contract's own ceilings, and the config satisfies the contract's declared
+comparisons and decisions. It syntax-checks Python workspace code and rejects
+workload references to evaluator-owned `evaluation.json`, `rubric_score`, and
+`integrity_pass`. Workloads emit metrics and evidence; the immutable wrapper
+runs the evaluator and owns evaluation output. Honeydew's structured approval
+cannot bypass these checks.
+
+The same ownership rule applies during protocol generation. A protocol may
+list evaluator output as a final artifact, but it cannot assign creation,
+formatting, reading, or scoring of that output to Beaker or workload code.
+
+The preflight report records the exact expanded job count, checks performed,
+configured comparisons, configured decisions, and blocking findings. Discord
+renders that report before showing approval controls.
+
+The original Adult benchmark contract remains immutable at `1.0.0`.
+Methodology declarations were added as `ml-benchmark-adult-income-v1@1.1.0`;
+new Adult task runs use the newer binding while historical runs retain their
+recorded `1.0.0` digest.
+
+Honeydew rejection feedback is passed to Beaker with the complete structured
+claim list and evidence references. Automatic methodology repair is limited by
+`GLASSLAB_ORCHESTRATOR_MAXIMUM_METHODOLOGY_REVISIONS`, two by default.
+Exceeding the limit pauses at `BEAKER_REVISING` and emits
+`methodology.human_resolution_requested` instead of consuming the remaining
+turn budget in an unbounded review loop.
 
 Approval and execution are separate audited facts. If an approved action cannot
 execute, the orchestrator records `action.execution_failed` with the error,
@@ -363,13 +396,27 @@ Resume creates a fresh OpenCode session, injects the compact checkpoint, and
 continues from the unchanged worktree. Successful sessions remain reusable
 across normal turns. Resume also detects older paused records whose latest
 failed turn still references the attached session and rotates them before
-recovery.
+recovery. A pause or cancellation received while an agent turn is completing
+is rechecked after the turn output is stored; the output remains auditable, but
+the orchestrator does not record requested actions or start another turn.
+
+The run-level runtime ceiling measures active workflow time. The orchestrator
+accumulates elapsed active seconds when a run is paused, stops the clock while
+it remains `PAUSED`, and starts it again on resume. Operator review time in
+explicit approval states remains part of active runtime unless the run is
+paused.
 
 Beaker implementation is split into two bounded turns. `BEAKER_PLANNING`
 produces a task-specific `implementation-plan.md`; `BEAKER_IMPLEMENTING`
 executes that plan and may adapt it when repository evidence requires. The
 orchestrator does not impose a generated runner scaffold or a fixed model
 architecture.
+
+If an imported-task implementation turn is interrupted after creating its
+required `run.py`, recovery enters `BEAKER_FINALIZING`. That bounded turn
+preserves the existing implementation, runs only narrow local checks, repairs
+concrete blockers, and proposes the experiment matrix. It does not restart the
+broad implementation task or execute the full benchmark locally.
 
 ## Discord
 
@@ -592,12 +639,14 @@ Manually tested:
   `/research-resume`
 - live immutable dataset upload, durable lookup, and SHA-256 readback
 - live resume of a paused Adult run into a new Beaker implementation turn
+- distributed Qwen inference across the cabled `.17` and `.18` exo pair
 
 Not yet tested:
 
 - full Adult, Wine, or Fashion-MNIST benchmark completion on live GPUs/CPUs
 - research-orchestrator submission of an experiment Kubernetes Job; the active
-  Adult run has not yet returned a structured matrix proposal
+  Adult run has returned a structured matrix but has not passed methodology
+  review and human execution approval
 - full generic `/task-start` execution through final report acceptance
 - automatic public asset ingestion against a real new task
 

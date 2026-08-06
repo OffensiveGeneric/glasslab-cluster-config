@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     database_path: str = '/tmp/glasslab-research-orchestrator/orchestrator.db'
     workspace_root: str = '/tmp/glasslab-research-orchestrator/runs'
     artifact_root: str = '/tmp/glasslab-research-orchestrator/artifacts'
+    evidence_excerpt_max_bytes: int = 32 * 1024
     approved_repo_path: str = '/workspace/cluster-config'
     approved_repo_ref: str = 'main'
     evaluation_contract_root: str = str(SERVICE_ROOT / 'evaluation-contracts')
@@ -45,6 +46,7 @@ class Settings(BaseSettings):
     )
     maximum_dataset_upload_bytes: int = 2 * 1024 * 1024 * 1024
     maximum_discord_dataset_upload_bytes: int = 100 * 1024 * 1024
+    maximum_discord_artifact_bundle_bytes: int = 24 * 1024 * 1024
     benchmark_dataset_catalog_path: str = (
         '/tmp/glasslab-research-orchestrator/datasets/catalog.json'
     )
@@ -56,8 +58,9 @@ class Settings(BaseSettings):
     opencode_start_port: int = 4210
     opencode_start_timeout_seconds: float = 15.0
     opencode_turn_timeout_seconds: float = 1800.0
+    opencode_repeated_tool_limit: int = 6
     opencode_structured_repair_attempts: int = 1
-    qwen_base_url: str = 'http://192.168.1.18:52415/v1'
+    qwen_base_url: str = 'http://192.168.1.17:52415/v1'
     qwen_model_name: str = 'mlx-community/Qwen3-Coder-Next-4bit'
     opencode_runtime_image: str = (
         'ghcr.io/offensivegeneric/glasslab-research-orchestrator:0.1.0'
@@ -75,6 +78,7 @@ class Settings(BaseSettings):
     ]
 
     maximum_turns: int = 20
+    maximum_methodology_revisions: int = 2
     maximum_runtime_seconds: int = 86400
     maximum_cpu: float = 8.0
     maximum_memory_gib: float = 32.0

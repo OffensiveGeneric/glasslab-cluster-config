@@ -1,0 +1,151 @@
+---
+- name: Build the active Kubernetes observer list
+  ansible.builtin.set_fact:
+    glasslab_kubernetes_observer_users: >-
+      {{ glasslab_active_identity_users |
+         selectattr('roles', 'contains', 'kubernetes_observer') | list }}
+
+- name: Verify the Kubernetes administrator kubeconfig exists
+  ansible.builtin.stat:
+    path: "{{ glasslab_kubernetes_admin_kubeconfig }}"
+  register: glasslab_kubernetes_admin_kubeconfig_stat
+
+- name: Require the Kubernetes administrator kubeconfig
+  ansible.builtin.assert:
+    that:
+      - glasslab_kubernetes_admin_kubeconfig_stat.stat.exists
+      - glasslab_kubernetes_admin_kubeconfig_stat.stat.isreg
+    fail_msg: >-
+      The provisioner cannot manage contributor Kubernetes access without
+      {{ glasslab_kubernetes_admin_kubeconfig }}.
+
+- name: Render contributor observer RBAC
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/kubernetes-observer-rbac.yml.j2"
+    dest: /etc/glasslab-kubernetes-observer-rbac.yml
+    owner: root
+    group: root
+    mode: '0600'
+  register: glasslab_kubernetes_observer_rbac
+
+- name: Apply contributor observer RBAC
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig
+      - "{{ glasslab_kubernetes_admin_kubeconfig }}"
+      - apply
+      - -f
+      - /etc/glasslab-kubernetes-observer-rbac.yml
+  register: glasslab_kubernetes_observer_rbac_apply
+  changed_when: >-
+    ' created' in glasslab_kubernetes_observer_rbac_apply.stdout or
+    ' configured' in glasslab_kubernetes_observer_rbac_apply.stdout
+  when: not ansible_check_mode
+
+- name: Provision personal Kubernetes observer kubeconfigs
+  ansible.builtin.command:
+    argv:
+      - "{{ playbook_dir }}/../../scripts/provision-kubernetes-observer.sh"
+      - "{{ item.username }}"
+      - "{{ glasslab_kubernetes_admin_kubeconfig }}"
+      - "{{ glasslab_kubernetes_client_certificate_seconds | string }}"
+      - "{{ glasslab_kubernetes_client_renew_before_seconds | string }}"
+      - "{{ glasslab_kubernetes_observer_namespaces | join(',') }}"
+  register: glasslab_kubernetes_observer_provision
+  changed_when: "'changed=true' in glasslab_kubernetes_observer_provision.stdout"
+  loop: "{{ glasslab_kubernetes_observer_users }}"
+  loop_control:
+    label: "{{ item.username }}"
+  when: not ansible_check_mode
+
+- name: Find managed Kubernetes credentials no longer assigned
+  ansible.builtin.stat:
+    path: "/home/{{ item }}/.kube/.glasslab-managed-observer"
+  loop: "{{ glasslab_identity_managed_usernames }}"
+  register: glasslab_managed_kubernetes_markers
+  loop_control:
+    label: "{{ item }}"
+
+- name: Remove revoked managed Kubernetes observer credentials
+  ansible.builtin.file:
+    path: "/home/{{ item.item }}/.kube"
+    state: absent
+  when:
+    - item.stat.exists
+    - item.item not in (glasslab_kubernetes_observer_users | map(attribute='username') | list)
+  loop: "{{ glasslab_managed_kubernetes_markers.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Verify observers can read workload status
+  ansible.builtin.command:
+    argv:
+      - runuser
+      - -u
+      - "{{ item.0.username }}"
+      - --
+      - kubectl
+      - --kubeconfig
+      - "/home/{{ item.0.username }}/.kube/config"
+      - auth
+      - can-i
+      - get
+      - pods
+      - --namespace
+      - "{{ item.1 }}"
+  register: glasslab_kubernetes_observer_read_check
+  changed_when: false
+  failed_when: glasslab_kubernetes_observer_read_check.stdout | trim != 'yes'
+  loop: "{{ glasslab_kubernetes_observer_users | product(glasslab_kubernetes_observer_namespaces) | list }}"
+  loop_control:
+    label: "{{ item.0.username }} in {{ item.1 }}"
+  when: not ansible_check_mode
+
+- name: Verify observers cannot submit jobs
+  ansible.builtin.command:
+    argv:
+      - runuser
+      - -u
+      - "{{ item.0.username }}"
+      - --
+      - kubectl
+      - --kubeconfig
+      - "/home/{{ item.0.username }}/.kube/config"
+      - auth
+      - can-i
+      - create
+      - jobs.batch
+      - --namespace
+      - "{{ item.1 }}"
+  register: glasslab_kubernetes_observer_submit_check
+  changed_when: false
+  failed_when: glasslab_kubernetes_observer_submit_check.stdout | trim != 'no'
+  loop: "{{ glasslab_kubernetes_observer_users | product(glasslab_kubernetes_observer_namespaces) | list }}"
+  loop_control:
+    label: "{{ item.0.username }} in {{ item.1 }}"
+  when: not ansible_check_mode
+
+- name: Verify observers cannot read secrets
+  ansible.builtin.command:
+    argv:
+      - runuser
+      - -u
+      - "{{ item.0.username }}"
+      - --
+      - kubectl
+      - --kubeconfig
+      - "/home/{{ item.0.username }}/.kube/config"
+      - auth
+      - can-i
+      - get
+      - secrets
+      - --namespace
+      - "{{ item.1 }}"
+  register: glasslab_kubernetes_observer_secret_check
+  changed_when: false
+  failed_when: glasslab_kubernetes_observer_secret_check.stdout | trim != 'no'
+  loop: "{{ glasslab_kubernetes_observer_users | product(glasslab_kubernetes_observer_namespaces) | list }}"
+  loop_control:
+    label: "{{ item.0.username }} in {{ item.1 }}"
+  when: not ansible_check_mode

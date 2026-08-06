@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from datetime import timedelta
+from hashlib import sha256
 from pathlib import Path
 from threading import Event
 
@@ -10,24 +12,168 @@ import pytest
 from app.contracts import EvaluationContractResolver
 from app.contract_candidates import ContractCandidateManager
 from app.discord_adapter import DisabledDiscordAdapter
-from app.engine import ResearchOrchestrator
+from app.engine import ResearchOrchestrator, WorkflowError
 from app.main import create_app
 from app.mock_runtime import ScriptedMockRuntime
 from app.policy import ActionPolicy
 from app.schemas import (
     AgentName,
     AgentTurnResult,
+    ActionRecord,
     ApprovalStatus,
+    ArtifactRecord,
+    ExperimentMatrix,
     JobStatus,
     RequestedAction,
+    PolicyClassification,
     RunCreateRequest,
     RunState,
     TurnKind,
+    utc_now,
 )
 from app.storage import SqliteStore
 from app.workspaces import WorkspaceManager
 
 from conftest import RUNNER_IMAGE
+
+
+def test_human_approval_states_stop_active_runtime_clock(
+    orchestrator_bundle,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(objective='Exclude human review from active runtime.')
+    )
+    assert run.state == RunState.AWAITING_PROTOCOL_APPROVAL
+    assert run.active_since is None
+
+    writing = store.replace_run(
+        run.model_copy(
+            update={
+                'state': RunState.HONEYDEW_WRITING_REPORT,
+                'active_runtime_seconds': 5.0,
+                'active_since': utc_now() - timedelta(seconds=100),
+            }
+        ),
+        expected_version=run.version,
+    )
+    waiting = store.transition_run(
+        writing.run_id,
+        RunState.AWAITING_FINAL_ACCEPTANCE,
+    )
+    assert 104 <= waiting.active_runtime_seconds <= 107
+    assert waiting.active_since is None
+
+    revising = store.transition_run(
+        waiting.run_id,
+        RunState.HONEYDEW_WRITING_REPORT,
+    )
+    assert revising.active_since is not None
+    assert revising.active_runtime_seconds == waiting.active_runtime_seconds
+
+
+def test_evidence_snapshot_projects_bounded_verified_artifact_contents(
+    orchestrator_bundle,
+) -> None:
+    settings, store, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(objective='Diagnose an authoritative job failure.')
+    )
+    log_path = Path(settings.shared_mount_root) / 'artifacts/job-1/runner.log'
+    log_path.parent.mkdir(parents=True)
+    log_content = (
+        'unimportant prefix that should be truncated\n'
+        'ValueError: feature names should match fit\n'
+    ).encode()
+    log_path.write_bytes(log_content)
+    store.save_artifact(
+        ArtifactRecord(
+            run_id=run.run_id,
+            type='runner_log',
+            uri='artifacts/job-1/runner.log',
+            sha256=sha256(log_content).hexdigest(),
+        )
+    )
+    status_path = Path(settings.shared_mount_root) / 'artifacts/job-1/status.json'
+    status_content = b'{"status":"failed","exit_code":1}'
+    status_path.write_bytes(status_content)
+    store.save_artifact(
+        ArtifactRecord(
+            run_id=run.run_id,
+            type='status',
+            uri='artifacts/job-1/status.json',
+            sha256=sha256(status_content).hexdigest(),
+        )
+    )
+    engine.settings.evidence_excerpt_max_bytes = 48
+
+    contents = engine._evidence_snapshot(run.run_id)['artifact_contents']
+
+    log = next(item for item in contents if item['type'] == 'runner_log')
+    assert log['digest_verified'] is True
+    assert log['truncated'] is True
+    assert log['excerpt_position'] == 'tail'
+    assert 'ValueError: feature names should match fit' in log['content']
+    status = next(item for item in contents if item['type'] == 'status')
+    assert status['content'] == {'status': 'failed', 'exit_code': 1}
+
+    fairness_path = (
+        Path(settings.shared_mount_root) / 'artifacts/job-1/fairness.csv'
+    )
+    fairness_content = b'group,accuracy\nA,0.75\n'
+    fairness_path.write_bytes(fairness_content)
+    store.save_artifact(
+        ArtifactRecord(
+            run_id=run.run_id,
+            type='fairness_table',
+            uri='artifacts/job-1/fairness.csv',
+            sha256=sha256(fairness_content).hexdigest(),
+        )
+    )
+    contents = engine._evidence_snapshot(run.run_id)['artifact_contents']
+    fairness = next(
+        item for item in contents if item['type'] == 'fairness_table'
+    )
+    assert fairness['digest_verified'] is True
+    assert fairness['content'] == 'group,accuracy\nA,0.75\n'
+
+
+def test_evidence_snapshot_rejects_mismatched_or_escaping_artifacts(
+    orchestrator_bundle,
+) -> None:
+    settings, store, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(objective='Reject untrusted artifact evidence.')
+    )
+    status_path = Path(settings.shared_mount_root) / 'status.json'
+    status_path.write_text('{"status":"complete"}')
+    store.save_artifact(
+        ArtifactRecord(
+            run_id=run.run_id,
+            type='status',
+            uri='status.json',
+            sha256='0' * 64,
+        )
+    )
+    store.save_artifact(
+        ArtifactRecord(
+            run_id=run.run_id,
+            type='status',
+            uri='../status.json',
+            sha256='0' * 64,
+        )
+    )
+
+    contents = engine._evidence_snapshot(run.run_id)['artifact_contents']
+
+    assert contents == [
+        {
+            'uri': 'artifact://status.json',
+            'type': 'status',
+            'sha256': '0' * 64,
+            'content_unavailable': 'artifact digest mismatch',
+        }
+    ]
 
 
 class DeniedThenValidRuntime(ScriptedMockRuntime):
@@ -78,6 +224,72 @@ class FailOnceImplementationRuntime(ScriptedMockRuntime):
                 raise RuntimeError('mock implementation timeout')
             self.recovery_prompt = kwargs['prompt']
         return super().run_turn(**kwargs)
+
+
+class MissingPlanThenRepairRuntime(ScriptedMockRuntime):
+    def __init__(self, *, runner_image: str) -> None:
+        super().__init__(runner_image=runner_image)
+        self.removed_first_plan = False
+
+    def run_turn(self, **kwargs):
+        result = super().run_turn(**kwargs)
+        if (
+            kwargs['agent'] == AgentName.BEAKER
+            and 'Write implementation-plan.md' in kwargs['prompt']
+            and not self.removed_first_plan
+        ):
+            (kwargs['workspace'] / 'implementation-plan.md').unlink()
+            self.removed_first_plan = True
+        return result
+
+
+class MissingProtocolThenRepairRuntime(ScriptedMockRuntime):
+    def __init__(self, *, runner_image: str) -> None:
+        super().__init__(runner_image=runner_image)
+        self.removed_first_protocol = False
+
+    def run_turn(self, **kwargs):
+        if (
+            kwargs['agent'] == AgentName.HONEYDEW
+            and kwargs['prompt'].startswith('Focused workspace repair.')
+        ):
+            return super().run_turn(
+                **{
+                    **kwargs,
+                    'prompt': 'Draft a concrete program.md focused repair.',
+                }
+            )
+        result = super().run_turn(**kwargs)
+        if (
+            kwargs['agent'] == AgentName.HONEYDEW
+            and 'Draft a concrete program.md' in kwargs['prompt']
+            and not self.removed_first_protocol
+        ):
+            (kwargs['workspace'] / 'program.md').unlink()
+            self.removed_first_protocol = True
+        return result
+
+
+class PauseDuringImplementationRuntime(ScriptedMockRuntime):
+    def __init__(self, *, runner_image: str) -> None:
+        super().__init__(runner_image=runner_image)
+        self.engine: ResearchOrchestrator | None = None
+
+    def run_turn(self, **kwargs):
+        result = super().run_turn(**kwargs)
+        if (
+            self.engine is not None
+            and kwargs['agent'] == AgentName.BEAKER
+            and (
+                'Implement the bounded' in kwargs['prompt']
+                or 'Execute the task-specific plan' in kwargs['prompt']
+            )
+        ):
+            self.engine.pause_run(
+                kwargs['run_id'],
+                requested_by='test-mid-turn',
+            )
+        return result
 
 
 class NewContractRuntime(ScriptedMockRuntime):
@@ -489,6 +701,56 @@ def test_mocked_complete_workflow_and_agent_isolation(orchestrator_bundle) -> No
     assert runtime.turn_counts
 
 
+def test_missing_beaker_plan_file_gets_one_focused_repair(
+    orchestrator_bundle,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    runtime = MissingPlanThenRepairRuntime(runner_image=RUNNER_IMAGE)
+    engine.runtime = runtime
+    run = engine.create_run(
+        RunCreateRequest(objective='Repair a missing authoritative plan file.')
+    )
+    protocol = _pending_action(store, run.run_id, 'approve_protocol')
+
+    engine.approve_action(
+        protocol.action_id,
+        reviewer='test-human',
+        reason='Protocol accepted.',
+    )
+
+    current = store.get_run(run.run_id)
+    assert current.state == RunState.AWAITING_EXECUTION_APPROVAL
+    assert (Path(current.beaker_workspace) / 'implementation-plan.md').is_file()
+    event_types = {
+        event.event_type for event in store.list_events(run.run_id)
+    }
+    assert 'agent.file_repair_requested' in event_types
+    assert 'agent.file_repair_completed' in event_types
+    assert runtime.turn_counts[AgentName.BEAKER] == 3
+
+
+def test_missing_honeydew_protocol_file_gets_one_focused_repair(
+    orchestrator_bundle,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    runtime = MissingProtocolThenRepairRuntime(runner_image=RUNNER_IMAGE)
+    engine.runtime = runtime
+
+    run = engine.create_run(
+        RunCreateRequest(objective='Repair a missing authoritative protocol file.')
+    )
+
+    current = store.get_run(run.run_id)
+    assert current.state == RunState.AWAITING_PROTOCOL_APPROVAL
+    assert Path(current.protocol_path or '').is_file()
+    event_types = {
+        event.event_type for event in store.list_events(run.run_id)
+    }
+    assert 'agent.file_repair_requested' in event_types
+    assert 'agent.file_repair_completed' in event_types
+    assert runtime.turn_counts[AgentName.HONEYDEW] == 2
+
+
 def test_idempotent_job_submission(orchestrator_bundle) -> None:
     _, store, cluster, _, engine = orchestrator_bundle
     run = _advance_to_jobs(engine, store)
@@ -500,6 +762,50 @@ def test_idempotent_job_submission(orchestrator_bundle) -> None:
     stored, created = store.create_job_if_absent(job)
     assert created is False
     assert stored.job_id == job.job_id
+
+
+def test_submitted_queued_job_is_inspected_without_resubmission(
+    orchestrator_bundle,
+    monkeypatch,
+) -> None:
+    _, store, cluster, _, engine = orchestrator_bundle
+    original_submit = cluster.submit
+    submission_calls = []
+
+    def submit_as_accepted(spec):
+        submission_calls.append(spec.idempotency_key)
+        submission = original_submit(spec)
+        accepted = submission.__class__(
+            external_run_id=submission.external_run_id,
+            job_name=submission.job_name,
+            kubernetes_uid=submission.kubernetes_uid,
+            status=JobStatus.QUEUED,
+        )
+        cluster.submissions[spec.idempotency_key] = accepted
+        cluster.snapshots[accepted.external_run_id] = (
+            cluster.snapshots[accepted.external_run_id].__class__(
+                status=JobStatus.QUEUED
+            )
+        )
+        return accepted
+
+    monkeypatch.setattr(cluster, 'submit', submit_as_accepted)
+    run = _advance_to_jobs(engine, store)
+    jobs = store.list_jobs(run.run_id)
+    assert all(job.status == JobStatus.QUEUED for job in jobs)
+    assert all(job.external_run_id is not None for job in jobs)
+
+    engine.reconcile_run(run.run_id)
+    engine.reconcile_run(run.run_id)
+
+    assert submission_calls == [job.idempotency_key for job in jobs]
+    assert len(
+        [
+            event
+            for event in store.list_events(run.run_id)
+            if event.event_type == 'job.submitted'
+        ]
+    ) == len(jobs)
 
 
 def test_policy_denial_returns_beaker_to_revision(
@@ -534,13 +840,115 @@ def test_policy_denial_returns_beaker_to_revision(
     )
 
 
+def test_imported_task_prompt_uses_exact_dataset_binding_names(
+    orchestrator_bundle,
+    monkeypatch,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(objective='Use exact imported dataset binding names.')
+    )
+    current = store.get_run(run.run_id)
+    task = {
+        'source_subdirectory': 'research-workspace/task',
+        'runner_image': RUNNER_IMAGE,
+        'resources': {
+            'cpu': 1,
+            'memory_gib': 1,
+            'gpus': 0,
+            'wallclock_minutes': 5,
+        },
+        'required_artifacts': ['metrics.json'],
+        'datasets': [
+            {
+                'name': 'adult_train',
+                'role': 'train',
+                'uri': 's3://datasets/adult.data',
+                'sha256': 'a' * 64,
+                'contains_labels': True,
+            }
+        ],
+    }
+    store.replace_run(
+        current.model_copy(update={'task_definition': task}),
+        expected_version=current.version,
+    )
+    plan = Path(current.beaker_workspace) / 'implementation-plan.md'
+    plan.write_text('# Plan\n')
+    captured: dict[str, str] = {}
+
+    def capture_turn(**kwargs):
+        captured['prompt'] = kwargs['prompt']
+        raise RuntimeError('prompt captured')
+
+    monkeypatch.setattr(engine, '_run_agent_turn', capture_turn)
+
+    with pytest.raises(RuntimeError, match='prompt captured'):
+        engine._beaker_implement(run.run_id)
+
+    implementation_prompt = captured['prompt']
+    assert 'keyed by each exact declared dataset `name`' in implementation_prompt
+    assert 'Do not assume generic keys such as `train` or `test`' in implementation_prompt
+    assert '"adult_train": "/mnt/datasets/adult_train"' in implementation_prompt
+    assert 'Run a loader-only smoke check' in implementation_prompt
+    assert 'Do not run the full benchmark' in implementation_prompt
+    assert '`metrics.json` document root' in implementation_prompt
+
+
+def test_imported_task_revision_does_not_retry_missing_dependencies(
+    orchestrator_bundle,
+    monkeypatch,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(objective='Revise an imported benchmark safely.')
+    )
+    current = store.get_run(run.run_id)
+    store.replace_run(
+        current.model_copy(
+            update={
+                'task_definition': {
+                    'source_subdirectory': 'benchmark-workspace/task',
+                    'runner_image': RUNNER_IMAGE,
+                    'resources': {
+                        'cpu': 1,
+                        'memory_gib': 1,
+                        'gpus': 0,
+                        'wallclock_minutes': 5,
+                    },
+                    'required_artifacts': ['metrics.json'],
+                    'datasets': [],
+                }
+            }
+        ),
+        expected_version=current.version,
+    )
+    captured: dict[str, str] = {}
+
+    def capture_turn(**kwargs):
+        captured['prompt'] = kwargs['prompt']
+        raise RuntimeError('prompt captured')
+
+    monkeypatch.setattr(engine, '_run_agent_turn', capture_turn)
+
+    with pytest.raises(RuntimeError, match='prompt captured'):
+        engine._beaker_revise(run.run_id, feedback='Fix the smoke check.')
+
+    revision_prompt = captured['prompt']
+    assert 'Attempt each local command only once' in revision_prompt
+    assert 'If a check fails with ModuleNotFoundError' in revision_prompt
+    assert 'do not install packages, repeat the command' in revision_prompt
+    assert 'artifact://, git://, event://, job://, or contract://' in revision_prompt
+
+
 def test_contract_preflight_returns_beaker_to_revision(
     orchestrator_bundle,
 ) -> None:
     _, store, _, _, engine = orchestrator_bundle
-    engine.runtime = ContractOversizedThenValidRuntime(
+    runtime = ContractOversizedThenValidRuntime(
         runner_image=RUNNER_IMAGE
     )
+    engine.runtime = runtime
     run = engine.create_run(
         RunCreateRequest(
             objective='Reject a matrix that exceeds the evaluation contract.'
@@ -569,6 +977,23 @@ def test_contract_preflight_returns_beaker_to_revision(
         'submit_experiment_matrix',
     )
     assert pending.honeydew_approved is True
+    revision_prompt = next(
+        prompt
+        for agent, prompt in runtime.prompts
+        if agent == AgentName.BEAKER
+        and 'focused deterministic-preflight correction' in prompt
+    )
+    assert 'Do not browse unrelated repository files' in revision_prompt
+    assert '`configs/baseline.yaml`' in revision_prompt
+    assert 'exact dotted path from the root' in revision_prompt
+    assert 'not beneath `methodology`' in revision_prompt
+    assert 'do not add `description` or `values` metadata wrappers' in revision_prompt
+    assert any(
+        agent == AgentName.HONEYDEW
+        and 'Required root metric keys:' in prompt
+        and 'nested copies do not satisfy the contract' in prompt
+        for agent, prompt in runtime.prompts
+    )
 
 
 def test_transient_approved_action_failure_is_persisted_and_pauses_run(
@@ -637,6 +1062,82 @@ def test_failed_resume_returns_run_to_paused_state(
     assert 'mock resumed turn timeout' in event.payload['reason']
 
 
+def test_pause_during_agent_turn_stops_workflow_advancement(
+    orchestrator_bundle,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    runtime = PauseDuringImplementationRuntime(runner_image=RUNNER_IMAGE)
+    runtime.engine = engine
+    engine.runtime = runtime
+    run = engine.create_run(
+        RunCreateRequest(
+            objective='Stop advancement when paused during implementation.'
+        )
+    )
+    protocol = _pending_action(store, run.run_id, 'approve_protocol')
+
+    with pytest.raises(
+        WorkflowError,
+        match='workflow advancement stopped after agent turn',
+    ):
+        engine.approve_action(
+            protocol.action_id,
+            reviewer='test-human',
+            reason='Protocol accepted.',
+        )
+
+    paused = store.get_run(run.run_id)
+    assert paused.state == RunState.PAUSED
+    assert paused.resume_state == RunState.BEAKER_IMPLEMENTING
+    assert not any(
+        action.type == 'submit_experiment_matrix'
+        for action in store.list_actions(run.run_id)
+    )
+    assert runtime.turn_counts[AgentName.HONEYDEW] == 1
+
+
+def test_honeydew_receives_read_only_beaker_review_snapshot(
+    orchestrator_bundle,
+) -> None:
+    _, store, _, runtime, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(
+            objective='Review the actual implementation before execution.'
+        )
+    )
+    cache = Path(run.beaker_workspace) / '__pycache__'
+    cache.mkdir()
+    (cache / 'generated.pyc').write_bytes(b'generated bytecode')
+    protocol = _pending_action(store, run.run_id, 'approve_protocol')
+    engine.approve_action(
+        protocol.action_id,
+        reviewer='test-human',
+        reason='Protocol accepted.',
+    )
+
+    review_root = Path(run.honeydew_workspace) / '.glasslab-review'
+    manifest = json.loads((review_root / 'manifest.json').read_text())
+    reviewed_paths = {item['path'] for item in manifest['files']}
+    assert 'configs/baseline.yaml' in reviewed_paths
+    assert 'experiment.py' in reviewed_paths
+    assert 'implementation-plan.md' in reviewed_paths
+    assert '__pycache__/generated.pyc' not in reviewed_paths
+    assert (review_root / 'experiment.py').read_text() == (
+        'print("bounded mock experiment")\n'
+    )
+    assert (review_root / 'experiment.py').stat().st_mode & 0o222 == 0
+    honeydew_prompt = next(
+        prompt
+        for agent, prompt in reversed(runtime.prompts)
+        if agent == AgentName.HONEYDEW and 'Review Beaker' in prompt
+    )
+    assert '.glasslab-review/manifest.json' in honeydew_prompt
+    assert any(
+        event.event_type == 'agent.review_snapshot_created'
+        for event in store.list_events(run.run_id)
+    )
+
+
 def test_failed_turn_resumes_with_fresh_session_and_checkpoint(
     orchestrator_bundle,
 ) -> None:
@@ -677,6 +1178,80 @@ def test_failed_turn_resumes_with_fresh_session_and_checkpoint(
         'This is a fresh OpenCode session after an interrupted or failed turn.'
     )
     assert 'implementation-plan.md' in runtime.recovery_prompt
+
+
+def test_imported_task_resume_finalizes_existing_runner(
+    orchestrator_bundle,
+) -> None:
+    _, store, _, runtime, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(
+            objective='Resume an imported task from its completed runner.'
+        )
+    )
+    source_subdirectory = 'benchmark-workspace/adult-income'
+    source = Path(run.beaker_workspace) / source_subdirectory
+    source.mkdir(parents=True)
+    (source / 'run.py').write_text('print("preserved implementation")\n')
+    config = Path(run.beaker_workspace) / 'configs' / 'candidate.yaml'
+    config.parent.mkdir(exist_ok=True)
+    config.write_text('candidate: true\n')
+    (Path(run.beaker_workspace) / 'implementation-plan.md').write_text(
+        '# Existing implementation plan\n'
+    )
+    task_definition = {
+        'source_subdirectory': source_subdirectory,
+        'runner_image': RUNNER_IMAGE,
+        'resources': {
+            'cpu': 1,
+            'memory_gib': 1,
+            'gpus': 0,
+            'wallclock_minutes': 5,
+        },
+        'required_artifacts': ['metrics.json'],
+        'datasets': [],
+    }
+    template = engine._matrix_action_template(
+        run.model_copy(update={'task_definition': task_definition})
+    )
+    assert template['reason']
+    ExperimentMatrix.model_validate(template['arguments'])
+    paused = run.model_copy(
+        update={
+            'state': RunState.PAUSED,
+            'resume_state': RunState.BEAKER_IMPLEMENTING,
+            'task_definition': task_definition,
+            'maximum_runtime_seconds': 60,
+            'active_runtime_seconds': 1.0,
+            'active_since': None,
+        }
+    )
+    store.replace_run(paused, expected_version=run.version)
+
+    resumed = engine.resume_run(run.run_id, requested_by='test-human')
+
+    assert resumed.state == RunState.AWAITING_EXECUTION_APPROVAL
+    finalizing_event = next(
+        event
+        for event in store.list_events(run.run_id)
+        if event.event_type == 'run.state_changed'
+        and event.payload['to'] == RunState.BEAKER_FINALIZING.value
+    )
+    assert finalizing_event.payload['from'] == RunState.BEAKER_IMPLEMENTING.value
+    assert runtime.turn_counts[AgentName.BEAKER] == 1
+    beaker_prompt = next(
+        prompt
+        for agent, prompt in runtime.prompts
+        if agent == AgentName.BEAKER
+    )
+    assert 'Do not use any tools' in beaker_prompt
+    assert resumed.active_runtime_seconds < resumed.maximum_runtime_seconds
+    matrix = _pending_action(
+        store,
+        run.run_id,
+        'submit_experiment_matrix',
+    )
+    assert matrix.honeydew_approved is True
 
 
 def test_deterministic_matrix_execution_failure_requests_revision(
@@ -774,6 +1349,60 @@ def test_restart_recovery_from_job_running(orchestrator_bundle) -> None:
     recovered = restarted_store.get_run(run.run_id)
     assert recovered.state == RunState.AWAITING_FINAL_ACCEPTANCE
     assert len(restarted_store.list_artifacts(run.run_id)) == 5
+
+
+def test_recovery_does_not_replay_stale_approved_matrix(
+    orchestrator_bundle,
+    monkeypatch,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(objective='Do not replay an obsolete matrix approval.')
+    )
+    run = store.replace_run(
+        run.model_copy(update={'state': RunState.AWAITING_EXECUTION_APPROVAL}),
+        expected_version=run.version,
+    )
+    old = store.save_action(
+        ActionRecord(
+            run_id=run.run_id,
+            proposed_by=AgentName.BEAKER,
+            type='submit_experiment_matrix',
+            arguments={},
+            policy_classification=(
+                PolicyClassification.HONEYDEW_AND_HUMAN_APPROVAL
+            ),
+            approval_status=ApprovalStatus.APPROVED,
+            reason='Old approved matrix.',
+            idempotency_key='old-matrix',
+        )
+    )
+    latest = store.save_action(
+        ActionRecord(
+            run_id=run.run_id,
+            proposed_by=AgentName.BEAKER,
+            type='submit_experiment_matrix',
+            arguments={},
+            policy_classification=(
+                PolicyClassification.HONEYDEW_AND_HUMAN_APPROVAL
+            ),
+            approval_status=ApprovalStatus.PENDING,
+            reason='Replacement matrix awaiting approval.',
+            idempotency_key='latest-matrix',
+        )
+    )
+    submitted: list[str] = []
+    monkeypatch.setattr(
+        engine,
+        '_submit_matrix',
+        lambda action: submitted.append(action.action_id),
+    )
+
+    engine._recover_run(run.run_id)
+
+    assert old.action_id != latest.action_id
+    assert submitted == []
+    assert store.get_run(run.run_id).state == RunState.AWAITING_EXECUTION_APPROVAL
 
 
 def test_recovery_backfills_protocol_artifact_from_event(

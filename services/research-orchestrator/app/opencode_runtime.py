@@ -7,6 +7,7 @@ from pathlib import Path
 import secrets
 import socket
 import subprocess
+import threading
 import time
 from typing import Any, Iterator
 from uuid import uuid4
@@ -486,6 +487,49 @@ class OpenCodeProcessRuntime(AgentRuntime):
             agent=agent,
             workspace=workspace,
         )
+        stop_watchdog = threading.Event()
+        abort_reasons: list[str] = []
+        watchdog = threading.Thread(
+            target=self._watch_turn,
+            kwargs={
+                'handle': handle,
+                'session_id': session_id,
+                'workspace': workspace,
+                'stop': stop_watchdog,
+                'abort_reasons': abort_reasons,
+            },
+            daemon=True,
+            name=f'opencode-watchdog-{agent.value}-{run_id[:8]}',
+        )
+        watchdog.start()
+        try:
+            result = self._run_turn_request_loop(
+                handle=handle,
+                agent=agent,
+                workspace=workspace,
+                session_id=session_id,
+                prompt=prompt,
+            )
+            if abort_reasons:
+                raise OpenCodeRuntimeError(abort_reasons[0])
+            return result
+        except Exception as exc:
+            if abort_reasons:
+                raise OpenCodeRuntimeError(abort_reasons[0]) from exc
+            raise
+        finally:
+            stop_watchdog.set()
+            watchdog.join(timeout=3)
+
+    def _run_turn_request_loop(
+        self,
+        *,
+        handle: _ProcessHandle,
+        agent: AgentName,
+        workspace: Path,
+        session_id: str,
+        prompt: str,
+    ) -> tuple[AgentTurnResult, str | None]:
         message_id: str | None = None
         current_prompt = prompt
         with self._client(handle) as client:
@@ -581,6 +625,94 @@ class OpenCodeProcessRuntime(AgentRuntime):
                     f'repair attempt(s): {_validation_summary(exc)}'
                 ) from exc
         raise OpenCodeRuntimeError('OpenCode turn ended without a result')
+
+    @staticmethod
+    def _terminal_tool_signatures(messages: list[dict[str, Any]]) -> list[str]:
+        signatures: list[str] = []
+        for message in messages:
+            for part in message.get('parts', []):
+                if part.get('type') != 'tool':
+                    continue
+                state = part.get('state')
+                if (
+                    not isinstance(state, dict)
+                    or state.get('status') not in {'completed', 'error'}
+                ):
+                    continue
+                signatures.append(
+                    json.dumps(
+                        {
+                            'tool': part.get('tool'),
+                            'input': state.get('input'),
+                        },
+                        sort_keys=True,
+                        separators=(',', ':'),
+                    )
+                )
+        return signatures
+
+    def _watch_turn(
+        self,
+        *,
+        handle: _ProcessHandle,
+        session_id: str,
+        workspace: Path,
+        stop: threading.Event,
+        abort_reasons: list[str],
+    ) -> None:
+        deadline = time.monotonic() + self.settings.opencode_turn_timeout_seconds
+        while not stop.wait(2):
+            reason: str | None = None
+            if time.monotonic() >= deadline:
+                reason = (
+                    'OpenCode turn exceeded the hard wall-clock limit of '
+                    f'{self.settings.opencode_turn_timeout_seconds:g} seconds'
+                )
+            else:
+                try:
+                    with httpx.Client(
+                        base_url=handle.base_url,
+                        auth=('glasslab-orchestrator', handle.password),
+                        timeout=5,
+                    ) as client:
+                        response = client.get(
+                            f'/session/{session_id}/message',
+                            params={'directory': str(workspace)},
+                        )
+                        response.raise_for_status()
+                        messages = response.json()
+                    if isinstance(messages, list):
+                        signatures = self._terminal_tool_signatures(messages)
+                        limit = self.settings.opencode_repeated_tool_limit
+                        if (
+                            limit > 1
+                            and len(signatures) >= limit
+                            and len(set(signatures[-limit:])) == 1
+                        ):
+                            reason = (
+                                'OpenCode turn aborted after '
+                                f'{limit} identical terminal tool calls'
+                            )
+                except (httpx.HTTPError, ValueError):
+                    continue
+            if reason is None:
+                continue
+            abort_reasons.append(reason)
+            try:
+                with httpx.Client(
+                    base_url=handle.base_url,
+                    auth=('glasslab-orchestrator', handle.password),
+                    timeout=5,
+                ) as client:
+                    response = client.post(
+                        f'/session/{session_id}/abort',
+                        params={'directory': str(workspace)},
+                    )
+                    if response.status_code not in {200, 404}:
+                        response.raise_for_status()
+            except httpx.HTTPError:
+                pass
+            return
 
     def abort(self, *, run_id: str, agent: AgentName, session_id: str) -> None:
         handle = self._handles.get((run_id, agent))

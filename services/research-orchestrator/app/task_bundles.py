@@ -87,7 +87,7 @@ RUNTIME_PROFILES = {
         workload_id='workspace-cpu-ml-v1',
         runner_image=(
             'ghcr.io/offensivegeneric/'
-            'glasslab-research-workspace-runner:benchmark-cpu-v1'
+            'glasslab-research-workspace-runner:benchmark-cpu-v2'
         ),
         resources={
             'cpu': 4,
@@ -109,6 +109,18 @@ RUNTIME_PROFILES = {
             'wallclock_minutes': 240,
         },
     ),
+}
+
+# The workflow registry owns these fixed images. Persisted task metadata keeps
+# the scientific bundle immutable, while execution binds to current deployment
+# policy when the task is loaded.
+FIXED_WORKLOAD_RUNNER_IMAGES = {
+    'benchmark-workspace-cpu-v1': (
+        'ghcr.io/offensivegeneric/'
+        'glasslab-research-workspace-runner:benchmark-cpu-v2'
+    ),
+    'workspace-cpu-ml-v1': RUNTIME_PROFILES['cpu-ml-standard-v1'].runner_image,
+    'workspace-gpu-ml-v1': RUNTIME_PROFILES['gpu-ml-standard-v1'].runner_image,
 }
 
 BASE_REQUIRED_ARTIFACTS = (
@@ -554,9 +566,13 @@ class TaskBundleManager:
             candidates = [path for path in candidates if path.name == digest]
         if not candidates:
             raise TaskBundleError(f'task bundle digest is not imported: {task_id}')
-        return TaskBundleRecord.model_validate_json(
+        record = TaskBundleRecord.model_validate_json(
             (candidates[0] / 'task.json').read_text()
         )
+        runner_image = FIXED_WORKLOAD_RUNNER_IMAGES.get(record.workload_id)
+        if runner_image and runner_image != record.runner_image:
+            record = record.model_copy(update={'runner_image': runner_image})
+        return record
 
     def list(self) -> list[TaskBundleRecord]:
         records: list[TaskBundleRecord] = []

@@ -198,6 +198,42 @@ def _render_action_context(payload: dict[str, Any]) -> str:
                 ),
             ]
         )
+        preflight = payload.get('preflight')
+        if isinstance(preflight, dict):
+            checks = preflight.get('checks')
+            comparisons = preflight.get('comparisons')
+            decisions = preflight.get('decisions')
+            errors = preflight.get('errors')
+            if not isinstance(checks, list):
+                checks = []
+            if not isinstance(comparisons, dict):
+                comparisons = {}
+            if not isinstance(decisions, dict):
+                decisions = {}
+            if not isinstance(errors, list):
+                errors = []
+            methodology = [
+                f"{name}=[{', '.join(map(str, values))}]"
+                for name, values in {**comparisons, **decisions}.items()
+                if isinstance(values, list)
+            ]
+            lines.extend(
+                [
+                    '',
+                    '**Deterministic preflight**',
+                    (
+                        f"{'Passed' if preflight.get('passed') else 'Failed'}; "
+                        f"{preflight.get('job_count', job_count)} job(s). "
+                        f"{'; '.join(map(str, checks)) or 'No checks recorded.'}"
+                    ),
+                    (
+                        'Methodology: '
+                        + (', '.join(methodology) or 'no declared dimensions')
+                    ),
+                ]
+            )
+            if errors:
+                lines.append('Blocking findings: ' + '; '.join(map(str, errors)))
     elif action_type == 'accept_final_report':
         artifact = payload.get('artifact')
         if not isinstance(artifact, dict):

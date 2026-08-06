@@ -22,6 +22,7 @@ class RunState(StrEnum):
     AWAITING_CONTRACT_PROMOTION = 'AWAITING_CONTRACT_PROMOTION'
     BEAKER_PLANNING = 'BEAKER_PLANNING'
     BEAKER_IMPLEMENTING = 'BEAKER_IMPLEMENTING'
+    BEAKER_FINALIZING = 'BEAKER_FINALIZING'
     HONEYDEW_REVIEWING = 'HONEYDEW_REVIEWING'
     BEAKER_REVISING = 'BEAKER_REVISING'
     AWAITING_EXECUTION_APPROVAL = 'AWAITING_EXECUTION_APPROVAL'
@@ -417,11 +418,14 @@ class RunRecord(BaseModel):
     reports_path: str
     current_agent: AgentName | None = None
     turn_number: int = 0
+    methodology_revision_count: int = Field(default=0, ge=0)
     discord_thread_id: str | None = None
     discord_status_message_id: str | None = None
     maximum_turns: int
     maximum_runtime_seconds: int
     maximum_parallel_jobs: int
+    active_runtime_seconds: float = Field(default=0.0, ge=0.0)
+    active_since: datetime | None = None
     resume_state: RunState | None = None
     version: int = 1
     created_at: datetime

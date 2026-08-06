@@ -150,6 +150,21 @@ def test_discord_matrix_waits_for_honeydew_before_showing_controls() -> None:
         'objective': 'Compare naive and semi-hard triplet mining.',
         'reason': 'The matrix requires methodology and human approval.',
         'effect': 'Authorize bounded cluster submission.',
+        'preflight': {
+            'passed': True,
+            'job_count': 6,
+            'checks': [
+                'candidate config parsed',
+                'deterministic expansion produces 6 jobs',
+            ],
+            'comparisons': {
+                'miner': ['naive', 'semi_hard'],
+            },
+            'decisions': {
+                'encoding': ['one_hot'],
+            },
+            'errors': [],
+        },
         'arguments': {
             'variants': [
                 {'name': 'naive-mining', 'overrides': {}},
@@ -182,6 +197,8 @@ def test_discord_matrix_waits_for_honeydew_before_showing_controls() -> None:
     assert proposed.components is None
     assert '6 jobs' in proposed.content
     assert '1 GPU' in proposed.content
+    assert '**Deterministic preflight**' in proposed.content
+    assert 'miner=[naive, semi_hard]' in proposed.content
 
     requested = renderer.render(
         EventRecord(
@@ -345,6 +362,7 @@ def test_discord_gateway_registers_component_handler() -> None:
     for command_name in (
         'research-pause',
         'research-resume',
+        'research-artifacts',
         'dataset-upload',
     ):
         assert gateway.tree.get_command(
@@ -622,6 +640,48 @@ def test_opencode_event_normalization() -> None:
         run_id='run-1',
         agent=AgentName.BEAKER,
     ) is None
+
+
+def test_opencode_terminal_tool_signatures_ignore_incomplete_calls() -> None:
+    messages = [
+        {
+            'parts': [
+                {
+                    'type': 'tool',
+                    'tool': 'read',
+                    'state': {
+                        'status': 'completed',
+                        'input': {'filePath': '/workspace/run.py', 'offset': 15},
+                    },
+                },
+                {
+                    'type': 'tool',
+                    'tool': 'read',
+                    'state': {
+                        'status': 'pending',
+                        'input': {'filePath': '/workspace/other.py'},
+                    },
+                },
+            ]
+        },
+        {
+            'parts': [
+                {
+                    'type': 'tool',
+                    'tool': 'read',
+                    'state': {
+                        'status': 'error',
+                        'input': {'offset': 15, 'filePath': '/workspace/run.py'},
+                    },
+                }
+            ]
+        },
+    ]
+
+    signatures = OpenCodeProcessRuntime._terminal_tool_signatures(messages)
+
+    assert len(signatures) == 2
+    assert signatures[0] == signatures[1]
 
 
 def test_extracts_current_and_legacy_opencode_structured_output() -> None:

@@ -156,7 +156,6 @@ class WorkflowApiClusterExecutor(ClusterExecutor):
             'experiment_type': spec.experiment_type or self.experiment_type,
             'workload_id': spec.workload_id or self.workload_id,
             'campaign_id': spec.run_id,
-            'image_ref': spec.runner_image,
             'config_payload': {
                 'orchestrator_job_id': spec.orchestrator_job_id,
                 'variant_name': spec.variant_name,
@@ -202,9 +201,22 @@ class WorkflowApiClusterExecutor(ClusterExecutor):
             'submitted_by': 'research-orchestrator',
             'run_priority': 'user',
         }
+        # Workspace runner images are fixed by the workflow registry. Omitting
+        # image_ref prevents a persisted task bundle from overriding a newer,
+        # compatible registry image after an orchestrator upgrade.
+        if not (spec.task_bundle and spec.source_bundle):
+            body['image_ref'] = spec.runner_image
         with self._client() as client:
             response = client.post('/experiments/runs', json=body)
-            response.raise_for_status()
+            if response.is_error:
+                try:
+                    detail = response.json().get('detail')
+                except (ValueError, AttributeError):
+                    detail = response.text
+                raise ClusterExecutorError(
+                    'workflow-api rejected experiment submission '
+                    f'({response.status_code}): {detail or response.reason_phrase}'
+                )
             payload = response.json()
         submission_payload = payload.get('job_submission') or {}
         raw_status = str((payload.get('status') or {}).get('status', 'accepted'))

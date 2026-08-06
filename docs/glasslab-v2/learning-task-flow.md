@@ -153,6 +153,17 @@ For generic experiment manifests, that Job receives:
 The workload container should read those inputs, run one bounded candidate, and
 write a terminal bundle under the artifacts mount.
 
+The research workspace runner validates those bindings and exposes the
+resolved paths to the candidate as:
+
+- `GLASSLAB_DATASET_BINDINGS_JSON`, the canonical JSON object
+- `GLASSLAB_DATASET_<NORMALIZED_NAME>`, a namespaced per-binding variable
+- `<NORMALIZED_NAME>_PATH`, a compatibility alias for imported benchmark code
+
+For example, the binding `adult_train` is available as both
+`GLASSLAB_DATASET_ADULT_TRAIN` and `ADULT_TRAIN_PATH`. Binding names that would
+collide after normalization are rejected.
+
 ## What Lives Where
 
 ### `cluster-config`

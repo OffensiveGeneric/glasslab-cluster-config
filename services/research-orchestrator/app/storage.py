@@ -23,7 +23,7 @@ from .schemas import (
     TurnRecord,
     utc_now,
 )
-from .state_machine import validate_transition
+from .state_machine import HUMAN_WAIT_STATES, validate_transition
 
 
 class RecordNotFound(KeyError):
@@ -331,9 +331,32 @@ class SqliteStore:
             current = RunRecord.model_validate_json(row['payload'])
             validate_transition(current.state, target)
             now = utc_now()
+            runtime_updates: dict[str, Any] = {}
+            if (
+                target in HUMAN_WAIT_STATES
+                and current.state not in HUMAN_WAIT_STATES
+            ):
+                active_runtime = current.active_runtime_seconds
+                if current.active_since is not None:
+                    active_runtime += max(
+                        0.0,
+                        (now - current.active_since).total_seconds(),
+                    )
+                runtime_updates = {
+                    'active_runtime_seconds': active_runtime,
+                    'active_since': None,
+                }
+            elif (
+                current.state in HUMAN_WAIT_STATES
+                and target not in HUMAN_WAIT_STATES
+                and target not in TERMINAL_STATES
+                and target != RunState.PAUSED
+            ):
+                runtime_updates = {'active_since': now}
             changed = current.model_copy(
                 update={
                     **(updates or {}),
+                    **runtime_updates,
                     'state': target,
                     'version': int(row['version']) + 1,
                     'updated_at': now,

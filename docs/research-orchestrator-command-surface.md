@@ -17,6 +17,7 @@ and approval role or explicit administrator allowlist.
 | `/task-start archive:<zip> [objective:<text>]` | Main Glasslab channel | Compiles an arbitrary task archive, performs preflight, and starts the run only when required inputs are ready. |
 | `/benchmark-start archive:<zip> [objective:<text>]` | Main Glasslab channel | Compatibility alias for `/task-start`; do not build new integrations around this name. |
 | `/dataset-upload dataset:<file> name:<name> [role:<role>] [contains_labels:<bool>]` | Main Glasslab channel | Stores a file immutably and returns a checksum-addressed `glasslab-dataset://` reference. |
+| `/research-artifacts [run_id:<id>] [include_source:<bool>]` | Run thread, or main channel with `run_id` | Downloads a digest-verified ZIP of the latest run-level artifacts and successful-job outputs. |
 | `/research-pause [run_id:<id>] [reason:<text>]` | Run thread, or main channel with `run_id` | Aborts an active model turn, preserves state, and records where to resume. |
 | `/research-resume [run_id:<id>] [reason:<text>]` | Run thread, or main channel with `run_id` | Restores a paused run to its prior state and restarts workflow recovery. |
 | `/research-cancel [run_id:<id>] [reason:<text>]` | Run thread, or main channel with `run_id` | Cancels the run, aborts active OpenCode turns, requests cancellation of active jobs, and records the Discord actor and reason. |
@@ -26,6 +27,26 @@ and do not require an ID.
 
 Discord does not currently expose list or status slash commands. Status is
 shown by the run thread's editable status message.
+
+## Result Artifacts
+
+Use `/research-artifacts` inside a run thread to download its verified result
+bundle. By default the bundle contains the latest protocol, report, analysis
+notebook, metrics, evaluation output, tables, manifests, and logs associated
+with successful jobs. Failed-job files and duplicate superseded run-level
+artifacts are excluded from the default delivery.
+
+Set `include_source:true` to include frozen source and task ZIP files. The
+command fails closed on path traversal, symlinks, digest mismatches, and the
+configured Discord bundle-size ceiling. Every ZIP contains
+`artifact-manifest.json` with the original URI, digest, job ID, and archive
+path for each delivered file.
+
+After a successful job, the orchestrator also derives `analysis.ipynb` from
+digest-verified `metrics.json` and `tables/*.csv` files. The notebook embeds
+those inputs and supplies generic pandas/matplotlib inspection and plotting
+cells. It is marked as a non-authoritative analysis surface; the immutable
+evaluator output remains the scientific evidence.
 
 ## Approval Controls
 
@@ -215,7 +236,7 @@ Implemented and live:
 - durable state, actions, jobs, artifacts, and append-only events
 - protocol, evaluator-promotion, execution, and final-report approval gates
 - Discord start, task-start, dataset upload, approval, rejection, pause,
-  resume, and cancellation controls
+  resume, cancellation, and artifact-download controls
 - deterministic CPU/GPU task compilation, immutable uploaded datasets, and
   public asset ingestion
 - bounded Kubernetes execution through `workflow-api`

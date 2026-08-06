@@ -18,7 +18,7 @@
     }
   ],
   "allowed_models": ["agent-generated-python"],
-  "runner_image": "ghcr.io/offensivegeneric/glasslab-research-workspace-runner:benchmark-cpu-v1",
+  "runner_image": "ghcr.io/offensivegeneric/glasslab-research-workspace-runner:benchmark-cpu-v2",
   "evaluator_type": "immutable-task-contract-v1",
   "expected_artifacts": {
     "required": [

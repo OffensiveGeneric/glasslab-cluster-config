@@ -137,7 +137,7 @@ So the honest state is:
 
 The large `flash-moe` bootstrap on `.21` later completed successfully.
 
-Validated follow-on state from `glasslab-44 -> .21`:
+Validated follow-on state from `glasslab-provisioner -> .21`:
 
 - Hugging Face snapshot completed:
   - `58/58` files fetched

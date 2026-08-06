@@ -14,6 +14,8 @@ secondary, compatibility-only, or historical.
 Read these first:
 
 - `README.md`
+- `docs/access-topology.md`
+- `docs/contributor-access.md`
 - `docs/glasslab-v2/current/README.md`
 - `docs/glasslab-v2/system-map-2026-07.md`
 - `docs/glasslab-v2/ci-policy-2026-07.md`
@@ -43,9 +45,28 @@ The default check mirrors the default CI signal:
 - Python syntax for services
 - workflow-api core tests
 
+## Pull Request Flow
+
+Create one branch for one coherent change and open a pull request into `main`.
+Continue pushing revisions to the same branch; GitHub updates the pull request
+automatically.
+
+`main` is protected. A merge requires:
+
+- the always-running `Glasslab PR Gate` check
+- one approval from someone other than the author
+- all review conversations resolved
+- a current approval after material revisions
+
+Use squash merge, then delete the feature branch. Direct administrator pushes
+are an incident-recovery bypass, not a normal development path.
+
 ## CI Lanes
 
-Default GitHub checks are intentionally small and path-aware.
+Every pull request runs the four reusable CI lanes below. Their results are
+combined into the required `Glasslab PR Gate` check. Path-aware copies still
+run after relevant changes land on `main`, and compatibility tests remain
+manual.
 
 | Lane | Purpose |
 | --- | --- |
@@ -92,7 +113,7 @@ under the full commit SHA. If a change affects a live service, wait for the `Pub
 workflow, then roll that exact commit from `.44`:
 
 ```bash
-ssh glasslab-44
+ssh glasslab-provisioner
 cd /home/glasslab/cluster-config
 ./scripts/rollout-research-services.sh --sync
 ```
