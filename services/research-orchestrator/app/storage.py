@@ -13,12 +13,16 @@ from .schemas import (
     ActionRecord,
     ApprovalStatus,
     ArtifactRecord,
+    ContextPacketRecord,
     EventRecord,
     IngestedDatasetRecord,
     JobRecord,
     JobStatus,
+    KnowledgeEvent,
     RunRecord,
     RunState,
+    SourceRecord,
+    SourceType,
     TERMINAL_STATES,
     TurnRecord,
     utc_now,
@@ -151,6 +155,47 @@ class SqliteStore:
                 );
                 CREATE INDEX IF NOT EXISTS events_run_idx
                 ON events(run_id, sequence_number);
+
+                CREATE TABLE IF NOT EXISTS knowledge_sources (
+                    source_id TEXT PRIMARY KEY,
+                    source_type TEXT NOT NULL,
+                    canonical_uri TEXT NOT NULL,
+                    run_scope TEXT,
+                    access_policy TEXT NOT NULL,
+                    source_version TEXT,
+                    content_digest TEXT NOT NULL,
+                    ingestion_timestamp TEXT NOT NULL,
+                    chunking_version TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    metadata TEXT NOT NULL,
+                    parent_source_id TEXT,
+                    chunk_index INTEGER,
+                    total_chunks INTEGER,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS knowledge_sources_type_idx
+                ON knowledge_sources(source_type);
+                CREATE INDEX IF NOT EXISTS knowledge_sources_digest_idx
+                ON knowledge_sources(content_digest);
+                CREATE INDEX IF NOT EXISTS knowledge_sources_run_scope_idx
+                ON knowledge_sources(run_scope);
+
+                CREATE TABLE IF NOT EXISTS context_packets (
+                    packet_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL REFERENCES runs(run_id),
+                    agent TEXT NOT NULL,
+                    turn_number INTEGER NOT NULL,
+                    turn_kind TEXT NOT NULL,
+                    query_or_retrieval_intent TEXT NOT NULL,
+                    index_version TEXT NOT NULL,
+                    source_ids_with_scores TEXT NOT NULL,
+                    exact_text_supplied TEXT NOT NULL,
+                    token_budget INTEGER NOT NULL,
+                    used_tokens INTEGER NOT NULL,
+                    timestamp TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS context_packets_run_idx
+                ON context_packets(run_id, turn_number, agent);
                 '''
             )
 
@@ -824,3 +869,365 @@ class SqliteStore:
                 (run_id, after_sequence),
             ).fetchall()
         return [EventRecord.model_validate_json(row['payload']) for row in rows]
+
+    def ingest_source(self, record: SourceRecord) -> SourceRecord:
+        with self.transaction() as connection:
+            connection.execute(
+                '''
+                INSERT OR IGNORE INTO knowledge_sources (
+                    source_id, source_type, canonical_uri, run_scope, access_policy,
+                    source_version, content_digest, ingestion_timestamp, chunking_version,
+                    title, metadata, parent_source_id, chunk_index, total_chunks, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    record.source_id,
+                    record.source_type.value,
+                    record.canonical_uri,
+                    record.run_scope,
+                    record.access_policy,
+                    record.source_version,
+                    record.content_digest,
+                    record.ingestion_timestamp.isoformat(),
+                    record.chunking_version,
+                    record.title,
+                    json.dumps(record.metadata),
+                    record.parent_source_id,
+                    record.chunk_index,
+                    record.total_chunks,
+                    record.created_at.isoformat(),
+                ),
+            )
+        return self.get_source(record.source_id)
+
+    def get_source(self, source_id: str) -> SourceRecord:
+        with self._connect() as connection:
+            row = connection.execute(
+                'SELECT * FROM knowledge_sources WHERE source_id = ?',
+                (source_id,),
+            ).fetchone()
+        if row is None:
+            raise RecordNotFound(source_id)
+        return SourceRecord(
+            source_id=row['source_id'],
+            source_type=SourceType(row['source_type']),
+            canonical_uri=row['canonical_uri'],
+            run_scope=row['run_scope'],
+            access_policy=row['access_policy'],
+            source_version=row['source_version'],
+            content_digest=row['content_digest'],
+            ingestion_timestamp=datetime.fromisoformat(row['ingestion_timestamp']),
+            chunking_version=row['chunking_version'],
+            title=row['title'],
+            metadata=json.loads(row['metadata']),
+            parent_source_id=row['parent_source_id'],
+            chunk_index=row['chunk_index'],
+            total_chunks=row['total_chunks'],
+            created_at=datetime.fromisoformat(row['created_at']),
+        )
+
+    def get_source_by_digest(self, content_digest: str) -> SourceRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                'SELECT * FROM knowledge_sources WHERE content_digest = ?',
+                (content_digest,),
+            ).fetchone()
+        if row is None:
+            return None
+        return SourceRecord(
+            source_id=row['source_id'],
+            source_type=SourceType(row['source_type']),
+            canonical_uri=row['canonical_uri'],
+            run_scope=row['run_scope'],
+            access_policy=row['access_policy'],
+            source_version=row['source_version'],
+            content_digest=row['content_digest'],
+            ingestion_timestamp=datetime.fromisoformat(row['ingestion_timestamp']),
+            chunking_version=row['chunking_version'],
+            title=row['title'],
+            metadata=json.loads(row['metadata']),
+            parent_source_id=row['parent_source_id'],
+            chunk_index=row['chunk_index'],
+            total_chunks=row['total_chunks'],
+            created_at=datetime.fromisoformat(row['created_at']),
+        )
+
+    def list_sources(
+        self,
+        *,
+        source_type: SourceType | None = None,
+        run_scope: str | None = None,
+    ) -> list[SourceRecord]:
+        parameters: list[Any] = []
+        query = 'SELECT * FROM knowledge_sources'
+        conditions: list[str] = []
+        if source_type:
+            conditions.append('source_type = ?')
+            parameters.append(source_type.value)
+        if run_scope:
+            conditions.append('run_scope = ?')
+            parameters.append(run_scope)
+        if conditions:
+            query += ' WHERE ' + ' AND '.join(conditions)
+        query += ' ORDER BY created_at DESC'
+        with self._connect() as connection:
+            rows = connection.execute(query, parameters).fetchall()
+        return [self._source_from_row(row) for row in rows]
+
+    def _source_from_row(self, row: sqlite3.Row) -> SourceRecord:
+        return SourceRecord(
+            source_id=row['source_id'],
+            source_type=SourceType(row['source_type']),
+            canonical_uri=row['canonical_uri'],
+            run_scope=row['run_scope'],
+            access_policy=row['access_policy'],
+            source_version=row['source_version'],
+            content_digest=row['content_digest'],
+            ingestion_timestamp=datetime.fromisoformat(row['ingestion_timestamp']),
+            chunking_version=row['chunking_version'],
+            title=row['title'],
+            metadata=json.loads(row['metadata']),
+            parent_source_id=row['parent_source_id'],
+            chunk_index=row['chunk_index'],
+            total_chunks=row['total_chunks'],
+            created_at=datetime.fromisoformat(row['created_at']),
+        )
+
+    def delete_source(self, source_id: str) -> int:
+        with self.transaction() as connection:
+            cursor = connection.execute(
+                'DELETE FROM knowledge_sources WHERE source_id = ?',
+                (source_id,),
+            )
+            return cursor.rowcount
+
+    def save_context_packet(self, record: ContextPacketRecord) -> ContextPacketRecord:
+        with self.transaction() as connection:
+            connection.execute(
+                '''
+                INSERT INTO context_packets (
+                    packet_id, run_id, agent, turn_number, turn_kind,
+                    query_or_retrieval_intent, index_version, source_ids_with_scores,
+                    exact_text_supplied, token_budget, used_tokens, timestamp
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    record.packet_id,
+                    record.run_id,
+                    record.agent,
+                    record.turn_number,
+                    record.turn_kind,
+                    record.query_or_retrieval_intent,
+                    record.index_version,
+                    json.dumps(record.source_ids_with_scores),
+                    record.exact_text_supplied,
+                    record.token_budget,
+                    record.used_tokens,
+                    record.timestamp.isoformat(),
+                ),
+            )
+        return record
+
+    def get_context_packet(self, packet_id: str) -> ContextPacketRecord:
+        with self._connect() as connection:
+            row = connection.execute(
+                'SELECT * FROM context_packets WHERE packet_id = ?',
+                (packet_id,),
+            ).fetchone()
+        if row is None:
+            raise RecordNotFound(packet_id)
+        return ContextPacketRecord(
+            packet_id=row['packet_id'],
+            run_id=row['run_id'],
+            agent=row['agent'],
+            turn_number=row['turn_number'],
+            turn_kind=row['turn_kind'],
+            query_or_retrieval_intent=row['query_or_retrieval_intent'],
+            index_version=row['index_version'],
+            source_ids_with_scores=json.loads(row['source_ids_with_scores']),
+            exact_text_supplied=row['exact_text_supplied'],
+            token_budget=row['token_budget'],
+            used_tokens=row['used_tokens'],
+            timestamp=datetime.fromisoformat(row['timestamp']),
+        )
+
+    def list_context_packets(
+        self,
+        run_id: str,
+        *,
+        agent: str | None = None,
+        turn_number: int | None = None,
+    ) -> list[ContextPacketRecord]:
+        parameters: list[Any] = [run_id]
+        query = 'SELECT * FROM context_packets WHERE run_id = ?'
+        if agent:
+            query += ' AND agent = ?'
+            parameters.append(agent)
+        if turn_number is not None:
+            query += ' AND turn_number = ?'
+            parameters.append(turn_number)
+        query += ' ORDER BY timestamp DESC'
+        with self._connect() as connection:
+            rows = connection.execute(query, parameters).fetchall()
+        return [self._context_packet_from_row(row) for row in rows]
+
+    def _context_packet_from_row(self, row: sqlite3.Row) -> ContextPacketRecord:
+        return ContextPacketRecord(
+            packet_id=row['packet_id'],
+            run_id=row['run_id'],
+            agent=row['agent'],
+            turn_number=row['turn_number'],
+            turn_kind=row['turn_kind'],
+            query_or_retrieval_intent=row['query_or_retrieval_intent'],
+            index_version=row['index_version'],
+            source_ids_with_scores=json.loads(row['source_ids_with_scores']),
+            exact_text_supplied=row['exact_text_supplied'],
+            token_budget=row['token_budget'],
+            used_tokens=row['used_tokens'],
+            timestamp=datetime.fromisoformat(row['timestamp']),
+        )
+
+
+    def retrieve_context(
+        self,
+        *,
+        run_id: str,
+        agent: str,
+        turn_kind: str,
+        query: str,
+        index_version: str = 'v1',
+        max_results: int = 10,
+        token_budget: int = 4000,
+        run_scope: str | None = None,
+        source_types: list[SourceType] | None = None,
+    ) -> tuple[list[dict[str, Any]], str]:
+        """Retrieve context matching the query within allowed scopes.
+
+        Returns:
+            Tuple of (source_ids_with_scores, exact_text_supplied)
+        """
+        conditions: list[Any] = []
+        
+        # Filter by run_scope if provided (run_scope is the only scope column in knowledge_sources)
+        if run_scope:
+            conditions.append('run_scope = ?')
+            parameters = [run_scope]
+        else:
+            # No run_scope means all public/global sources (run_scope IS NULL)
+            conditions.append('run_scope IS NULL')
+            parameters = []
+        
+        if source_types:
+            type_placeholders = ', '.join(['?'] * len(source_types))
+            conditions.append(f'source_type IN ({type_placeholders})')
+            for st in source_types:
+                parameters.append(st.value)
+        
+        query_clause = ' AND '.join(conditions)
+        
+        with self._connect() as connection:
+            rows = connection.execute(
+                f'SELECT * FROM knowledge_sources WHERE {query_clause}',
+                parameters,
+            ).fetchall()
+        
+        scored_sources: list[dict[str, Any]] = []
+        for row in rows:
+            score = self._compute_relevance_score(
+                row=row,
+                query=query,
+                agent=agent,
+                turn_kind=turn_kind,
+            )
+            if score > 0:
+                scored_sources.append({
+                    'source_id': row['source_id'],
+                    'score': score,
+                })
+        
+        scored_sources.sort(key=lambda x: x['score'], reverse=True)
+        top_sources = scored_sources[:max_results]
+        
+        chunks_text = []
+        used_tokens = 0
+        
+        for source in top_sources:
+            try:
+                source_record = self.get_source(source['source_id'])
+                # Check if this is a chunked source
+                if source_record.chunk_index is not None and source_record.total_chunks is not None:
+                    chunk_text = self._get_chunk_content(
+                        source_record=source_record,
+                    )
+                    chunk_tokens = len(chunk_text) // 4
+                    if used_tokens + chunk_tokens <= token_budget:
+                        chunks_text.append(chunk_text)
+                        used_tokens += chunk_tokens
+                else:
+                    # Non-chunked source: use title and summary
+                    title = source_record.title
+                    summary = self._get_chunk_content(source_record=source_record)
+                    if summary:
+                        chunk_text = f"{title}\n\n{summary}"
+                    else:
+                        chunk_text = title
+                    chunk_tokens = len(chunk_text) // 4
+                    if used_tokens + chunk_tokens <= token_budget:
+                        chunks_text.append(chunk_text)
+                        used_tokens += chunk_tokens
+            except RecordNotFound:
+                continue
+        
+        exact_text_supplied = '\n\n'.join(chunks_text)
+        
+        return top_sources, exact_text_supplied
+
+    def _compute_relevance_score(
+        self,
+        *,
+        row: sqlite3.Row,
+        query: str,
+        agent: str,
+        turn_kind: str,
+    ) -> float:
+        """Compute relevance score for a source."""
+        score = 0.0
+        
+        title = row['title'].lower()
+        canonical_uri = row['canonical_uri'].lower()
+        
+        query_lower = query.lower()
+        
+        if query_lower in title:
+            score += 10.0
+        if query_lower in canonical_uri:
+            score += 5.0
+        
+        source_type = row['source_type']
+        
+        if source_type == 'handoff' and agent in ('honeydew', 'beaker'):
+            score += 3.0
+        if source_type == 'protocol' and agent == 'honeydew':
+            score += 3.0
+        if source_type == 'implementation' and agent == 'beaker':
+            score += 3.0
+        
+        access_policy = row['access_policy']
+        if access_policy == 'public':
+            score += 1.0
+        
+        if row['source_version'] and row['source_version'].startswith('v'):
+            score += 0.5
+        
+        return score
+
+    def _get_chunk_content(self, *, source_record: SourceRecord) -> str:
+        """Get content for a chunk."""
+        metadata = source_record.metadata
+        if 'chunk_content' in metadata:
+            return metadata['chunk_content']
+        if 'content' in metadata:
+            return metadata['content']
+        if 'text' in metadata:
+            return metadata['text']
+        return metadata.get('summary', '')

@@ -16,6 +16,7 @@ from .contract_candidates import ContractCandidateManager
 from .contracts import EvaluationContractResolver
 from .discord_adapter import DiscordAdapter
 from .datasets import DatasetIngestionManager
+from .knowledge_manager import KnowledgeManager
 from .matrix import expand_experiment_matrix
 from .opencode_runtime import AgentRuntime
 from .policy import ActionPolicy
@@ -71,6 +72,7 @@ class ResearchOrchestrator:
         discord: DiscordAdapter,
         task_bundles: TaskBundleManager | None = None,
         datasets: DatasetIngestionManager | None = None,
+        knowledge: KnowledgeManager | None = None,
     ) -> None:
         self.settings = settings
         self.store = store
@@ -91,6 +93,10 @@ class ResearchOrchestrator:
             task_asset_root=settings.task_asset_root,
             maximum_asset_bytes=settings.maximum_task_asset_bytes,
             ingested_datasets=self.datasets,
+        )
+        self.knowledge = knowledge or KnowledgeManager(
+            store=store,
+            root=settings.knowledge_root,
         )
         self.policy = policy
         self.cluster = cluster

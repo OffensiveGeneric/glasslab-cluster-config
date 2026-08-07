@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     benchmark_dataset_catalog_path: str = (
         '/tmp/glasslab-research-orchestrator/datasets/catalog.json'
     )
+    knowledge_root: str = '/tmp/glasslab-research-orchestrator/knowledge'
     default_evaluation_contract_id: str = 'example-research-v1'
     default_evaluation_contract_version: str = '1.0.0'
 
