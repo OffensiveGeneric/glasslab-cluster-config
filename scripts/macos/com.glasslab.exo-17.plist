@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.glasslab.exo</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>/usr/local/libexec/glasslab-exo-run</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>GLASSLAB_EXO_ROLE</key><string>master</string>
+      <key>GLASSLAB_EXO_SELF_IP</key><string>192.168.0.2</string>
+      <key>GLASSLAB_EXO_PEER_IP</key><string>192.168.0.1</string>
+      <key>GLASSLAB_EXO_HOME</key><string>/Users/glasslab/.exo-rdma-17</string>
+      <key>GLASSLAB_EXO_NAMESPACE</key><string>glasslab-rdma-prod</string>
+    </dict>
+    <key>UserName</key><string>glasslab</string>
+    <key>GroupName</key><string>staff</string>
+    <key>WorkingDirectory</key><string>/Users/glasslab/exo</string>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><true/>
+    <key>ThrottleInterval</key><integer>15</integer>
+    <key>ProcessType</key><string>Adaptive</string>
+    <key>StandardOutPath</key><string>/Users/glasslab/Library/Logs/glasslab-exo.log</string>
+    <key>StandardErrorPath</key><string>/Users/glasslab/Library/Logs/glasslab-exo.error.log</string>
+  </dict>
+</plist>
