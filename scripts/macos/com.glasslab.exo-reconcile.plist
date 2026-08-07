@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.glasslab.exo-reconcile</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>/usr/local/libexec/glasslab-exo-reconcile</string>
+    </array>
+    <key>UserName</key><string>glasslab</string>
+    <key>GroupName</key><string>staff</string>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><true/>
+    <key>ThrottleInterval</key><integer>15</integer>
+    <key>ProcessType</key><string>Background</string>
+    <key>StandardOutPath</key><string>/Users/glasslab/Library/Logs/glasslab-exo-reconcile.log</string>
+    <key>StandardErrorPath</key><string>/Users/glasslab/Library/Logs/glasslab-exo-reconcile.error.log</string>
+  </dict>
+</plist>
