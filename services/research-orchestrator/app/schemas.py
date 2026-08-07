@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from enum import StrEnum
+from enum import Enum
 from typing import Annotated, Any, Literal
 from uuid import uuid4
 
@@ -10,6 +10,74 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class StrEnum(str, Enum):
+    """Backport of StrEnum for Python < 3.11."""
+    def __str__(self) -> str:
+        return self.value
+
+
+class KnowledgeEvent(StrEnum):
+    SOURCE_INGESTED = 'knowledge.source_ingested'
+    INDEX_UPDATED = 'knowledge.index_updated'
+    AGENT_CONTEXT_RETRIEVED = 'agent.context_retrieved'
+    AGENT_CONTEXT_ATTACHED = 'agent.context_attached'
+
+
+class SourceType(StrEnum):
+    DOCUMENTATION = 'documentation'
+    HANDOFF = 'handoff'
+    EVALUATION_CONTRACT = 'evaluation_contract'
+    TASK_BUNDLE = 'task_bundle'
+    DATASET_METADATA = 'dataset_metadata'
+    PAPER = 'paper'
+    TECHNIQUE_CARD = 'technique_card'
+    RUN_PROTOCOL = 'run_protocol'
+    RUN_REPORT = 'run_report'
+    RUN_ARTIFACT = 'run_artifact'
+    IMPLEMENTATION_FILE = 'implementation_file'
+
+
+class SourceRecord(BaseModel):
+    """A knowledge source (document or chunk) in the RAG index."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    source_id: str = Field(default_factory=lambda: uuid4().hex)
+    source_type: SourceType
+    canonical_uri: str = Field(min_length=1)
+    run_scope: str | None = None
+    access_policy: str = Field(default='run-private', min_length=1)
+    source_version: str | None = None
+    content_digest: str = Field(pattern=r'^[a-f0-9]{64}$')
+    ingestion_timestamp: datetime = Field(default_factory=utc_now)
+    chunking_version: str = Field(default='v1', min_length=1)
+    title: str = Field(min_length=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    parent_source_id: str | None = None
+    chunk_index: int | None = None
+    total_chunks: int | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class ContextPacketRecord(BaseModel):
+    """A retrieved context packet for an agent turn."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    packet_id: str = Field(default_factory=lambda: uuid4().hex)
+    run_id: str
+    agent: str
+    turn_number: int
+    turn_kind: str
+    query_or_retrieval_intent: str = Field(min_length=1)
+    index_version: str = Field(default='v1', min_length=1)
+    source_ids_with_scores: list[dict[str, Any]]
+    exact_text_supplied: str = Field(min_length=1)
+    token_budget: int = Field(gt=0)
+    used_tokens: int
+    timestamp: datetime = Field(default_factory=utc_now)
 
 
 class RunState(StrEnum):
