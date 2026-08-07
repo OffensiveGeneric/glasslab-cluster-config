@@ -50,6 +50,7 @@ from .task_bundles import (
     TaskPreflight,
 )
 from .workspaces import WorkspaceManager
+from .knowledge_manager import KnowledgeManager
 
 
 class WorkflowError(RuntimeError):
@@ -71,6 +72,7 @@ class ResearchOrchestrator:
         discord: DiscordAdapter,
         task_bundles: TaskBundleManager | None = None,
         datasets: DatasetIngestionManager | None = None,
+        knowledge: KnowledgeManager | None = None,
     ) -> None:
         self.settings = settings
         self.store = store
@@ -91,6 +93,10 @@ class ResearchOrchestrator:
             task_asset_root=settings.task_asset_root,
             maximum_asset_bytes=settings.maximum_task_asset_bytes,
             ingested_datasets=self.datasets,
+        )
+        self.knowledge = knowledge or KnowledgeManager(
+            store=store,
+            root=settings.knowledge_root,
         )
         self.policy = policy
         self.cluster = cluster
@@ -516,6 +522,33 @@ class ResearchOrchestrator:
             + '\n\nCurrent bounded task:\n'
         )
 
+    def _get_agent_context(
+        self,
+        *,
+        run_id: str,
+        agent: AgentName,
+        turn_number: int,
+        turn_kind: TurnKind,
+        query: str,
+    ) -> str | None:
+        """Retrieve and format context for an agent turn."""
+        try:
+            packet = self.knowledge.retrieve(
+                run_id=run_id,
+                agent=agent.value,
+                turn_number=turn_number,
+                turn_kind=turn_kind.value,
+                query=query,
+                index_version='v1',
+                max_results=10,
+                token_budget=4000,
+                run_scope=run_id,
+                allowed_source_types=None,
+            )
+            return packet.exact_text_supplied if packet.exact_text_supplied else None
+        except Exception:
+            return None
+
     def _run_agent_turn(
         self,
         *,
@@ -590,6 +623,15 @@ class ResearchOrchestrator:
             },
         )
         try:
+            retrieval_result = self._get_agent_context(
+                run_id=run_id,
+                agent=agent,
+                turn_number=run.turn_number + 1,
+                turn_kind=expected_kind,
+                query=prompt,
+            )
+            if retrieval_result:
+                prompt = retrieval_result + '\n\n' + prompt
             result, message_id = self.runtime.run_turn(
                 run_id=run_id,
                 agent=agent,
