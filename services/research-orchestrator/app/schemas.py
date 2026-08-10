@@ -201,6 +201,12 @@ class TaskAssetProposal(BaseModel):
     expected_sha256: str | None = Field(
         default=None,
         pattern=r'^[a-f0-9]{64}$',
+        description=(
+            'Only set if a verified SHA-256 checksum is already known for '
+            'this asset. Omit (leave null) for source_url assets, '
+            'multi-file or sharded datasets, or any case where no single '
+            'verified checksum exists. Do not invent or compute a value.'
+        ),
     )
     contains_labels: bool = False
 
