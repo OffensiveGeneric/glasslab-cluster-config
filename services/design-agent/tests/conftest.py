@@ -1,3 +1,9 @@
+"""Test path setup for the design agent.
+
+Inserts the service root and the repo root on sys.path so shared packages
+resolve regardless of how pytest is launched.
+"""
+
 import sys
 from pathlib import Path
 

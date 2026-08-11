@@ -1,3 +1,13 @@
+"""Deterministic preflight gate before cluster submission.
+
+Runs static, code-owning checks over the candidate config and the imported
+workload source: methodology requirements from the approved evaluation contract
+must be present as plain scalar/list values, the workload must statically write
+the required metrics.json keys, and it must never create or score the
+evaluator-owned outputs. The report fails closed: `passed` requires zero
+errors, and every error is surfaced to the human reviewer.
+"""
+
 from __future__ import annotations
 
 import ast
@@ -33,11 +43,15 @@ class MatrixPreflightReport(BaseModel):
 
 
 EVALUATOR_OWNED_LITERALS = {
+    # The workload emits evidence and metrics only; these outputs belong to the
+    # immutable evaluator and must never be written or scored by workload code.
     'evaluation.json',
     'integrity_pass',
     'rubric_score',
 }
 SCANNED_SOURCE_SUFFIXES = {
+    # Static-analysis scope is deliberately limited to code files that carry
+    # logic; data files cannot be reasoned about statically.
     '.js',
     '.py',
     '.r',
@@ -78,6 +92,10 @@ def _dict_keys(
     *,
     resolving: frozenset[str] = frozenset(),
 ) -> set[str]:
+    # Conservative static key resolution: dict literals, simple assignments,
+    # string subscripts, and (optionally) known function returns. `resolving`
+    # breaks cycles in self-referential assignments instead of recursing
+    # forever.
     if isinstance(expression, ast.Name):
         if expression.id in resolving:
             return set()
@@ -237,6 +255,9 @@ def _metrics_root_errors(
             or node.args[1].id not in metric_handles
         ):
             continue
+        # Only json.dump(<dict>, <metrics-handle>) counts as a metrics.json
+        # serialization; the handle must have been opened from something
+        # referencing 'metrics.json' earlier in the walk.
         found_serialization = True
         serialized_keys.update(
             _dict_keys(
@@ -321,6 +342,10 @@ def _source_errors(
         if artifact in evaluator_owned:
             continue
         parts = [part for part in Path(artifact).parts if part not in {'.', '/'}]
+        # A required artifact counts as "statically referenced" only when every
+        # path segment (or the full path itself) appears as a string literal
+        # somewhere in the scanned sources; anything less is reported as
+        # missing so the workload cannot silently omit contract outputs.
         if all(
             any(part == literal or artifact == literal for literal in referenced_tokens)
             for part in parts
@@ -383,6 +408,9 @@ def preflight_matrix(
             )
             continue
         if isinstance(configured_value, dict):
+            # Reject wrapped metadata objects outright: a requirement value
+            # must be a plain scalar or list so the deterministic check sees
+            # exactly what the job will consume.
             errors.append(
                 f'`{requirement.config_path}` must directly contain a scalar '
                 'or list of values, not a metadata object; do not wrap values '
@@ -443,6 +471,10 @@ def preflight_matrix(
         and len(configured_seeds) > 1
         and configured_seeds == matrix.seeds
     ):
+        # Enforces the reproducibility rule from AGENTS.md: an internal
+        # multi-seed stability analysis must run inside one job, while outer
+        # matrix seeds create independent replicated jobs. Duplicating the same
+        # list in both places silently inflates the job count.
         errors.append(
             'candidate config and outer experiment matrix contain the same '
             'multi-seed list; internal stability seeds must run inside one job, '

@@ -1,3 +1,13 @@
+"""Repo-owned front door for Glasslab research chat traffic.
+
+Accepts an inbound message plus sender and channel, relays it to the
+research-command-router's /dispatch endpoint, and returns the router's
+deterministic response text. Deliberately narrow: there is no conversational
+fallback and no workflow state of its own — every inbound message is forwarded
+verbatim, so the command router stays the only place that decides how a
+message is handled.
+"""
+
 from __future__ import annotations
 
 import json
@@ -89,6 +99,8 @@ def _request_router(
             return json.loads(response.read().decode("utf-8"))
     except urllib_error.HTTPError as exc:
         try:
+            # Same preference for the router's JSON `detail` as the router
+            # shows for workflow-api, so error text stays deterministic.
             detail = json.loads(exc.read().decode("utf-8"))
         except Exception:
             detail = {"detail": exc.reason}
@@ -99,6 +111,9 @@ def _request_router(
             detail=f"research-command-router unreachable: {exc.reason}",
         )
     except (TimeoutError, socket.timeout):
+        # urllib raises the raw socket timeout (not URLError) on slow backends;
+        # map it to 504 so the caller can distinguish "unreachable" from
+        # "took too long".
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail="research-command-router timed out",
@@ -123,6 +138,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         router_payload = _request_router(
             active_settings,
             request.message,
+            # The sender identity is namespaced by channel so the same sender
+            # on two channels cannot collide in the router's session pinning.
             submitted_by=f"{channel}:{request.sender}",
             session_id=request.session_id,
         )
@@ -134,6 +151,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 router_payload=router_payload,
             )
 
+        # Unsupported turns are still handled (200) so a caller never mistakes
+        # a deliberate rejection for a transport failure; the route label
+        # distinguishes the two cases.
         return InboundMessageResponse(
             handled=True,
             route="unsupported-turn",

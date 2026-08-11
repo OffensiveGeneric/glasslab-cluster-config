@@ -1,3 +1,11 @@
+"""Utilities for creating, updating, and querying research sessions.
+
+Research sessions are the stateful container that tracks a user's experiment
+pipeline: intakes, interpretations, assessments, designs, runs, datasets, and
+source documents. Every mutation touches the session so the latest record
+pointer stays consistent.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -247,6 +255,9 @@ def attach_dataset_to_session(
     dataset_ids = list(session.dataset_ids)
     if dataset.dataset_id not in dataset_ids:
         dataset_ids.append(dataset.dataset_id)
+    # Attaching a dataset invalidates the downstream pipeline stages because
+    # the dataset changes the assumptions for interpretation, assessment, and
+    # design. The caller must re-derive those stages from the new intake.
     updated = session.model_copy(
         update={
             'dataset_ids': dataset_ids,

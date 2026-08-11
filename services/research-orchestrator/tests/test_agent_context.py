@@ -1,3 +1,11 @@
+"""Agent context retrieval and the knowledge packets it feeds to turns.
+
+Covers the empty state (no artifacts yet), surfaced recorded artifacts,
+durable packet persistence and citation, injection of retrieved context into
+later Honeydew/Beaker turns, and the ordering guarantee that recovery framing
+always leads the prompt over retrieved reference material.
+"""
+
 from __future__ import annotations
 
 import json
@@ -10,6 +18,8 @@ from test_workflow import _advance_to_jobs, _complete_jobs, _pending_action
 
 
 def _bare_run(store) -> RunRecord:
+    # A run inserted directly through the store, bypassing engine.create_run,
+    # so it has no events and no recorded artifacts yet.
     now = datetime.now(timezone.utc)
     return store.create_run(
         RunRecord(
@@ -149,6 +159,9 @@ def test_retrieval_persists_context_packet_and_events(
 def test_complete_workflow_injects_retrieved_context_into_later_turns(
     orchestrator_bundle,
 ) -> None:
+    # Drives the whole workflow to the final-report turn, then asserts the
+    # report prompt carries retrieved reference material, proving retrieval
+    # feeds live turns rather than existing only as an isolated API.
     _, store, cluster, runtime, engine = orchestrator_bundle
     run = _advance_to_jobs(engine, store)
     run = _complete_jobs(engine, store, cluster, run.run_id)

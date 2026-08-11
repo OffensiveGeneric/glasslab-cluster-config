@@ -1,3 +1,12 @@
+"""API-level tests for the WhatsApp gateway.
+
+Each test monkeypatches _request_research_ingress to avoid a network
+dependency and uses a tmp_path-backed state_dir so transcript files do not
+leak between tests. The TestClient exercises every endpoint through the
+live app stack, including inbound webhooks, session persistence, and
+attachment augmentation.
+"""
+
 from pathlib import Path
 
 from fastapi.testclient import TestClient

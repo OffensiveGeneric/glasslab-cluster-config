@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+"""Read-only repo hygiene check: verify relative markdown links resolve.
+
+Only the explicitly listed CURRENT_DOCS are checked. Nothing is written and no
+links are rewritten; broken targets are reported and the script exits with 1.
+"""
 from __future__ import annotations
 
 import re
@@ -34,6 +39,9 @@ def iter_markdown_files() -> list[Path]:
 
 def normalize_target(raw_target: str) -> str:
     target = raw_target.strip()
+    # Anchors, external URLs, and mailto: are out of scope for the local link
+    # check; percent-encoded paths are decoded so a space in a link matches
+    # the on-disk name.
     if not target or target.startswith(SKIP_PREFIXES):
         return ''
     if '://' in target:
@@ -53,6 +61,8 @@ def main() -> int:
             if not target:
                 continue
             if target.startswith('/'):
+                # A leading slash means repo-root-relative rather than
+                # relative to the markdown file's directory.
                 candidate = Path(target.lstrip('/'))
             else:
                 candidate = path.parent / target

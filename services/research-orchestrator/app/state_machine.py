@@ -1,8 +1,19 @@
+"""Single source of truth for legal run-state transitions.
+
+validate_transition is invoked inside storage.transition_run's transaction, so
+an illegal move is rejected atomically with the state write. The one-active-run
+constraint is not part of this graph: it is enforced separately in
+storage.create_run, guarded by the one_active_run setting.
+"""
+
 from __future__ import annotations
 
 from .schemas import RunState, TERMINAL_STATES
 
 
+# States where no agent or cluster work is in flight; the engine stops the
+# active-runtime clock while a run waits on a human (see transition_run's
+# active_since bookkeeping).
 HUMAN_WAIT_STATES = {
     RunState.AWAITING_PROTOCOL_APPROVAL,
     RunState.AWAITING_CONTRACT_PROMOTION,
@@ -114,6 +125,9 @@ TRANSITIONS: dict[RunState, set[RunState]] = {
     },
     RunState.JOB_QUEUED: {
         RunState.JOB_RUNNING,
+        # BEAKER_ANALYZING is reachable directly from JOB_QUEUED: if every job
+        # finishes before a poll ever observes RUNNING, the run can still
+        # proceed to analysis without being stuck.
         RunState.BEAKER_ANALYZING,
         RunState.PAUSED,
         RunState.CANCELLED,
@@ -158,7 +172,12 @@ TRANSITIONS: dict[RunState, set[RunState]] = {
         RunState.FAILED,
         RunState.TIMED_OUT,
     },
+    # Pause can happen in any non-terminal phase and resume re-enters the phase
+    # recorded in resume_state, so the graph keeps PAUSED broadly permissive
+    # rather than enumerating one allowed exit per origin state.
     RunState.PAUSED: set(RunState) - TERMINAL_STATES - {RunState.PAUSED},
+    # Terminal states have no outgoing edges: once COMPLETE/FAILED/CANCELLED/
+    # TIMED_OUT, no further transition can pass validation.
     RunState.COMPLETE: set(),
     RunState.FAILED: set(),
     RunState.CANCELLED: set(),

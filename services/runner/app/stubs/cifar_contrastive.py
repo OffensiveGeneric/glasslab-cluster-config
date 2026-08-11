@@ -1,3 +1,10 @@
+"""Stub fallback for src.metrics.cifar_contrastive.
+
+Returns deterministic sentinel values for clustering metrics when the real
+implementation is unavailable. The contrastive runner prefers real imports; this
+module is only loaded when the search library is not installed.
+"""
+
 # Stub for src.metrics.cifar_contrastive
 # This is needed for contrastive_runner.py but the actual implementation
 # will be provided by the cluster runtime

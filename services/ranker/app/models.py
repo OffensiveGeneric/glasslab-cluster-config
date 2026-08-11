@@ -1,3 +1,9 @@
+"""Closed Pydantic schemas for the ranker.
+
+extra='forbid' rejects unknown fields so a malformed candidate or response
+fails validation instead of silently round-tripping between services.
+"""
+
 from __future__ import annotations
 
 from typing import Any

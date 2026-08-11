@@ -1,3 +1,13 @@
+"""Automated iterative experiment campaigns: seed, mutate, launch, score, decide.
+
+Builds methodology drafts from approved designs, generates speculative variants
+through mutation axes and technique-catalog records, maps drafts to bounded run
+requests, summarizes scored results, and produces keep/discard/escalate decisions.
+The campaign is scoped by a max-iteration ceiling and an evaluator contract;
+every decision is idempotent (re-running a decision reuses the existing record
+unless new evidence makes a stale escalation actionable).
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -24,6 +34,7 @@ from .technique_catalog import match_catalog_records_for_intake
 
 
 def _dedupe(values: list[str]) -> list[str]:
+    # dict insertion order preserves discovery order while dropping duplicates.
     return list(dict.fromkeys([value.strip() for value in values if value and value.strip()]))
 
 
@@ -302,6 +313,8 @@ def draft_initial_methodologies(
     drafts: list[MethodologyDraftRecord] = []
     technique_specs = _build_catalog_variant_specs(store, seed)
     baseline_specs = _build_variant_specs(seed, workflow)
+    # Technique-catalog variants precede baseline structural variants so
+    # catalog knowledge takes priority over generic model-family splits.
     ordered_specs = []
     seen_signatures: set[tuple[str, ...]] = set()
     for spec in [*technique_specs, *baseline_specs]:

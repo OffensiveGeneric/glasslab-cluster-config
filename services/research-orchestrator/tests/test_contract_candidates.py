@@ -1,3 +1,10 @@
+"""Contract candidate sealing, integrity verification, and promotion.
+
+Covers the full seal -> promote -> resolve lifecycle, digest-based tamper
+rejection, and the unsupported-input rules (no checksums, no symlinks) that
+keep a sealed bundle byte-exact and safe to promote to the trusted catalog.
+"""
+
 from __future__ import annotations
 
 import json
@@ -13,6 +20,8 @@ from app.contracts import ContractIntegrityError, EvaluationContractResolver
 
 
 def _write_candidate(root: Path) -> None:
+    # A complete candidate bundle mirroring what Beaker's agent would produce:
+    # descriptor plus wrapper, evaluator, and both JSON schemas.
     root.mkdir(parents=True)
     descriptor = {
         'contract_id': 'candidate-v1',

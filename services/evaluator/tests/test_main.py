@@ -1,3 +1,10 @@
+"""Tests for the evaluator's generic tabular-metric-max comparison.
+
+write_bundle fabricates the three runner records a real bundle carries
+(run_manifest.json, metrics.json, status.json) so write_outputs can be exercised
+end-to-end against a temp directory without touching the cluster.
+"""
+
 import json
 from pathlib import Path
 

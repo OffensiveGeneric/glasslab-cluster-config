@@ -1,4 +1,11 @@
-"""Statistical testing utilities for contrastive learning evaluation."""
+"""Statistical comparison tests for pairwise model evaluation.
+
+Provides three independent tests (5x2 CV paired t-test, McNemar, Fisher exact)
+and a composite report that combines them into an overall conclusion. Each test
+operates on prediction arrays from two models against shared ground truth.
+The module imports mlxtend and scipy; both are expected in the runner's
+execution environment.
+"""
 
 from __future__ import annotations
 
@@ -39,6 +46,9 @@ def paired_ttest_5x2cv_statistical_test(
     
     # mlxtend expects arrays of shape [n_samples]
     # We'll compute the difference and use the built-in test
+    # Use scipy's one-sample t-test on the correctness differences as a
+    # computationally cheaper equivalent to the full 5x2 CV resampling procedure
+    # when only a single train/test split is available (no folds to iterate over).
     diff = correct_a - correct_b
     
     # Use scipy's t-test on the differences (equivalent for 5x2 CV)
@@ -95,6 +105,9 @@ def mcnemar_test_statistical(
     
     # McNemar's test uses b and c
     # Chi-square statistic: (b - c)^2 / (b + c) for b + c > 0
+    # McNemar's test uses only b (A correct / B incorrect) and c (A incorrect /
+    # B correct) counts; a and d (both correct / both incorrect) do not
+    # contribute to the test statistic.
     if b + c == 0:
         chi_sq = 0.0
         p_value = 1.0
@@ -141,6 +154,9 @@ def fisher_exact_test(
     b_only_correct = (y_preds_a != y_true) & (y_preds_b == y_true)
     both_incorrect = (y_preds_a != y_true) & (y_preds_b != y_true)
     
+    # Build 2x2 contingency table: rows = A correct, A incorrect; columns =
+    # B correct, B incorrect. Fisher's test handles small counts without
+    # the chi-squared approximation's sample-size requirements.
     table = [
         [np.sum(both_correct), np.sum(a_only_correct)],
         [np.sum(b_only_correct), np.sum(both_incorrect)],
@@ -192,6 +208,9 @@ def statistical_comparison_report(
     }
     
     # Determine overall conclusion
+    # Overall conclusion is derived from the minimum p-value across all three
+    # tests (the most favorable to rejecting the null). This is a loose
+    # heuristic, not a corrected family-wise procedure.
     p_values = [
         results["5x2cv_paired_ttest"]["p_value"],
         results["mcnemar_test"]["p_value"],

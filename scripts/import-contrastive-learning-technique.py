@@ -5,6 +5,8 @@ from pathlib import Path
 
 import requests
 
+# Assumes a local port-forward to the metric-search service; no cluster
+# credentials are used from this script.
 BASE_URL = "http://127.0.0.1:18081"
 
 
@@ -161,6 +163,9 @@ def import_contrastive_learning_technique() -> None:
     payload = {
         "import_source": "manual-contrastive-learning-spec",
         "cards": [technique_card],
+        # replace_existing=False keeps this additive-only: a second run against
+        # an existing record fails rather than silently overwriting catalog
+        # data, so the script has no destructive default.
         "replace_existing": False,
     }
 

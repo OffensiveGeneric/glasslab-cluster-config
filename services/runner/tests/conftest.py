@@ -1,3 +1,7 @@
+"""Shared test configuration: injects the app directory into sys.path so tests
+can import from app.* without installing the package.
+"""
+
 import sys
 from pathlib import Path
 

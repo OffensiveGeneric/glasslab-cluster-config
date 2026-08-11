@@ -1,3 +1,12 @@
+"""Policy classification, contract read-only rendering, and matrix preflight.
+
+Covers the ActionPolicy approval tiers (automatic / honeydew-and-human /
+deny), immutable read-only evaluation-contract mounts, deterministic matrix
+expansion, and the Adult/Wine benchmark preflight rules that gate cluster
+submission: root metric keys, evaluator-owned outputs, required evidence
+files, and the internal-vs-matrix seed-axis rule.
+"""
+
 from __future__ import annotations
 
 import json
@@ -217,6 +226,9 @@ def test_experiment_matrix_expansion_is_deterministic(orchestrator_bundle) -> No
 def test_adult_preflight_distinguishes_comparisons_from_decisions(
     orchestrator_bundle,
 ) -> None:
+    # The preflight must classify config dimensions as either comparison axes
+    # (model families, allowed to vary) or fixed decisions (methodology
+    # choices that must be pinned), so the contract can flag ambiguity.
     _, _, _, _, engine = orchestrator_bundle
     run = engine.create_run(
         request=RunCreateRequest(

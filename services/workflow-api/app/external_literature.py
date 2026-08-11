@@ -1,3 +1,11 @@
+"""Multi-source literature search across OpenAlex, arXiv, Crossref, and DBLP.
+
+Builds queries from problem statements and priorities, fetches candidates
+from each provider, scores them heuristically against the session context, and
+selects a diverse top-N. Each provider failure is a warning, not a hard
+failure, so a partial response is always returned.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -201,6 +209,9 @@ def _select_diverse_top_candidates(
     provider_counts: dict[str, int] = {}
     remaining = list(candidates)
 
+    # Greedy best-first selection that penalizes duplicate titles (by Jaccard
+    # overlap) and over-representation from a single provider, ensuring the
+    # final top-N spans multiple sources with non-overlapping topics.
     while remaining and len(selected) < max_candidate_papers:
         best_index = 0
         best_value: tuple[float, int, int] | None = None
@@ -493,6 +504,9 @@ def search_external_literature(
         ("crossref", _crossref_candidates),
         ("dblp", _dblp_candidates),
     ]
+    # Each provider is called independently; a failure in one does not block
+    # the others. This is a soft fan-out: the caller always receives a partial
+    # result with warnings for any provider that failed.
     for provider_name, provider_fn in providers:
         try:
             provider_results = provider_fn(query, per_provider, settings)

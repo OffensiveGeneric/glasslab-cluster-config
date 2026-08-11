@@ -1,3 +1,12 @@
+"""Black-box run of the generic-task-integrity evaluator subprocess.
+
+Invokes the checked-in evaluator.py as a real subprocess with the GLASSLAB_*
+environment, verifying that checksum verification and dynamic
+required-artifact/required-metric keys gate integrity_pass. Cluster jobs use
+this same evaluator, so this test runs the actual production code path
+without a container.
+"""
+
 from __future__ import annotations
 
 import json
@@ -19,6 +28,8 @@ CONTRACT_ROOT = (
 
 
 def _run_evaluator(root: Path, task_spec: dict) -> subprocess.CompletedProcess[str]:
+    # Mirror the runner's contract environment: output dir, JSON task spec,
+    # and the pinned contract id/version/digest the runner records.
     environment = {
         **os.environ,
         'GLASSLAB_OUTPUT_DIR': str(root),

@@ -1,3 +1,10 @@
+"""Tests for digest and approved-rerun schedule execution with idempotency guarantees.
+
+Validates that schedule execution produces exactly one execution record
+per due tick (repeated invocations are no-ops), that schedule metadata is
+updated correctly, and that reruns clone the source run's contract.
+"""
+
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -21,6 +28,8 @@ def build_registry() -> WorkflowRegistry:
 
 
 def cron_expr_for(now: datetime) -> str:
+    # Converts Python's weekday() (Mon=0..Sun=6) to the standard cron
+    # weekday range (Sun=0, Mon=1, …, Sat=6) by shifting +1 and wrapping.
     return f'{now.minute} {now.hour} {now.day} {now.month} {(now.weekday() + 1) % 7}'
 
 

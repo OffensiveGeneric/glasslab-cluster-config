@@ -1,3 +1,10 @@
+"""Retrieval-quality regression against the checked-in relevance fixture.
+
+Rebuilds one index from QUERY_RELEVANCE_FIXTURE and asserts recall@k for
+every fixture query plus a floor on hybrid top-1 ranking, so a ranking
+change that drops a relevant source fails deterministically.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -62,6 +69,8 @@ def _ranked_uris(packet) -> set[str]:
 
 
 def test_retrieval_quality_fixture_recalls_relevant_sources(tmp_path: Path) -> None:
+    # A single shared index is built once from the fixture's deduplicated
+    # documents, then every query is run against it; any miss fails recall@k.
     by_query: dict[str, dict] = {}
     documents: list[dict] = []
     for entry in QUERY_RELEVANCE_FIXTURE:

@@ -1,3 +1,10 @@
+"""Entry point: load settings, run the experiment, write artifacts, and exit.
+
+On failure the runner writes a partial error bundle (result_payload, status,
+report, artifact index) before re-raising so downstream consumers see a
+terminal status even when the experiment body aborts.
+"""
+
 from __future__ import annotations
 
 import json
@@ -14,6 +21,8 @@ def main() -> None:
         write_supporting_artifacts(settings, result, status='succeeded')
         print(json.dumps(result, sort_keys=True))
     except Exception as exc:
+        # Write a partial bundle even on failure so downstream consumers see a
+        # terminal status; the runner process still exits non-zero via the re-raise.
         settings.artifact_dir.mkdir(parents=True, exist_ok=True)
         result_payload = {
             'experiment_id': settings.experiment_id,

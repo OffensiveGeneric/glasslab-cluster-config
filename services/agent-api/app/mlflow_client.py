@@ -1,3 +1,11 @@
+"""Project the API's MLflow settings into the runner's environment.
+
+The runner performs the actual logging inside the cluster; the API only passes
+the tracking URI and experiment name through as GLASSLAB_RUNNER_MLFLOW_* vars,
+and disables logging entirely when mlflow_enabled is false. mlflow_status_payload
+exists for observability endpoints.
+"""
+
 from __future__ import annotations
 
 from .config import Settings

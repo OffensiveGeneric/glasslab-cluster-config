@@ -1,3 +1,10 @@
+"""Build self-contained Jupyter notebooks from digest-verified evaluator output.
+
+Only artifacts that pass VerifiedArtifactReader (sha256 + path confinement) are
+embedded, so a notebook is a pure, immutable analysis surface backed by
+provenance records; it is explicitly not authoritative evidence.
+"""
+
 from __future__ import annotations
 
 from hashlib import sha256
@@ -76,6 +83,9 @@ def build_analysis_notebook(
         f'METRICS = json.loads({json.dumps(metrics, sort_keys=True)!r})\n'
         f'TABLES = json.loads({json.dumps(tables, sort_keys=True)!r})\n'
     )
+    # The data is embedded as literals (not loaded at runtime from the shared
+    # mount) so the exported notebook is self-contained and frozen; it can be
+    # replayed anywhere without access to the original artifacts.
     visualization = '''from io import StringIO
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -165,6 +175,9 @@ def write_analysis_notebook(
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix('.ipynb.tmp')
     temporary.write_bytes(content)
+    # Atomic replace: a partially written notebook can never be observed at the
+    # final path, and the digest returned below always matches the bytes that
+    # landed on disk.
     temporary.replace(destination)
     notebook = json.loads(content)
     return (

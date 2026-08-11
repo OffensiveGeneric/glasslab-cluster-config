@@ -1,3 +1,16 @@
+"""Deterministic experiment runner dispatching across pipeline types.
+
+Supports four pipelines: titanic_baseline (tabular model comparison),
+literature_to_experiment (paper-spec drafting), gpu_experiment (runtime probe +
+technique alignment scoring), and contrastive_learning (CIFAR-100 unseen-class
+generalization).
+
+Every pipeline writes a standard artifact bundle (metrics.json,
+result_payload.json, config.json, status.json, report.md,
+analysis_notebook.ipynb, artifacts_index.json) plus pipeline-specific files.
+The bundle is what downstream orchestrator/evaluator services consume.
+"""
+
 from __future__ import annotations
 
 import importlib.util
@@ -8,6 +21,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+# torch is optional: the runner must load without it for CPU-only pipelines.
+# The module-level binding lets every function inspect availability without
+# repeating the import guard.
 try:
     import torch  # type: ignore
 except Exception:
@@ -26,6 +42,9 @@ MEDIA_TYPES = {
     '.txt': 'text/plain',
     '.ipynb': 'application/x-ipynb+json',
 }
+# Canonical contract: every run must produce this set of paths under the
+# artifact directory. The artifact index marks each path as required/optional,
+# and the orchestrator's evaluator validates required=1 entries exist.
 REQUIRED_ARTIFACTS = {
     'run_manifest.json',
     'config.json',
@@ -39,6 +58,8 @@ REQUIRED_ARTIFACTS = {
 
 
 def _load_tabular_runtime() -> tuple[Any, Any, Any, Any, Any, Any, Any, Any]:
+    # Lazy imports so the module stays loadable without pandas/sklearn for
+    # non-tabular pipelines (GPU experiment, contrastive learning).
     import pandas as pd
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.linear_model import LogisticRegression
@@ -60,6 +81,8 @@ def _load_tabular_runtime() -> tuple[Any, Any, Any, Any, Any, Any, Any, Any]:
 
 
 def run_literature_to_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> dict:
+    # Validate required fields upfront so callers get a clear error rather than
+    # an opaque KeyError during payload construction.
     paper_id = str(spec.get('paper_id', '')).strip()
     source_notes = str(spec.get('source_notes', '')).strip()
     dataset_uri = str(spec.get('dataset_uri', '')).strip()
@@ -73,6 +96,8 @@ def run_literature_to_experiment(settings: Settings, spec: dict, artifact_dir: P
     if not requested_models:
         raise ValueError('literature_to_experiment requires at least one requested model')
 
+    # Only the first model in the list is used as the selected model; the full
+    # list is recorded for provenance but the run is single-model.
     selected_model = requested_models[0]
     method_spec = {
         'paper_id': paper_id,
@@ -142,6 +167,9 @@ def run_literature_to_experiment(settings: Settings, spec: dict, artifact_dir: P
 
 
 def infer_gpu_modality(model_family: str, training_notes: str, dataset_uri: str) -> str:
+    # Simple keyword heuristic: vision tokens imply computer vision domain;
+    # everything else is generic GPU ML. This drives downstream metadata, not
+    # execution behavior.
     corpus = ' '.join([model_family, training_notes, dataset_uri]).lower()
     if any(token in corpus for token in ('vision', 'image', 'cnn', 'resnet', 'vit', 'segmentation', 'detection')):
         return 'computer_vision'
@@ -155,6 +183,7 @@ def infer_gpu_required_packages(model_family: str, training_notes: str, requeste
         packages.append('timm')
     if any(token in corpus for token in ('huggingface', 'transformers', 'clip', 'bert')):
         packages.append('transformers')
+    # Deduplicate while preserving order (dict.fromkeys is insertion-ordered in 3.7+).
     return list(dict.fromkeys(packages))
 
 
@@ -174,6 +203,9 @@ def _normalized_overlap_score(reference_values: list[str], corpus_tokens: set[st
         return fallback
     overlap = len(reference_tokens & corpus_tokens)
     coverage = overlap / float(len(reference_tokens))
+    # Scale coverage from [0, 1] into [0.45, 1.0] so perfect overlap maps to 1.0
+    # and no overlap maps to 0.45, ensuring every contract component contributes
+    # non-zero weight to the composite score even without token matches.
     return round(min(1.0, 0.45 + (0.55 * coverage)), 4)
 
 
@@ -255,6 +287,8 @@ def bounded_gpu_execution_score(
 
 
 def run_gpu_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> dict:
+    # Extract all gpu_experiment-specific fields from spec. The parsed_spec
+    # property may have already backfilled technique_* fields from the manifest.
     dataset_uri = str(spec.get('dataset_uri', '')).strip()
     model_family = str(spec.get('model_family', '')).strip()
     training_notes = str(spec.get('training_notes', '')).strip()
@@ -280,6 +314,8 @@ def run_gpu_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> di
     torch_available = False
     cuda_available = False
     cuda_device_count = 0
+    # Scope the import so a missing torch only fails when gpu_experiment is
+    # actually dispatched, not when the runner module is first loaded.
     try:
         import torch  # type: ignore
 
@@ -289,6 +325,8 @@ def run_gpu_experiment(settings: Settings, spec: dict, artifact_dir: Path) -> di
     except Exception:
         torch_available = False
 
+    # Only the first requested model is used as the selected model for scoring;
+    # the full list is recorded for provenance.
     selected_model = requested_models[0]
     required_packages = infer_gpu_required_packages(model_family, training_notes, requested_models)
     available_packages = package_availability(required_packages)
@@ -440,6 +478,8 @@ def run_contrastive_learning(settings: Settings, spec: dict, artifact_dir: Path)
     """Run contrastive learning experiment for CIFAR-100 unseen class generalization."""
     import json
     from pathlib import Path
+    # Lazy imports scoped to the function so the contrastive runner (including
+    # its torch dependency) is only loaded when this pipeline is dispatched.
     from services.runner.app.contrastive_runner import (
         train_contrastive_model,
         load_cifar100_splits,
@@ -608,6 +648,8 @@ def configure_logging(level: str, log_path: Path) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s')
     root_logger = logging.getLogger()
+    # Clear any pre-existing handlers (e.g. from test frameworks) to avoid
+    # duplicate log lines. The runner owns the root logger for its lifetime.
     root_logger.handlers.clear()
     root_logger.setLevel(level.upper())
 
@@ -629,6 +671,8 @@ def run_experiment(settings: Settings | None = None) -> dict:
     configure_logging(settings.log_level, artifact_dir / 'logs' / 'runner.log')
 
     feature_profile = spec['feature_profile']
+    # Pipeline dispatch: short-circuit early for non-tabular pipelines so they
+    # don't trigger pandas/sklearn import or training-data file checks.
     if spec['pipeline'] == 'literature_to_experiment':
         return run_literature_to_experiment(settings, spec, artifact_dir)
     if spec['pipeline'] == 'gpu_experiment':
@@ -636,6 +680,10 @@ def run_experiment(settings: Settings | None = None) -> dict:
     if spec['pipeline'] == 'contrastive_learning':
         return run_contrastive_learning(settings, spec, artifact_dir)
 
+    # --- titanic_baseline (default) pipeline ---
+    # Below this line all code is tabular-pipeline specific. The import and
+    # dataset checks would fail for other pipelines, which is why they are
+    # gated above.
     dataset_root = Path(settings.dataset_root)
     train_path = dataset_root / 'train.csv'
     test_path = dataset_root / 'test.csv'
@@ -657,6 +705,7 @@ def run_experiment(settings: Settings | None = None) -> dict:
     if 'Survived' not in train_df.columns:
         raise ValueError('train.csv must contain a Survived column')
 
+    # Stratified split preserves class distribution; Survived is the label column.
     y = train_df['Survived'].astype(int)
     X = train_df.drop(columns=['Survived'])
 
@@ -686,6 +735,9 @@ def run_experiment(settings: Settings | None = None) -> dict:
             }
         )
 
+        # Each model is independently trained on X_train and evaluated on X_valid.
+        # The model with the highest validation accuracy is chosen as best for
+        # final retraining on the full training set.
         model_comparison: dict[str, dict] = {}
         for model_name in spec['models']:
             pipeline, feature_summary = build_model_pipeline(
@@ -710,6 +762,8 @@ def run_experiment(settings: Settings | None = None) -> dict:
             feature_profile=feature_profile,
             random_state=settings.random_state,
         )
+        # Retrain the best model on full X (train+valid) before generating a
+        # submission, so the submission uses the maximum available labeled data.
         best_pipeline.fit(engineer_features(X, feature_profile), y)
 
         submission_created = False

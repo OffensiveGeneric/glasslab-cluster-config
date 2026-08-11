@@ -1,3 +1,11 @@
+"""Artifact discovery and status resolution for completed runs.
+
+Three layers of status resolution (on-disk, live Kubernetes, stored record)
+let callers observe terminal state regardless of whether the run is still in
+flight or has already persisted its status.json. Artifacts are discovered from
+the shared PVC directory rather than trusting a pre-built index alone.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -85,6 +93,9 @@ def build_artifacts_from_directory(settings: Settings, run_id: str) -> Artifacts
 
 
 def load_artifacts_from_disk(settings: Settings, run_id: str) -> ArtifactsIndex | None:
+    # Prefer the runner-written index; fall back to directory scanning.
+    # The runner's index is authoritative because it includes digest
+    # verification; directory scanning is a best-effort fallback.
     index_path = artifact_run_dir(settings, run_id) / 'artifacts_index.json'
     if index_path.exists():
         payload = json.loads(index_path.read_text())
@@ -161,12 +172,18 @@ def load_terminal_bundle(
 
 
 def _path_is_within(path: Path, root: Path) -> bool:
+    # Resolves both paths before checking containment, so symlinks are
+    # resolved to their real targets. A path that is a symlink pointing
+    # inside the root is accepted; a symlink pointing outside is rejected.
     resolved_root = root.resolve()
     resolved_path = path.resolve()
     return resolved_path == resolved_root or resolved_path.is_relative_to(resolved_root)
 
 
 def resolve_run_status(record: RunRecord, settings: Settings, submitter: JobSubmitter) -> RunStatus:
+    # Prefer on-disk terminal status first (authoritative once written), then
+    # live Kubernetes status (for in-flight jobs), falling back to the stored
+    # record (accepted but not yet scheduled).
     disk_status = load_status_from_disk(settings, record.run_id)
     if disk_status is not None:
         return disk_status

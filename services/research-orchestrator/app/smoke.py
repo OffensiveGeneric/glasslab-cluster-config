@@ -1,3 +1,13 @@
+"""Dependency-free end-to-end orchestrator smoke run.
+
+Exercises the full bounded workflow - create run, Honeydew protocol, human
+approval, Beaker implementation, fake cluster execution, report acceptance,
+knowledge retrieval and citation - using a scripted mock runtime and a fake
+cluster executor, so it runs anywhere with no external model or cluster. The
+assertions below mirror the real acceptance criteria, and the returned summary
+is JSON so CI can consume it.
+"""
+
 from __future__ import annotations
 
 import json
@@ -27,6 +37,8 @@ RUNNER_IMAGE = 'ghcr.io/offensivegeneric/glasslab-smoke-runner:test'
 
 
 def _create_repo(root: Path) -> Path:
+    # The approved repository is a real git repo so workspace installation,
+    # source snapshotting, and evidence URIs behave like production.
     repo = root / 'approved-repo'
     repo.mkdir()
     subprocess.run(['git', 'init', '-b', 'main'], cwd=repo, check=True)

@@ -1,3 +1,10 @@
+"""Deterministic action policy.
+
+Every agent-requested action is classified here before it can reach a human,
+and the classification (plus an idempotency key) is stored with the action so
+approval decisions are replayable and auditable.
+"""
+
 from __future__ import annotations
 
 from hashlib import sha256
@@ -18,12 +25,14 @@ from .schemas import (
 
 
 class ActionPolicy:
+    # Actions with no cluster or external side effects need no human gate.
     AUTOMATIC_ACTIONS = {
         'read_workspace',
         'edit_workspace',
         'run_local_tests',
         'commit_experiment_branch',
     }
+    # Externally visible or irreversible outcomes are gated on a human.
     HUMAN_ACTIONS = {
         'approve_protocol',
         'accept_final_report',
@@ -32,6 +41,7 @@ class ActionPolicy:
         'publish_report',
         'publish_external_artifact',
     }
+    # Hard denies regardless of who proposes them.
     DENIED_ACTIONS = {
         'modify_evaluation_contract',
         'read_secrets',
@@ -89,6 +99,10 @@ class ActionPolicy:
                 return PolicyClassification.DENY, (
                     f'contract candidate schema validation failed: {exc}'
                 )
+            # Contract proposals are the one action type that legitimately names
+            # contract files, so reject_contract_overrides is deliberately
+            # bypassed only here; the candidate still goes through schema
+            # validation, sealing, and Honeydew review before promotion.
             return PolicyClassification.HONEYDEW_AND_HUMAN_APPROVAL, None
         try:
             reject_contract_overrides(action.arguments)
@@ -118,6 +132,10 @@ class ActionPolicy:
                     f'allowed images: {allowed}'
                 )
             resources = matrix.resources
+            # Image allowlist and resource ceilings are enforced at classify
+            # time, before anything is shown for approval, so a human can only
+            # approve a matrix that already complies with the global limits
+            # (the per-contract ceiling is enforced separately in matrix.py).
             if (
                 resources.cpu > self.maximum_cpu
                 or resources.memory_gib > self.maximum_memory_gib
@@ -168,6 +186,9 @@ class ActionPolicy:
                 }
             ).encode()
         ).hexdigest()
+        # The ordinal is part of the idempotency key so the same action
+        # proposed again in a later turn is a distinct record, not a deduped
+        # replay of the earlier one.
         return ActionRecord(
             run_id=run_id,
             proposed_by=proposed_by,

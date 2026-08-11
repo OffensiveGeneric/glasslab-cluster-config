@@ -1,3 +1,13 @@
+"""Tests for run-request validation, investigation plan graph checks, evaluation
+contract resolution, and Kubernetes job rendering.
+
+Verifies that invalid inputs, disallowed models, bad resource profiles,
+cyclic execution graphs, unapproved mount URIs, tampered evaluation
+contracts, and missing guardrail metrics are all rejected before a run
+reaches the cluster.  Contract resolution tests check that digest
+mismatches and agent-supplied override fields are caught.
+"""
+
 import sys
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -320,6 +330,11 @@ def test_evaluation_contract_rejects_agent_supplied_execution_fields() -> None:
 
 
 def test_kubernetes_job_mounts_trusted_contract_read_only(monkeypatch) -> None:
+    # Renders a full Kubernetes job to verify: (1) the evaluation contract
+    # container image is mounted as an init container, (2) the workload
+    # command is replaced by the contract execution wrapper, (3) the
+    # contract volume is read-only, and (4) the service account token is
+    # not automounted.
     digest = 'a' * 64
     trusted = {
         'contract_id': 'example',
@@ -469,6 +484,9 @@ def test_investigation_plan_rejects_invalid_execution_graph(
         )
 
 
+# Verifies that the workspace runner only sees the sub-paths declared in
+# the investigation plan (task bundle, source bundle, dataset bindings)
+# and its own writable run directory — no sibling runs are exposed.
 def test_research_workspace_mounts_only_declared_asset_subpaths() -> None:
     manifest = RunManifest(
         run_id='run-isolated',
@@ -551,6 +569,9 @@ def test_research_workspace_mounts_only_declared_asset_subpaths() -> None:
     ]
 
 
+# Only s3://datasets/ and s3://artifacts/ URIs are allowed; https://,
+# file://, and parent-traversal paths are all rejected to prevent the
+# agent from referencing assets outside the approved mount roots.
 @pytest.mark.parametrize(
     'uri',
     [

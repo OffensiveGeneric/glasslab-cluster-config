@@ -1,4 +1,11 @@
-"""Glasslab v2 workflow API."""
+"""Runtime cluster service for bounded experiment execution.
+
+Receives validated, policy-checked run requests from the research-orchestrator,
+submits them as bounded Kubernetes Jobs, and serves observation endpoints
+(status, logs, artifacts) that the orchestrator polls. This service never
+originates research decisions; it is the deterministic control plane beneath
+the agent layer.
+"""
 
 import sys
 
