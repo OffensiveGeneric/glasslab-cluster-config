@@ -1675,6 +1675,21 @@ def test_cancellation_aborts_sessions_and_jobs(orchestrator_bundle) -> None:
     )
 
 
+def test_cancellation_discards_paused_run_without_resuming(orchestrator_bundle) -> None:
+    _, store, _, runtime, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(objective='Discard a paused research run.')
+    )
+    engine.pause_run(run.run_id, requested_by='test')
+
+    cancelled = engine.cancel_run(run.run_id, requested_by='test')
+
+    assert cancelled.state == RunState.CANCELLED
+    assert store.get_run(run.run_id).state == RunState.CANCELLED
+    assert runtime.aborted
+    assert store.list_events(run.run_id)[-1].event_type == 'run.cancelled'
+
+
 def test_event_sequence_is_append_only_and_ordered(orchestrator_bundle) -> None:
     _, store, _, _, engine = orchestrator_bundle
     run = engine.create_run(

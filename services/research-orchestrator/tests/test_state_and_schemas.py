@@ -47,8 +47,11 @@ def test_valid_and_invalid_state_transitions() -> None:
         RunState.BEAKER_PLANNING,
     )
     validate_transition(RunState.BEAKER_PLANNING, RunState.BEAKER_IMPLEMENTING)
+    validate_transition(RunState.PAUSED, RunState.CANCELLED)
     with pytest.raises(InvalidTransition):
         validate_transition(RunState.CREATED, RunState.COMPLETE)
+    with pytest.raises(InvalidTransition):
+        validate_transition(RunState.PAUSED, RunState.COMPLETE)
     with pytest.raises(InvalidTransition):
         validate_transition(RunState.COMPLETE, RunState.PREPARING)
 

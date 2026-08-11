@@ -173,9 +173,10 @@ TRANSITIONS: dict[RunState, set[RunState]] = {
         RunState.TIMED_OUT,
     },
     # Pause can happen in any non-terminal phase and resume re-enters the phase
-    # recorded in resume_state, so the graph keeps PAUSED broadly permissive
-    # rather than enumerating one allowed exit per origin state.
-    RunState.PAUSED: set(RunState) - TERMINAL_STATES - {RunState.PAUSED},
+    # recorded in resume_state. Operators must also be able to discard a paused
+    # run without resuming it and accidentally starting another agent turn.
+    RunState.PAUSED: set(RunState)
+    - {RunState.PAUSED, RunState.COMPLETE, RunState.FAILED, RunState.TIMED_OUT},
     # Terminal states have no outgoing edges: once COMPLETE/FAILED/CANCELLED/
     # TIMED_OUT, no further transition can pass validation.
     RunState.COMPLETE: set(),
