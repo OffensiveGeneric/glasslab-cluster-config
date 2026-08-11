@@ -50,7 +50,7 @@ from app.storage import SqliteStore
 from app.workspaces import WorkspaceManager
 
 
-RUNNER_IMAGE = 'ghcr.io/offensivegeneric/glasslab-test-runner:test'
+RUNNER_IMAGE = 'ghcr.io/ccny-glasslab/glasslab-test-runner:test'
 
 
 def create_test_repo(root: Path) -> Path:

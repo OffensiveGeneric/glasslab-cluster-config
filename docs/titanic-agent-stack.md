@@ -123,10 +123,10 @@ Expected files:
 
 ```bash
 cd /home/glasslab/cluster-config
-sudo docker build -t ghcr.io/offensivegeneric/glasslab-agent-api:0.1.0 services/agent-api
-sudo docker build -t ghcr.io/offensivegeneric/glasslab-titanic-runner:0.1.0 services/runner
-sudo docker push ghcr.io/offensivegeneric/glasslab-agent-api:0.1.0
-sudo docker push ghcr.io/offensivegeneric/glasslab-titanic-runner:0.1.0
+sudo docker build -t ghcr.io/ccny-glasslab/glasslab-agent-api:0.1.0 services/agent-api
+sudo docker build -t ghcr.io/ccny-glasslab/glasslab-titanic-runner:0.1.0 services/runner
+sudo docker push ghcr.io/ccny-glasslab/glasslab-agent-api:0.1.0
+sudo docker push ghcr.io/ccny-glasslab/glasslab-titanic-runner:0.1.0
 ```
 
 2. Copy the example secret manifest and replace the placeholder values.

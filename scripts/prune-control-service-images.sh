@@ -7,8 +7,8 @@ KEEP=3
 APPLY=false
 RETAIN_TAGS=()
 REPOSITORIES=(
-  'ghcr.io/offensivegeneric/glasslab-workflow-api'
-  'ghcr.io/offensivegeneric/glasslab-research-orchestrator'
+  'ghcr.io/ccny-glasslab/glasslab-workflow-api'
+  'ghcr.io/ccny-glasslab/glasslab-research-orchestrator'
 )
 
 usage() {

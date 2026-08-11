@@ -33,7 +33,7 @@ from .storage import SqliteStore
 from .workspaces import WorkspaceManager
 
 
-RUNNER_IMAGE = 'ghcr.io/offensivegeneric/glasslab-smoke-runner:test'
+RUNNER_IMAGE = 'ghcr.io/ccny-glasslab/glasslab-smoke-runner:test'
 
 
 def _create_repo(root: Path) -> Path:

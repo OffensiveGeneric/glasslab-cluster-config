@@ -36,7 +36,7 @@ class Settings(BaseSettings):
 
     runner_namespace: str = 'glasslab-agents'
     runner_service_account_name: str = 'glasslab-agent-api'
-    runner_image: str = 'ghcr.io/offensivegeneric/glasslab-titanic-runner:0.1.0'
+    runner_image: str = 'ghcr.io/ccny-glasslab/glasslab-titanic-runner:0.1.0'
     runner_image_pull_policy: str = 'IfNotPresent'
     runner_backoff_limit: int = 0
     runner_job_ttl_seconds: int = 86400

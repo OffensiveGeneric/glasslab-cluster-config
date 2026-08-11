@@ -17,7 +17,7 @@ spec:
         - name: glasslab-ghcr-pull
       containers:
         - name: assessment-agent
-          image: ghcr.io/offensivegeneric/glasslab-assessment-agent:0.1.0
+          image: ghcr.io/ccny-glasslab/glasslab-assessment-agent:0.1.0
           imagePullPolicy: IfNotPresent
           env:
             - name: GLASSLAB_ASSESSMENT_AGENT_PROVIDER_API

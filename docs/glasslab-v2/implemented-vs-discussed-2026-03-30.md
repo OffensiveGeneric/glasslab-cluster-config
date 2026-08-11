@@ -13,7 +13,7 @@ This note is the short answer to a specific problem from the 2026-03-30 session:
 These were validated from the provisioner and are not just repo ideas.
 
 - `workflow-api` is live at:
-  - `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.54-local`
+  - `ghcr.io/ccny-glasslab/glasslab-workflow-api:0.1.54-local`
 - `/healthz` reported:
   - `build_source_revision: 41cf6b6`
 

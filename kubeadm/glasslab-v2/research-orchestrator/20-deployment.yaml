@@ -53,7 +53,7 @@ spec:
               mountPath: /mnt/artifacts
       containers:
         - name: orchestrator
-          image: ghcr.io/offensivegeneric/glasslab-research-orchestrator:0.1.0
+          image: ghcr.io/ccny-glasslab/glasslab-research-orchestrator:0.1.0
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:

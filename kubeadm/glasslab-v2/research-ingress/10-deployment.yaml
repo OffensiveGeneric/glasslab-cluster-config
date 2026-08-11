@@ -17,7 +17,7 @@ spec:
         - name: glasslab-ghcr-pull
       containers:
         - name: research-ingress
-          image: ghcr.io/offensivegeneric/glasslab-research-ingress:0.1.1
+          image: ghcr.io/ccny-glasslab/glasslab-research-ingress:0.1.1
           imagePullPolicy: IfNotPresent
           env:
             - name: GLASSLAB_RESEARCH_INGRESS_COMMAND_ROUTER_URL

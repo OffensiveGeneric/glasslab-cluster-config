@@ -42,7 +42,7 @@ jobs:
           context: .
           file: services/workflow-api/Dockerfile
           push: true
-          tags: ghcr.io/offensivegeneric/glasslab-workflow-api:${{ github.sha }}
+          tags: ghcr.io/ccny-glasslab/glasslab-workflow-api:${{ github.sha }}
           build-args: |
             GLASSLAB_GIT_SHA=${{ github.sha }}
             GLASSLAB_BUILD_SOURCE=github:${{ github.run_id }}
@@ -71,7 +71,7 @@ jobs:
           context: services/research-orchestrator
           file: services/research-orchestrator/Dockerfile
           push: true
-          tags: ghcr.io/offensivegeneric/glasslab-research-orchestrator:${{ github.sha }}
+          tags: ghcr.io/ccny-glasslab/glasslab-research-orchestrator:${{ github.sha }}
           build-args: |
             GLASSLAB_GIT_SHA=${{ github.sha }}
             GLASSLAB_BUILD_SOURCE=github:${{ github.run_id }}

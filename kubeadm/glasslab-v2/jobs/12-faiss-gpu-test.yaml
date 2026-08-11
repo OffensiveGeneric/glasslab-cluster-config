@@ -8,7 +8,7 @@ spec:
     spec:
       containers:
         - name: faiss-gpu
-          image: ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.7-local
+          image: ghcr.io/ccny-glasslab/glasslab-gpu-experiment-runner:0.1.7-local
           command: ["python", "-c", "import faiss; print(f'FAISS version: {faiss.__version__}'); print(f'Is CPU: {faiss.is_cpu()}'); print(f'Use CUDA: {faiss.use_cuda()}')"]
           resources:
             limits:

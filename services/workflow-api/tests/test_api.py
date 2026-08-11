@@ -5432,7 +5432,7 @@ def test_gpu_workflow_execution_preflight_reports_gpu_contract() -> None:
     payload = response.json()
     assert payload['workflow_id'] == 'gpu-experiment'
     assert payload['resource_profile'] == 'gpu-small'
-    assert payload['runner_image'] == 'ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.7-local'
+    assert payload['runner_image'] == 'ghcr.io/ccny-glasslab/glasslab-gpu-experiment-runner:0.1.7-local'
     assert payload['resource_requests'] == {'cpu': '2', 'memory': '4Gi', 'nvidia.com/gpu': '1'}
     assert payload['resource_limits'] == {'cpu': '4', 'memory': '8Gi', 'nvidia.com/gpu': '1'}
     assert payload['node_selector'] == {

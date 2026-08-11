@@ -105,7 +105,7 @@ def test_loading_persisted_task_rebinds_fixed_workload_runner(
             update={
                 'workload_id': 'benchmark-workspace-cpu-v1',
                 'runner_image': (
-                    'ghcr.io/offensivegeneric/'
+                    'ghcr.io/ccny-glasslab/'
                     'glasslab-research-workspace-runner:benchmark-cpu-v1'
                 ),
             }

@@ -33,7 +33,7 @@
     "replication-template-v1",
     "qwen3-4b-instruct-2507"
   ],
-  "runner_image": "ghcr.io/offensivegeneric/glasslab-replication-runner:0.1.0",
+  "runner_image": "ghcr.io/ccny-glasslab/glasslab-replication-runner:0.1.0",
   "evaluator_type": "replication-delta",
   "expected_artifacts": {
     "required": [

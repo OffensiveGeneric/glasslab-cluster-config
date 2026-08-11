@@ -293,8 +293,8 @@ GitHub Actions publishes a matched pair of immutable images under the full
 commit SHA:
 
 ```text
-ghcr.io/offensivegeneric/glasslab-workflow-api:<full-sha>
-ghcr.io/offensivegeneric/glasslab-research-orchestrator:<full-sha>
+ghcr.io/ccny-glasslab/glasslab-workflow-api:<full-sha>
+ghcr.io/ccny-glasslab/glasslab-research-orchestrator:<full-sha>
 ```
 
 Deploy that release from the canonical `.44` checkout:

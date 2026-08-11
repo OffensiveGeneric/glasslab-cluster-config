@@ -391,10 +391,10 @@ Current intended source of truth:
 
 Current relevant images:
 
-- `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.26-local`
-- `ghcr.io/offensivegeneric/glasslab-tabular-runner:0.1.2`
-- `ghcr.io/offensivegeneric/glasslab-literature-runner:0.1.2`
-- `ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.1`
+- `ghcr.io/ccny-glasslab/glasslab-workflow-api:0.1.26-local`
+- `ghcr.io/ccny-glasslab/glasslab-tabular-runner:0.1.2`
+- `ghcr.io/ccny-glasslab/glasslab-literature-runner:0.1.2`
+- `ghcr.io/ccny-glasslab/glasslab-gpu-experiment-runner:0.1.1`
 
 Cluster pull path:
 

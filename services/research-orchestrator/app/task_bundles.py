@@ -96,7 +96,7 @@ RUNTIME_PROFILES = {
     'cpu-ml-standard-v1': RuntimeProfile(
         workload_id='workspace-cpu-ml-v1',
         runner_image=(
-            'ghcr.io/offensivegeneric/'
+            'ghcr.io/ccny-glasslab/'
             'glasslab-research-workspace-runner:benchmark-cpu-v2'
         ),
         resources={
@@ -109,7 +109,7 @@ RUNTIME_PROFILES = {
     'gpu-ml-standard-v1': RuntimeProfile(
         workload_id='workspace-gpu-ml-v1',
         runner_image=(
-            'ghcr.io/offensivegeneric/'
+            'ghcr.io/ccny-glasslab/'
             'glasslab-research-workspace-runner:benchmark-gpu-v1'
         ),
         resources={
@@ -126,7 +126,7 @@ RUNTIME_PROFILES = {
 # policy when the task is loaded.
 FIXED_WORKLOAD_RUNNER_IMAGES = {
     'benchmark-workspace-cpu-v1': (
-        'ghcr.io/offensivegeneric/'
+        'ghcr.io/ccny-glasslab/'
         'glasslab-research-workspace-runner:benchmark-cpu-v2'
     ),
     'workspace-cpu-ml-v1': RUNTIME_PROFILES['cpu-ml-standard-v1'].runner_image,

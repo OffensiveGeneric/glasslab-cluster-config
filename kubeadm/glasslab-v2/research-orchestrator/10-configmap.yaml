@@ -48,7 +48,7 @@ data:
   GLASSLAB_ORCHESTRATOR_CLUSTER_EXECUTION_WORKLOAD_ID: metric-search-v0
   GLASSLAB_ORCHESTRATOR_CLUSTER_EXECUTION_EXPERIMENT_TYPE: gpu-training-job
   GLASSLAB_ORCHESTRATOR_KUBERNETES_NAMESPACE: glasslab-v2
-  GLASSLAB_ORCHESTRATOR_PERMITTED_JOB_IMAGES: ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.7-local,ghcr.io/offensivegeneric/glasslab-research-workspace-runner:benchmark-cpu-v1,ghcr.io/offensivegeneric/glasslab-research-workspace-runner:benchmark-cpu-v2,ghcr.io/offensivegeneric/glasslab-research-workspace-runner:benchmark-gpu-v1
+  GLASSLAB_ORCHESTRATOR_PERMITTED_JOB_IMAGES: ghcr.io/ccny-glasslab/glasslab-gpu-experiment-runner:0.1.7-local,ghcr.io/ccny-glasslab/glasslab-research-workspace-runner:benchmark-cpu-v1,ghcr.io/ccny-glasslab/glasslab-research-workspace-runner:benchmark-cpu-v2,ghcr.io/ccny-glasslab/glasslab-research-workspace-runner:benchmark-gpu-v1
   GLASSLAB_ORCHESTRATOR_MAXIMUM_TURNS: "20"
   GLASSLAB_ORCHESTRATOR_MAXIMUM_METHODOLOGY_REVISIONS: "2"
   GLASSLAB_ORCHESTRATOR_MAXIMUM_RUNTIME_SECONDS: "86400"

@@ -20,7 +20,7 @@
   "allowed_models": [
     "agent-generated-python"
   ],
-  "runner_image": "ghcr.io/offensivegeneric/glasslab-research-workspace-runner:0.1.0",
+  "runner_image": "ghcr.io/ccny-glasslab/glasslab-research-workspace-runner:0.1.0",
   "evaluator_type": "rubric-gated-v1",
   "expected_artifacts": {
     "required": [

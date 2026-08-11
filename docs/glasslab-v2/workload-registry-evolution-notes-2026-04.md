@@ -346,7 +346,7 @@ Create a single generic workflow definition:
     {"name": "experiment_spec", "input_type": "notes", "required": true, "description": "Experiment specification document"}
   ],
   "allowed_models": ["*"],
-  "runner_image": "ghcr.io/offensivegeneric/glasslab-generic-runner:1.0.0",
+  "runner_image": "ghcr.io/ccny-glasslab/glasslab-generic-runner:1.0.0",
   "evaluator_type": "generic-metric-comparison",
   "expected_artifacts": {
     "required": ["run_manifest.json", "config.json", "metrics.json", "artifacts_index.json", "report.md", "status.json", "logs/"],

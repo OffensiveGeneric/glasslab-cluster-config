@@ -42,11 +42,11 @@ Current assumptions:
 - the shared PVCs `glasslab-shared-datasets` and `glasslab-shared-artifacts` exist and are `Bound`
 - control-service images are pullable by full commit SHA
 - the bounded-agent Deployments pull:
-  - `ghcr.io/offensivegeneric/glasslab-intake-agent:0.1.0`
-  - `ghcr.io/offensivegeneric/glasslab-interpretation-agent:0.1.0`
-  - `ghcr.io/offensivegeneric/glasslab-assessment-agent:0.1.0`
-  - `ghcr.io/offensivegeneric/glasslab-design-agent:0.1.0`
-  - `ghcr.io/offensivegeneric/glasslab-schedule-worker:0.1.0`
+  - `ghcr.io/ccny-glasslab/glasslab-intake-agent:0.1.0`
+  - `ghcr.io/ccny-glasslab/glasslab-interpretation-agent:0.1.0`
+  - `ghcr.io/ccny-glasslab/glasslab-assessment-agent:0.1.0`
+  - `ghcr.io/ccny-glasslab/glasslab-design-agent:0.1.0`
+  - `ghcr.io/ccny-glasslab/glasslab-schedule-worker:0.1.0`
 - local push/import helpers are break-glass fallback paths
 
 Prereq check:

@@ -51,7 +51,7 @@ require_object() {
 }
 
 rollout_workflow_api() {
-  local image="ghcr.io/offensivegeneric/glasslab-workflow-api:${IMAGE_TAG}"
+  local image="ghcr.io/ccny-glasslab/glasslab-workflow-api:${IMAGE_TAG}"
 
   require_object persistentvolumeclaim glasslab-shared-datasets
   require_object persistentvolumeclaim glasslab-shared-artifacts
@@ -71,7 +71,7 @@ rollout_workflow_api() {
 }
 
 rollout_research_orchestrator() {
-  local image="ghcr.io/offensivegeneric/glasslab-research-orchestrator:${IMAGE_TAG}"
+  local image="ghcr.io/ccny-glasslab/glasslab-research-orchestrator:${IMAGE_TAG}"
 
   require_object persistentvolumeclaim glasslab-shared-artifacts
   apply_manifest "$ROOT_DIR/kubeadm/glasslab-v2/research-orchestrator/00-service-account.yaml"

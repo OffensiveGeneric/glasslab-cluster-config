@@ -93,7 +93,7 @@ class Settings(BaseSettings):
     qwen_base_url: str = 'http://192.168.1.17:52415/v1'
     qwen_model_name: str = 'mlx-community/Qwen3-Coder-Next-4bit'
     opencode_runtime_image: str = (
-        'ghcr.io/offensivegeneric/glasslab-research-orchestrator:0.1.0'
+        'ghcr.io/ccny-glasslab/glasslab-research-orchestrator:0.1.0'
     )
     hermes_executable: str = '/usr/local/bin/hermes'
     hermes_server_host: str = '127.0.0.1'
@@ -114,7 +114,7 @@ class Settings(BaseSettings):
     cluster_execution_experiment_type: str = 'gpu-training-job'
     kubernetes_namespace: str = 'glasslab-v2'
     permitted_job_images: Annotated[list[str], NoDecode] = [
-        'ghcr.io/offensivegeneric/glasslab-metric-search:latest',
+        'ghcr.io/ccny-glasslab/glasslab-metric-search:latest',
     ]
 
     maximum_turns: int = 20

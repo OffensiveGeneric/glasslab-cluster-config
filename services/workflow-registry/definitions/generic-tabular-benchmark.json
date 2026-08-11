@@ -46,7 +46,7 @@
     "random_forest",
     "xgboost_optional"
   ],
-  "runner_image": "ghcr.io/offensivegeneric/glasslab-tabular-runner:0.1.2",
+  "runner_image": "ghcr.io/ccny-glasslab/glasslab-tabular-runner:0.1.2",
   "evaluator_type": "tabular-metric-max",
   "expected_artifacts": {
     "required": [

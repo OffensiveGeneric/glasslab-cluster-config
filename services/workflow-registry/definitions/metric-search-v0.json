@@ -20,7 +20,7 @@
   "allowed_models": [
     "config-driven"
   ],
-  "runner_image": "ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.7-local",
+  "runner_image": "ghcr.io/ccny-glasslab/glasslab-gpu-experiment-runner:0.1.7-local",
   "evaluator_type": "art-retrieval-v1",
   "expected_artifacts": {
     "required": [
