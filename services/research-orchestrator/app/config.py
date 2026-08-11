@@ -29,6 +29,8 @@ class Settings(BaseSettings):
 
     app_name: str = 'glasslab-research-orchestrator'
     app_version: str = '0.1.0'
+    store_backend: Literal['sqlite', 'postgres'] = 'sqlite'
+    store_postgres_dsn: str | None = None
     database_path: str = '/tmp/glasslab-research-orchestrator/orchestrator.db'
     workspace_root: str = '/tmp/glasslab-research-orchestrator/runs'
     artifact_root: str = '/tmp/glasslab-research-orchestrator/artifacts'
@@ -140,6 +142,13 @@ class Settings(BaseSettings):
     @property
     def effective_agent_model_name(self) -> str:
         return self.agent_model_name or self.qwen_model_name
+
+    @field_validator('store_postgres_dsn')
+    @classmethod
+    def require_postgres_dsn(cls, value: str | None, info) -> str | None:
+        if info.data.get('store_backend') == 'postgres' and not (value or '').strip():
+            raise ValueError('postgres store backend requires a non-empty store_postgres_dsn')
+        return value
 
     @field_validator('permitted_job_images', mode='before')
     @classmethod
