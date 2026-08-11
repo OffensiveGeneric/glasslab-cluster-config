@@ -253,3 +253,5 @@ def test_recovery_context_still_leads_after_retrieval(orchestrator_bundle) -> No
     assert prompt.index(
         'This is a fresh OpenCode session after an interrupted or failed turn.'
     ) < prompt.index('Write implementation-plan.md')
+    assert 'AUTHORITATIVE STRUCTURED OUTPUT CONTRACT' in prompt
+    assert 'exactly `implementation_plan`' in prompt
