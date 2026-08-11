@@ -42,13 +42,14 @@ Apple GPUs are available to their local model-serving runtimes, not through
 
 | Device | Address | Identified hardware/service | Capacity or role | Status |
 | --- | --- | --- | --- | --- |
-| Synology NAS, interface 1 | `192.168.1.13` | Synology DSM/NFS/SMB services | Same NAS as `.207`; exact model/RAM require DSM admin access | Reachable |
-| Synology NAS, interface 2 | `192.168.1.207` | Synology DSM/NFS/SMB services | NFS export `192.168.1.207:/volume1/backup`: 11 TB total, 1.9 TB used, 9.0 TB free | Reachable |
+| `g-nas`, management interface | `192.168.1.13` | Synology DSM/NFS/SMB services | Same storage server as `.207`; exact model/RAM require DSM admin access | Reachable |
+| `g-nas`, data interface | `192.168.1.207` | Synology DSM/NFS/SMB services | NFS export `192.168.1.207:/volume1/backup`: 11 TB total, 1.9 TB used, 9.0 TB free | Reachable |
 | LAN gateway | `192.168.1.100` | Cisco device | Default router/gateway; not compute capacity | Reachable |
 | Network switch/controller | `192.168.1.10` | Hewlett Packard Enterprise HTTP management service | Network appliance; not compute capacity | Reachable |
 | Netgear device | `192.168.1.3` | Netgear MAC; no management service observed | Network appliance or unmanaged endpoint; no hardware facts available | Reachable |
 
-The shared `glasslab-v2` Kubernetes volumes are NFS-backed by `.207`:
+The shared `glasslab-v2` Kubernetes volumes are NFS-backed by `g-nas` at
+`.207`:
 
 - `shared-datasets`: 2 TiB claim
 - `shared-artifacts`: 3 TiB claim
