@@ -1,3 +1,5 @@
+"""Pydantic wire-format contracts shared across Glasslab v2 services."""
+
 from .run_artifacts import ArtifactIndexEntry, ArtifactsIndex, MetricRecord, Metrics, RunManifest, RunPriority, RunStatus
 from .workflow_registry import ExpectedArtifactsSpec, ResourceProfileSpec, WorkflowInputSpec, WorkflowRegistryEntry
 

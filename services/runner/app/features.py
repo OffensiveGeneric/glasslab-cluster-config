@@ -1,3 +1,11 @@
+"""Feature engineering and preprocessing for Titanic tabular pipelines.
+
+Exposes two feature profiles: 'basic' (raw columns only) and 'extended'
+(derived columns Title, Deck, FamilySize, IsAlone, NameLength). Missing source
+columns are filled with pd.NA so the preprocessor can impute, avoiding
+train-time failures on partially-available input schemas.
+"""
+
 from __future__ import annotations
 
 import pandas as pd
@@ -18,6 +26,9 @@ REQUIRED_SOURCE_COLUMNS = ['Pclass', 'Sex', 'Age', 'SibSp', 'Parch', 'Fare', 'Em
 
 def engineer_features(frame: pd.DataFrame, profile: str) -> pd.DataFrame:
     prepared = frame.copy()
+    # Any missing required column is filled with pd.NA so the preprocessor can
+    # impute it downstream; this avoids pipeline crashes on incomplete manifests
+    # without silently dropping features.
     for column in REQUIRED_SOURCE_COLUMNS:
         if column not in prepared.columns:
             prepared[column] = pd.NA

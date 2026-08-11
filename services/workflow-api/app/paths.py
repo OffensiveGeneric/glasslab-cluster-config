@@ -1,3 +1,10 @@
+"""Filesystem location utilities for the workflow-api service.
+
+Shipped images do not inherit the developer's working directory, so all
+path-based configuration must be resolved relative to a discovered repo root
+rather than a hard-coded prefix.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path

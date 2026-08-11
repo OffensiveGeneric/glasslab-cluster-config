@@ -1,3 +1,13 @@
+"""FastAPI surface and bounded intake interpretation.
+
+POST /interpret-intake first builds a deterministic interpretation draft from
+the intake text, asks the primary model backend to refine it against the closed
+draft schema, and normalizes the model output back onto the deterministic
+baseline so the response always satisfies the schema. If the primary backend
+fails it falls through to an optional secondary backend and then to the pure
+deterministic scaffold, always returning a valid draft with warnings.
+"""
+
 from __future__ import annotations
 
 from collections import Counter
@@ -21,6 +31,9 @@ from .models import (
 
 TOKEN_RE = re.compile(r"[a-z0-9]+")
 
+# Shared deterministic lexicon, the same vocabulary the ranker service uses,
+# so the model backend and the deterministic scaffold agree on what each
+# workflow family means. Keeps ranking/refinement stable and auditable.
 WORKFLOW_HINTS: dict[str, set[str]] = {
     'literature-to-experiment': {'paper', 'literature', 'claim', 'method', 'study', 'review'},
     'generic-tabular-benchmark': {'tabular', 'benchmark', 'dataset', 'csv', 'train', 'test', 'titanic'},
@@ -46,6 +59,9 @@ class ProviderConfig:
 
     @property
     def chat_url(self) -> str:
+        # OpenAI-compatible endpoints (including exo) expose /v1/chat/completions;
+        # Ollama uses /api/chat. The provider string also selects the response
+        # envelope shape later in parse_chat_response.
         if self.provider in {'openai-compatible', 'openai', 'exo'}:
             return self.base_url.rstrip('/') + '/v1/chat/completions'
         return self.base_url.rstrip('/') + '/api/chat'
@@ -61,6 +77,9 @@ PRIMARY_BACKEND = ProviderConfig(
 )
 
 _fallback_base_url = os.getenv('GLASSLAB_INTERPRETATION_AGENT_FALLBACK_PROVIDER_BASE_URL', '').strip()
+# The fallback backend exists only when an explicit fallback base URL is
+# configured; with no URL there is no second backend and the deterministic
+# scaffold is the only safety net when the primary is down.
 FALLBACK_BACKEND = (
     ProviderConfig(
         provider=os.getenv('GLASSLAB_INTERPRETATION_AGENT_FALLBACK_PROVIDER_API', 'openai-compatible').strip()
@@ -110,6 +129,10 @@ def infer_candidate_workflows(raw_text: str, candidates: list[str]) -> list[str]
     for workflow_id in candidates:
         hints = WORKFLOW_HINTS.get(workflow_id, set())
         score = sum(counts[token] for token in hints)
+        # Re-weight specific families beyond the per-token hint count: generic
+        # vocabulary like 'dataset' or 'benchmark' is shared across families and
+        # would otherwise dominate purely by token volume, so the distinctive
+        # families get a bounded bonus on top.
         if workflow_id == 'generic-tabular-benchmark' and any(
             token in lowered for token in ('titanic', 'tabular', 'dataset', 'csv')
         ):
@@ -123,6 +146,9 @@ def infer_candidate_workflows(raw_text: str, candidates: list[str]) -> list[str]
         ):
             score += 3
         scored.append((score, workflow_id))
+    # Non-zero scores come first, ordered by descending score and then
+    # alphabetically by id so the ranking is fully deterministic across runs;
+    # every remaining candidate is still returned in its original order.
     ranked = [workflow_id for score, workflow_id in sorted(scored, key=lambda item: (-item[0], item[1])) if score > 0]
     remainder = [workflow_id for workflow_id in candidates if workflow_id not in ranked]
     return ranked + remainder
@@ -320,6 +346,9 @@ def infer_unresolved_questions(
 
 
 def build_interpretation_draft(request: InterpretationRequest) -> InterpretationDraft:
+    # Deterministic baseline that always succeeds: the model prompt below is
+    # built from it, and a total backend failure returns it unchanged, so a
+    # coherent draft is guaranteed even with no model available.
     intake = request.intake
     raw_text = ' '.join(
         [
@@ -373,6 +402,8 @@ def build_interpretation_draft(request: InterpretationRequest) -> Interpretation
 def build_prompt_payload(request: InterpretationRequest, deterministic_draft: InterpretationDraft) -> dict[str, Any]:
     intake = request.intake
     allowed_workflows = intake.workflow_family_candidates
+    # Field-for-field mirror of InterpretationDraft: the model may only be asked
+    # for this closed schema, and normalize_model_draft drops any key outside it.
     schema_keys = {
         'source_type': 'string',
         'normalized_summary': 'string',
@@ -426,11 +457,15 @@ def build_prompt_payload(request: InterpretationRequest, deterministic_draft: In
 def normalize_model_draft(raw_draft: dict[str, Any], request: InterpretationRequest) -> InterpretationDraft:
     baseline = build_interpretation_draft(request)
     payload = baseline.model_dump()
+    # Merge only the schema keys the model returned; anything else is dropped so
+    # the model cannot smuggle fields into the response.
     for key, value in raw_draft.items():
         if key not in payload:
             continue
         payload[key] = value
 
+    # Every accepted list is deduplicated and capped at its per-field limit so a
+    # verbose model cannot blow up the response or repeat entries.
     for list_field, limit in (
         ('candidate_workflow_families', 4),
         ('dataset_hints', 4),
@@ -450,6 +485,9 @@ def normalize_model_draft(raw_draft: dict[str, Any], request: InterpretationRequ
 
     if payload['candidate_workflow_families']:
         allowed = set(request.intake.workflow_family_candidates)
+        # Restrict to the intake's allowed set: the model may rank and reorder
+        # families but never invent one. An empty result after filtering falls
+        # back to the deterministic ranking rather than returning nothing.
         payload['candidate_workflow_families'] = [
             workflow_id for workflow_id in payload['candidate_workflow_families'] if workflow_id in allowed
         ]
@@ -480,6 +518,9 @@ def normalize_model_draft(raw_draft: dict[str, Any], request: InterpretationRequ
 
 
 def parse_chat_response(body: dict[str, Any], request: InterpretationRequest, backend: ProviderConfig) -> InterpretationDraft:
+    # Two response envelopes depending on the provider: OpenAI-compatible
+    # returns choices[0].message, Ollama returns a bare message. Both are
+    # reduced to the same content string before JSON parsing.
     if backend.provider in {'openai-compatible', 'openai', 'exo'}:
         choices = body.get('choices')
         if not isinstance(choices, list) or not choices:
@@ -506,6 +547,10 @@ def parse_chat_response(body: dict[str, Any], request: InterpretationRequest, ba
 def call_backend(request: InterpretationRequest, backend: ProviderConfig) -> InterpretationDraft:
     deterministic_draft = build_interpretation_draft(request)
     payload = build_prompt_payload(request, deterministic_draft)
+    # build_prompt_payload is backend-agnostic: the model name and the
+    # provider-specific envelope are filled in here. OpenAI-compatible
+    # endpoints take temperature top-level and response_format for JSON mode;
+    # Ollama keeps the options block and takes format='json'.
     payload['model'] = backend.model
     if backend.provider in {'openai-compatible', 'openai', 'exo'}:
         payload.pop('options', None)
@@ -525,6 +570,9 @@ def call_backend(request: InterpretationRequest, backend: ProviderConfig) -> Int
 
 
 def interpret_with_backends(request: InterpretationRequest) -> tuple[InterpretationDraft, ModelBackendMetadata, list[str]]:
+    # Degradation order: primary -> optional fallback -> deterministic scaffold.
+    # Every degradation appends a warning so the caller can see which backend
+    # actually produced the draft; the final branch is guaranteed to return.
     warnings: list[str] = []
     try:
         draft = call_backend(request, PRIMARY_BACKEND)

@@ -1,3 +1,15 @@
+"""Headless OpenCode runtime adapter.
+
+Owns one isolated OpenCode server process per (run_id, agent) pair and drives
+structured agent turns through the local HTTP API. Session ids are persisted by
+the engine so a restarted process can re-attach to the same conversation;
+runtime ids are ephemeral process instances and are only used to rebuild the
+session handle after recovery. The model's free text is never trusted: every
+turn must validate against the AgentTurnResult JSON schema, and declared
+write_file actions are applied by the orchestrator only after a strict
+workspace and purpose check.
+"""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -65,6 +77,10 @@ class AgentRuntime(ABC):
 
 
 NORMALIZED_EVENT_TYPES = {
+    # SSE stream is noisy; only the states that matter to the event log are
+    # projected. Failures (`tool.error`, `session.error`) collapse onto the
+    # same generic types as their successful counterparts because the run
+    # outcome is decided by structured-output validation, not stream events.
     'message.part.delta': 'agent.output_updated',
     'tool.pending': 'agent.tool_started',
     'tool.running': 'agent.tool_started',
@@ -85,6 +101,8 @@ def normalize_opencode_event(
     raw_type = str(raw.get('type', ''))
     normalized = NORMALIZED_EVENT_TYPES.get(raw_type)
     if normalized is None:
+        # Unknown event types are deliberately dropped rather than recorded:
+        # the log must stay bounded and only reflect workflow-relevant states.
         return None
     properties = raw.get('properties')
     if not isinstance(properties, dict):
@@ -108,7 +126,35 @@ def extract_structured_output(body: dict[str, Any]) -> Any | None:
     return info.get('structured_output')
 
 
+def parse_json_text(raw: str) -> Any:
+    """Parse a JSON-only response, tolerating one Markdown JSON fence."""
+    candidate = raw.strip()
+    if candidate.startswith('```') and candidate.endswith('```'):
+        lines = candidate.splitlines()
+        if len(lines) >= 3 and lines[0].strip() in {'```', '```json'}:
+            candidate = '\n'.join(lines[1:-1]).strip()
+    return json.loads(candidate)
+
+
+def provider_error_message(body: dict[str, Any]) -> str | None:
+    info = body.get('info')
+    if not isinstance(info, dict):
+        return None
+    error = info.get('error')
+    if not isinstance(error, dict):
+        return None
+    data = error.get('data')
+    if isinstance(data, dict) and data.get('message'):
+        return str(data['message'])
+    if error.get('name'):
+        return str(error['name'])
+    return 'unknown provider error'
+
+
 def _decode_json_field(value: Any, expected_type: type) -> Any:
+    # Qwen-family models sometimes emit a nested object/array as a JSON string
+    # instead of a real JSON value; decode it only when the result is exactly
+    # the expected container type so a stray string is never coerced.
     if not isinstance(value, str):
         return value
     try:
@@ -141,6 +187,9 @@ def normalize_structured_output(structured: Any) -> Any:
         proposal = dict(proposal)
         primary = proposal.get('primary_metric')
         if isinstance(primary, str):
+            # The schema requires a ProposedMetric object; accept the flattened
+            # string spelling some checkpoints emit and back-fill defaults for
+            # the two companion fields from their legacy positions.
             proposal['primary_metric'] = {
                 'name': primary,
                 'direction': proposal.pop(
@@ -165,6 +214,10 @@ def materialize_declared_workspace_files(
     if not isinstance(actions, list) or not isinstance(produced, list):
         return structured
 
+    # A write_file request is honoured only when it is backed by a declared
+    # produced file. Honeydew may only materialize protocol/report/analysis
+    # material; Beaker may only materialize implementation material. Anything
+    # else (including transition bookkeeping) is left for the engine to see.
     declared: dict[str, ProducedFile] = {}
     for item in produced:
         try:
@@ -207,16 +260,23 @@ def materialize_declared_workspace_files(
         destination = workspace / declaration.path
         destination.parent.mkdir(parents=True, exist_ok=True)
         parent = destination.parent.resolve()
+        # Re-resolve the parent so a symlinked intermediate directory cannot
+        # redirect the write outside the workspace; symlink final components
+        # are rejected outright rather than overwritten.
         if not parent.is_relative_to(root) or destination.is_symlink():
             remaining.append(action)
             continue
         destination.write_text(content, encoding='utf-8')
     normalized = dict(structured)
+    # Applied write_file actions are removed from the result so the engine and
+    # the event log only ever see the declarative remainder.
     normalized['requested_actions'] = remaining
     return normalized
 
 
 def _validation_summary(exc: ValidationError) -> str:
+    # Cap the first few errors only: this text is embedded in a repair prompt
+    # and a failure message, so it must stay small and bounded.
     details: list[str] = []
     for error in exc.errors(include_url=False, include_input=False)[:8]:
         location = '.'.join(str(part) for part in error['loc'])
@@ -241,6 +301,8 @@ class OpenCodeProcessRuntime(AgentRuntime):
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        # Keyed by (run_id, agent): sessions of two agents never share a
+        # process, and different runs never share agent context.
         self._handles: dict[tuple[str, AgentName], _ProcessHandle] = {}
         prompt_root = Path(__file__).resolve().parents[1] / 'prompts'
         self._system_prompts = {
@@ -269,6 +331,10 @@ class OpenCodeProcessRuntime(AgentRuntime):
         raise OpenCodeRuntimeError('no OpenCode runtime port is available')
 
     def _permissions(self, agent: AgentName) -> dict[str, Any]:
+        # Deny-list for the agent's bash tool. Cluster mutation, network
+        # egress to the cluster, image publication, and git push/PR creation
+        # are off limits for both agents; Honeydew additionally cannot mutate
+        # the repository at all while drafting and reviewing.
         denied_shell = {
             '*': 'allow',
             'kubectl *': 'deny',
@@ -318,26 +384,16 @@ class OpenCodeProcessRuntime(AgentRuntime):
         opencode_config_root.mkdir(parents=True, exist_ok=True)
         for path in (data_root, cache_root, state_root, home_root):
             path.mkdir(parents=True, exist_ok=True)
+        provider_id = self.settings.agent_model_provider_id
+        model_name = self.settings.effective_agent_model_name
         config = {
             '$schema': 'https://opencode.ai/config.json',
-            'model': f'exo/{self.settings.qwen_model_name}',
-            'small_model': f'exo/{self.settings.qwen_model_name}',
+            'model': f'{provider_id}/{model_name}',
+            'small_model': f'{provider_id}/{model_name}',
             'default_agent': 'build',
             'share': 'disabled',
             'autoupdate': False,
             'lsp': False,
-            'provider': {
-                'exo': {
-                    'npm': '@ai-sdk/openai-compatible',
-                    'name': 'Glasslab Exo',
-                    'options': {'baseURL': self.settings.qwen_base_url},
-                    'models': {
-                        self.settings.qwen_model_name: {
-                            'name': self.settings.qwen_model_name,
-                        }
-                    },
-                }
-            },
             'permission': self._permissions(agent),
             'agent': {
                 'build': {
@@ -347,6 +403,19 @@ class OpenCodeProcessRuntime(AgentRuntime):
                 'plan': {'disable': True},
             },
         }
+        if provider_id == 'exo':
+            config['provider'] = {
+                'exo': {
+                    'npm': '@ai-sdk/openai-compatible',
+                    'name': 'Glasslab Exo',
+                    'options': {'baseURL': self.settings.qwen_base_url},
+                    'models': {
+                        model_name: {
+                            'name': model_name,
+                        }
+                    },
+                }
+            }
         (opencode_config_root / 'opencode.json').write_text(
             json.dumps(config, indent=2, sort_keys=True) + '\n'
         )
@@ -361,6 +430,8 @@ class OpenCodeProcessRuntime(AgentRuntime):
     ) -> _ProcessHandle:
         key = (run_id, agent)
         existing = self._handles.get(key)
+        # Recovery hook: if the stored process is still alive it is reused so a
+        # transient error above this layer does not tear down a healthy server.
         if existing is not None and existing.process.poll() is None:
             return existing
         port = self._runtime_port()
@@ -379,6 +450,12 @@ class OpenCodeProcessRuntime(AgentRuntime):
         log_path = runtime_root / 'opencode.log'
         log_handle = log_path.open('a', encoding='utf-8')
         password = secrets.token_urlsafe(32)
+        # XDG roots are isolated per run and agent under the workspace parent,
+        # so no conversation state leaks between runs. The random server
+        # password is held only in this in-memory handle and is never written
+        # to disk or the log. NOTE: the full inherited process environment is
+        # passed through, so any orchestrator secrets in env vars are visible
+        # to the agent shell.
         environment = {
             **__import__('os').environ,
             'XDG_CONFIG_HOME': str(config_root),
@@ -416,6 +493,9 @@ class OpenCodeProcessRuntime(AgentRuntime):
         )
         self._handles[key] = handle
         deadline = time.monotonic() + self.settings.opencode_start_timeout_seconds
+        # Poll the authenticated health endpoint until the server accepts
+        # requests; a process that dies during startup is surfaced with the log
+        # path so the failure is diagnosable without guessing.
         while time.monotonic() < deadline:
             if process.poll() is not None:
                 raise OpenCodeRuntimeError(
@@ -458,6 +538,11 @@ class OpenCodeProcessRuntime(AgentRuntime):
         params = {'directory': str(workspace)}
         with self._client(handle) as client:
             if existing_session_id:
+                # Recovery across process restarts: the persisted session id is
+                # re-validated against the live server so a re-attached run
+                # continues the same conversation. A fresh process without the
+                # persisted id (or a deleted session) falls through to a new
+                # session instead.
                 response = client.get(
                     f'/session/{existing_session_id}',
                     params=params,
@@ -489,6 +574,10 @@ class OpenCodeProcessRuntime(AgentRuntime):
         )
         stop_watchdog = threading.Event()
         abort_reasons: list[str] = []
+        # The watchdog polls the transcript and enforces both the hard
+        # wall-clock deadline and the identical-terminal-tool-call guard. It
+        # records why the turn was aborted so run_turn surfaces a meaningful
+        # error rather than a generic HTTP failure.
         watchdog = threading.Thread(
             target=self._watch_turn,
             kwargs={
@@ -534,23 +623,41 @@ class OpenCodeProcessRuntime(AgentRuntime):
         current_prompt = prompt
         with self._client(handle) as client:
             try:
+                # The model is asked to emit an AgentTurnResult-shaped object
+                # under a JSON-schema format; validation failures and missing
+                # structured output trigger a bounded repair turn that may only
+                # correct the result, never do new workspace work.
                 for attempt in range(
                     self.settings.opencode_structured_repair_attempts + 1
                 ):
                     payload = {
                         'model': {
-                            'providerID': 'exo',
-                            'modelID': self.settings.qwen_model_name,
+                            'providerID': self.settings.agent_model_provider_id,
+                            'modelID': (
+                                self.settings.effective_agent_model_name
+                            ),
                         },
                         'agent': 'build',
                         'system': self._system_prompts[agent],
                         'parts': [{'type': 'text', 'text': current_prompt}],
-                        'format': {
-                            'type': 'json_schema',
-                            'schema': AgentTurnResult.model_json_schema(),
-                            'retryCount': 2,
-                        },
                     }
+                    output_format = {
+                        'type': 'json_schema',
+                        'schema': AgentTurnResult.model_json_schema(),
+                        'retryCount': 2,
+                    }
+                    if (
+                        self.settings.opencode_structured_output_mode
+                        == 'json_schema'
+                    ):
+                        payload['format'] = output_format
+                    else:
+                        payload['parts'][0]['text'] = (
+                            f'{current_prompt}\n\n'
+                            'Return only a JSON object, without Markdown '
+                            'fences or commentary, matching this JSON Schema:\n'
+                            + json.dumps(output_format['schema'])
+                        )
                     response = client.post(
                         f'/session/{session_id}/message',
                         params={'directory': str(workspace)},
@@ -558,10 +665,18 @@ class OpenCodeProcessRuntime(AgentRuntime):
                     )
                     response.raise_for_status()
                     body = response.json()
+                    provider_error = provider_error_message(body)
+                    if provider_error:
+                        raise OpenCodeRuntimeError(
+                            f'OpenCode provider error: {provider_error}'
+                        )
                     info = body.get('info', {})
                     message_id = info.get('id')
                     structured = extract_structured_output(body)
                     if structured is None:
+                        # Some checkpoints return plain prose instead of the
+                        # structured field; fall back to parsing the text parts
+                        # before giving up.
                         text_parts = [
                             str(part.get('text', ''))
                             for part in body.get('parts', [])
@@ -569,7 +684,7 @@ class OpenCodeProcessRuntime(AgentRuntime):
                         ]
                         raw = ''.join(text_parts).strip()
                         try:
-                            structured = json.loads(raw)
+                            structured = parse_json_text(raw)
                         except json.JSONDecodeError as exc:
                             if (
                                 attempt
@@ -628,6 +743,8 @@ class OpenCodeProcessRuntime(AgentRuntime):
 
     @staticmethod
     def _terminal_tool_signatures(messages: list[dict[str, Any]]) -> list[str]:
+        # Canonical fingerprint (tool + input) of tool parts that already
+        # finished, so identical repeated calls are detectable as a loop.
         signatures: list[str] = []
         for message in messages:
             for part in message.get('parts', []):
@@ -684,6 +801,9 @@ class OpenCodeProcessRuntime(AgentRuntime):
                     if isinstance(messages, list):
                         signatures = self._terminal_tool_signatures(messages)
                         limit = self.settings.opencode_repeated_tool_limit
+                        # Guard against retry loops: once `limit` consecutive
+                        # terminal tool calls are byte-identical (same tool and
+                        # same input) the turn is stuck and is aborted.
                         if (
                             limit > 1
                             and len(signatures) >= limit
@@ -763,6 +883,9 @@ class OpenCodeProcessRuntime(AgentRuntime):
         self._handles.clear()
 
     def release(self, *, run_id: str, agent: AgentName) -> None:
+        # Used for short-lived compiler sessions; terminating the process also
+        # drops the isolated session state so no half-finished agent context
+        # survives.
         handle = self._handles.pop((run_id, agent), None)
         if handle is not None:
             self._stop_handle(handle)

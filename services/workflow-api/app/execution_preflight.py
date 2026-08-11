@@ -1,3 +1,12 @@
+"""Determine whether a workflow can execute in the current Kubernetes cluster.
+
+Checks PVC binding status, image pull secrets, node readiness, and resource
+allocation against the workflow's declared resource profile and node selector.
+Returns a summary of eligible nodes, blocking issues, and warnings.
+When job_submission_mode is not "kubernetes" the check short-circuits
+with a warning — PVC/secret/node checks all assume a live cluster.
+"""
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -182,6 +191,8 @@ def build_execution_preflight_result(workflow: WorkflowRegistryEntry, settings: 
 
     allocated: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for pod in pods:
+        # Only count active pods: completed or failed pods have released
+        # their resource claims, so they do not affect availability.
         if pod.status.phase in {"Succeeded", "Failed"}:
             continue
         node_name = pod.spec.node_name

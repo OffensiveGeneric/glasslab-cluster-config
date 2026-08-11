@@ -1,3 +1,10 @@
+"""Integration-style tests for the schedule worker's FastAPI endpoints.
+
+The service package is loaded dynamically so the tests can run without an
+installed package build step. Each test uses TestClient against the live app
+instance and monkeypatches urllib to avoid hitting the real workflow API.
+"""
+
 import json
 import sys
 import types
@@ -7,6 +14,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
+# Load the app module as if it were a package so relative imports resolve.
 APP_ROOT = SERVICE_ROOT / 'app'
 PACKAGE_NAME = 'schedule_worker_app'
 
@@ -54,6 +62,8 @@ def test_run_once_calls_workflow_api(monkeypatch) -> None:
             return json.dumps(self.payload).encode('utf-8')
 
     def fake_urlopen(request_obj, timeout):
+        # Route by URL suffix: digest and rerun endpoints return distinct
+        # payloads so the combined result verifies both cycles executed.
         if request_obj.full_url.endswith('/digest-schedules/run-due'):
             return FakeResponse(
                 [

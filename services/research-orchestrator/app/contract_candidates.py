@@ -1,3 +1,12 @@
+"""Seal, verify, and promote evaluation-contract candidates.
+
+Candidates are agent-proposed bundles; sealing freezes them into an immutable,
+digest-named blob; promotion binds a contract_id/version to exactly one digest
+in the trusted catalog. Digests are recomputed and cross-checked at every stage,
+so nothing is trusted from the proposing agent except the file bytes that pass
+validation.
+"""
+
 from __future__ import annotations
 
 import ast
@@ -48,6 +57,11 @@ class ContractCandidateManager:
 
     @staticmethod
     def _validate_source_tree(source: Path) -> list[Path]:
+        # Symlinks are rejected anywhere in the tree (even under a directory
+        # that would otherwise be skipped) and a pre-existing contract.sha256
+        # is forbidden: the agent must never control the checksum file, and
+        # every hashed byte must be a real file a reviewer saw. Restricting to
+        # text suffixes keeps the bundle auditable and diffable.
         if source.is_symlink() or not source.is_dir():
             raise ContractCandidateError(
                 'contract candidate must be a real directory'
@@ -103,6 +117,9 @@ class ContractCandidateManager:
                 'candidate descriptor identity does not match the proposal'
             )
         if descriptor.container_image_digest is not None:
+            # A candidate cannot pin its own container image; image selection
+            # stays with promotion/registration so agents cannot choose to run
+            # unvetted code as the evaluator.
             raise ContractCandidateError(
                 'shared-bundle candidates cannot choose a container image'
             )
@@ -139,6 +156,9 @@ class ContractCandidateManager:
                 descriptor.execution_wrapper,
                 descriptor.evaluation_entry_point,
             ):
+                # AST parsing is deliberately syntax-only: candidates are Python
+                # that will later run as the evaluator, so static validation
+                # catches breakage without executing anything untrusted.
                 ast.parse(
                     (root / python_path).read_text(encoding='utf-8'),
                     filename=python_path,
@@ -164,14 +184,21 @@ class ContractCandidateManager:
         staging_parent.mkdir(parents=True, exist_ok=True)
         staging = staging_parent / uuid4().hex
         shutil.copytree(source, staging)
+        # The digest is computed over the staging copy before contract.sha256
+        # exists, so the checksum file can never influence its own digest.
         digest = compute_contract_digest(staging)
         (staging / 'contract.sha256').write_text(digest + '\n', encoding='ascii')
         destination = self.sealed_root / contract_id / version / digest
         destination.parent.mkdir(parents=True, exist_ok=True)
         if destination.exists():
+            # The same digest was sealed before: discard the new staging copy
+            # rather than overwriting, so sealing is idempotent and the first
+            # seal always wins.
             shutil.rmtree(staging)
         else:
             os.replace(staging, destination)
+        # Read-only bits are set after the atomic move so a sealed bundle is
+        # write-once from the orchestrator's perspective.
         for path in destination.rglob('*'):
             path.chmod(0o555 if path.is_dir() else 0o444)
         return SealedContractCandidate(
@@ -193,6 +220,9 @@ class ContractCandidateManager:
             raise ContractCandidateError('sealed candidate escapes candidate root')
         expected = (path / 'contract.sha256').read_text().strip()
         actual = compute_contract_digest(path)
+        # Recompute the digest over the sealed tree and compare against both
+        # the recorded expected digest and the bundle's own checksum file;
+        # either mismatch means the sealed bytes drifted from what was approved.
         if expected != expected_digest or actual != expected_digest:
             raise ContractIntegrityError('sealed candidate digest mismatch')
         return EvaluationContractDescriptor.model_validate_json(
@@ -212,6 +242,8 @@ class ContractCandidateManager:
         destination = (
             self.promoted_root / descriptor.contract_id / descriptor.version
         )
+        # A promoted id/version is immutable: if it already exists under a
+        # different digest the promotion is refused rather than overwritten.
         if destination.exists():
             existing = compute_contract_digest(destination)
             if existing != expected_digest:
@@ -219,6 +251,8 @@ class ContractCandidateManager:
                     'contract version is already promoted with another digest'
                 )
         else:
+            # Copy-then-rename keeps promotion atomic so a resolver never
+            # observes a half-written contract tree.
             staging = destination.parent / f'.{descriptor.version}.{uuid4().hex}'
             staging.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(sealed_path, staging)
@@ -240,6 +274,8 @@ class ContractCandidateManager:
             contract_id=source.parent.name,
             version=source.name,
         )
+        # Repository-shipped contracts already carry a pinned contract.sha256;
+        # the checksum is verified before install.
         expected = (source / 'contract.sha256').read_text(
             encoding='ascii'
         ).strip()
@@ -263,6 +299,8 @@ class ContractCandidateManager:
             shutil.copytree(
                 source,
                 staging,
+                # Ignore pycache/pyc because the digest excludes them anyway,
+                # keeping the promoted tree byte-identical to what was hashed.
                 ignore=shutil.ignore_patterns('__pycache__', '*.pyc'),
             )
             os.replace(staging, destination)
@@ -282,6 +320,10 @@ class ContractCandidateManager:
         digest: str,
         promoted_path: Path,
     ) -> None:
+        # The catalog is the resolution anchor for cluster jobs: bundle paths
+        # are stored relative to the shared mount so renderers never depend on
+        # host paths. The tmp+replace write keeps the catalog atomic under
+        # concurrent readers.
         if not promoted_path.is_relative_to(self.shared_mount_root):
             raise ContractCandidateError(
                 'promoted contract is outside the shared mount root'

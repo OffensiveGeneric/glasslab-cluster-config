@@ -1,3 +1,11 @@
+"""Process configuration for the agent API.
+
+Settings are read from environment variables prefixed with GLASSLAB_AGENT_ (and
+an optional .env file), so deployment mutates behavior without code changes.
+All components share one cached Settings instance, and the values here pin the
+kube, runner, and MLflow contract the API promises the cluster.
+"""
+
 from __future__ import annotations
 
 from functools import lru_cache

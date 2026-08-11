@@ -1,3 +1,9 @@
+"""API-level tests for health, catalog, and experiment lifecycle endpoints.
+
+Cluster and model dependencies are replaced with fakes so the tests exercise
+the FastAPI surface and control loop without a real cluster or LLM endpoint.
+"""
+
 import logging
 
 from fastapi.testclient import TestClient
@@ -28,6 +34,8 @@ class FakeJobStatusService:
 
     def get_job_status(self, job_name):
         self.calls += 1
+        # First status call reports running, later calls report succeeded,
+        # simulating a Job that finishes between two polls.
         if self.calls == 1:
             return {'job_name': job_name, 'status': 'running'}
         return {'job_name': job_name, 'status': 'succeeded'}

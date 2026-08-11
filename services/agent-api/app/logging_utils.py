@@ -1,3 +1,10 @@
+"""Structured JSON logging for the agent API.
+
+One log line per record in a form Cloud Logging can parse, with caller-supplied
+extra fields collected into a 'context' object. configure_logging is called once
+at startup so every logger in the process shares the same formatter.
+"""
+
 from __future__ import annotations
 
 import json
@@ -6,6 +13,8 @@ import sys
 from datetime import datetime, timezone
 
 
+# LogRecord's built-in keys are excluded from 'context' so only caller-supplied
+# extras (like experiment_id) are captured as structured fields.
 STANDARD_RECORD_KEYS = {
     'args',
     'asctime',

@@ -1,3 +1,10 @@
+"""Thin service-facing wrappers over the domain modules.
+
+main.py depends on these names instead of reaching into the implementation
+modules directly, so the API layer's imports stay stable while the underlying
+registries, validators, and cluster adapters evolve.
+"""
+
 from __future__ import annotations
 
 from . import registry

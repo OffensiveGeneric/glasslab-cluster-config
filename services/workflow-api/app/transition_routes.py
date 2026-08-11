@@ -1,3 +1,14 @@
+"""HTTP routes for the streamlined research transition workflow.
+
+Provides the "transitions" API surface: promote a paper candidate to an intake
+record, create an interpretation (always via the interpretation agent), derive
+a methodology/design draft from the interpretation, and launch a validation run
+from an approved design. The intake-staging function supports both agent and
+deterministic paths, with the deterministic fallback using keyword-based
+inference. Imports are intentionally placed mid-file (after helper defs) to
+break a circular dependency with stage_design.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -66,6 +77,9 @@ def build_intake_request_from_problem_candidate(
         notes=notes,
         submitted_by=queue.submitted_by,
     )
+# Imports below are intentionally placed here to break a circular dependency:
+# stage_design calls back into stage_inference functions when building
+# design drafts, and transition_routes needs both modules.
 from .source_documents import build_source_fetch_candidates
 from .stage_design import build_design_draft as build_design_draft_impl
 from .stage_inference import (

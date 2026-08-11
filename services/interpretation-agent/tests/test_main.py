@@ -1,3 +1,11 @@
+"""Behavioral tests for the interpretation agent.
+
+The service is loaded from its source files under a synthetic package name
+rather than imported as `app`, so these tests run regardless of the image layout
+the service is deployed in. Loading order matters: main.py imports `.models`,
+so models must be registered in sys.modules first.
+"""
+
 import sys
 import types
 from importlib.util import module_from_spec, spec_from_file_location
@@ -11,6 +19,9 @@ PACKAGE_NAME = 'interpretation_agent_app'
 
 
 def load_package_module(module_name: str, path: Path):
+    # Executes the file under the synthetic package name so relative imports
+    # (`from .models import ...`) resolve; registering in sys.modules keeps the
+    # module identity single even though pytest imports these files directly.
     spec = spec_from_file_location(module_name, path)
     assert spec is not None
     assert spec.loader is not None
@@ -24,6 +35,8 @@ package = types.ModuleType(PACKAGE_NAME)
 package.__path__ = [str(APP_ROOT)]
 sys.modules[PACKAGE_NAME] = package
 
+# models must load before main: main.py does `from .models import ...` and the
+# relative import is resolved through the synthetic package above.
 models_module = load_package_module(f'{PACKAGE_NAME}.models', APP_ROOT / 'models.py')
 main_module = load_package_module(f'{PACKAGE_NAME}.main', APP_ROOT / 'main.py')
 
@@ -113,6 +126,9 @@ def test_interpretation_agent_uses_fallback_backend(monkeypatch) -> None:
 
     def fake_call_backend(req, backend):
         calls.append(backend.base_url)
+        # The primary backend is distinguished by its host (192.168.1.21); the
+        # stub fails exactly the primary and lets the patched fallback (.22)
+        # succeed so the fallback path is exercised end to end.
         if backend.base_url.endswith('.21:52415'):
             raise ValueError('primary unavailable')
         draft = build_interpretation_draft(req)
@@ -131,6 +147,8 @@ def test_interpretation_agent_uses_fallback_backend(monkeypatch) -> None:
 def test_interpretation_agent_falls_back_to_deterministic_scaffold(monkeypatch) -> None:
     request = build_request()
 
+    # Both backends fail, so interpret_with_backends must return the pure
+    # deterministic scaffold while still reporting which backend was used.
     def failing_call_backend(_req, _backend):
         raise ValueError('backend failed')
 

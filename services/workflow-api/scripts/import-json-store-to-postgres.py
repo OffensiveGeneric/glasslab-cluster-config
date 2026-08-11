@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+"""One-shot migration from the JSON file store into Postgres.
+
+Idempotent: the INSERT uses ON CONFLICT DO UPDATE on the fixed store_key
+``'default'``, so re-running safely replaces the single authoritative row
+without creating duplicates or leaving stale state.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -28,6 +35,9 @@ def main() -> int:
                 )
                 '''
             )
+            # The entire JSON file becomes a single row keyed by 'default'.
+            # ON CONFLICT DO UPDATE makes the migration idempotent: re-running
+            # replaces the row instead of duplicating it.
             cur.execute(
                 '''
                 INSERT INTO workflow_state (store_key, payload, updated_at)

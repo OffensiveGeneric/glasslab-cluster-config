@@ -1,3 +1,9 @@
+"""Workflow registry contracts.
+
+The registry is the authoritative declaration of what each workflow may
+consume and must emit; preflight and the evaluator both validate against it.
+"""
+
 from __future__ import annotations
 
 from typing import Any, Literal

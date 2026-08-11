@@ -1,3 +1,11 @@
+"""Verified artifact delivery and the analysis notebook projection.
+
+Covers the VerifiedArtifactReader (rejects path escapes and digest
+mismatches), the run artifact bundle (only verified, successful-job artifacts
+plus a digest-carrying manifest), and build_analysis_notebook embedding
+verified metrics and tables into a runnable notebook.
+"""
+
 from __future__ import annotations
 
 from hashlib import sha256
@@ -27,6 +35,8 @@ def _artifact(
     artifact_type: str,
     content: bytes,
 ) -> ArtifactRecord:
+    # Writes a real file and returns the matching ArtifactRecord, so the
+    # reader/bundle code paths see consistent on-disk state and digests.
     path = root / relative
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)

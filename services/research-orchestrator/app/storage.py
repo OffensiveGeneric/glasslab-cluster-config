@@ -1,3 +1,13 @@
+"""Durable SQLite store for the research orchestrator.
+
+The store is the single source of truth behind the append-only event log.
+Every run state change, action approval, and job write is emitted as an
+event in the same transaction that performs the write, so the event log and
+the relational rows can never diverge. Records are stored as one JSON
+payload column plus a few typed columns that mirror only the fields needed
+for queries, ordering, and optimistic-versioning guards.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -11,15 +21,21 @@ from typing import Any, Iterator
 
 from .schemas import (
     ActionRecord,
+    AgentName,
     ApprovalStatus,
     ArtifactRecord,
+    ContextPacket,
     EventRecord,
     IngestedDatasetRecord,
     JobRecord,
     JobStatus,
+    KnowledgeChunk,
+    KnowledgeSource,
     RunRecord,
     RunState,
+    SourceType,
     TERMINAL_STATES,
+    TurnKind,
     TurnRecord,
     utc_now,
 )
@@ -35,6 +51,8 @@ class ConcurrencyConflict(RuntimeError):
 
 
 def _dump(record: Any) -> str:
+    # The full validated record is stored as JSON in the payload column;
+    # typed columns exist only where the SQL needs to query, filter, or order.
     return record.model_dump_json()
 
 
@@ -49,18 +67,29 @@ class SqliteStore:
         self._ensure_schema()
 
     def _connect(self) -> sqlite3.Connection:
+        # isolation_level=None puts the connection in autocommit mode so the
+        # transaction() context manager controls BEGIN/COMMIT explicitly.
         connection = sqlite3.connect(
             self.database_path,
             timeout=30,
             isolation_level=None,
         )
         connection.row_factory = sqlite3.Row
+        # Enforced per-connection because PRAGMA foreign_keys is not a
+        # persistent database property in SQLite.
         connection.execute('PRAGMA foreign_keys=ON')
+        # Backstop for cross-process contention; the in-process RLock already
+        # serializes writes within one replica.
         connection.execute('PRAGMA busy_timeout=30000')
         return connection
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
+        # BEGIN IMMEDIATE takes the write lock up front: read-then-write
+        # methods (sequence MAX+1, the one-active-run check, run version
+        # bumps) never upgrade a read lock to a write lock mid-transaction,
+        # which is what avoids deadlocks and makes those check-then-act
+        # patterns atomic under the RLock.
         with self._lock:
             connection = self._connect()
             try:
@@ -75,7 +104,12 @@ class SqliteStore:
 
     def _ensure_schema(self) -> None:
         with self._connect() as connection:
+            # WAL is persistent for the database file; it lets the read-only
+            # API connections proceed while a writer holds the transaction.
             connection.execute('PRAGMA journal_mode=WAL')
+            # Additive, idempotent DDL doubles as the migration mechanism:
+            # every CREATE/INDEX uses IF NOT EXISTS, so a new deployment
+            # upgrades an existing file by creating only the missing objects.
             connection.executescript(
                 '''
                 CREATE TABLE IF NOT EXISTS runs (
@@ -147,10 +181,89 @@ class SqliteStore:
                     event_type TEXT NOT NULL,
                     payload TEXT NOT NULL,
                     timestamp TEXT NOT NULL,
+                    -- Sequence numbers must be gap-free and increasing per
+                    -- run; they are allocated under BEGIN IMMEDIATE so the
+                    -- UNIQUE constraint only ever catches programmer error.
                     UNIQUE(run_id, sequence_number)
                 );
                 CREATE INDEX IF NOT EXISTS events_run_idx
                 ON events(run_id, sequence_number);
+
+                -- Knowledge store tables. The orchestrator has no formal
+                -- migration framework; schema drift is handled by additive
+                -- CREATE TABLE IF NOT EXISTS statements that run on every
+                -- startup, so a new deployment upgrades an existing SQLite
+                -- file by creating the new tables and leaving old rows intact.
+                -- knowledge_sources is content-addressed: digest is the
+                -- natural key for dedup, and source_id remains the stable
+                -- surrogate used by the FTS chunk rows.
+                CREATE TABLE IF NOT EXISTS knowledge_sources (
+                    source_id TEXT PRIMARY KEY,
+                    source_type TEXT NOT NULL,
+                    canonical_uri TEXT NOT NULL,
+                    run_scope TEXT,
+                    access_policy TEXT NOT NULL,
+                    source_version TEXT,
+                    digest TEXT NOT NULL,
+                    ingested_at TEXT NOT NULL,
+                    index_version TEXT NOT NULL,
+                    title TEXT,
+                    metadata TEXT NOT NULL,
+                    parent_source_id TEXT
+                );
+                CREATE INDEX IF NOT EXISTS knowledge_sources_type_idx
+                ON knowledge_sources(source_type);
+                CREATE INDEX IF NOT EXISTS knowledge_sources_scope_idx
+                ON knowledge_sources(run_scope);
+                CREATE INDEX IF NOT EXISTS knowledge_sources_digest_idx
+                ON knowledge_sources(digest);
+                -- Dedup guard: identical content re-ingested from the same
+                -- canonical URI must resolve to one source row so the
+                -- knowledge:// URI stays stable. Distinct URIs with equal
+                -- content are deliberately allowed (provenance preserved).
+                CREATE UNIQUE INDEX IF NOT EXISTS
+                knowledge_sources_digest_uri_uniq
+                ON knowledge_sources(digest, canonical_uri);
+
+                CREATE TABLE IF NOT EXISTS knowledge_chunks (
+                    chunk_id TEXT PRIMARY KEY,
+                    source_id TEXT NOT NULL
+                        REFERENCES knowledge_sources(source_id)
+                        ON DELETE CASCADE,
+                    chunk_index INTEGER NOT NULL,
+                    text TEXT NOT NULL,
+                    digest TEXT NOT NULL,
+                    token_count INTEGER NOT NULL,
+                    index_version TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS knowledge_chunks_source_idx
+                ON knowledge_chunks(source_id);
+
+                -- FTS5 is the lexical half of hybrid retrieval. chunk_id is
+                -- the rowid-style key linking to knowledge_chunks; the rank is
+                -- read back to feed the combined lexical/BM25 score in the
+                -- knowledge manager.
+                CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_chunks_fts
+                USING fts5(chunk_id, text);
+
+                CREATE TABLE IF NOT EXISTS context_packets (
+                    packet_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL REFERENCES runs(run_id),
+                    agent TEXT NOT NULL,
+                    turn_number INTEGER NOT NULL,
+                    turn_kind TEXT NOT NULL,
+                    query TEXT NOT NULL,
+                    index_version TEXT NOT NULL,
+                    ranked_sources TEXT NOT NULL,
+                    exact_text_supplied TEXT,
+                    token_budget INTEGER NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                -- Per-turn context packets are durable so a report can cite
+                -- exactly which retrieval grounded a claim (knowledge://context
+                -- URIs) even long after the turn finished.
+                CREATE INDEX IF NOT EXISTS context_packets_run_idx
+                ON context_packets(run_id, created_at);
                 '''
             )
 
@@ -167,6 +280,11 @@ class SqliteStore:
         event_type: str,
         payload: dict[str, Any],
     ) -> EventRecord:
+        # Sequence allocation and the insert share one write transaction:
+        # with BEGIN IMMEDIATE serializing writers, MAX+1 is authoritative and
+        # a rolled-back transaction consumes no sequence number, keeping the
+        # per-run log contiguous. The payload column stores the whole event
+        # record as JSON, so consumers read it back with no column mapping.
         row = connection.execute(
             '''
             SELECT COALESCE(MAX(sequence_number), 0) + 1
@@ -221,6 +339,11 @@ class SqliteStore:
         terminal = tuple(state.value for state in TERMINAL_STATES)
         placeholders = ','.join('?' for _ in terminal)
         with self.transaction() as connection:
+            # The one-active-run invariant is enforced here by ordering the
+            # check and the INSERT inside one write transaction (BEGIN
+            # IMMEDIATE), not by any database constraint. It therefore holds
+            # only when callers pass one_active_run=True, and only across
+            # paths that create runs through this store.
             if one_active_run:
                 active = connection.execute(
                     f'SELECT run_id FROM runs WHERE state NOT IN ({placeholders}) LIMIT 1',
@@ -286,6 +409,11 @@ class SqliteStore:
         return [RunRecord.model_validate_json(row['payload']) for row in rows]
 
     def replace_run(self, record: RunRecord, *, expected_version: int) -> RunRecord:
+        # This is the genuine optimistic-concurrency path: the caller reads a
+        # version outside the lock (e.g. get_run), works on the record, then
+        # replays the write guarded by WHERE version = expected_version. A
+        # concurrent writer between the read and the UPDATE makes rowcount 0,
+        # which raises instead of silently losing the update.
         now = utc_now()
         updated = record.model_copy(
             update={'version': expected_version + 1, 'updated_at': now}
@@ -318,6 +446,10 @@ class SqliteStore:
         *,
         reason: str,
     ) -> RunRecord:
+        # Unlike replace_run, this re-reads the row inside the already-held
+        # write transaction, so the WHERE version = row['version'] guard is
+        # defensive only (no writer can interleave); the budget reset and its
+        # event are committed atomically.
         with self.transaction() as connection:
             row = connection.execute(
                 'SELECT payload, version FROM runs WHERE run_id = ?',
@@ -388,6 +520,12 @@ class SqliteStore:
             validate_transition(current.state, target)
             now = utc_now()
             runtime_updates: dict[str, Any] = {}
+            # The run clock is stored as a base (active_runtime_seconds) plus
+            # an open interval (active_since). Entering a human-wait state
+            # closes the interval into the base; leaving a human-wait state
+            # for work reopens it. PAUSED and terminal transitions are handled
+            # by the engine (pause/resume/check_turn_budget) via `updates`, so
+            # this method deliberately stays out of those paths.
             if (
                 target in HUMAN_WAIT_STATES
                 and current.state not in HUMAN_WAIT_STATES
@@ -435,6 +573,8 @@ class SqliteStore:
             )
             if cursor.rowcount != 1:
                 raise ConcurrencyConflict(f'run was updated concurrently: {run_id}')
+            # The state change and its event commit together, so the event log
+            # is the authoritative record of the transition.
             self._append_event_conn(
                 connection,
                 run_id=run_id,
@@ -449,6 +589,8 @@ class SqliteStore:
         return changed
 
     def save_turn(self, record: TurnRecord) -> TurnRecord:
+        # UPSERT makes turn writes idempotent: recovery and retries may
+        # re-deliver a turn record and must land on the same row.
         with self.transaction() as connection:
             connection.execute(
                 '''
@@ -480,6 +622,10 @@ class SqliteStore:
         return [TurnRecord.model_validate_json(row['payload']) for row in rows]
 
     def mark_running_turns_interrupted(self, run_id: str) -> int:
+        # Recovery sweep: turns left 'running' by a crashed process are marked
+        # failed so they are never resumed as if they completed. Each turn is
+        # rewritten in its own transaction; a crash mid-sweep just re-runs the
+        # sweep, which is safe because finished turns are skipped.
         changed = 0
         for turn in self.list_turns(run_id):
             if turn.status != 'running':
@@ -496,6 +642,9 @@ class SqliteStore:
         return changed
 
     def save_action(self, record: ActionRecord) -> ActionRecord:
+        # The idempotency key is the retry guard: a re-submitted action
+        # resolves to the originally stored record (the winner) and any
+        # differences in the new copy are ignored.
         with self.transaction() as connection:
             existing = connection.execute(
                 'SELECT payload FROM actions WHERE idempotency_key = ?',
@@ -538,6 +687,10 @@ class SqliteStore:
             if row is None:
                 raise RecordNotFound(action_id)
             action = ActionRecord.model_validate_json(row['payload'])
+            # Approval idempotency: only PENDING and AUTOMATICALLY_APPROVED
+            # actions may be finalized by a human, and the status check runs
+            # inside the write transaction, so a second approval of the same
+            # action always raises instead of applying twice.
             if action.approval_status not in {
                 ApprovalStatus.PENDING,
                 ApprovalStatus.AUTOMATICALLY_APPROVED,
@@ -582,6 +735,9 @@ class SqliteStore:
             if row is None:
                 raise RecordNotFound(action_id)
             action = ActionRecord.model_validate_json(row['payload'])
+            # Two-stage approval: Honeydew's sign-off is recorded as a flag
+            # while the action deliberately stays PENDING, waiting for the
+            # human half of the gate.
             if action.approval_status != ApprovalStatus.PENDING:
                 raise ConcurrencyConflict(
                     f'action is not pending: {action.approval_status}'
@@ -621,6 +777,8 @@ class SqliteStore:
             if row is None:
                 raise RecordNotFound(action_id)
             action = ActionRecord.model_validate_json(row['payload'])
+            # Only an APPROVED action may be marked execution-failed; the
+            # terminal status prevents the action from ever being executed.
             if action.approval_status != ApprovalStatus.APPROVED:
                 raise ConcurrencyConflict(
                     f'action is not approved: {action.approval_status}'
@@ -666,6 +824,8 @@ class SqliteStore:
         return [ActionRecord.model_validate_json(row['payload']) for row in rows]
 
     def create_job_if_absent(self, record: JobRecord) -> tuple[JobRecord, bool]:
+        # Returns (stored, False) when the idempotency key already exists so a
+        # retry after a crash never submits a duplicate cluster job.
         with self.transaction() as connection:
             existing = connection.execute(
                 'SELECT payload FROM jobs WHERE idempotency_key = ?',
@@ -694,6 +854,9 @@ class SqliteStore:
         return record, True
 
     def update_job(self, record: JobRecord) -> JobRecord:
+        # Blind write keyed on job_id only (no version guard): the job watcher
+        # is the sole writer and re-reads before every update, so the rowcount
+        # check is purely a not-found signal.
         updated = record.model_copy(update={'updated_at': utc_now()})
         with self.transaction() as connection:
             cursor = connection.execute(
@@ -741,6 +904,8 @@ class SqliteStore:
         return [JobRecord.model_validate_json(row['payload']) for row in rows]
 
     def save_artifact(self, record: ArtifactRecord) -> ArtifactRecord:
+        # INSERT OR IGNORE: artifacts are append-only and immutable, so a
+        # re-delivered artifact id keeps the first write.
         with self.transaction() as connection:
             connection.execute(
                 '''
@@ -786,6 +951,8 @@ class SqliteStore:
                     record.created_at.isoformat(),
                 ),
             )
+        # Re-read the stored row so a duplicate ingest returns the canonical
+        # record (first write wins) rather than the caller's copy.
         return self.get_dataset(record.dataset_id)
 
     def get_dataset(self, dataset_id: str) -> IngestedDatasetRecord:
@@ -814,6 +981,9 @@ class SqliteStore:
         *,
         after_sequence: int = 0,
     ) -> list[EventRecord]:
+        # Cursor-style read for incremental consumers (SSE). Ordering by
+        # sequence_number equals insertion order because appends are
+        # serialized by the write transaction.
         with self._connect() as connection:
             rows = connection.execute(
                 '''
@@ -824,3 +994,350 @@ class SqliteStore:
                 (run_id, after_sequence),
             ).fetchall()
         return [EventRecord.model_validate_json(row['payload']) for row in rows]
+
+    def save_knowledge_source(self, record: KnowledgeSource) -> KnowledgeSource:
+        with self.transaction() as connection:
+            connection.execute(
+                '''
+                INSERT INTO knowledge_sources (
+                    source_id, source_type, canonical_uri, run_scope,
+                    access_policy, source_version, digest, ingested_at,
+                    index_version, title, metadata, parent_source_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(source_id) DO UPDATE SET
+                    source_type = excluded.source_type,
+                    canonical_uri = excluded.canonical_uri,
+                    run_scope = excluded.run_scope,
+                    access_policy = excluded.access_policy,
+                    source_version = excluded.source_version,
+                    digest = excluded.digest,
+                    ingested_at = excluded.ingested_at,
+                    index_version = excluded.index_version,
+                    title = excluded.title,
+                    metadata = excluded.metadata,
+                    parent_source_id = excluded.parent_source_id
+                ''',
+                (
+                    record.source_id,
+                    record.source_type.value,
+                    record.canonical_uri,
+                    record.run_scope,
+                    record.access_policy,
+                    record.source_version,
+                    record.digest,
+                    record.ingested_at.isoformat(),
+                    record.index_version,
+                    record.title,
+                    json.dumps(record.metadata, sort_keys=True),
+                    record.parent_source_id,
+                ),
+            )
+        return record
+
+    def get_knowledge_source(self, source_id: str) -> KnowledgeSource:
+        with self._connect() as connection:
+            row = connection.execute(
+                'SELECT * FROM knowledge_sources WHERE source_id = ?',
+                (source_id,),
+            ).fetchone()
+        if row is None:
+            raise RecordNotFound(source_id)
+        return self._knowledge_source_from_row(row)
+
+    def find_knowledge_source(
+        self,
+        *,
+        digest: str,
+        canonical_uri: str,
+    ) -> KnowledgeSource | None:
+        """Resolve an existing source by content digest and canonical URI.
+
+        Used by ingestion to deduplicate re-ingested approved sources: identical
+        content from the same URI returns the original row instead of creating a
+        second source with a new evidence URI.
+        """
+        with self._connect() as connection:
+            row = connection.execute(
+                'SELECT * FROM knowledge_sources '
+                'WHERE digest = ? AND canonical_uri = ?',
+                (digest, canonical_uri),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._knowledge_source_from_row(row)
+
+    def list_knowledge_sources(
+        self,
+        *,
+        source_types: Iterable[SourceType] | None = None,
+        run_scope: str | None = None,
+    ) -> list[KnowledgeSource]:
+        parameters: list[Any] = []
+        query = 'SELECT * FROM knowledge_sources'
+        clauses: list[str] = []
+        if run_scope is not None:
+            clauses.append('(run_scope = ? OR run_scope IS NULL)')
+            parameters.append(run_scope)
+        if source_types:
+            values = [item.value for item in source_types]
+            clauses.append(
+                'source_type IN (' + ','.join('?' for _ in values) + ')'
+            )
+            parameters.extend(values)
+        if clauses:
+            query += ' WHERE ' + ' AND '.join(clauses)
+        query += ' ORDER BY ingested_at, source_id'
+        with self._connect() as connection:
+            rows = connection.execute(query, parameters).fetchall()
+        return [self._knowledge_source_from_row(row) for row in rows]
+
+    @staticmethod
+    def _knowledge_source_from_row(row: sqlite3.Row) -> KnowledgeSource:
+        return KnowledgeSource(
+            source_id=row['source_id'],
+            source_type=SourceType(row['source_type']),
+            canonical_uri=row['canonical_uri'],
+            run_scope=row['run_scope'],
+            access_policy=row['access_policy'],
+            source_version=row['source_version'],
+            digest=row['digest'],
+            ingested_at=datetime.fromisoformat(row['ingested_at']),
+            index_version=row['index_version'],
+            title=row['title'],
+            metadata=json.loads(row['metadata']),
+            parent_source_id=row['parent_source_id'],
+        )
+
+    def delete_knowledge_source(self, source_id: str) -> bool:
+        with self.transaction() as connection:
+            connection.execute(
+                'DELETE FROM knowledge_chunks_fts '
+                'WHERE chunk_id IN ('
+                '  SELECT chunk_id FROM knowledge_chunks WHERE source_id = ?'
+                ')',
+                (source_id,),
+            )
+            cursor = connection.execute(
+                'DELETE FROM knowledge_sources WHERE source_id = ?',
+                (source_id,),
+            )
+        return cursor.rowcount == 1
+
+    def delete_knowledge_sources_by_digest(self, digest: str) -> int:
+        with self.transaction() as connection:
+            connection.execute(
+                'DELETE FROM knowledge_chunks_fts '
+                'WHERE chunk_id IN ('
+                '  SELECT chunk_id FROM knowledge_chunks WHERE source_id IN ('
+                '    SELECT source_id FROM knowledge_sources WHERE digest = ?'
+                '  )'
+                ')',
+                (digest,),
+            )
+            cursor = connection.execute(
+                'DELETE FROM knowledge_sources WHERE digest = ?',
+                (digest,),
+            )
+        return cursor.rowcount
+
+    def replace_knowledge_chunks(
+        self,
+        source_id: str,
+        chunks: list[KnowledgeChunk],
+    ) -> list[KnowledgeChunk]:
+        with self.transaction() as connection:
+            connection.execute(
+                'DELETE FROM knowledge_chunks_fts '
+                'WHERE chunk_id IN ('
+                '  SELECT chunk_id FROM knowledge_chunks WHERE source_id = ?'
+                ')',
+                (source_id,),
+            )
+            connection.execute(
+                'DELETE FROM knowledge_chunks WHERE source_id = ?',
+                (source_id,),
+            )
+            for chunk in chunks:
+                connection.execute(
+                    '''
+                    INSERT INTO knowledge_chunks (
+                        chunk_id, source_id, chunk_index, text, digest,
+                        token_count, index_version
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ''',
+                    (
+                        chunk.chunk_id,
+                        chunk.source_id,
+                        chunk.chunk_index,
+                        chunk.text,
+                        chunk.digest,
+                        chunk.token_count,
+                        chunk.index_version,
+                    ),
+                )
+                connection.execute(
+                    '''
+                    INSERT INTO knowledge_chunks_fts (chunk_id, text)
+                    VALUES (?, ?)
+                    ''',
+                    (chunk.chunk_id, chunk.text),
+                )
+        return chunks
+
+    def list_knowledge_chunks(
+        self,
+        source_id: str,
+    ) -> list[KnowledgeChunk]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                '''
+                SELECT * FROM knowledge_chunks
+                WHERE source_id = ? ORDER BY chunk_index
+                ''',
+                (source_id,),
+            ).fetchall()
+        return [
+            KnowledgeChunk(
+                chunk_id=row['chunk_id'],
+                source_id=row['source_id'],
+                chunk_index=row['chunk_index'],
+                text=row['text'],
+                digest=row['digest'],
+                token_count=row['token_count'],
+                index_version=row['index_version'],
+            )
+            for row in rows
+        ]
+
+    def search_knowledge_chunks(
+        self,
+        query: str,
+        *,
+        source_ids: list[str] | None = None,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        terms = [term for term in query.split() if len(term) > 1]
+        fts_query = ' OR '.join(f'"{term}"' for term in terms[:6]) or None
+        with self._connect() as connection:
+            if fts_query and source_ids:
+                placeholders = ', '.join('?' * len(source_ids))
+                rows = connection.execute(
+                    f'''
+                    SELECT c.chunk_id, c.source_id, c.chunk_index, c.text,
+                           c.digest, c.token_count, c.index_version,
+                           bm25(knowledge_chunks_fts) AS rank
+                    FROM knowledge_chunks c
+                    JOIN knowledge_chunks_fts
+                      ON knowledge_chunks_fts.chunk_id = c.chunk_id
+                    WHERE knowledge_chunks_fts MATCH ?
+                      AND c.source_id IN ({placeholders})
+                    ORDER BY rank
+                    LIMIT ?
+                    ''',
+                    (fts_query, *source_ids, limit * 3),
+                ).fetchall()
+            elif fts_query:
+                rows = connection.execute(
+                    '''
+                    SELECT c.chunk_id, c.source_id, c.chunk_index, c.text,
+                           c.digest, c.token_count, c.index_version,
+                           bm25(knowledge_chunks_fts) AS rank
+                    FROM knowledge_chunks c
+                    JOIN knowledge_chunks_fts
+                      ON knowledge_chunks_fts.chunk_id = c.chunk_id
+                    WHERE knowledge_chunks_fts MATCH ?
+                    ORDER BY rank
+                    LIMIT ?
+                    ''',
+                    (fts_query, limit * 3),
+                ).fetchall()
+            else:
+                rows = []
+        return [
+            {
+                'chunk_id': row['chunk_id'],
+                'source_id': row['source_id'],
+                'chunk_index': row['chunk_index'],
+                'text': row['text'],
+                'digest': row['digest'],
+                'token_count': row['token_count'],
+                'index_version': row['index_version'],
+                'rank': row['rank'],
+            }
+            for row in rows[:limit]
+        ]
+
+    def save_context_packet(self, packet: ContextPacket) -> ContextPacket:
+        with self.transaction() as connection:
+            connection.execute(
+                '''
+                INSERT INTO context_packets (
+                    packet_id, run_id, agent, turn_number, turn_kind, query,
+                    index_version, ranked_sources, exact_text_supplied,
+                    token_budget, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    packet.packet_id,
+                    packet.run_id,
+                    packet.agent.value,
+                    packet.turn_number,
+                    packet.turn_kind.value,
+                    packet.query,
+                    packet.index_version,
+                    json.dumps(packet.ranked_sources),
+                    packet.exact_text_supplied,
+                    packet.token_budget,
+                    packet.created_at.isoformat(),
+                ),
+            )
+        return packet
+
+    def get_context_packet(self, packet_id: str) -> ContextPacket:
+        with self._connect() as connection:
+            row = connection.execute(
+                'SELECT * FROM context_packets WHERE packet_id = ?',
+                (packet_id,),
+            ).fetchone()
+        if row is None:
+            raise RecordNotFound(packet_id)
+        return ContextPacket(
+            packet_id=row['packet_id'],
+            run_id=row['run_id'],
+            agent=AgentName(row['agent']),
+            turn_number=row['turn_number'],
+            turn_kind=TurnKind(row['turn_kind']),
+            query=row['query'],
+            index_version=row['index_version'],
+            ranked_sources=json.loads(row['ranked_sources']),
+            exact_text_supplied=row['exact_text_supplied'],
+            token_budget=row['token_budget'],
+            created_at=datetime.fromisoformat(row['created_at']),
+        )
+
+    def list_context_packets(self, run_id: str) -> list[ContextPacket]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                '''
+                SELECT * FROM context_packets
+                WHERE run_id = ? ORDER BY created_at, packet_id
+                ''',
+                (run_id,),
+            ).fetchall()
+        return [self._context_packet_from_row(row) for row in rows]
+
+    @staticmethod
+    def _context_packet_from_row(row: sqlite3.Row) -> ContextPacket:
+        return ContextPacket(
+            packet_id=row['packet_id'],
+            run_id=row['run_id'],
+            agent=AgentName(row['agent']),
+            turn_number=row['turn_number'],
+            turn_kind=TurnKind(row['turn_kind']),
+            query=row['query'],
+            index_version=row['index_version'],
+            ranked_sources=json.loads(row['ranked_sources']),
+            exact_text_supplied=row['exact_text_supplied'],
+            token_budget=row['token_budget'],
+            created_at=datetime.fromisoformat(row['created_at']),
+        )

@@ -1,3 +1,11 @@
+"""In-process workflow registry backed by JSON definition files on disk.
+
+Workflows are loaded once at startup from the definitions directory; reload()
+re-reads them while the process is running. The registry is the sole source of
+truth for runner images, resource profiles, allowed models, evaluator types,
+approval tiers, and expected artifact contracts.
+"""
+
 from __future__ import annotations
 
 import json

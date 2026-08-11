@@ -1,3 +1,5 @@
+"""Tests for the Settings model, particularly the gpu_experiment spec/manifest merge."""
+
 import json
 
 from app.config import Settings

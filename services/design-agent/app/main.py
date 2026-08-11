@@ -1,3 +1,12 @@
+"""FastAPI surface for the design stage-agent.
+
+Exposes POST /draft-design plus /healthz. Drafts come from deterministic
+scaffold logic in build_design_draft (the future model call would replace it),
+so the endpoint always returns the same warnings block. Inputs that cannot be
+resolved deterministically are emitted as UNRESOLVED_ sentinels rather than
+guessed, keeping operator-review obligations explicit. Caller is workflow-api.
+"""
+
 from __future__ import annotations
 
 import os
@@ -8,6 +17,9 @@ from .models import DesignDraft, DesignRequest, DesignResponse, HealthResponse, 
 
 UNRESOLVED_PREFIX = 'UNRESOLVED_'
 
+# Backend metadata is read from env once at import time and echoed on every
+# response; defaults point at the shared mlx Qwen endpoint a live implementation
+# would call. Kept out of the request path so it is immutable per process.
 MODEL_BACKEND = ModelBackendMetadata(
     provider=os.getenv('GLASSLAB_DESIGN_AGENT_PROVIDER_API', 'openai-compatible').strip() or 'openai-compatible',
     base_url=os.getenv('GLASSLAB_DESIGN_AGENT_PROVIDER_BASE_URL', 'http://192.168.1.21:52415').strip(),
@@ -25,6 +37,8 @@ def derive_design_from_intake(request: DesignRequest) -> tuple[dict[str, object]
     design_notes: list[str] = []
 
     if workflow.workflow_id == 'generic-tabular-benchmark':
+        # Only the Titanic benchmark has a deterministic dataset binding; any
+        # other tabular request leaves all four inputs explicitly unresolved.
         if 'titanic' in lowered:
             declared_inputs = {
                 'dataset_name': 'titanic',
@@ -54,6 +68,9 @@ def derive_design_from_intake(request: DesignRequest) -> tuple[dict[str, object]
             design_notes.append(f'Stored source documents are available: {", ".join(intake.document_refs[:2])}.')
         design_notes.append('Dataset selection remains unresolved for literature-derived experiments.')
     else:
+        # Fallback for any workflow without a deterministic mapping: every
+        # execution-critical input stays an explicit sentinel for operator
+        # review instead of being silently defaulted.
         paper_id = intake.source_refs[0] if intake.source_refs else 'UNRESOLVED_PAPER_ID'
         declared_inputs = {
             'paper_id': paper_id,
@@ -63,6 +80,9 @@ def derive_design_from_intake(request: DesignRequest) -> tuple[dict[str, object]
         }
         design_notes.append('Replication targets require explicit repository and evaluation inputs.')
 
+    # Sentinel scan: any declared input still carrying the UNRESOLVED_ prefix is
+    # reported by field name, so the caller sees exactly what needs operator
+    # input without parsing values.
     unresolved_inputs = [
         name for name, value in declared_inputs.items() if isinstance(value, str) and value.startswith(UNRESOLVED_PREFIX)
     ]
@@ -73,6 +93,8 @@ def build_design_draft(request: DesignRequest) -> DesignDraft:
     intake = request.intake
     workflow = request.workflow
     declared_inputs, unresolved_inputs, design_notes = derive_design_from_intake(request)
+    # These prefixes are the interpretation agent's note format; only notes
+    # carrying them are propagated into the draft.
     literature_state_notes = [note for note in intake.notes if note.startswith('Literature state: ')]
     bounded_idea_notes = [note for note in intake.notes if note.startswith('Bounded experiment ideas: ')]
     design_notes.extend(literature_state_notes[:1])
@@ -84,9 +106,13 @@ def build_design_draft(request: DesignRequest) -> DesignDraft:
     return DesignDraft(
         workflow_id=workflow.workflow_id,
         workflow_family=workflow.workflow_family,
+        # Cap the objective so a bloated intake summary never overflows
+        # downstream context windows or logs.
         objective=f'Derived from intake: {intake.normalized_summary}'[:500],
         declared_inputs=declared_inputs,
         unresolved_inputs=unresolved_inputs,
+        # The draft proposes at most two candidates even when the registry
+        # allows more, keeping the bounded-design contract small.
         candidate_models=workflow.allowed_models[:2],
         resource_profile=workflow.resource_profile_name,
         expected_artifacts=workflow.expected_artifacts,

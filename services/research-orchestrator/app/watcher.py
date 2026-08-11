@@ -1,3 +1,11 @@
+"""Poll runs in the job phase and reconcile them against the cluster.
+
+Reconcile is a blocking, synchronous call, so it is dispatched to a worker
+thread while the loop keeps polling. A reconcile failure is recorded as an
+event and never crashes the loop; only runs in JOB_QUEUED or JOB_RUNNING are
+touched, so paused or terminal runs are left for recovery and resume paths.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -20,17 +28,25 @@ class JobWatcher:
     async def run(self) -> None:
         while not self._stop.is_set():
             for run in self.engine.store.list_active_runs():
+                # Paused and terminal runs must not be reconciled here; resume
+                # and recovery drive their transitions, and reconcile assumes a
+                # job the orchestrator still owns.
                 if run.state not in {
                     RunState.JOB_QUEUED,
                     RunState.JOB_RUNNING,
                 }:
                     continue
                 try:
+                    # reconcile_run is blocking cluster I/O, so keep it off the
+                    # event loop even though the polling itself is async.
                     await asyncio.to_thread(
                         self.engine.reconcile_run,
                         run.run_id,
                     )
                 except Exception as exc:
+                    # Record the failure and keep polling: a transient cluster
+                    # error must not kill the watcher, and the event log is the
+                    # authoritative record of what went wrong.
                     self.engine._event(
                         run.run_id,
                         source='orchestrator',
@@ -38,6 +54,8 @@ class JobWatcher:
                         payload={'error': str(exc)},
                     )
             try:
+                # Sleeping on the stop event instead of asyncio.sleep makes
+                # stop() preempt the current poll interval immediately.
                 await asyncio.wait_for(
                     self._stop.wait(),
                     timeout=self.poll_interval_seconds,

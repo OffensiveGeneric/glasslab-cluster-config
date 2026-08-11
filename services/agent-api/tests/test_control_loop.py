@@ -1,3 +1,10 @@
+"""End-to-end experiment flow through create_app with fake dependencies.
+
+Covers the full lifecycle on one request — plan, validate, submit, refresh to a
+terminal state, summarize the result — plus the logs endpoint after the record
+is finalized.
+"""
+
 import logging
 
 from fastapi.testclient import TestClient
@@ -28,6 +35,8 @@ class FakeJobStatusService:
 
     def get_job_status(self, job_name):
         self.calls += 1
+        # First status call reports running, later calls report succeeded,
+        # simulating a Job that finishes between two polls.
         if self.calls == 1:
             return {'job_name': job_name, 'status': 'running'}
         return {'job_name': job_name, 'status': 'succeeded'}

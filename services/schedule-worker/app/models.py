@@ -1,3 +1,10 @@
+"""Request and response contracts between the schedule worker and workflow API.
+
+All models use extra='forbid' so an unknown field from the workflow API fails
+validation instead of silently round-tripping. ScheduledExecutionPayload is
+the shared execution record for both digest and approved-rerun cycles.
+"""
+
 from __future__ import annotations
 
 from typing import Any

@@ -1,3 +1,14 @@
+"""Behavioral tests for the intake agent.
+
+The service is loaded from its source files under a synthetic package name
+rather than imported as `app`, so the tests do not depend on how the deployed
+image lays out its code. Loading order matters: main.py imports `.models`, so
+models must be registered in sys.modules first. Several assertions (venue and
+paper counts, track ids, exact warning wording) are pinned to the checked-in
+seed manifest, so this suite also guards
+seeds/glasslab_paper_harvester_seed_manifest.yaml against unreviewed edits.
+"""
+
 import sys
 import types
 from importlib.util import module_from_spec, spec_from_file_location
@@ -11,6 +22,10 @@ PACKAGE_NAME = 'intake_agent_app'
 
 
 def load_package_module(module_name: str, path: Path):
+    # Executes the file under the synthetic package name so relative imports
+    # (`from .models import ...`) resolve; registering in sys.modules before
+    # exec_module lets a later `from .models import ...` reuse this exact
+    # module object instead of re-executing the file.
     spec = spec_from_file_location(module_name, path)
     assert spec is not None
     assert spec.loader is not None
@@ -24,6 +39,8 @@ package = types.ModuleType(PACKAGE_NAME)
 package.__path__ = [str(APP_ROOT)]
 sys.modules[PACKAGE_NAME] = package
 
+# models must load before main: main.py does `from .models import ...` and the
+# relative import resolves through the synthetic package registered above.
 models_module = load_package_module(f'{PACKAGE_NAME}.models', APP_ROOT / 'models.py')
 main_module = load_package_module(f'{PACKAGE_NAME}.main', APP_ROOT / 'main.py')
 
@@ -36,6 +53,9 @@ NormalizeIntakeRequest = models_module.NormalizeIntakeRequest
 
 
 def build_request() -> NormalizeIntakeRequest:
+    # example.org is deliberately absent from the seed manifest's venue
+    # allowlist, so every test using this request also exercises the
+    # out-of-policy source warning.
     return NormalizeIntakeRequest(
         request_id='intake-1',
         intake={
@@ -130,6 +150,10 @@ def test_problem_harvester_plan_matches_agent_evaluation_problem() -> None:
 
 
 def test_problem_harvester_plan_surfaces_weak_coverage_diagnostics(monkeypatch) -> None:
+    # Patching the loader functions (not the cached seed manifest) keeps the
+    # real seed data out of this test; the fake track's tokens are deliberately
+    # disjoint from the problem statement to force zero overlap and the
+    # fallback coverage path.
     monkeypatch.setattr(
         main_module,
         'load_tracks',

@@ -1,3 +1,11 @@
+"""Pydantic request/response models and data records for the workflow API.
+
+Every model uses extra='forbid' so unknown fields fail validation instead of
+silently propagating. Models are split into three categories: create requests
+(input validation), response/resource records (returned by endpoints), and
+internal pipeline records (intake, interpretation, assessment, design, run).
+"""
+
 from __future__ import annotations
 
 from datetime import datetime

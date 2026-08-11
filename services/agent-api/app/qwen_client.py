@@ -1,3 +1,10 @@
+"""Thin HTTP client for the shared vLLM / OpenAI-compatible Qwen endpoint.
+
+Only chat completions and model listing are exposed; the API config pins the
+model name, temperature, seed, and timeout. All transport failures are
+normalized to QwenClientError so callers never touch requests exceptions.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -31,6 +38,9 @@ class QwenClient:
             'messages': messages,
             'temperature': self.settings.planner_temperature,
             'max_tokens': max_tokens or self.settings.planner_max_tokens,
+            # temperature 0.0 plus a fixed seed keeps planner output as
+            # reproducible as vLLM permits; plan_request still falls back if
+            # the model drifts anyway.
             'seed': self.settings.planner_seed,
         }
         try:
@@ -38,6 +48,8 @@ class QwenClient:
                 f"{self.settings.qwen_api_base.rstrip('/')}/chat/completions",
                 headers=headers,
                 json=payload,
+                # A timeout here becomes a fallback trigger in plan_request,
+                # not a hung request in the API worker.
                 timeout=self.settings.qwen_timeout_seconds,
             )
             response.raise_for_status()
@@ -48,6 +60,8 @@ class QwenClient:
         try:
             content = data['choices'][0]['message']['content']
         except (KeyError, IndexError, TypeError) as exc:
+            # Defensive: a 200 can still be malformed (e.g. streaming choices
+            # with no content), so the missing field is a first-class error.
             raise QwenClientError('planner model response missing choices[0].message.content') from exc
         return ChatResponse(content=content, raw_payload=data)
 

@@ -1,3 +1,10 @@
+"""Behavioral tests for deterministic workflow-family ranking.
+
+Covers the pure ranking function and the HTTP surface. Ranking is fully
+deterministic, so each test asserts the expected winner directly with no model
+stubbing.
+"""
+
 from fastapi.testclient import TestClient
 
 from app.main import app, rank_workflow_families
@@ -12,6 +19,8 @@ def test_healthz() -> None:
 
 
 def test_ranker_prefers_literature_workflow_for_paper_request() -> None:
+    # The query is deliberately neutral about datasets, so the paper-link hint
+    # and the literature-vocabulary overlap decide the winner.
     request = WorkflowFamilyRankRequest(
         request_id='intake-1',
         query='Read this paper and derive a bounded experiment design from the literature notes.',
@@ -35,6 +44,9 @@ def test_ranker_prefers_literature_workflow_for_paper_request() -> None:
 
 
 def test_ranker_endpoint_prefers_tabular_workflow_for_dataset_request() -> None:
+    # The dataset_name hint (titanic) plus 'tabular', 'csv', 'train', 'test'
+    # vocabulary should push generic-tabular-benchmark ahead of the literature
+    # candidate even though both are present.
     client = TestClient(app)
     response = client.post(
         '/rank/workflow-family',
