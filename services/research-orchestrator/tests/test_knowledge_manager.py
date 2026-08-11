@@ -219,7 +219,7 @@ def test_ingest_source_rejects_secret_paths_and_content(tmp_path: Path) -> None:
             path=str(secret_path),
         )
     secret_content = approved / 'notes.md'
-    secret_content.write_text('the token is aaaaa\n')
+    secret_content.write_text('the bearer token is abcdef123456\n')
     with pytest.raises(KnowledgeError, match='secret'):
         manager.ingest_source(
             source_type=SourceType.DOCUMENTATION,

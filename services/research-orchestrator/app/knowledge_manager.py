@@ -17,10 +17,11 @@ Design decisions recorded here (tracked in the provenance-RAG PR):
    types are decided by the active agent's role and the turn kind before any
    query runs (see ``_default_source_types``). Agents cannot broaden their own
    scope, and implementation files are hidden from Honeydew protocol drafts.
-4. Hybrid ranking anchors on lexical hits. SQLite FTS5 provides the candidate
-   set and BM25 ranking; exact query-term overlap is weighted above it so a
-   distinct-topic query cannot be displaced by an embedding near-miss. Source
-   type boosts (e.g. verified results above prose) are small and additive.
+4. Lexical ranking. SQLite FTS5 provides the candidate set and BM25 ranking;
+   exact query-term overlap is weighted above it so a distinct-topic query
+   cannot be displaced by a generic BM25 near-match. Source-type boosts
+   (e.g. verified results above prose) are small and additive. Embedding-based
+   similarity and reranking are planned but not yet implemented.
 5. Secret exclusion is fail-closed. Path patterns, content patterns, and
    long-base64 heuristics are all reject-only; anything ambiguous is not
    indexed rather than risking credential leakage into an agent context.
@@ -53,12 +54,16 @@ from .storage import SqliteStore
 SECRET_PATTERNS = (
     re.compile(r'password', re.IGNORECASE),
     re.compile(r'api[_-]?key', re.IGNORECASE),
-    re.compile(r'\bsecret\b', re.IGNORECASE),
-    re.compile(r'\btoken\b', re.IGNORECASE),
+    # token/bearer/secret appear in ML text; require credential-like context
+    re.compile(r'(bearer|api|auth|access)\s+token', re.IGNORECASE),
+    re.compile(r'token[\"\']?\s*[:=]\s*\S+', re.IGNORECASE),
+    re.compile(r'(client|api|auth|private|access)\s+secret', re.IGNORECASE),
+    re.compile(r'secret\s*(key|token|id)', re.IGNORECASE),
+    re.compile(r'secret[\"\']?\s*[:=]\s*\S+', re.IGNORECASE),
+    re.compile(r'bearer\s+[A-Za-z0-9._\-+/=]{10,}', re.IGNORECASE),
     re.compile(r'credential', re.IGNORECASE),
     re.compile(r'private[_-]?key', re.IGNORECASE),
     re.compile(r'auth[_-]?header', re.IGNORECASE),
-    re.compile(r'\bbearer\b', re.IGNORECASE),
     re.compile(r'access[_-]?key', re.IGNORECASE),
     re.compile(r'client[_-]?secret', re.IGNORECASE),
     re.compile(r'[A-Za-z0-9+/]{40,}={0,2}\s*$', re.MULTILINE),
@@ -281,7 +286,26 @@ class KnowledgeManager:
         stored = self.store.list_knowledge_chunks(source.source_id)
         if not stored:
             return []
-        text = '\n\n'.join(chunk.text for chunk in stored)
+        # Reconstruct the original normalized text by removing the overlap
+        # from each chunk after the first. The chunker produces windows with
+        # up to chunk_overlap characters of overlap; word-boundary rounding
+        # may vary the exact amount. Simply joining chunks duplicates
+        # overlapping content, which compounds each rebuild.
+        parts = [stored[0].text]
+        for i in range(1, len(stored)):
+            curr = stored[i].text
+            overlap = 0
+            search_limit = min(len(parts[-1]), len(curr), self.chunk_overlap * 3)
+            for o in range(search_limit, 0, -1):
+                if parts[-1][-o:] == curr[:o]:
+                    overlap = o
+                    break
+            if overlap > 0:
+                parts.append(curr[overlap:])
+            else:
+                # No overlap detected (unlikely, but safe fallback)
+                parts.append(curr)
+        text = ' '.join(p for p in parts if p)
         return self._build_chunks(source, text)
 
     def invalidate_by_digest(self, digest: str) -> int:
@@ -566,9 +590,7 @@ class KnowledgeManager:
         lexical = self._lexical_score(hit['text'], query)
         bm25 = float(hit.get('rank') or 0.0)
         # Lexical exact-match overlap is the anchor (weighted 3x) and BM25
-        # (lower is better) only breaks ties between equivalent hits. This is
-        # the "hybrid anchors on lexical" decision from the module docstring:
-        # for distinct-topic queries the exact match must win outright.
+        # (lower is better) only breaks ties between equivalent hits.
         score = lexical * 3.0 - bm25
         if source is not None:
             # Small additive source-type boosts: verified/evaluated material

@@ -490,7 +490,10 @@ def create_app(
         '/runs/{run_id}/context-packets',
         response_model=ContextPacketListResponse,
     )
-    def list_context_packets(run_id: str) -> ContextPacketListResponse:
+    def list_context_packets(
+        run_id: str,
+        _: None = Depends(require_operator),
+    ) -> ContextPacketListResponse:
         try:
             engine.store.get_run(run_id)
             return ContextPacketListResponse(
@@ -503,7 +506,10 @@ def create_app(
         '/context-packets/{packet_id}',
         response_model=ContextPacket,
     )
-    def get_context_packet(packet_id: str) -> ContextPacket:
+    def get_context_packet(
+        packet_id: str,
+        _: None = Depends(require_operator),
+    ) -> ContextPacket:
         try:
             return engine.knowledge.get_context_packet(packet_id)
         except Exception as exc:

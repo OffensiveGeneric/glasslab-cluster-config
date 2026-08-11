@@ -1131,7 +1131,24 @@ class SqliteStore:
         terms = [term for term in query.split() if len(term) > 1]
         fts_query = ' OR '.join(f'"{term}"' for term in terms[:6]) or None
         with self._connect() as connection:
-            if fts_query:
+            if fts_query and source_ids:
+                placeholders = ', '.join('?' * len(source_ids))
+                rows = connection.execute(
+                    f'''
+                    SELECT c.chunk_id, c.source_id, c.chunk_index, c.text,
+                           c.digest, c.token_count, c.index_version,
+                           bm25(knowledge_chunks_fts) AS rank
+                    FROM knowledge_chunks c
+                    JOIN knowledge_chunks_fts
+                      ON knowledge_chunks_fts.chunk_id = c.chunk_id
+                    WHERE knowledge_chunks_fts MATCH ?
+                      AND c.source_id IN ({placeholders})
+                    ORDER BY rank
+                    LIMIT ?
+                    ''',
+                    (fts_query, *source_ids, limit * 3),
+                ).fetchall()
+            elif fts_query:
                 rows = connection.execute(
                     '''
                     SELECT c.chunk_id, c.source_id, c.chunk_index, c.text,
@@ -1148,15 +1165,6 @@ class SqliteStore:
                 ).fetchall()
             else:
                 rows = []
-            if source_ids:
-                filtered = []
-                allowed = set(source_ids)
-                for row in rows:
-                    if row['source_id'] in allowed:
-                        filtered.append(row)
-                rows = filtered
-            else:
-                rows = rows[:limit]
         return [
             {
                 'chunk_id': row['chunk_id'],

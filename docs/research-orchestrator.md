@@ -242,12 +242,11 @@ evidence URI of the form `knowledge://<source_id>`. Re-ingesting identical
 content from the same canonical URI deduplicates to the original source row so
 its evidence URI stays stable; sources are invalidated explicitly by digest.
 
-Retrieval is hybrid and quality-ranked. It combines SQLite FTS5 lexical matches
-with embedding cosine similarity (a local `text-embedding` model through the
-Ollama endpoint when configured, otherwise a deterministic hash embedding) and
-optionally re-ranks through the Ollama model. The final ranking preserves the
-anchor behavior of lexical exact-match for distinct-topic queries while letting
-semantic similarity surface paraphrased methodology.
+Retrieval is lexical and quality-ranked. It uses SQLite FTS5 with BM25 ranking,
+weighted by exact query-term overlap. The final ranking preserves the anchor
+behavior of lexical exact-match for distinct-topic queries so a
+distinct-topic result cannot be displaced by a generic near-match. Embedding-
+based semantic similarity and reranking are planned but not yet implemented.
 
 Per-turn retrieval is scoped to the active agent's role and the turn kind.
 Honeydew's protocol and review turns access methodology, evaluation,
@@ -663,9 +662,9 @@ Implemented:
 - HTTP API, SSE, Discord renderer, manifests, and configuration
 - model-produced TaskSpec validation, deterministic CPU/GPU profile compilation,
   immutable asset ingestion, task preflight, and generic integrity evaluation
-- knowledge ingestion, hybrid quality-ranked retrieval, role-scoped per-turn
+- knowledge ingestion, lexical-similarity retrieval, role-scoped per-turn
   context packets, and `knowledge://` citation evidence URIs
-- hybrid retrieval quality fixtures and knowledge API surface
+- retrieval quality fixtures and knowledge API surface
 
 Covered by mocks:
 
