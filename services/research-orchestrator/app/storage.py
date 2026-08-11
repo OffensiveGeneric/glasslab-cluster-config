@@ -11,15 +11,21 @@ from typing import Any, Iterator
 
 from .schemas import (
     ActionRecord,
+    AgentName,
     ApprovalStatus,
     ArtifactRecord,
+    ContextPacket,
     EventRecord,
     IngestedDatasetRecord,
     JobRecord,
     JobStatus,
+    KnowledgeChunk,
+    KnowledgeSource,
     RunRecord,
     RunState,
+    SourceType,
     TERMINAL_STATES,
+    TurnKind,
     TurnRecord,
     utc_now,
 )
@@ -151,6 +157,82 @@ class SqliteStore:
                 );
                 CREATE INDEX IF NOT EXISTS events_run_idx
                 ON events(run_id, sequence_number);
+
+                -- Knowledge store tables. The orchestrator has no formal
+                -- migration framework; schema drift is handled by additive
+                -- CREATE TABLE IF NOT EXISTS statements that run on every
+                -- startup, so a new deployment upgrades an existing SQLite
+                -- file by creating the new tables and leaving old rows intact.
+                -- knowledge_sources is content-addressed: digest is the
+                -- natural key for dedup, and source_id remains the stable
+                -- surrogate used by the FTS chunk rows.
+                CREATE TABLE IF NOT EXISTS knowledge_sources (
+                    source_id TEXT PRIMARY KEY,
+                    source_type TEXT NOT NULL,
+                    canonical_uri TEXT NOT NULL,
+                    run_scope TEXT,
+                    access_policy TEXT NOT NULL,
+                    source_version TEXT,
+                    digest TEXT NOT NULL,
+                    ingested_at TEXT NOT NULL,
+                    index_version TEXT NOT NULL,
+                    title TEXT,
+                    metadata TEXT NOT NULL,
+                    parent_source_id TEXT
+                );
+                CREATE INDEX IF NOT EXISTS knowledge_sources_type_idx
+                ON knowledge_sources(source_type);
+                CREATE INDEX IF NOT EXISTS knowledge_sources_scope_idx
+                ON knowledge_sources(run_scope);
+                CREATE INDEX IF NOT EXISTS knowledge_sources_digest_idx
+                ON knowledge_sources(digest);
+                -- Dedup guard: identical content re-ingested from the same
+                -- canonical URI must resolve to one source row so the
+                -- knowledge:// URI stays stable. Distinct URIs with equal
+                -- content are deliberately allowed (provenance preserved).
+                CREATE UNIQUE INDEX IF NOT EXISTS
+                knowledge_sources_digest_uri_uniq
+                ON knowledge_sources(digest, canonical_uri);
+
+                CREATE TABLE IF NOT EXISTS knowledge_chunks (
+                    chunk_id TEXT PRIMARY KEY,
+                    source_id TEXT NOT NULL
+                        REFERENCES knowledge_sources(source_id)
+                        ON DELETE CASCADE,
+                    chunk_index INTEGER NOT NULL,
+                    text TEXT NOT NULL,
+                    digest TEXT NOT NULL,
+                    token_count INTEGER NOT NULL,
+                    index_version TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS knowledge_chunks_source_idx
+                ON knowledge_chunks(source_id);
+
+                -- FTS5 is the lexical half of hybrid retrieval. chunk_id is
+                -- the rowid-style key linking to knowledge_chunks; the rank is
+                -- read back to feed the combined lexical/BM25 score in the
+                -- knowledge manager.
+                CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_chunks_fts
+                USING fts5(chunk_id, text);
+
+                CREATE TABLE IF NOT EXISTS context_packets (
+                    packet_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL REFERENCES runs(run_id),
+                    agent TEXT NOT NULL,
+                    turn_number INTEGER NOT NULL,
+                    turn_kind TEXT NOT NULL,
+                    query TEXT NOT NULL,
+                    index_version TEXT NOT NULL,
+                    ranked_sources TEXT NOT NULL,
+                    exact_text_supplied TEXT,
+                    token_budget INTEGER NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                -- Per-turn context packets are durable so a report can cite
+                -- exactly which retrieval grounded a claim (knowledge://context
+                -- URIs) even long after the turn finished.
+                CREATE INDEX IF NOT EXISTS context_packets_run_idx
+                ON context_packets(run_id, created_at);
                 '''
             )
 
@@ -824,3 +906,342 @@ class SqliteStore:
                 (run_id, after_sequence),
             ).fetchall()
         return [EventRecord.model_validate_json(row['payload']) for row in rows]
+
+    def save_knowledge_source(self, record: KnowledgeSource) -> KnowledgeSource:
+        with self.transaction() as connection:
+            connection.execute(
+                '''
+                INSERT INTO knowledge_sources (
+                    source_id, source_type, canonical_uri, run_scope,
+                    access_policy, source_version, digest, ingested_at,
+                    index_version, title, metadata, parent_source_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(source_id) DO UPDATE SET
+                    source_type = excluded.source_type,
+                    canonical_uri = excluded.canonical_uri,
+                    run_scope = excluded.run_scope,
+                    access_policy = excluded.access_policy,
+                    source_version = excluded.source_version,
+                    digest = excluded.digest,
+                    ingested_at = excluded.ingested_at,
+                    index_version = excluded.index_version,
+                    title = excluded.title,
+                    metadata = excluded.metadata,
+                    parent_source_id = excluded.parent_source_id
+                ''',
+                (
+                    record.source_id,
+                    record.source_type.value,
+                    record.canonical_uri,
+                    record.run_scope,
+                    record.access_policy,
+                    record.source_version,
+                    record.digest,
+                    record.ingested_at.isoformat(),
+                    record.index_version,
+                    record.title,
+                    json.dumps(record.metadata, sort_keys=True),
+                    record.parent_source_id,
+                ),
+            )
+        return record
+
+    def get_knowledge_source(self, source_id: str) -> KnowledgeSource:
+        with self._connect() as connection:
+            row = connection.execute(
+                'SELECT * FROM knowledge_sources WHERE source_id = ?',
+                (source_id,),
+            ).fetchone()
+        if row is None:
+            raise RecordNotFound(source_id)
+        return self._knowledge_source_from_row(row)
+
+    def find_knowledge_source(
+        self,
+        *,
+        digest: str,
+        canonical_uri: str,
+    ) -> KnowledgeSource | None:
+        """Resolve an existing source by content digest and canonical URI.
+
+        Used by ingestion to deduplicate re-ingested approved sources: identical
+        content from the same URI returns the original row instead of creating a
+        second source with a new evidence URI.
+        """
+        with self._connect() as connection:
+            row = connection.execute(
+                'SELECT * FROM knowledge_sources '
+                'WHERE digest = ? AND canonical_uri = ?',
+                (digest, canonical_uri),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._knowledge_source_from_row(row)
+
+    def list_knowledge_sources(
+        self,
+        *,
+        source_types: Iterable[SourceType] | None = None,
+        run_scope: str | None = None,
+    ) -> list[KnowledgeSource]:
+        parameters: list[Any] = []
+        query = 'SELECT * FROM knowledge_sources'
+        clauses: list[str] = []
+        if run_scope is not None:
+            clauses.append('(run_scope = ? OR run_scope IS NULL)')
+            parameters.append(run_scope)
+        if source_types:
+            values = [item.value for item in source_types]
+            clauses.append(
+                'source_type IN (' + ','.join('?' for _ in values) + ')'
+            )
+            parameters.extend(values)
+        if clauses:
+            query += ' WHERE ' + ' AND '.join(clauses)
+        query += ' ORDER BY ingested_at, source_id'
+        with self._connect() as connection:
+            rows = connection.execute(query, parameters).fetchall()
+        return [self._knowledge_source_from_row(row) for row in rows]
+
+    @staticmethod
+    def _knowledge_source_from_row(row: sqlite3.Row) -> KnowledgeSource:
+        return KnowledgeSource(
+            source_id=row['source_id'],
+            source_type=SourceType(row['source_type']),
+            canonical_uri=row['canonical_uri'],
+            run_scope=row['run_scope'],
+            access_policy=row['access_policy'],
+            source_version=row['source_version'],
+            digest=row['digest'],
+            ingested_at=datetime.fromisoformat(row['ingested_at']),
+            index_version=row['index_version'],
+            title=row['title'],
+            metadata=json.loads(row['metadata']),
+            parent_source_id=row['parent_source_id'],
+        )
+
+    def delete_knowledge_source(self, source_id: str) -> bool:
+        with self.transaction() as connection:
+            connection.execute(
+                'DELETE FROM knowledge_chunks_fts '
+                'WHERE chunk_id IN ('
+                '  SELECT chunk_id FROM knowledge_chunks WHERE source_id = ?'
+                ')',
+                (source_id,),
+            )
+            cursor = connection.execute(
+                'DELETE FROM knowledge_sources WHERE source_id = ?',
+                (source_id,),
+            )
+        return cursor.rowcount == 1
+
+    def delete_knowledge_sources_by_digest(self, digest: str) -> int:
+        with self.transaction() as connection:
+            connection.execute(
+                'DELETE FROM knowledge_chunks_fts '
+                'WHERE chunk_id IN ('
+                '  SELECT chunk_id FROM knowledge_chunks WHERE source_id IN ('
+                '    SELECT source_id FROM knowledge_sources WHERE digest = ?'
+                '  )'
+                ')',
+                (digest,),
+            )
+            cursor = connection.execute(
+                'DELETE FROM knowledge_sources WHERE digest = ?',
+                (digest,),
+            )
+        return cursor.rowcount
+
+    def replace_knowledge_chunks(
+        self,
+        source_id: str,
+        chunks: list[KnowledgeChunk],
+    ) -> list[KnowledgeChunk]:
+        with self.transaction() as connection:
+            connection.execute(
+                'DELETE FROM knowledge_chunks_fts '
+                'WHERE chunk_id IN ('
+                '  SELECT chunk_id FROM knowledge_chunks WHERE source_id = ?'
+                ')',
+                (source_id,),
+            )
+            connection.execute(
+                'DELETE FROM knowledge_chunks WHERE source_id = ?',
+                (source_id,),
+            )
+            for chunk in chunks:
+                connection.execute(
+                    '''
+                    INSERT INTO knowledge_chunks (
+                        chunk_id, source_id, chunk_index, text, digest,
+                        token_count, index_version
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ''',
+                    (
+                        chunk.chunk_id,
+                        chunk.source_id,
+                        chunk.chunk_index,
+                        chunk.text,
+                        chunk.digest,
+                        chunk.token_count,
+                        chunk.index_version,
+                    ),
+                )
+                connection.execute(
+                    '''
+                    INSERT INTO knowledge_chunks_fts (chunk_id, text)
+                    VALUES (?, ?)
+                    ''',
+                    (chunk.chunk_id, chunk.text),
+                )
+        return chunks
+
+    def list_knowledge_chunks(
+        self,
+        source_id: str,
+    ) -> list[KnowledgeChunk]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                '''
+                SELECT * FROM knowledge_chunks
+                WHERE source_id = ? ORDER BY chunk_index
+                ''',
+                (source_id,),
+            ).fetchall()
+        return [
+            KnowledgeChunk(
+                chunk_id=row['chunk_id'],
+                source_id=row['source_id'],
+                chunk_index=row['chunk_index'],
+                text=row['text'],
+                digest=row['digest'],
+                token_count=row['token_count'],
+                index_version=row['index_version'],
+            )
+            for row in rows
+        ]
+
+    def search_knowledge_chunks(
+        self,
+        query: str,
+        *,
+        source_ids: list[str] | None = None,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        terms = [term for term in query.split() if len(term) > 1]
+        fts_query = ' OR '.join(f'"{term}"' for term in terms[:6]) or None
+        with self._connect() as connection:
+            if fts_query:
+                rows = connection.execute(
+                    '''
+                    SELECT c.chunk_id, c.source_id, c.chunk_index, c.text,
+                           c.digest, c.token_count, c.index_version,
+                           bm25(knowledge_chunks_fts) AS rank
+                    FROM knowledge_chunks c
+                    JOIN knowledge_chunks_fts
+                      ON knowledge_chunks_fts.chunk_id = c.chunk_id
+                    WHERE knowledge_chunks_fts MATCH ?
+                    ORDER BY rank
+                    LIMIT ?
+                    ''',
+                    (fts_query, limit * 3),
+                ).fetchall()
+            else:
+                rows = []
+            if source_ids:
+                filtered = []
+                allowed = set(source_ids)
+                for row in rows:
+                    if row['source_id'] in allowed:
+                        filtered.append(row)
+                rows = filtered
+            else:
+                rows = rows[:limit]
+        return [
+            {
+                'chunk_id': row['chunk_id'],
+                'source_id': row['source_id'],
+                'chunk_index': row['chunk_index'],
+                'text': row['text'],
+                'digest': row['digest'],
+                'token_count': row['token_count'],
+                'index_version': row['index_version'],
+                'rank': row['rank'],
+            }
+            for row in rows[:limit]
+        ]
+
+    def save_context_packet(self, packet: ContextPacket) -> ContextPacket:
+        with self.transaction() as connection:
+            connection.execute(
+                '''
+                INSERT INTO context_packets (
+                    packet_id, run_id, agent, turn_number, turn_kind, query,
+                    index_version, ranked_sources, exact_text_supplied,
+                    token_budget, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    packet.packet_id,
+                    packet.run_id,
+                    packet.agent.value,
+                    packet.turn_number,
+                    packet.turn_kind.value,
+                    packet.query,
+                    packet.index_version,
+                    json.dumps(packet.ranked_sources),
+                    packet.exact_text_supplied,
+                    packet.token_budget,
+                    packet.created_at.isoformat(),
+                ),
+            )
+        return packet
+
+    def get_context_packet(self, packet_id: str) -> ContextPacket:
+        with self._connect() as connection:
+            row = connection.execute(
+                'SELECT * FROM context_packets WHERE packet_id = ?',
+                (packet_id,),
+            ).fetchone()
+        if row is None:
+            raise RecordNotFound(packet_id)
+        return ContextPacket(
+            packet_id=row['packet_id'],
+            run_id=row['run_id'],
+            agent=AgentName(row['agent']),
+            turn_number=row['turn_number'],
+            turn_kind=TurnKind(row['turn_kind']),
+            query=row['query'],
+            index_version=row['index_version'],
+            ranked_sources=json.loads(row['ranked_sources']),
+            exact_text_supplied=row['exact_text_supplied'],
+            token_budget=row['token_budget'],
+            created_at=datetime.fromisoformat(row['created_at']),
+        )
+
+    def list_context_packets(self, run_id: str) -> list[ContextPacket]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                '''
+                SELECT * FROM context_packets
+                WHERE run_id = ? ORDER BY created_at, packet_id
+                ''',
+                (run_id,),
+            ).fetchall()
+        return [self._context_packet_from_row(row) for row in rows]
+
+    @staticmethod
+    def _context_packet_from_row(row: sqlite3.Row) -> ContextPacket:
+        return ContextPacket(
+            packet_id=row['packet_id'],
+            run_id=row['run_id'],
+            agent=AgentName(row['agent']),
+            turn_number=row['turn_number'],
+            turn_kind=TurnKind(row['turn_kind']),
+            query=row['query'],
+            index_version=row['index_version'],
+            ranked_sources=json.loads(row['ranked_sources']),
+            exact_text_supplied=row['exact_text_supplied'],
+            token_budget=row['token_budget'],
+            created_at=datetime.fromisoformat(row['created_at']),
+        )

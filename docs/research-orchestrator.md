@@ -224,6 +224,46 @@ catalog at startup after checksum verification. Agent-generated contracts
 still require Honeydew and human promotion approval. Unknown, changed, or
 mismatched bundles fail closed.
 
+## Knowledge Context Retrieval
+
+The orchestrator maintains an append-only, content-addressed knowledge store
+for durable context the agents may cite. It is separate from workspaces and
+evaluation contracts: nothing an agent writes is ingested without an explicit,
+path-allowlisted ingest operation.
+
+Knowledge sources are ingested with an explicit `SourceType`:
+
+- `documentation`, `technique_card`, `evaluation_contract`, `run_protocol`,
+  `run_report`, `run_artifact`, `implementation_file`, `task_bundle`,
+  `dataset_metadata`, `handoff`, `policy`, `methodology`, `verified_result`
+
+Every source records a SHA-256 digest, a canonical URI, a version, and an
+evidence URI of the form `knowledge://<source_id>`. Re-ingesting identical
+content from the same canonical URI deduplicates to the original source row so
+its evidence URI stays stable; sources are invalidated explicitly by digest.
+
+Retrieval is hybrid and quality-ranked. It combines SQLite FTS5 lexical matches
+with embedding cosine similarity (a local `text-embedding` model through the
+Ollama endpoint when configured, otherwise a deterministic hash embedding) and
+optionally re-ranks through the Ollama model. The final ranking preserves the
+anchor behavior of lexical exact-match for distinct-topic queries while letting
+semantic similarity surface paraphrased methodology.
+
+Per-turn retrieval is scoped to the active agent's role and the turn kind.
+Honeydew's protocol and review turns access methodology, evaluation,
+run-record, and verified-result context; Beaker's planning and implementation
+turns access protocol, repository, implementation, job-log, and bounded
+artifact context. Implementation files are excluded from Honeydew protocol
+drafts. The system boundary is enforced in retrieval, not only in prompt text.
+
+Each agent turn receives a `ContextPacket` of ranked source chunks within the
+configured token budget. Attachment is recorded as an
+`agent.context_attached` event with the packet ID, agent, turn kind, ranked
+count, and token count, and the packet is citable as
+`knowledge://context:<packet_id>`. Report generation therefore can cite the
+exact context packet that grounded a claim; a claim about knowledge requires a
+`knowledge://` evidence URI.
+
 ## Compiled Research Tasks
 
 The generic contribution path accepts a ZIP with exactly one `problem.md` and
@@ -496,6 +536,11 @@ GET  /runs/{run_id}
 GET  /runs/{run_id}/events
 GET  /runs/{run_id}/events/stream
 GET  /runs/{run_id}/artifacts
+POST /knowledge/sources
+GET  /knowledge/sources
+DELETE /knowledge/sources/{source_id}
+DELETE /knowledge/sources/by-digest/{digest}
+POST /knowledge/index/rebuild
 POST /runs/{run_id}/pause
 POST /runs/{run_id}/resume
 POST /runs/{run_id}/cancel
@@ -566,9 +611,9 @@ The repository smoke wrapper is:
 ```
 
 It needs no GPU, Qwen endpoint, Kubernetes access, or Discord token. It
-demonstrates objective, protocol approval, implementation, review, fake job
-approval and completion, analysis, verification, report, final acceptance, and
-`COMPLETE`.
+demonstrates knowledge ingestion and retrieval, objective, protocol approval,
+implementation, review, fake job approval and completion, analysis,
+verification, context-cited report, final acceptance, and `COMPLETE`.
 
 Configuration is documented in
 `services/research-orchestrator/.env.example`. Never commit the Discord token or
@@ -618,6 +663,9 @@ Implemented:
 - HTTP API, SSE, Discord renderer, manifests, and configuration
 - model-produced TaskSpec validation, deterministic CPU/GPU profile compilation,
   immutable asset ingestion, task preflight, and generic integrity evaluation
+- knowledge ingestion, hybrid quality-ranked retrieval, role-scoped per-turn
+  context packets, and `knowledge://` citation evidence URIs
+- hybrid retrieval quality fixtures and knowledge API surface
 
 Covered by mocks:
 
@@ -625,6 +673,7 @@ Covered by mocks:
 - structured OpenCode turn completion and abort behavior
 - parallel fake jobs, completion, failure evidence, and artifacts
 - restart reconciliation and cancellation
+- knowledge ingestion, retrieval scoping, and context attachment
 
 Manually tested:
 

@@ -230,6 +230,7 @@ GET /task-bundles/{task_id}
 GET /task-bundles/{task_id}/preflight
 GET /datasets
 GET /datasets/{dataset_id}
+GET /knowledge/sources
 GET /actions/{action_id}
 GET /health
 GET /ready
@@ -242,6 +243,10 @@ deployment:
 POST /runs
 POST /task-bundles/import
 POST /datasets/import
+POST /knowledge/sources
+DELETE /knowledge/sources/{source_id}
+DELETE /knowledge/sources/by-digest/{digest}
+POST /knowledge/index/rebuild
 POST /runs/{run_id}/pause
 POST /runs/{run_id}/resume
 POST /runs/{run_id}/cancel
