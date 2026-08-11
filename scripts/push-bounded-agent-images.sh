@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REGISTRY_HOST="${GLASSLAB_AGENT_REGISTRY_HOST:-ghcr.io}"
-REGISTRY_USERNAME="${GHCR_USERNAME:-${GITHUB_ACTOR:-OffensiveGeneric}}"
+REGISTRY_USERNAME="${GHCR_USERNAME:-${GITHUB_ACTOR:-ccny-glasslab}}"
 REGISTRY_TOKEN="${GHCR_TOKEN:-}"
 
 INTAKE_IMAGE_REF="${GLASSLAB_INTAKE_AGENT_IMAGE_REF:-ghcr.io/ccny-glasslab/glasslab-intake-agent:0.1.0}"
@@ -20,7 +20,7 @@ Build and push the bounded stage-agent images to GHCR.
 
 Environment:
   GHCR_TOKEN    GitHub token with package write access
-  GHCR_USERNAME Registry username. Defaults to OffensiveGeneric.
+  GHCR_USERNAME Registry username. Defaults to ccny-glasslab.
 USAGE
 }
 

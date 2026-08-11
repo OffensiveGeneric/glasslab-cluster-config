@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPOSITORY="${GLASSLAB_GITHUB_REPOSITORY:-OffensiveGeneric/glasslab-cluster-config}"
+REPOSITORY="${GLASSLAB_GITHUB_REPOSITORY:-ccny-glasslab/glasslab-cluster-config}"
 WORKFLOW="${GLASSLAB_IMAGE_WORKFLOW:-manual-docker.yml}"
 
 usage() {

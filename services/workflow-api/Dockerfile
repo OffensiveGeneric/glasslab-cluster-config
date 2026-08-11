@@ -11,7 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 ARG GLASSLAB_GIT_SHA=unknown
 ARG GLASSLAB_BUILD_SOURCE=unspecified
 LABEL org.opencontainers.image.revision="${GLASSLAB_GIT_SHA}"
-LABEL org.opencontainers.image.source="https://github.com/OffensiveGeneric/glasslab-cluster-config"
+LABEL org.opencontainers.image.source="https://github.com/ccny-glasslab/glasslab-cluster-config"
 LABEL io.glasslab.build-source="${GLASSLAB_BUILD_SOURCE}"
 ENV \
     GLASSLAB_WORKFLOW_API_BUILD_SOURCE_REVISION=${GLASSLAB_GIT_SHA} \

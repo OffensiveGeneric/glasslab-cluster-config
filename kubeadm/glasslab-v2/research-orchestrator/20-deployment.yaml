@@ -36,7 +36,7 @@ spec:
               mkdir -p "$(dirname "$target")"
               if [ ! -d "$target/.git" ]; then
                 git clone --branch main --single-branch \
-                  https://github.com/OffensiveGeneric/glasslab-cluster-config.git \
+                  https://github.com/ccny-glasslab/glasslab-cluster-config.git \
                   "$target"
               fi
               git -C "$target" fetch origin main

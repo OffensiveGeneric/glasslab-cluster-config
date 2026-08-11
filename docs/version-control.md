@@ -14,7 +14,7 @@ What is intentionally not tracked:
 
 Git remote:
 
-- `origin` is reserved for `git@github-cluster-config:OffensiveGeneric/glasslab-cluster-config.git`
+- `origin` is reserved for `git@github-cluster-config:ccny-glasslab/glasslab-cluster-config.git`
 - SSH uses the dedicated provisioner key `~/.ssh/id_ed25519_github_cluster_config`
 
 Typical workflow:
