@@ -14,16 +14,16 @@ from psycopg.types.json import Jsonb
 
 
 TABLES = (
-    ('runs', 'orchestrator_runs', ('run_id', 'state', 'version', 'payload', 'created_at', 'updated_at')),
-    ('turns', 'orchestrator_turns', ('turn_id', 'run_id', 'status', 'payload', 'created_at', 'updated_at')),
-    ('actions', 'orchestrator_actions', ('action_id', 'run_id', 'approval_status', 'idempotency_key', 'payload', 'created_at', 'updated_at')),
-    ('jobs', 'orchestrator_jobs', ('job_id', 'run_id', 'action_id', 'status', 'idempotency_key', 'payload', 'created_at', 'updated_at')),
-    ('artifacts', 'orchestrator_artifacts', ('artifact_id', 'run_id', 'job_id', 'payload', 'created_at')),
-    ('datasets', 'orchestrator_datasets', ('dataset_id', 'payload', 'created_at')),
-    ('events', 'orchestrator_events', ('event_id', 'run_id', 'sequence_number', 'source', 'event_type', 'payload', 'timestamp')),
-    ('knowledge_sources', 'orchestrator_knowledge_sources', ('source_id', 'source_type', 'canonical_uri', 'run_scope', 'digest', 'payload', 'ingested_at')),
-    ('knowledge_chunks', 'orchestrator_knowledge_chunks', ('chunk_id', 'source_id', 'chunk_index', 'text', 'payload')),
-    ('context_packets', 'orchestrator_context_packets', ('packet_id', 'run_id', 'payload', 'created_at')),
+    ('runs', 'orchestrator_runs', ('run_id', 'state', 'version', 'payload', 'created_at', 'updated_at'), ('run_id', 'state', 'version', 'payload', 'created_at', 'updated_at')),
+    ('turns', 'orchestrator_turns', ('turn_id', 'run_id', 'status', 'payload', 'created_at', 'updated_at'), ('turn_id', 'run_id', 'status', 'payload', 'created_at', 'updated_at')),
+    ('actions', 'orchestrator_actions', ('action_id', 'run_id', 'approval_status', 'idempotency_key', 'payload', 'created_at', 'updated_at'), ('action_id', 'run_id', 'approval_status', 'idempotency_key', 'payload', 'created_at', 'updated_at')),
+    ('jobs', 'orchestrator_jobs', ('job_id', 'run_id', 'action_id', 'status', 'idempotency_key', 'payload', 'created_at', 'updated_at'), ('job_id', 'run_id', 'action_id', 'status', 'idempotency_key', 'payload', 'created_at', 'updated_at')),
+    ('artifacts', 'orchestrator_artifacts', ('artifact_id', 'run_id', 'job_id', 'payload', 'created_at'), ('artifact_id', 'run_id', 'job_id', 'payload', 'created_at')),
+    ('datasets', 'orchestrator_datasets', ('dataset_id', 'payload', 'created_at'), ('dataset_id', 'payload', 'created_at')),
+    ('events', 'orchestrator_events', ('event_id', 'run_id', 'sequence_number', 'source', 'event_type', 'payload', 'timestamp'), ('event_id', 'run_id', 'sequence_number', 'source', 'event_type', 'payload', 'timestamp')),
+    ('knowledge_sources', 'orchestrator_knowledge_sources', ('source_id', 'source_type', 'canonical_uri', 'run_scope', 'access_policy', 'source_version', 'digest', 'ingested_at', 'index_version', 'title', 'metadata', 'parent_source_id'), ('source_id', 'source_type', 'canonical_uri', 'run_scope', 'digest', 'payload', 'ingested_at')),
+    ('knowledge_chunks', 'orchestrator_knowledge_chunks', ('chunk_id', 'source_id', 'chunk_index', 'text', 'digest', 'token_count', 'index_version'), ('chunk_id', 'source_id', 'chunk_index', 'text', 'payload')),
+    ('context_packets', 'orchestrator_context_packets', ('packet_id', 'run_id', 'agent', 'turn_number', 'turn_kind', 'query', 'index_version', 'ranked_sources', 'exact_text_supplied', 'token_budget', 'created_at'), ('packet_id', 'run_id', 'payload', 'created_at')),
 )
 
 
@@ -80,19 +80,19 @@ def main() -> int:
             existing = conn.execute('SELECT COUNT(*) AS count FROM orchestrator_runs').fetchone()['count']
             if existing:
                 raise RuntimeError('destination is not empty; refusing to merge an ambiguous SQLite import')
-            for source_table, destination_table, columns in TABLES:
+            for source_table, destination_table, source_columns, destination_columns in TABLES:
                 exists = source.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (source_table,)).fetchone()
                 if not exists:
                     continue
-                rows = source.execute(f"SELECT {', '.join(columns)} FROM {source_table}").fetchall()
+                rows = source.execute(f"SELECT {', '.join(source_columns)} FROM {source_table}").fetchall()
                 if not rows:
                     continue
-                placeholders = ', '.join(['%s'] * len(columns))
-                statement = f"INSERT INTO {destination_table} ({', '.join(columns)}) VALUES ({placeholders})"
+                placeholders = ', '.join(['%s'] * len(destination_columns))
+                statement = f"INSERT INTO {destination_table} ({', '.join(destination_columns)}) VALUES ({placeholders})"
                 for row in rows:
                     values = [
                         Jsonb(payload_for(source_table, row)) if column == 'payload' else row[column]
-                        for column in columns
+                        for column in destination_columns
                     ]
                     conn.execute(statement, values)
                 print(f'imported {len(rows)} {source_table} rows')
