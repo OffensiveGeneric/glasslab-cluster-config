@@ -1,3 +1,10 @@
+"""Tests for on-disk run artifact loading, status resolution, and terminal bundle verification.
+
+Covers loading status/artifacts/logs from the artifacts mount, preferring
+on-disk terminal state over in-memory job-submission status, validating
+complete terminal bundles, and rejecting symlink artifacts.
+"""
+
 from datetime import datetime, timezone
 from pathlib import Path
 

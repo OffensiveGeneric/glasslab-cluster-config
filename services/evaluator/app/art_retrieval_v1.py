@@ -1,3 +1,12 @@
+"""Art-retrieval-specific run comparison for evaluator type art-retrieval-v1.
+
+A specialization of the tabular comparison: it additionally reads a
+workload-produced comparison.json from each run bundle and, when present, ranks
+runs by the workload's own composite_score (higher wins) before falling back to
+the generic primary-metric ordering. Kept separate from main.py so the generic
+comparison stays stable while this variant owns its extra contract.
+"""
+
 from __future__ import annotations
 
 import json
@@ -18,10 +27,15 @@ def load_art_retrieval_bundle(bundle_dir: Path) -> ComparedRun:
     primary_metric = None
     if metrics.primary_metric:
         primary_metric = next((item for item in metrics.values if item.name == metrics.primary_metric), None)
+    # A primary_metric name with no matching value row yields None rather than
+    # an error: metric presence is itself part of the ranking, so a missing
+    # value must be observable, not fatal.
 
     # Load art-retrieval specific outputs
     comparison_json_path = bundle_dir / 'comparison.json'
     comparison_output: dict[str, Any] | None = None
+    # comparison.json is optional; a bundle without it simply ranks on the
+    # generic primary metric below.
     if comparison_json_path.exists():
         comparison_output = json.loads(comparison_json_path.read_text())
 
@@ -52,11 +66,13 @@ def rank_art_retrieval(runs: list[ComparedRun]) -> tuple[list[ComparedRun], str]
             ranking = item.art_retrieval_output.get('ranking', [])
             if ranking:
                 composite_score = ranking[0].get('composite_score')
-        
+
         status_weight = 0 if item.status == 'succeeded' else 1
         metric_missing = 1 if item.primary_metric_value is None else 0
-        
-        # Prefer composite_score if available
+
+        # Tuple order is significant: status first, then metric presence, so a
+        # failed or metric-less run always sorts behind a complete succeeded one
+        # regardless of how good its score is.
         if composite_score is not None:
             metric_sort = -composite_score  # higher is better
         elif item.primary_metric_value is not None:
@@ -64,12 +80,13 @@ def rank_art_retrieval(runs: list[ComparedRun]) -> tuple[list[ComparedRun], str]
             metric_sort = item.primary_metric_value if direction == 'minimize' else -item.primary_metric_value
         else:
             metric_sort = 0.0
-        
+
+        # Missing runtime sorts last as a tiebreak; run_id makes ties total.
         runtime_sort = item.runtime_seconds if item.runtime_seconds is not None else float('inf')
         return (status_weight, metric_missing, metric_sort, runtime_sort, item.run_id)
 
     ranked = sorted(runs, key=sort_key)
-    
+
     # Build comparison basis
     basis_parts = ['succeeded status, metric presence']
     has_composite = any(r.art_retrieval_output and r.art_retrieval_output.get('ranking') for r in ranked)

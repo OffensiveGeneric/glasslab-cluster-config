@@ -1,3 +1,11 @@
+"""Application settings loaded from the GLASSLAB_ORCHESTRATOR_ env prefix.
+
+Kept as a single pydantic-settings model so every knob is documented in one
+place. Secret-bearing fields (operator_api_token, discord_bot_token,
+discord_webhook_url) must never be rendered into prompts, events, or logs;
+nothing in the app logs Settings as a whole.
+"""
+
 from __future__ import annotations
 
 from functools import lru_cache
@@ -125,6 +133,9 @@ class Settings(BaseSettings):
     @field_validator('permitted_job_images', mode='before')
     @classmethod
     def parse_image_allowlist(cls, value: object) -> object:
+        # pydantic-settings passes the raw env string for list fields; NoDecode
+        # stops its JSON attempt, and this validator splits the conventional
+        # comma-separated spelling instead.
         if isinstance(value, str):
             return [item.strip() for item in value.split(',') if item.strip()]
         return value
@@ -139,4 +150,6 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
+    # Single cached instance so every module that needs settings observes the
+    # same env snapshot for the process lifetime.
     return Settings()

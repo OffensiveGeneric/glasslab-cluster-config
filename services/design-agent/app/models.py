@@ -1,3 +1,12 @@
+"""Request/response contracts for the design-agent HTTP surface.
+
+All models use extra='forbid' so unknown fields from callers fail validation
+instead of silently round-tripping. IntakePayload is the wire copy of the
+intake-agent's output; its list validators strip blank entries and reject
+duplicates. WorkflowPayload is the caller's registry view of the workflow the
+draft must be bound to.
+"""
+
 from __future__ import annotations
 
 from typing import Any

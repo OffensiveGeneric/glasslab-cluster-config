@@ -1,3 +1,10 @@
+"""Immutable dataset uploads and content-addressed resolution.
+
+Uploaded bytes are written once under a digest-derived directory and re-verified
+at bind time, so a dataset reference always resolves to the exact bytes that
+were registered.
+"""
+
 from __future__ import annotations
 
 from hashlib import sha256
@@ -40,6 +47,9 @@ class DatasetIngestionManager:
 
     @staticmethod
     def _safe_filename(filename: str) -> str:
+        # The filename must be a bare basename: storage layout is derived from
+        # content (the digest directory), so untrusted uploader input can never
+        # influence the directory structure or escape the upload root.
         value = Path(filename).name.strip()
         if (
             not value
@@ -101,6 +111,10 @@ class DatasetIngestionManager:
         except RecordNotFound:
             existing = None
         if existing is not None:
+            # Content-addressed dedup: identical bytes return the first record.
+            # contains_labels is a declaration about those bytes, so a mismatch
+            # is an error rather than a silent overwrite; other metadata fields
+            # are deliberately not compared (the first registration wins).
             staged_path.unlink(missing_ok=True)
             if existing.contains_labels != contains_labels:
                 raise DatasetIngestionError(
@@ -117,6 +131,8 @@ class DatasetIngestionManager:
             os.replace(staged_path, destination)
         destination.chmod(0o444)
         destination.parent.chmod(0o555)
+        # Write-once on disk: the file is 0o444 and its digest directory 0o555,
+        # so nothing later can mutate a registered dataset in place.
         artifact_uri = (
             's3://artifacts/'
             + destination.relative_to(self.shared_mount_root).as_posix()
@@ -171,6 +187,9 @@ class DatasetIngestionManager:
                 f'ingested dataset is unavailable: {reference_uri}'
             )
         actual_digest = self._file_sha256(path)
+        # Beyond the registry record, the on-disk bytes are re-hashed so
+        # tampering or partial overwrite is caught at bind time, and the
+        # proposal's expected checksum plus label declaration are enforced.
         if actual_digest != record.sha256:
             raise TaskBundleError(
                 f'ingested dataset failed checksum verification: {reference_uri}'

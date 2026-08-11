@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""
-FAISS Integration Test Submission Script
+"""Operator tool: submit the FAISS integration test Job manifest to Kubernetes.
 
-Submits a FAISS integration test job to the Kubernetes cluster.
+Runs from a contributor workstation (not the provisioner) and applies a
+hardcoded YAML manifest via kubectl. Job-info retrieval after submission is
+best-effort — the script returns a sentinel dict on success regardless of
+whether the info fetch succeeded.
 """
 
 import json
@@ -13,7 +15,8 @@ from pathlib import Path
 def submit_faiss_test():
     """Submit FAISS integration test job"""
     
-    # The job definition file
+    # Hardcoded workstation path; this script is a manual operator tool,
+    # not a general-purpose submission utility.
     job_file = Path("/Users/glasslab/cluster-config/kubeadm/glasslab-v2/jobs/11-faiss-integration-test.yaml")
     
     if not job_file.exists():
@@ -42,7 +45,8 @@ def submit_faiss_test():
         print("Output:")
         print(result.stdout)
         
-        # Try to get job info
+        # Job-info retrieval is best-effort: a network hiccup or transient
+        # error here must not fail a successful submission.
         try:
             job_info = subprocess.run(
                 ["kubectl", "-n", "glasslab-v2", "get", "jobs", "faiss-integration-test", "-o", "json"],

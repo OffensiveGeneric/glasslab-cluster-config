@@ -1,3 +1,12 @@
+"""Read Kubernetes Job state, pod failure logs, and experiment artifacts.
+
+The API never executes workloads; it only observes Jobs it created in the
+runner namespace. Job status is derived from the Job's completion counters, a
+missing Job is reported as a terminal 'missing' state (the Job TTL may have
+reclaimed it), and artifacts/result payloads are read straight from the shared
+artifacts PVC mounted in this process.
+"""
+
 from __future__ import annotations
 
 import json
@@ -12,6 +21,8 @@ from .schemas import ArtifactRef
 
 
 def _load_kube_config() -> None:
+    # In-cluster service-account credentials are the norm; the kubeconfig
+    # fallback keeps local development and tests working.
     try:
         config.load_incluster_config()
     except ConfigException:
@@ -69,6 +80,8 @@ class JobStatusService:
         if not pod_names:
             return None
         pod_name = pod_names[0]
+        # The runner writes its stack trace at the very end of the log, so the
+        # last 40 lines carry the failure without fetching the whole stream.
         try:
             logs = self.core_api.read_namespaced_pod_log(
                 name=pod_name,

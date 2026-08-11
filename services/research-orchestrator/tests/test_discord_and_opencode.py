@@ -1,3 +1,11 @@
+"""Discord rendering/controls and OpenCode runtime behavior.
+
+Covers Discord message rendering and approval controls, the control-policy
+gates and actor identity recording, HTTP adapter thread/status handling, and
+the OpenCode runtime: event normalization, structured-output extraction and
+repair, workspace-file materialization, and per-agent runtime isolation.
+"""
+
 from __future__ import annotations
 
 import json

@@ -1,3 +1,10 @@
+"""Run-time record contracts: manifests, metrics, and artifact indexes.
+
+Written by the workspace runner and read by the orchestrator and evaluator.
+Every model uses extra='forbid' so an unknown field fails validation instead of
+silently round-tripping between services.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime

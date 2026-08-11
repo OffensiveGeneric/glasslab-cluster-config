@@ -1,3 +1,5 @@
+"""Tests that validate_spec enforces the registry whitelist and cross-field rules."""
+
 from app.validator import validate_spec
 
 

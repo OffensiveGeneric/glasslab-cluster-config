@@ -1,3 +1,10 @@
+"""Knowledge and context-packet HTTP surface over a mocked engine.
+
+Builds a full FastAPI app with a temp knowledge root and tests ingest, list,
+rebuild, and digest-based invalidation through the API, allowlist
+enforcement for outside paths, and the context-packet list/inspect routes.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -19,6 +26,8 @@ from conftest import RUNNER_IMAGE, create_test_repo
 
 
 def _bundle(tmp_path: Path):
+    # The engine here mirrors the conftest orchestrator_bundle fixture but
+    # adds a knowledge root and an allowlisted directory the API may index.
     approved = tmp_path / 'approved'
     approved.mkdir(parents=True)
     (approved / 'technique-card.md').write_text(

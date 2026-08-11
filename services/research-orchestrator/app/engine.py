@@ -111,6 +111,9 @@ class ResearchOrchestrator:
         self.policy = policy
         self.cluster = cluster
         self.discord = discord
+        # Serializes all run-advancing mutations in this process. Pause and
+        # cancel deliberately do NOT take this lock so they can abort a model
+        # turn that currently holds it (see pause_run).
         self._advance_lock = RLock()
 
     def _publish_latest(self, run_id: str) -> None:
@@ -233,6 +236,8 @@ class ResearchOrchestrator:
                     request.maximum_runtime_seconds
                     or self.settings.maximum_runtime_seconds
                 ),
+                # Cap the per-run concurrency at the service ceiling even when
+                # the request explicitly asks for more; the cap is global policy.
                 maximum_parallel_jobs=min(
                     request.maximum_parallel_jobs
                     or self.settings.maximum_parallel_jobs,
@@ -252,6 +257,8 @@ class ResearchOrchestrator:
                     objective=request.objective,
                 )
             except Exception:
+                # Discord is a replaceable projection; a thread failure must not
+                # fail run creation (the run itself is already committed above).
                 thread_id = None
             if thread_id:
                 current = self.store.get_run(run_id)
@@ -262,6 +269,10 @@ class ResearchOrchestrator:
                     expected_version=current.version,
                 )
             self._publish_latest(run_id)
+            # Walk through PREPARING explicitly even though the next line moves
+            # straight on: if the process dies between these transitions,
+            # recover() sees a run in PREPARING and resumes drafting, which is
+            # the only signal that workspace setup finished.
             self._transition(run_id, RunState.PREPARING)
             self._transition(run_id, RunState.HONEYDEW_DRAFTING_PROTOCOL)
             try:
@@ -292,11 +303,15 @@ class ResearchOrchestrator:
         digest = sha256(content).hexdigest()
         existing = self.task_bundles.find_by_digest(digest)
         if existing is not None:
+            # Re-import of identical bytes is a no-op: the compiled bundle is
+            # keyed by content digest, so the archive is only ever compiled once.
             return existing
         staged = self.task_bundles.stage_archive(
             filename=filename,
             content=content,
         )
+        # The session is keyed by a digest-derived id rather than a real run id,
+        # so a recompiled archive never leaks into a research run's workspace.
         compiler_id = f'task-compiler-{staged.digest[:16]}'
         workspace = staged.root / 'normalized'
         try:
@@ -367,6 +382,10 @@ class ResearchOrchestrator:
         )
 
     def _check_turn_budget(self, run: RunRecord) -> None:
+        # Both limits are soft caps checked only at turn boundaries: they stop a
+        # turn from STARTING once exhausted, but never interrupt an in-flight
+        # model turn. turn_number is incremented after this check, so `>=`
+        # admits exactly maximum_turns completed turns.
         if run.turn_number >= run.maximum_turns:
             self._transition(
                 run.run_id,
@@ -376,6 +395,9 @@ class ResearchOrchestrator:
             raise WorkflowError('maximum turn count reached')
         active_runtime = run.active_runtime_seconds
         if run.active_since is not None:
+            # active_runtime_seconds is the accumulated base stored by
+            # storage.transition_run; add the time elapsed since the clock last
+            # started (set on creation and on every resume/approval).
             active_runtime += max(
                 0.0,
                 (utc_now() - run.active_since).total_seconds(),
@@ -405,12 +427,17 @@ class ResearchOrchestrator:
             if agent == AgentName.HONEYDEW
             else run.beaker_workspace
         )
+        # Only the last few structured outputs travel into the recovery prompt;
+        # the full history lives in the event log, and unbounded transcripts
+        # would blow the replacement session's context window.
         completed = [
             turn
             for turn in self.store.list_turns(run_id)
             if turn.status == 'completed' and turn.structured_output is not None
         ][-4:]
         try:
+            # git status is best-effort context for the fresh session; the
+            # worktree itself is the authoritative state.
             status = subprocess.run(
                 ['git', 'status', '--short'],
                 cwd=workspace,
@@ -473,6 +500,9 @@ class ResearchOrchestrator:
         except Exception as exc:
             release_error = str(exc)
         current = self.store.get_run(run_id)
+        # Clear the session ids from the authoritative record BEFORE writing the
+        # checkpoint: any later recovery then sees a fresh-session run and must
+        # rebuild from the checkpoint instead of reusing a poisoned session.
         updates: dict[str, Any] = {'current_agent': None}
         if agent == AgentName.HONEYDEW:
             updates.update(
@@ -606,6 +636,9 @@ class ResearchOrchestrator:
         )
         recovery_context = ''
         if existing_session is None:
+            # The recovery checkpoint is injected only into a brand-new session
+            # (after a rotation or a restart). A continuing session already has
+            # the previous turns in its own context.
             recovery_context = self._recovery_context(
                 run_id=run_id,
                 agent=agent,
@@ -617,6 +650,9 @@ class ResearchOrchestrator:
             existing_session_id=existing_session,
         )
         run = self.store.get_run(run_id)
+        # Persist the live session and turn number before the model does any
+        # work, so a crash or pause mid-turn can find and abort the right
+        # session (see recover() and pause_run).
         session_updates = {
             'current_agent': agent,
             'turn_number': run.turn_number + 1,
@@ -797,6 +833,10 @@ class ResearchOrchestrator:
             )
             raise
         current = self.store.get_run(run_id)
+        # Pause/cancel bypass the advancement lock (they must be able to abort a
+        # running turn), so the run may have left this phase while the model was
+        # working. Refuse to let the caller drive the next transition on a
+        # stalled run; recovery resumes at the correct phase instead.
         if current.state == RunState.PAUSED or current.state in TERMINAL_STATES:
             raise WorkflowError(
                 'workflow advancement stopped after agent turn because run is '
@@ -995,6 +1035,9 @@ class ResearchOrchestrator:
         digest: str,
         metadata: dict[str, Any],
     ) -> ArtifactRecord:
+        # The artifact id is a deterministic function of (run, uri, digest), not
+        # random: re-delivering the same content re-derives the same id, which
+        # makes recovery backfill idempotent (storage uses INSERT OR IGNORE).
         artifact = ArtifactRecord(
             artifact_id=uuid5(
                 NAMESPACE_URL,
@@ -1023,6 +1066,12 @@ class ResearchOrchestrator:
         return proposal if isinstance(proposal, dict) else None
 
     def _contract_binding_compatible(self, run_id: str) -> bool:
+        # Re-derives the Honeydew proposal from the stored artifact (not from
+        # memory) and checks it against the currently installed contract. The
+        # digest equality pins the check to the exact contract the run was bound
+        # to, so this is also what forces a promoted candidate to match before
+        # execution. Missing resource keys default to sentinel values that FAIL
+        # the check (the proposal must be explicit about limits).
         run = self.store.get_run(run_id)
         proposal = self._latest_contract_proposal(run_id)
         if proposal is None:
@@ -1153,6 +1202,9 @@ class ResearchOrchestrator:
             item for item in result.produced_files if item.purpose == 'protocol'
         ]
         if len(protocol_files) != 1:
+            # Exactly one declared protocol file keeps the artifact binding
+            # unambiguous; a declared-but-missing file is repaired below rather
+            # than silently accepted from the structured response.
             raise WorkflowError('Honeydew must produce exactly one protocol file')
         protocol_path = Path(run.honeydew_workspace) / protocol_files[0].path
         if not protocol_path.is_file():
@@ -1368,6 +1420,9 @@ class ResearchOrchestrator:
             / 'evaluation-contract-proposal.json'
         )
         proposal_path.parent.mkdir(parents=True, exist_ok=True)
+        # Persist the proposal next to the worktrees so the approval UI and
+        # later routing (see _contract_binding_compatible) read the same bytes
+        # that were recorded as an artifact, instead of trusting agent memory.
         proposal_bytes = (
             json.dumps(proposal_payload, indent=2, sort_keys=True) + '\n'
         ).encode()
@@ -1460,6 +1515,11 @@ class ResearchOrchestrator:
         with self._advance_lock:
             action = self.store.get_action(action_id)
             if action.approval_status == ApprovalStatus.APPROVED:
+                # Re-approval is the crash-recovery retry: the first approval may
+                # have committed the action but died before (or during) resume.
+                # Re-running resume is safe because _resume_approved_action
+                # re-checks the run state and becomes a no-op once the run has
+                # moved past the awaiting state.
                 self._resume_approved_action(action)
                 return self.store.get_action(action_id)
             if action.approval_status != ApprovalStatus.PENDING:
@@ -1501,6 +1561,11 @@ class ResearchOrchestrator:
             for job in self.store.list_jobs(action.run_id)
             if job.action_id == action.action_id
         ]
+        # A deterministic matrix failure (ValueError from expansion, no jobs
+        # created yet) is the one failure the workflow can recover from without
+        # a human: it is a defect in the proposed matrix, so Beaker revises.
+        # Everything else pauses the run so the human can reconcile any partial
+        # job/artifact state before deciding what happens next.
         deterministic_matrix_failure = (
             action.type == 'submit_experiment_matrix'
             and isinstance(exc, ValueError)
@@ -1562,6 +1627,9 @@ class ResearchOrchestrator:
 
     def _resume_approved_action(self, action: ActionRecord) -> None:
         run = self.store.get_run(action.run_id)
+        # Every branch is gated on the run state, so a stale or duplicate
+        # approval click is a silent no-op once the run has already advanced;
+        # this is what makes re-approval safe as a recovery retry.
         if action.type == 'approve_protocol':
             if run.state != RunState.AWAITING_PROTOCOL_APPROVAL:
                 return
@@ -1752,6 +1820,10 @@ class ResearchOrchestrator:
         source = (workspace / request.candidate_path).resolve()
         if not source.is_relative_to(workspace):
             raise WorkflowError('contract candidate escapes Beaker workspace')
+        # The orchestrator seals the candidate itself and validates the sealed
+        # descriptor against the approved scientific proposal, so the agent can
+        # neither invent an evaluation entry point nor slip an override past the
+        # policy layer (which only checked the action schema).
         try:
             sealed = self.contract_candidates.seal(
                 source=source,
@@ -1806,6 +1878,10 @@ class ResearchOrchestrator:
                     'retrying': True,
                 },
             )
+            # Rejection here is a deterministic retry: Beaker re-drafts with the
+            # concrete failure as feedback. The retry chain is bounded by the
+            # per-run turn budget, which eventually transitions the run to
+            # TIMED_OUT if the candidate never becomes valid.
             self._beaker_draft_contract(
                 run_id,
                 feedback=feedback_message,
@@ -1920,6 +1996,9 @@ class ResearchOrchestrator:
             action.action_id,
             review_turn_id=turn.turn_id,
         )
+        # Honeydew review is recorded on the action itself (satisfying the
+        # HONEYDEW_AND_HUMAN_APPROVAL gate in approve_action), then the run
+        # moves to a human-wait state where promotion can be approved.
         self._event(
             run_id,
             source='honeydew',
@@ -1962,6 +2041,9 @@ class ResearchOrchestrator:
             artifact.metadata['descriptor']
         )
         current = self.store.get_run(action.run_id)
+        # The run's binding is rewritten to the promoted contract; the resolve
+        # below re-reads the trusted catalog so the digest check proves the
+        # promoted artifact is the one actually installed.
         self.store.replace_run(
             current.model_copy(
                 update={

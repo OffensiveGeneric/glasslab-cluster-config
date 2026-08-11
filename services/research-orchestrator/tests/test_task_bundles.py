@@ -1,3 +1,11 @@
+"""Task-bundle import, dataset binding, and deployment preflight.
+
+Covers immutable/idempotent archive compilation, path-traversal rejection,
+rebinding persisted tasks to the fixed workload runner image, uploaded
+dataset resolution (immutable, tamper-rejected) into a task, and preflight
+gating on missing inputs and public asset URLs.
+"""
+
 from __future__ import annotations
 
 from hashlib import sha256
@@ -45,6 +53,9 @@ def _manager(tmp_path: Path) -> TaskBundleManager:
 
 
 def test_import_task_bundle_is_immutable_and_idempotent(tmp_path: Path) -> None:
+    # Recompiling identical bytes must return the exact same record, and the
+    # on-disk bundle is read-only (mode without write bits), so the compiled
+    # task can never drift after the digest is pinned.
     manager = _manager(tmp_path)
     content = _archive()
     proposal = TaskSpecProposal(

@@ -1,3 +1,10 @@
+"""Test path setup for the intake-agent service.
+
+The service has no installable package metadata, so the service root and the
+repo root are inserted into sys.path before any test module is imported,
+keeping the checkout importable regardless of how pytest is launched.
+"""
+
 import sys
 from pathlib import Path
 

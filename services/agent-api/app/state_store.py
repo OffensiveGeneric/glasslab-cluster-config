@@ -1,3 +1,11 @@
+"""SQLite persistence for experiments and their audit logs.
+
+The store is the authoritative state for the agent API: the control loop reads
+and writes experiment records and appends every lifecycle event to an ordered
+per-experiment log. Pydantic models are serialized to JSON columns, and all
+timestamps are stored as UTC ISO strings.
+"""
+
 from __future__ import annotations
 
 import json
@@ -161,6 +169,8 @@ class StateStore:
             record = self._row_to_experiment(row)
             if record.normalized_spec and record.normalized_spec.pipeline == pipeline and record.normalized_spec.dataset == dataset:
                 return record
+        # Ordered by most recent submission; backs the planner's
+        # 'compare_to: latest_successful' option.
         return None
 
     def _row_to_experiment(self, row: sqlite3.Row) -> ExperimentRecord:
@@ -205,6 +215,8 @@ class StateStore:
         return value
 
     def _connect(self) -> sqlite3.Connection:
+        # 30s busy timeout tolerates brief write contention between the request
+        # handler and the background monitor threads.
         connection = sqlite3.connect(self.db_path, timeout=30)
         connection.row_factory = sqlite3.Row
         return connection

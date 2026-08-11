@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Read-only repo hygiene check: parse every YAML and JSON file and report
+failures without modifying anything."""
 from __future__ import annotations
 
 import json
@@ -24,6 +26,8 @@ EXCLUDED_SUFFIXES = {
 
 
 def should_skip(path: Path) -> bool:
+    # VCS internals, caches, and vendored dependency trees are never valid
+    # repo configs and are excluded from the walk.
     if any(part in EXCLUDED_PARTS for part in path.parts):
         return True
     return any(path.name.endswith(suffix) for suffix in EXCLUDED_SUFFIXES)
@@ -41,6 +45,8 @@ def main() -> int:
         if suffix in {'.yaml', '.yml'}:
             try:
                 with path.open() as fh:
+                    # safe_load_all handles multi-document YAML files, not
+                    # just single-document ones.
                     list(yaml.safe_load_all(fh))
             except Exception as exc:
                 yaml_errors.append((str(path), str(exc)))

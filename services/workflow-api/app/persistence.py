@@ -1,3 +1,12 @@
+"""Abstract store interface with three backends: in-memory, JSON file, PostgreSQL.
+
+The RunStore ABC defines the full read/write surface for all record types.
+InMemoryRunStore provides the shared implementation; JsonFileRunStore and
+PostgresRunStore layer persistence on top of it. Every mutating save method in
+the durable backends calls super().save_*(record) then _flush(), so the
+in-memory cache is always written first and the durable write is an append.
+"""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -361,6 +370,10 @@ def _parse_logs_map(items: dict[str, Any]) -> dict[str, list[LogEntry]]:
 
 
 class InMemoryRunStore(RunStore):
+    # Every dict is protected by self._lock (a threading.Lock). Durable
+    # subclass save methods call super().save_* (which acquires and releases
+    # the lock) then _flush() (which acquires it separately), so the two
+    # operations are sequential, not reentrant.
     def __init__(self) -> None:
         self._datasets: dict[str, DatasetRecord] = {}
         self._technique_catalog: dict[str, TechniqueCatalogRecord] = {}
@@ -1317,6 +1330,8 @@ def create_run_store(
     state_path: str | Path | None = None,
     postgres_dsn: str | None = None,
 ) -> RunStore:
+    # Factory dispatches to the correct backend. The in-memory store is the
+    # default for local development; json and postgres are the durable options.
     if store_backend == 'memory':
         return InMemoryRunStore()
     if store_backend == 'json':

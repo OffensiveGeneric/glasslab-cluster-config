@@ -1,3 +1,13 @@
+"""Task ZIP compilation and immutable asset ingestion.
+
+Imports a ZIP containing one problem.md into a compiled TaskBundleRecord driven
+by a validated TaskSpecProposal. The archive is normalized (stripped to exactly
+the problem and optional evaluator rubric), assets are ingested immutably from
+public HTTPS or an approved ingested-dataset registry, and every persisted file
+is chmod'ed read-only so nothing written here can be mutated later. Preflight
+re-verifies digests at decision time and fails closed.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -167,6 +177,10 @@ class TaskAssetFetcher:
             port = parsed.port
         except ValueError as exc:
             raise TaskBundleError('task asset URL is malformed') from exc
+        # Assets are ingested by the orchestrator's own identity, so only
+        # public HTTPS targets with no embedded credentials and no custom port
+        # are acceptable; anything else is refused before a single byte is
+        # fetched.
         if (
             parsed.scheme != 'https'
             or not parsed.hostname
@@ -175,6 +189,9 @@ class TaskAssetFetcher:
             or port not in {None, 443}
         ):
             raise TaskBundleError('task assets require a public HTTPS URL')
+        # Resolve the host at ingestion time and reject any non-globally
+        # routable address so a task cannot point the orchestrator at
+        # cluster-internal or link-local endpoints.
         try:
             addresses = socket.getaddrinfo(
                 parsed.hostname,
@@ -203,6 +220,9 @@ class TaskAssetFetcher:
         destination = self.root / task_digest / proposal.name
         metadata = destination / 'asset.json'
         if metadata.is_file():
+            # Already ingested for this exact task digest: reuse the immutable
+            # record rather than re-downloading (the digest key guarantees
+            # content equality).
             return DatasetAsset.model_validate_json(metadata.read_text())
         staging = self.root / '.staging' / uuid4().hex
         staging.mkdir(parents=True, exist_ok=False)
@@ -211,6 +231,9 @@ class TaskAssetFetcher:
         try:
             with httpx.Client(follow_redirects=False, timeout=60) as client:
                 for _ in range(6):
+                    # Follow redirects manually so every hop is re-validated
+                    # against the same public-HTTPS + global-address rules;
+                    # automatic redirects would bypass the allowlist.
                     self._validate_url(current_url)
                     with client.stream('GET', current_url) as response:
                         if response.status_code in {301, 302, 303, 307, 308}:
@@ -258,6 +281,9 @@ class TaskAssetFetcher:
                 f'task asset checksum mismatch for {proposal.name}'
             )
         destination.parent.mkdir(parents=True, exist_ok=True)
+        # Staged-then-renamed so a partially downloaded asset is never visible
+        # at the final path; a concurrent identical fetch that won the race
+        # simply discards our duplicate staging directory.
         if destination.exists():
             shutil.rmtree(staging)
         else:
@@ -276,6 +302,8 @@ class TaskAssetFetcher:
             contains_labels=proposal.contains_labels,
         )
         metadata.write_text(record.model_dump_json(indent=2) + '\n')
+        # Immutability: the asset blob, its sidecar record, and the directory
+        # are read-only after ingestion, so nothing downstream can modify them.
         asset_path = destination / 'asset'
         asset_path.chmod(0o444)
         metadata.chmod(0o444)
@@ -326,6 +354,9 @@ class TaskBundleManager:
                 for member in files:
                     path = PurePosixPath(member.filename)
                     mode = member.external_attr >> 16
+                    # Zip-slip and symlink members are rejected outright: an
+                    # absolute path, a `..` segment, or a symlink could escape
+                    # the normalized tree during extraction.
                     if (
                         path.is_absolute()
                         or '..' in path.parts
@@ -334,6 +365,9 @@ class TaskBundleManager:
                         raise TaskBundleError(
                             f'unsafe task archive member: {member.filename}'
                         )
+                    # Decompression-bomb guard based on declared uncompressed
+                    # sizes; the guard is cheap because only problem.md and the
+                    # evaluator prompt are ever actually extracted below.
                     expanded += member.file_size
                 if expanded > self.MAX_EXPANDED_BYTES:
                     raise TaskBundleError('task archive expands too large')
@@ -352,6 +386,9 @@ class TaskBundleManager:
                         'task archive requires one problem.md and at most one '
                         'eval_agent_prompt.md'
                     )
+                # Normalization: everything except the problem and the optional
+                # rubric is discarded, so a compiled task's inputs are exactly
+                # known regardless of what junk rode along in the ZIP.
                 normalized = staging / 'normalized'
                 normalized.mkdir()
                 problem = normalized / 'problem.md'
@@ -387,6 +424,9 @@ class TaskBundleManager:
 
     @staticmethod
     def _task_id(display_name: str, digest: str) -> str:
+        # Deliberately content-addressed: the digest (not the display name)
+        # determines the id, so re-importing the same archive never forks a new
+        # task and a renamed archive stays the same task.
         del display_name
         return f'task-{digest[:16]}'
 
@@ -406,6 +446,9 @@ class TaskBundleManager:
         destination = self.root / task_id / staged.digest
         metadata_path = destination / 'task.json'
         if metadata_path.is_file():
+            # Content-addressed idempotency: the identical archive was already
+            # compiled, so the persisted immutable record is reused and the
+            # fresh staging copy is dropped.
             shutil.rmtree(staged.root, ignore_errors=True)
             return TaskBundleRecord.model_validate_json(metadata_path.read_text())
 
@@ -413,6 +456,9 @@ class TaskBundleManager:
         missing = list(proposal.missing_inputs)
         for asset in proposal.assets:
             if asset.approved_uri:
+                # Approved URIs resolve through the ingested-dataset registry,
+                # never through a network fetch; the registry verifies the
+                # expected sha256 at resolution time.
                 if self.ingested_datasets is None:
                     missing.append(
                         f'ingested dataset registry is unavailable: {asset.name}'
@@ -445,6 +491,9 @@ class TaskBundleManager:
                 )
             except TaskBundleError as exc:
                 missing.append(str(exc))
+        # Compilation still succeeds with missing inputs so the record and its
+        # diagnostics are durable; TaskPreflight later refuses to start the
+        # task until every missing input is resolved.
         required_artifacts = list(
             dict.fromkeys(
                 [
@@ -489,6 +538,8 @@ class TaskBundleManager:
             missing_inputs=list(dict.fromkeys(missing)),
         )
         metadata_path.write_text(record.model_dump_json(indent=2) + '\n')
+        # Persisted bundle is immutable: directories and files are read-only so
+        # neither the agents nor later imports can mutate a compiled task.
         for path in destination.rglob('*'):
             path.chmod(0o555 if path.is_dir() else 0o444)
         return record
@@ -510,6 +561,9 @@ class TaskBundleManager:
         if not evaluator_ready:
             issues.append('compiled evaluation contract is not installed')
         archive = Path(record.archive_path).resolve()
+        # Re-verify the archive by content at decision time (not just at
+        # compile time) so a tampered or evicted file is caught before any
+        # cluster work depends on it.
         archive_ready = not (
             not archive.is_relative_to(self.root)
             or not archive.is_file()
@@ -518,6 +572,8 @@ class TaskBundleManager:
         if not archive_ready:
             issues.append('task archive is unavailable or failed checksum verification')
         for asset in record.datasets:
+            # Assets may only be referenced through the shared mounts; anything
+            # else (e.g. a stale external URI) is a blocking issue.
             if not asset.uri.startswith(('s3://artifacts/', 's3://datasets/')):
                 asset_issues.append(f'asset URI is not approved: {asset.name}')
             if asset.uri.startswith('s3://artifacts/'):
@@ -569,6 +625,9 @@ class TaskBundleManager:
         record = TaskBundleRecord.model_validate_json(
             (candidates[0] / 'task.json').read_text()
         )
+        # Rebind the runner image to the current deployment's fixed image for
+        # this workload id: the persisted bundle stays immutable and scientific
+        # (the digest), while execution always tracks current deployment policy.
         runner_image = FIXED_WORKLOAD_RUNNER_IMAGES.get(record.workload_id)
         if runner_image and runner_image != record.runner_image:
             record = record.model_copy(update={'runner_image': runner_image})

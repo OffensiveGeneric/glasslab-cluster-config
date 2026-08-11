@@ -1,3 +1,10 @@
+"""Expose a /run-once endpoint that triggers one full due-digest and
+approved-rerun cycle against the workflow API.
+
+The worker is stateless: it calls the workflow API synchronously and returns
+execution records. A Kubernetes CronJob owns the retry and schedule cadence.
+"""
+
 from __future__ import annotations
 
 import json
@@ -23,6 +30,8 @@ def worker_config() -> WorkerConfigMetadata:
 
 
 def run_due_digest_cycle() -> RunOnceResponse:
+    # POST with empty body: the workflow API resolves due digest schedules
+    # server-side from its own persisted definitions.
     request_obj = urllib_request.Request(
         f'{WORKFLOW_API_URL}/digest-schedules/run-due',
         data=b'',
@@ -63,6 +72,9 @@ def healthz() -> HealthResponse:
 @app.post('/run-once', response_model=RunOnceResponse)
 def run_once() -> RunOnceResponse:
     digest_result = run_due_digest_cycle()
+    # Digest cycle runs first so execution ordering is stable; rerun
+    # executions are appended so the combined list reflects both phases
+    # in a single response.
     rerun_executions = run_due_approved_rerun_cycle()
     all_executions = list(digest_result.executions) + rerun_executions
     return RunOnceResponse(

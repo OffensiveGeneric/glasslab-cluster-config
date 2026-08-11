@@ -1,9 +1,3 @@
-from __future__ import annotations
-
-from typing import Any
-
-from .schemas import SourceType
-
 """Checked-in retrieval quality fixture.
 
 Each entry pairs a retrieval query with a list of source documents and the
@@ -17,6 +11,12 @@ Honeydew protocol drafts, query 4 is Beaker implementation planning, so the
 same matrix also exercises role/turn scoping (e.g. implementation files are
 visible to Beaker but excluded from Honeydew protocol drafts).
 """
+
+from __future__ import annotations
+
+from typing import Any
+
+from .schemas import SourceType
 
 
 QUERY_RELEVANCE_FIXTURE: list[dict[str, Any]] = [

@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""
-FAISS Integration Test Monitor
+"""Operator tool: poll a Kubernetes Job and dump logs on terminal status.
 
-Monitors the FAISS integration test job and retrieves logs once completed.
+Used from a contributor workstation to manually observe a FAISS integration
+test job. kubectl errors are silently folded into return-code checks — a job
+that never appears (or disappears mid-poll) returns None. The poll interval
+advances by a fixed increment, not wall-clock time, so the printed elapsed
+seconds drift proportionally to kubectl latency.
 """
 
 import json
@@ -18,6 +21,8 @@ def run_kubectl(args, namespace="glasslab-v2"):
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         return result
     except subprocess.TimeoutExpired:
+        # Returncode 124 is the POSIX timeout convention; callers only
+        # inspect returncode, so the failure mode is intentionally uniform.
         return subprocess.CompletedProcess(cmd, 124, "", "Timeout")
     except Exception as e:
         return subprocess.CompletedProcess(cmd, 1, "", str(e))
@@ -44,6 +49,8 @@ def get_job_logs(job_name="faiss-integration-test"):
         print("No pod found for job")
         return None
     
+    # kubectl jsonpath wraps the pod name in single quotes; strip them
+    # before passing to the logs subcommand.
     pod_name = result.stdout.strip().strip("'")
     print(f"Getting logs for pod: {pod_name}")
     
@@ -64,6 +71,8 @@ def monitor_job(max_wait_seconds=600, poll_interval=10):
         
         if job is None:
             print("Job not found. Has it been submitted?")
+            # Hardcoded path targets the submit-faiss-test.py counterpart on
+            # the same workstation; this is not a general-purpose path.
             print("Run: kubectl apply -f /Users/glasslab/cluster-config/kubeadm/glasslab-v2/jobs/11-faiss-integration-test.yaml")
             return None
         
@@ -123,6 +132,9 @@ def monitor_job(max_wait_seconds=600, poll_interval=10):
             return job
         
         time.sleep(poll_interval)
+        # Sleep-then-add approximates elapsed time. Actual wall-clock time
+        # is longer when kubectl calls are slow, so the printed value
+        # under-reports rather than over-reports.
         elapsed += poll_interval
     
     print()

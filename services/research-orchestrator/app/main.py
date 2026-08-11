@@ -1,3 +1,13 @@
+"""FastAPI operator surface for the research orchestrator.
+
+The app is a thin HTTP projection over the ResearchOrchestrator engine: it
+validates requests, gates mutations behind the operator token, and maps
+domain errors to HTTP statuses. State and policy live in the engine and
+store, not here. All read endpoints are intentionally unauthenticated because
+the service binds to an internal network; only state-changing endpoints
+require the operator token.
+"""
+
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -65,6 +75,9 @@ def build_engine(
     cluster=None,
     discord=None,
 ) -> ResearchOrchestrator:
+    # Composition root: wires every subsystem against the same store so all
+    # mutations share one transaction boundary and one event log. The cluster
+    # executor is swapped for a fake when running without a live API.
     store = SqliteStore(settings.database_path)
     runtime = runtime or OpenCodeProcessRuntime(settings)
     if cluster is None:
@@ -97,6 +110,8 @@ def build_engine(
         shared_mount_root=settings.shared_mount_root,
     )
     baked_root = SERVICE_ROOT / 'evaluation-contracts'
+    # Repository-baked contracts are installed at startup so the trusted
+    # catalog is never empty even on a fresh deployment.
     for contract_id, version in (
         ('generic-task-integrity-v1', '1.0.0'),
         ('ml-benchmark-adult-income-v1', '1.0.0'),
@@ -183,6 +198,10 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        # Recovery runs on a background thread while the API is already
+        # serving: restart-crash sweeps (interrupted turns) and in-flight job
+        # reconciliation must not block operator requests. Shutdown stops the
+        # watcher and closes agent runtimes first, then drains the tasks.
         recovery_task = asyncio.create_task(
             asyncio.to_thread(engine.recover),
             name='research-orchestrator-recovery',
@@ -235,6 +254,8 @@ def create_app(
             return
         expected = settings.operator_api_token
         if not expected:
+            # Fail loudly (503) rather than silently allowing requests through
+            # when auth is required but no token is configured.
             raise HTTPException(
                 status_code=503,
                 detail='operator authentication is required but not configured',
@@ -243,12 +264,16 @@ def create_app(
             supplied_token,
             expected,
         ):
+            # compare_digest makes the token comparison constant-time.
             raise HTTPException(
                 status_code=401,
                 detail='valid operator token required',
             )
 
     def map_error(exc: Exception) -> HTTPException:
+        # 404 for missing records, 409 for domain conflicts and integrity
+        # violations (callers may retry after fixing the conflict), 500 for
+        # anything unexpected. Domain errors never leak stack traces.
         if isinstance(exc, RecordNotFound):
             return HTTPException(status_code=404, detail=str(exc))
         if isinstance(
@@ -517,6 +542,8 @@ def create_app(
 
     @app.get('/runs', response_model=RunListResponse)
     def list_runs() -> RunListResponse:
+        # Read endpoints are intentionally unauthenticated (internal-only
+        # network); the operator token gates only state-changing endpoints.
         return RunListResponse(runs=engine.store.list_runs())
 
     @app.get('/runs/{run_id}', response_model=RunRecord)
@@ -630,6 +657,9 @@ def create_app(
             raise map_error(exc) from exc
 
         async def generate() -> AsyncIterator[str]:
+            # Each event is emitted with id: <sequence_number> so a reconnecting
+            # client can resume with after_sequence=<last id>; list_events is
+            # gap-free and ordered, so the cursor never skips or duplicates.
             cursor = after_sequence
             while True:
                 events = engine.store.list_events(
@@ -658,3 +688,6 @@ def create_app(
 
 
 app = create_app()
+# Module import builds the single app instance; uvicorn imports this module
+# and serves the already-constructed app, so startup side effects (schema
+# ensure, contract install) run exactly once per process.

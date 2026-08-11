@@ -1,3 +1,11 @@
+"""Output contracts for run comparison and ranking.
+
+Plain validation-only models with extra='forbid', so an unknown field in a
+bundle or in a response fails validation instead of silently round-tripping
+between the evaluator and its callers. art_retrieval_output is intentionally
+untyped: it is opaque workload-specific JSON passed through verbatim.
+"""
+
 from __future__ import annotations
 
 from typing import Any

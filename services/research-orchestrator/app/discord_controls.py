@@ -1,3 +1,12 @@
+"""Outbound Discord command and button control surface.
+
+Slash commands and component buttons are only ever a UI; every handler funnels
+into engine calls that persist to the authoritative store, and authorization is
+re-checked server-side at the point of execution (never trusted from the
+rendered button). Heavy engine work is pushed to threads so the discord.py
+event loop is never blocked.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -32,6 +41,8 @@ class DiscordControlActor:
 
     @property
     def reviewer(self) -> str:
+        # Human actor identity written into the authoritative event log; the
+        # user id plus display name makes approvals attributable after the fact.
         return f'discord:{self.user_id}:{self.display_name}'
 
 
@@ -48,6 +59,9 @@ class DiscordControlPolicy:
         self.admin_user_ids = frozenset(admin_user_ids)
 
     def is_authorized(self, actor: DiscordControlActor) -> bool:
+        # Controls are guild-bound: an interaction from any other guild (or
+        # with a spoofed role set from DMs) is rejected. Explicit user ids
+        # override the role check so operator accounts survive role churn.
         if actor.guild_id != self.guild_id:
             return False
         if actor.user_id in self.admin_user_ids:
@@ -66,6 +80,8 @@ def execute_discord_action(
     actor: DiscordControlActor,
     reason: str | None = None,
 ) -> None:
+    # Whitelist the operation so a malformed custom_id can never reach the
+    # engine as anything other than approve or reject.
     if operation == 'approve':
         engine.approve_action(
             action_id,
@@ -162,6 +178,8 @@ def execute_discord_task_creation(
     )
     preflight = engine.task_preflight(task)
     if not preflight.ready:
+        # Fail closed: a task that does not compile, have its assets, or pass
+        # checksum verification must never be turned into a run.
         raise ValueError(
             'task compiled but is not ready: '
             + '; '.join(preflight.blocking_issues)
@@ -228,6 +246,8 @@ class DiscordControlGateway:
         self.client = discord.Client(intents=intents)
         self.guild = discord.Object(id=int(guild_id))
         self.tree = app_commands.CommandTree(self.client)
+        # Slash commands are guild-scoped: syncing to the explicit guild object
+        # avoids global sync rate limits and rollout delays.
         self._commands_synced = False
         self._register_commands()
         self.client.on_ready = self._on_ready
@@ -378,6 +398,9 @@ class DiscordControlGateway:
             )
 
         callback.__name__ = f'research_{operation}'
+        # discord.py derives the command signature from the callback's name and
+        # type annotations, so the dynamically generated pause/resume callbacks
+        # must carry real ones even though they are built at runtime.
         callback.__annotations__['interaction'] = discord.Interaction
         self.tree.command(
             name=f'research-{operation}',
@@ -393,6 +416,8 @@ class DiscordControlGateway:
     async def _on_ready(self) -> None:
         if self._commands_synced:
             return
+        # Sync exactly once per process lifetime to keep command registrations
+        # stable across reconnects and avoid hammering the sync endpoint.
         await self.tree.sync(guild=self.guild)
         self._commands_synced = True
 
@@ -474,6 +499,8 @@ class DiscordControlGateway:
         objective: str,
     ) -> None:
         try:
+            # Engine work is synchronous and disk/DB bound; run it in a worker
+            # thread so the gateway event loop stays responsive.
             run = await asyncio.to_thread(
                 execute_discord_run_creation,
                 self.engine,
@@ -565,6 +592,9 @@ class DiscordControlGateway:
         if run_id:
             run = self.engine.store.get_run(run_id)
         else:
+            # Outside a run thread a run id is required; inside the thread the
+            # run is resolved from the thread's own id, so commands issued in
+            # the thread never need a run id.
             run = next(
                 (
                     candidate
@@ -577,6 +607,8 @@ class DiscordControlGateway:
                 raise ValueError(
                     'run_id is required outside a Glasslab research thread'
                 )
+        # Control is scoped to the run's own thread or the configured channel;
+        # a run cannot be paused/cancelled from an unrelated channel.
         if channel_id not in {self.channel_id, run.discord_thread_id}:
             raise ValueError(
                 'control the run from its research thread or the configured '
@@ -831,6 +863,9 @@ class DiscordControlGateway:
                 'You are not authorized to control Glasslab research runs.',
             )
             return
+        # The button row is only a hint: authorization, thread attachment, and
+        # the stored approval status are re-checked here because the engine
+        # never trusts Discord state.
         try:
             action = self.engine.store.get_action(action_id)
             run = self.engine.store.get_run(action.run_id)
@@ -854,6 +889,8 @@ class DiscordControlGateway:
             return
 
         if operation == 'reject':
+            # Rejection requires revision feedback, so collect it through a
+            # modal instead of acting on the click alone.
             await interaction.response.send_modal(
                 RejectActionModal(
                     gateway=self,

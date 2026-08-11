@@ -1,3 +1,11 @@
+"""Request/response contracts for the intake-agent HTTP surface.
+
+All models use extra='forbid' so unknown fields from callers fail validation
+instead of silently round-tripping. The list validators deduplicate and drop
+blank entries so downstream scoring and source-policy checks never see
+duplicates.
+"""
+
 from __future__ import annotations
 
 from typing import Any, Literal

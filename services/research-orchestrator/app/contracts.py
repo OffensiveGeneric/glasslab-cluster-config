@@ -1,3 +1,12 @@
+"""Immutable evaluation-contract resolution and rendering.
+
+Contracts are stored bundles (descriptor, JSON schemas, wrapper Python) pinned
+by a content digest. The resolver only accepts bundles inside configured roots
+whose descriptor references resolve inside the bundle and whose recomputed
+digest equals the pinned checksum, so nothing an agent proposes can change what
+a contract_id/version means after approval.
+"""
+
 from __future__ import annotations
 
 from hashlib import sha256
@@ -17,6 +26,9 @@ class ContractIntegrityError(ValueError):
 
 
 def _safe_contract_relative_path(value: str) -> str:
+    # Descriptor fields must be bundle-relative: absolute paths, the '.' root
+    # and any '..' component are rejected so a descriptor cannot name a file
+    # outside its own directory.
     path = PurePosixPath(value)
     if path.is_absolute() or '..' in path.parts or path.as_posix() in {'', '.'}:
         raise ContractIntegrityError(f'invalid contract-relative path: {value}')
@@ -27,6 +39,9 @@ def compute_contract_digest(root: Path) -> str:
     if root.is_symlink() or not root.is_dir():
         raise ContractIntegrityError(f'contract root is not a real directory: {root}')
     digest = sha256()
+    # Each entry is framed as len(path)+path+len(content)+content so the hash
+    # is unambiguous. contract.sha256 is excluded because it is the checksum
+    # file itself, and __pycache__/*.pyc are generated, non-authoritative bytes.
     files = sorted(
         path
         for path in root.rglob('*')
@@ -41,6 +56,9 @@ def compute_contract_digest(root: Path) -> str:
         raise ContractIntegrityError(f'contract has no content: {root}')
     for path in files:
         if path.is_symlink():
+            # is_file() above follows symlinks, so this explicit check is what
+            # enforces "real files only": the digest covers bytes, not
+            # indirection, and a symlink could point anywhere at hashing time.
             raise ContractIntegrityError(f'contract file cannot be a symlink: {path}')
         relative = path.relative_to(root).as_posix().encode()
         content = path.read_bytes()
@@ -66,6 +84,8 @@ class EvaluationContractResolver:
     def resolve(self, contract_id: str, version: str) -> ResolvedEvaluationContract:
         root = None
         for candidate_root in [self.contract_root, *self.fallback_roots]:
+            # Resolve before comparing so a symlink leading out of the root is
+            # caught by the is_relative_to guard rather than followed.
             candidate = (candidate_root / contract_id / version).resolve()
             if not candidate.is_relative_to(candidate_root):
                 raise ContractIntegrityError(
@@ -87,6 +107,8 @@ class EvaluationContractResolver:
         descriptor = EvaluationContractDescriptor.model_validate_json(
             descriptor_path.read_text()
         )
+        # The path-derived identity must match the descriptor contents so a
+        # bundle cannot be relabeled as a different id/version after sealing.
         if descriptor.contract_id != contract_id or descriptor.version != version:
             raise ContractIntegrityError('contract identity does not match its path')
         for field in (
@@ -103,6 +125,9 @@ class EvaluationContractResolver:
                 )
         expected = digest_path.read_text().strip().lower()
         actual = compute_contract_digest(root)
+        # The pinned checksum must equal the digest recomputed over the live
+        # tree: this is the immutability check that binds the contract. It runs
+        # after descriptor reference checks so both pass or neither does.
         if expected != actual:
             raise ContractIntegrityError(
                 f'contract digest mismatch: expected {expected}, got {actual}'
@@ -153,12 +178,16 @@ def render_read_only_contract_job(
 ) -> dict[str, Any]:
     """Render a review artifact; workflow-api remains the submitting authority."""
     descriptor = contract.descriptor
+    # Bind the rendered job to the digest the run was created against: a spec
+    # referencing a different contract than the one just resolved is refused.
     if spec.evaluation_contract_digest != contract.digest:
         raise ContractIntegrityError('job contract digest does not match resolver')
     if not descriptor.container_image_digest:
         raise ContractIntegrityError(
             'Kubernetes contract rendering requires a digest-pinned contract image'
         )
+    # A digest-pinned image is the only trustworthy contract source in-cluster:
+    # a mutable tag would let a later push change what 'version' means.
     if '@sha256:' not in descriptor.container_image_digest:
         raise ContractIntegrityError('contract image must be pinned by digest')
     wrapper_path = f'/evaluation-contract/{descriptor.execution_wrapper}'

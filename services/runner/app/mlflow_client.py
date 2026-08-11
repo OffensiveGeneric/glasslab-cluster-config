@@ -1,3 +1,10 @@
+"""Optional MLflow integration for the runner.
+
+Provides a null-object-compatible logger: when MLflow is not installed or
+tracking is disabled, all log calls are silent no-ops. The module import is
+lazy-delayed so the runner can load without mlflow in the environment.
+"""
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -16,6 +23,8 @@ class MlflowRunLogger:
         try:
             import mlflow
         except ImportError:
+            # enabled is re-evaluated after a failed import so that start_run
+            # and log_* calls never try to use the still-None self._mlflow.
             self.enabled = False
             return
 

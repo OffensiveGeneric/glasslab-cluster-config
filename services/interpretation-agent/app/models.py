@@ -1,3 +1,11 @@
+"""Closed Pydantic schemas for the interpretation agent.
+
+extra='forbid' on every model means an unknown field fails validation instead of
+silently round-tripping between services. The draft schema is the same closed
+set the model prompt is built against and is enforced again when model output
+is normalized back onto the deterministic baseline.
+"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -21,6 +29,9 @@ class IntakePayload(BaseModel):
     @field_validator('source_refs', 'document_refs', 'workflow_family_candidates', 'notes')
     @classmethod
     def validate_unique_non_empty_lists(cls, value: list[str]) -> list[str]:
+        # Strip and dedupe, then reject rather than silently drop duplicates:
+        # a repeated source reference would corrupt downstream provenance, so
+        # the intake is required to be clean at the boundary.
         cleaned = [item.strip() for item in value if item.strip()]
         deduped = list(dict.fromkeys(cleaned))
         if len(cleaned) != len(deduped):

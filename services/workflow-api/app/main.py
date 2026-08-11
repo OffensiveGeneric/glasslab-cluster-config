@@ -1,3 +1,17 @@
+"""FastAPI application factory and pipeline orchestrator for the workflow API.
+
+This module wires together the full research pipeline: intake, interpretation,
+assessment, design drafting, run creation, and Kubernetes job submission. It is
+the top-level assembly point that receives dependencies (settings, registry,
+store, submitter) via create_app() and exposes them through FastAPI's app.state
+so route modules can access them without dynamic imports or globals.
+
+Route registrations are delegated to sub-modules (autoresearch, execution,
+investigation, literature, schedule, transitions) to keep this file focused on
+orchestration and pipeline assembly. The create_app() factory is the single
+entry point used by the uvicorn server.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -1036,6 +1050,8 @@ def create_run_record(
     run_purpose: str | None = None,
     session_id: str | None = None,
 ) -> RunRecord:
+    # Persistent failure: validation only blocks this request; unknown or
+    # disallowed fields are rejected so the caller can fix their input.
     issues = validate_run_request(request, workflow)
     if issues:
         raise HTTPException(
@@ -1095,6 +1111,9 @@ def create_run_record(
         session_id=session_id,
     )
     artifacts = build_artifact_index(run_id, workflow.expected_artifacts.required, workflow.expected_artifacts.optional)
+    # Touch the session AFTER the run is stored so a crash before submission
+    # doesn't leave a dangling latest_run_id pointer to a run that was never
+    # actually submitted.
     store.save_run(record)
     touch_research_session(store, session_id, latest_run_id=run_id)
     store.save_artifacts(run_id, artifacts)
@@ -1134,6 +1153,10 @@ def filter_run_inputs_for_workflow(inputs: dict[str, Any], workflow: WorkflowReg
 
 
 def resolve_run_requested_models(requested_models: list[str], workflow: WorkflowRegistryEntry) -> list[str]:
+    # Only models listed in the registry are allowed; when none of the
+    # requested models are in the allow-list, fall back to the first
+    # allowed model (not a silent empty list that would fail the
+    # min_length=1 constraint on the manifest).
     allowed = list(workflow.allowed_models or [])
     requested = [str(model).strip() for model in requested_models if str(model).strip()]
     compatible = [model for model in requested if model in allowed]

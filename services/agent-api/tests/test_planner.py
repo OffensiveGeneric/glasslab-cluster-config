@@ -1,3 +1,10 @@
+"""Tests for planner fallback behavior when the model endpoint misbehaves.
+
+Verifies that broken or unavailable model output degrades to the deterministic
+fallback, and that unrelated requests raise PlannerError instead of inventing a
+spec.
+"""
+
 import pytest
 
 from app.planner import PlannerError, plan_request

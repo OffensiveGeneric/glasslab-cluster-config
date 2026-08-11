@@ -1,3 +1,11 @@
+"""Searchable catalog of known machine-learning techniques, models, and workflows.
+
+The catalog is imported from structured technique cards and supports
+name-based search, deduplication by completeness score, and matching
+against intake text. Full-text scoring feeds the technique enrichment
+pipeline that populates interpretation and design records.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone

@@ -1,3 +1,13 @@
+"""FastAPI application and the experiment control loop.
+
+POST /experiments runs the full pipeline: persist an incoming request, call the
+planner to normalize it into a PlannerSpec, validate the spec against the
+registries, submit the bounded Kubernetes Job, and start a background monitor
+thread that polls Job status until it reaches a terminal state. All reads of
+experiment state go through the SQLite StateStore, so responses stay correct
+across requests even while the monitor thread is mutating the record.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -27,6 +37,8 @@ from .tools import list_datasets, list_pipelines, submit_job, validate_spec
 
 
 TERMINAL_STATUSES = {'failed', 'rejected', 'succeeded'}
+# A record in one of these states stops the monitor; 'rejected' covers specs
+# that failed policy validation before any Job was submitted.
 
 
 @dataclass
@@ -148,6 +160,8 @@ def create_app(settings: Settings | None = None, runtime: RuntimeContext | None 
             )
             if settings.auto_monitor_submitted_jobs:
                 _start_monitor(runtime, record.id)
+            # Refresh once before returning so the response reflects the current
+            # Job status even when monitoring is disabled.
             return _refresh_experiment(runtime, record.id)
         except PlannerError as exc:
             store.update_experiment(record.id, status='failed', error_message=str(exc))
@@ -184,6 +198,8 @@ def create_app(settings: Settings | None = None, runtime: RuntimeContext | None 
 
 
 def _start_monitor(runtime: RuntimeContext, experiment_id: str) -> None:
+    # Only one monitor thread may run per experiment; the lock also prevents a
+    # concurrent request from starting a duplicate.
     with runtime.monitor_lock:
         if experiment_id in runtime.active_monitors:
             return
@@ -200,6 +216,9 @@ def _start_monitor(runtime: RuntimeContext, experiment_id: str) -> None:
 
 def _monitor_experiment(runtime: RuntimeContext, experiment_id: str) -> None:
     try:
+        # Poll until the record reaches a terminal state or loses its Job; the
+        # finally clause frees the experiment id so a later request can restart
+        # monitoring for a stale record.
         while True:
             record = _refresh_experiment(runtime, experiment_id)
             if record.status in TERMINAL_STATUSES or record.job_name is None:
@@ -232,6 +251,8 @@ def _refresh_experiment(runtime: RuntimeContext, experiment_id: str) -> Experime
             if payload is not None
             else 'Titanic baseline job succeeded, but no result payload was found.'
         )
+        # A succeeded Job is finalized once here: artifacts, result summary, and
+        # the terminal status are captured together in the record.
         runtime.state_store.update_experiment(
             experiment_id,
             status='succeeded',
@@ -242,6 +263,9 @@ def _refresh_experiment(runtime: RuntimeContext, experiment_id: str) -> Experime
         record = runtime.state_store.get_experiment(experiment_id)
     elif job_status == 'failed':
         artifacts = runtime.job_status_service.list_artifacts(experiment_id)
+        # The failure message is the tail of the runner's pod log (see
+        # read_failure_message); artifacts are still captured so partial
+        # evidence survives for diagnosis.
         error_message = runtime.job_status_service.read_failure_message(record.job_name) or 'Kubernetes Job failed.'
         runtime.state_store.update_experiment(
             experiment_id,
