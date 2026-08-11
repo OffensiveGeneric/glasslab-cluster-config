@@ -1,3 +1,11 @@
+"""Pydantic models shared across the research orchestrator.
+
+All models forbid unknown fields so a misbehaving agent or API client cannot
+smuggle unexpected keys into a record. Validators here normalize and reject
+unsafe model input before any deterministic code executes it; they are the
+first line of defense between agent prose and policy-owned settings.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -74,7 +82,7 @@ class Claim(BaseModel):
         Annotated[
             str,
             Field(
-                pattern=r'^(artifact|git|event|job|contract)://.+$',
+                pattern=r'^(artifact|git|event|job|contract|knowledge)://.+$',
             ),
         ]
     ] = Field(default_factory=list)
@@ -82,7 +90,16 @@ class Claim(BaseModel):
     @field_validator('evidence')
     @classmethod
     def validate_evidence_uris(cls, value: list[str]) -> list[str]:
-        allowed = ('artifact://', 'git://', 'event://', 'job://', 'contract://')
+        # The scheme allowlist mirrors the Field pattern (defense in depth)
+        # and dedups URIs so a claim never cites the same evidence twice.
+        allowed = (
+            'artifact://',
+            'git://',
+            'event://',
+            'job://',
+            'contract://',
+            'knowledge://',
+        )
         for uri in value:
             if not uri.startswith(allowed):
                 raise ValueError(f'unsupported evidence URI: {uri}')
@@ -149,6 +166,8 @@ class EvaluationContractProposal(BaseModel):
 
     @model_validator(mode='after')
     def require_budget_limit(self) -> 'EvaluationContractProposal':
+        # Every budget mode must carry its matching numeric limit so a contract
+        # can never be approved as unbounded.
         limits = {
             'wallclock': self.max_wallclock_minutes,
             'training_exposure': self.max_samples_seen,
@@ -176,6 +195,8 @@ class ProducedFile(BaseModel):
     @field_validator('path')
     @classmethod
     def validate_relative_path(cls, value: str) -> str:
+        # Backslashes are normalized to '/' so a Windows-style '..\\..' cannot
+        # sneak past the path-safety checks, and all stored paths stay POSIX.
         normalized = value.strip().replace('\\', '/')
         parts = normalized.split('/')
         if (
@@ -212,6 +233,9 @@ class TaskAssetProposal(BaseModel):
 
     @model_validator(mode='after')
     def validate_asset_source(self) -> 'TaskAssetProposal':
+        # An asset is either fetched from a network URL or referenced from an
+        # already-ingested approved dataset; both sources would create two
+        # authoritative copies of the same bytes, which is never allowed.
         if self.source_url and self.approved_uri:
             raise ValueError(
                 'asset proposal cannot use both source_url and approved_uri'
@@ -298,6 +322,8 @@ class ExperimentMatrix(BaseModel):
     @field_validator('base_config')
     @classmethod
     def safe_base_config(cls, value: str) -> str:
+        # Same normalization as ProducedFile: reject absolute and '..' paths,
+        # and canonicalize Windows separators before the path is stored.
         normalized = value.strip().replace('\\', '/')
         parts = normalized.split('/')
         if (
@@ -430,9 +456,15 @@ class RunRecord(BaseModel):
     maximum_turns: int
     maximum_runtime_seconds: int
     maximum_parallel_jobs: int
+    # Active-time accounting: active_runtime_seconds is the accumulated base
+    # and active_since marks an open interval (when the run is doing work, not
+    # waiting on a human or paused). Consumers sum both on the fly, so the
+    # stored value is only the last closed portion.
     active_runtime_seconds: float = Field(default=0.0, ge=0.0)
     active_since: datetime | None = None
     resume_state: RunState | None = None
+    # Optimistic-concurrency counter incremented on every run write; writers
+    # must match it (see SqliteStore.replace_run) to avoid lost updates.
     version: int = 1
     created_at: datetime
     updated_at: datetime
@@ -463,6 +495,10 @@ class PolicyClassification(StrEnum):
 
 
 class ApprovalStatus(StrEnum):
+    # Ordering is significant: AUTOMATICALLY_APPROVED and PENDING are the only
+    # non-terminal statuses (approvable); APPROVED means the action may be
+    # executed; REJECTED/DENIED/EXECUTION_FAILED are terminal. An action moves
+    # PENDING -> APPROVED exactly once (see SqliteStore.update_action).
     AUTOMATICALLY_APPROVED = 'automatically_approved'
     PENDING = 'pending'
     APPROVED = 'approved'
@@ -481,6 +517,9 @@ class ActionRecord(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
     policy_classification: PolicyClassification
     approval_status: ApprovalStatus
+    # Honeydew's sign-off for a honeydew_and_human_approval action: the flag
+    # records the first gate while approval_status stays PENDING until the
+    # human gate also passes.
     honeydew_approved: bool = False
     honeydew_review_turn_id: str | None = None
     reviewer: str | None = None
@@ -573,10 +612,149 @@ class EventRecord(BaseModel):
     event_id: str = Field(default_factory=lambda: uuid4().hex)
     sequence_number: int
     run_id: str
+    # Free-form string, not an AgentName: events may come from the
+    # orchestrator, an agent runtime, or external adapters, and the set is
+    # not closed by an enum.
     source: str
     event_type: str
     payload: dict[str, Any] = Field(default_factory=dict)
     timestamp: datetime = Field(default_factory=utc_now)
+
+
+class SourceType(StrEnum):
+    # Knowledge source taxonomy. The split between Honeydew's and Beaker's
+    # sets below is the retrieval access-control boundary. Honeydew always
+    # receives the full set; Beaker is excluded from PAPER. Planned
+    # methodology and verified-result types are not yet wired into the enum.
+    DOCUMENTATION = 'documentation'
+    HANDOFF = 'handoff'
+    EVALUATION_CONTRACT = 'evaluation_contract'
+    TASK_BUNDLE = 'task_bundle'
+    DATASET_METADATA = 'dataset_metadata'
+    PAPER = 'paper'
+    TECHNIQUE_CARD = 'technique_card'
+    RUN_PROTOCOL = 'run_protocol'
+    RUN_REPORT = 'run_report'
+    RUN_ARTIFACT = 'run_artifact'
+    IMPLEMENTATION_FILE = 'implementation_file'
+
+
+HONEYDEW_SOURCE_TYPES = {
+    SourceType.DOCUMENTATION,
+    SourceType.HANDOFF,
+    SourceType.EVALUATION_CONTRACT,
+    SourceType.TASK_BUNDLE,
+    SourceType.DATASET_METADATA,
+    SourceType.PAPER,
+    SourceType.TECHNIQUE_CARD,
+    SourceType.RUN_PROTOCOL,
+    SourceType.RUN_REPORT,
+    SourceType.RUN_ARTIFACT,
+}
+
+BEAKER_SOURCE_TYPES = {
+    SourceType.DOCUMENTATION,
+    SourceType.HANDOFF,
+    SourceType.EVALUATION_CONTRACT,
+    SourceType.TASK_BUNDLE,
+    SourceType.DATASET_METADATA,
+    SourceType.RUN_PROTOCOL,
+    SourceType.RUN_REPORT,
+    SourceType.RUN_ARTIFACT,
+    SourceType.IMPLEMENTATION_FILE,
+}
+
+
+class KnowledgeSource(BaseModel):
+    """A provenance-carrying source in the knowledge index.
+
+    Sources are ingested only from approved, allowlisted roots. The record
+    never stores the source text; it points at the canonical URI and digests
+    the source bytes so derived chunks stay reproducible. ``source_id`` is the
+    stable surrogate used in ``knowledge://<source_id>`` evidence URIs; the
+    digest enables content invalidation and dedup.
+    """
+
+    model_config = ConfigDict(extra='forbid')
+
+    source_id: str = Field(default_factory=lambda: uuid4().hex)
+    source_type: SourceType
+    canonical_uri: str = Field(min_length=1)
+    run_scope: str | None = None
+    # run-approved sources are shareable across approved runs; run-private
+    # sources are visible only to the run they were ingested under.
+    access_policy: Literal['run-private', 'run-approved'] = 'run-approved'
+    source_version: str | None = None
+    digest: str = Field(pattern=r'^[a-f0-9]{64}$')
+    ingested_at: datetime = Field(default_factory=utc_now)
+    index_version: str = 'v1'
+    title: str | None = Field(default=None, max_length=512)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    parent_source_id: str | None = None
+
+    def evidence_uri(self) -> str:
+        return f'knowledge://{self.source_id}'
+
+
+class KnowledgeChunk(BaseModel):
+    """A fixed-size, overlapping fragment of a source ready for FTS indexing."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    chunk_id: str = Field(default_factory=lambda: uuid4().hex)
+    source_id: str = Field(min_length=1)
+    chunk_index: int = Field(ge=0)
+    text: str = Field(min_length=1)
+    digest: str = Field(pattern=r'^[a-f0-9]{64}$')
+    token_count: int = Field(ge=1)
+    index_version: str = 'v1'
+
+
+class ContextPacket(BaseModel):
+    """The durable, versioned context supplied to one agent turn.
+
+    Persisted per turn so a report can cite ``knowledge://context:<packet_id>``
+    as the exact retrieval that grounded a claim. ``ranked_sources`` is the
+    ordered, budget-truncated list; ``exact_text_supplied`` is the literal text
+    prepended to the agent prompt.
+    """
+
+    model_config = ConfigDict(extra='forbid')
+
+    packet_id: str = Field(default_factory=lambda: uuid4().hex)
+    run_id: str
+    agent: AgentName
+    turn_number: int = Field(ge=1)
+    turn_kind: TurnKind
+    query: str
+    index_version: str
+    ranked_sources: list[dict[str, Any]] = Field(default_factory=list)
+    exact_text_supplied: str | None = None
+    token_budget: int = Field(gt=0)
+    created_at: datetime = Field(default_factory=utc_now)
+
+    def evidence_uri(self) -> str:
+        return f'knowledge://context:{self.packet_id}'
+
+
+class KnowledgeSourceRequest(BaseModel):
+    """Typed request to ingest an approved source from an allowlisted root."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    source_type: SourceType
+    path: str = Field(min_length=1)
+    title: str | None = Field(default=None, max_length=512)
+    source_version: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ContextPacketListResponse(BaseModel):
+    packets: list[ContextPacket]
+
+
+class KnowledgeSourceListResponse(BaseModel):
+    sources: list[KnowledgeSource]
 
 
 class RunCreateRequest(BaseModel):
@@ -599,6 +777,8 @@ class RunCreateRequest(BaseModel):
 
     @model_validator(mode='after')
     def require_contract_pair(self) -> 'RunCreateRequest':
+        # Contract ID and version travel together: a version-less reference
+        # would make the resolved contract ambiguous.
         if bool(self.evaluation_contract_id) != bool(self.evaluation_contract_version):
             raise ValueError('evaluation contract ID and version must be supplied together')
         return self

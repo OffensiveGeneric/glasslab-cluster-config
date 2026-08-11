@@ -13,7 +13,12 @@ from .discord_adapter import DisabledDiscordAdapter
 from .engine import ResearchOrchestrator
 from .mock_runtime import ScriptedMockRuntime
 from .policy import ActionPolicy
-from .schemas import ApprovalStatus, RunCreateRequest, RunState
+from .schemas import (
+    ApprovalStatus,
+    RunCreateRequest,
+    RunState,
+    SourceType,
+)
 from .storage import SqliteStore
 from .workspaces import WorkspaceManager
 
@@ -52,6 +57,16 @@ def run_smoke() -> dict[str, object]:
     with tempfile.TemporaryDirectory(prefix='glasslab-orchestrator-smoke-') as raw:
         root = Path(raw)
         repo = _create_repo(root)
+        # Knowledge smoke setup: a small allowlisted directory mirrors the
+        # deployment's approved knowledge root, so ingest -> retrieve -> cite
+        # can be exercised without any external model or cluster.
+        approved = root / 'knowledge-approved'
+        approved.mkdir()
+        (approved / 'technique-card.md').write_text(
+            'Technique card: metric-search over GPU clusters. Prefer cosine '
+            'similarity for embedding retrieval and report verified metrics '
+            'with a fixed seed.'
+        )
         settings = Settings(
             database_path=str(root / 'orchestrator.db'),
             workspace_root=str(root / 'runs'),
@@ -75,6 +90,8 @@ def run_smoke() -> dict[str, object]:
             benchmark_dataset_catalog_path=str(
                 root / 'datasets' / 'catalog.json'
             ),
+            knowledge_root=str(root / 'knowledge'),
+            knowledge_allowlist_roots=[str(approved)],
             one_active_run=True,
             maximum_parallel_jobs=2,
         )
@@ -109,6 +126,14 @@ def run_smoke() -> dict[str, object]:
             cluster=cluster,
             discord=DisabledDiscordAdapter(),
         )
+        source = engine.knowledge.ingest_source(
+            source_type=SourceType.TECHNIQUE_CARD,
+            path=str(approved / 'technique-card.md'),
+            title='GPU metric-search technique card',
+        )
+        # The technique card becomes the approved knowledge the mock agents
+        # will retrieve and cite; its stable knowledge:// evidence URI is
+        # returned in the smoke summary to prove the citable surface.
         run = engine.create_run(
             RunCreateRequest(
                 objective='Prove the complete bounded orchestrator smoke workflow.'
@@ -161,6 +186,25 @@ def run_smoke() -> dict[str, object]:
         )
         run = store.get_run(run.run_id)
         assert run.state == RunState.COMPLETE
+        # Knowledge assertions: every completed run records durable context
+        # packets, at least one turn actually consumed ranked sources, and the
+        # attachment was logged as an event so the packet is citable with a
+        # knowledge://context:<id> evidence URI.
+        packets = store.list_context_packets(run.run_id)
+        assert packets, 'completed smoke run must record context packets'
+        retrieved = [p for p in packets if p.ranked_sources]
+        assert retrieved, 'at least one turn must consume retrieved context'
+        attached_events = [
+            event
+            for event in store.list_events(run.run_id)
+            if event.event_type == 'agent.context_attached'
+        ]
+        assert attached_events, 'context attachment events must be recorded'
+        assert (
+            engine.knowledge.get_context_packet(packets[0].packet_id)
+            .evidence_uri()
+            == f'knowledge://context:{packets[0].packet_id}'
+        )
         return {
             'run_id': run.run_id,
             'state': run.state.value,
@@ -170,6 +214,10 @@ def run_smoke() -> dict[str, object]:
             'events': len(store.list_events(run.run_id)),
             'protocol_path': run.protocol_path,
             'report_path': str(Path(run.reports_path) / 'report.md'),
+            'knowledge_sources': len(store.list_knowledge_sources()),
+            'context_packets': len(packets),
+            'citable_packet': packets[0].evidence_uri(),
+            'ingested_source': source.evidence_uri(),
         }
 
 

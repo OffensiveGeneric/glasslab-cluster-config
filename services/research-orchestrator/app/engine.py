@@ -27,6 +27,7 @@ from .schemas import (
     ApprovalStatus,
     ArtifactRecord,
     ContractCandidateRequest,
+    ContextPacket,
     EvaluationContractDescriptor,
     EvaluationContractProposal,
     ExperimentMatrix,
@@ -50,6 +51,7 @@ from .task_bundles import (
     TaskPreflight,
 )
 from .workspaces import WorkspaceManager
+from .knowledge_manager import KnowledgeManager
 
 
 class WorkflowError(RuntimeError):
@@ -71,6 +73,7 @@ class ResearchOrchestrator:
         discord: DiscordAdapter,
         task_bundles: TaskBundleManager | None = None,
         datasets: DatasetIngestionManager | None = None,
+        knowledge: KnowledgeManager | None = None,
     ) -> None:
         self.settings = settings
         self.store = store
@@ -91,6 +94,19 @@ class ResearchOrchestrator:
             task_asset_root=settings.task_asset_root,
             maximum_asset_bytes=settings.maximum_task_asset_bytes,
             ingested_datasets=self.datasets,
+        )
+        # Knowledge context is additive and failure-tolerant: the manager is
+        # constructed from settings and wired into every turn (see
+        # _get_agent_context). None of it is allowed to block a run.
+        self.knowledge = knowledge or KnowledgeManager(
+            store=store,
+            root=Path(settings.knowledge_root),
+            allowlist_roots=[Path(p) for p in settings.knowledge_allowlist_roots],
+            chunk_size=settings.knowledge_chunk_size,
+            chunk_overlap=settings.knowledge_chunk_overlap,
+            max_source_bytes=settings.knowledge_max_source_bytes,
+            max_results=settings.knowledge_max_results,
+            token_budget=settings.knowledge_token_budget,
         )
         self.policy = policy
         self.cluster = cluster
@@ -516,6 +532,57 @@ class ResearchOrchestrator:
             + '\n\nCurrent bounded task:\n'
         )
 
+    def _get_agent_context(
+        self,
+        *,
+        run_id: str,
+        agent: AgentName,
+        turn_number: int,
+        turn_kind: TurnKind,
+        query: str,
+    ) -> ContextPacket | None:
+        """Retrieve and persist scoped context for an agent turn.
+
+        The fallback to None on any retrieval failure is deliberate: knowledge
+        is additive context, never a hard dependency of a turn. The workflow
+        must not stall an experiment because the index or embedding endpoint
+        is briefly unavailable. Scope is decided inside KnowledgeManager.retrieve
+        from the agent/turn_kind, so this caller cannot widen it.
+        """
+        try:
+            return self.knowledge.retrieve(
+                run_id=run_id,
+                agent=agent.value,
+                turn_number=turn_number,
+                turn_kind=turn_kind.value,
+                query=query,
+                index_version='v1',
+                max_results=self.settings.knowledge_max_results,
+                token_budget=self.settings.knowledge_token_budget,
+                run_scope=run_id,
+                allowed_source_types=None,
+            )
+        except Exception:
+            return None
+
+    def _retrieval_query(
+        self,
+        *,
+        run_id: str,
+        objective: str,
+        prompt: str,
+        turn_kind: TurnKind,
+    ) -> str:
+        """Derive a compact, deterministic retrieval intent for a turn.
+
+        Combining the turn kind, the run objective, and the first 300 chars of
+        the prompt gives stable lexical signal without letting the agent steer
+        the query toward arbitrary material.
+        """
+        objective = (objective or '').strip()
+        prompt_head = ' '.join(prompt.split())[:300].strip()
+        return f'{turn_kind.value} {objective} {prompt_head}'.strip()
+
     def _run_agent_turn(
         self,
         *,
@@ -537,11 +604,12 @@ class ResearchOrchestrator:
             if agent == AgentName.HONEYDEW
             else run.beaker_session_id
         )
+        recovery_context = ''
         if existing_session is None:
-            prompt = self._recovery_context(
+            recovery_context = self._recovery_context(
                 run_id=run_id,
                 agent=agent,
-            ) + prompt
+            )
         session = self.runtime.ensure_session(
             run_id=run_id,
             agent=agent,
@@ -590,6 +658,48 @@ class ResearchOrchestrator:
             },
         )
         try:
+            # Per-turn knowledge retrieval (see KnowledgeManager). The query is
+            # derived from the turn's prompt and objective; the result is scoped
+            # by agent role + turn kind and persisted as a ContextPacket before
+            # the agent sees any of it. Attachment is recorded as an event so
+            # the packet is citable (knowledge://context:<id>) and auditable.
+            context_packet = self._get_agent_context(
+                run_id=run_id,
+                agent=agent,
+                turn_number=run.turn_number + 1,
+                turn_kind=expected_kind,
+                query=self._retrieval_query(
+                    run_id=run_id,
+                    objective=run.objective,
+                    prompt=prompt,
+                    turn_kind=expected_kind,
+                ),
+            )
+            if context_packet and context_packet.exact_text_supplied:
+                prompt = (
+                    context_packet.exact_text_supplied + '\n\n' + prompt
+                )
+                self._event(
+                    run_id,
+                    source='orchestrator',
+                    event_type='agent.context_attached',
+                    payload={
+                        'turn_id': turn.turn_id,
+                        'packet_id': context_packet.packet_id,
+                        'agent': agent.value,
+                        'turn_kind': expected_kind.value,
+                        'ranked_count': len(context_packet.ranked_sources),
+                        'token_count': (
+                            context_packet.exact_text_supplied
+                            and len(
+                                context_packet.exact_text_supplied.split()
+                            )
+                            or 0
+                        ),
+                    },
+                )
+            if recovery_context:
+                prompt = recovery_context + prompt
             result, message_id = self.runtime.run_turn(
                 run_id=run_id,
                 agent=agent,
