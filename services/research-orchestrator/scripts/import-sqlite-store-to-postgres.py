@@ -9,6 +9,13 @@ from pathlib import Path
 import sqlite3
 import sys
 
+# When invoked as ``python scripts/...``, Python puts ``scripts`` rather than
+# the service root on sys.path. Resolve the adjacent app package explicitly so
+# the image-bundled operational tool works from any current directory.
+SERVICE_ROOT = Path(__file__).resolve().parents[1]
+if str(SERVICE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SERVICE_ROOT))
+
 from app.postgres_store import PostgresStore
 from psycopg.types.json import Jsonb
 
