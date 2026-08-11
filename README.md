@@ -95,6 +95,8 @@ projection. OpenCode remains internal to Honeydew and Beaker.
 
 If you want the current source of truth:
 
+- [HARDWARE-INVENTORY.md](HARDWARE-INVENTORY.md) for the live LAN hardware,
+  storage, GPU, and managed-access inventory
 - [AGENTS.md](AGENTS.md) for the concise coding-agent and contributor handoff
 - [HANDOFF.md](HANDOFF.md) for the summarized current implementation checkpoint
 - [TODO.md](TODO.md) for the prioritized index into the GitHub Issues work queue
