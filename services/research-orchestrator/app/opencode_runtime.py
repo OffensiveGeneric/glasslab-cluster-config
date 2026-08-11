@@ -318,26 +318,16 @@ class OpenCodeProcessRuntime(AgentRuntime):
         opencode_config_root.mkdir(parents=True, exist_ok=True)
         for path in (data_root, cache_root, state_root, home_root):
             path.mkdir(parents=True, exist_ok=True)
+        provider_id = self.settings.agent_model_provider_id
+        model_name = self.settings.effective_agent_model_name
         config = {
             '$schema': 'https://opencode.ai/config.json',
-            'model': f'exo/{self.settings.qwen_model_name}',
-            'small_model': f'exo/{self.settings.qwen_model_name}',
+            'model': f'{provider_id}/{model_name}',
+            'small_model': f'{provider_id}/{model_name}',
             'default_agent': 'build',
             'share': 'disabled',
             'autoupdate': False,
             'lsp': False,
-            'provider': {
-                'exo': {
-                    'npm': '@ai-sdk/openai-compatible',
-                    'name': 'Glasslab Exo',
-                    'options': {'baseURL': self.settings.qwen_base_url},
-                    'models': {
-                        self.settings.qwen_model_name: {
-                            'name': self.settings.qwen_model_name,
-                        }
-                    },
-                }
-            },
             'permission': self._permissions(agent),
             'agent': {
                 'build': {
@@ -347,6 +337,19 @@ class OpenCodeProcessRuntime(AgentRuntime):
                 'plan': {'disable': True},
             },
         }
+        if provider_id == 'exo':
+            config['provider'] = {
+                'exo': {
+                    'npm': '@ai-sdk/openai-compatible',
+                    'name': 'Glasslab Exo',
+                    'options': {'baseURL': self.settings.qwen_base_url},
+                    'models': {
+                        model_name: {
+                            'name': model_name,
+                        }
+                    },
+                }
+            }
         (opencode_config_root / 'opencode.json').write_text(
             json.dumps(config, indent=2, sort_keys=True) + '\n'
         )
@@ -539,8 +542,10 @@ class OpenCodeProcessRuntime(AgentRuntime):
                 ):
                     payload = {
                         'model': {
-                            'providerID': 'exo',
-                            'modelID': self.settings.qwen_model_name,
+                            'providerID': self.settings.agent_model_provider_id,
+                            'modelID': (
+                                self.settings.effective_agent_model_name
+                            ),
                         },
                         'agent': 'build',
                         'system': self._system_prompts[agent],
