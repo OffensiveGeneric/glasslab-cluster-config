@@ -24,6 +24,20 @@ class Settings(BaseSettings):
     database_path: str = '/tmp/glasslab-research-orchestrator/orchestrator.db'
     workspace_root: str = '/tmp/glasslab-research-orchestrator/runs'
     artifact_root: str = '/tmp/glasslab-research-orchestrator/artifacts'
+    # Knowledge store: chunk sizing and the per-turn retrieval budget bound
+    # context cost regardless of model or content; the allowlist roots are the
+    # only places ingestion may read from (in production these are the mounted
+    # cluster-config docs and evaluation-contract directories).
+    knowledge_root: str = '/tmp/glasslab-research-orchestrator/knowledge'
+    knowledge_chunk_size: int = 1500
+    knowledge_chunk_overlap: int = 150
+    knowledge_max_source_bytes: int = 2 * 1024 * 1024
+    knowledge_max_results: int = 10
+    knowledge_token_budget: int = 4000
+    knowledge_allowlist_roots: Annotated[list[str], NoDecode] = [
+        '/workspace/cluster-config/docs',
+        '/workspace/cluster-config/services/research-orchestrator/evaluation-contracts',
+    ]
     evidence_excerpt_max_bytes: int = 32 * 1024
     approved_repo_path: str = '/workspace/cluster-config'
     approved_repo_ref: str = 'main'
