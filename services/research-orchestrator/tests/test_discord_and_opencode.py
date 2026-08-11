@@ -804,6 +804,30 @@ def test_opencode_writable_runtime_directories_are_per_agent(
     assert config['permission']['task'] == 'deny'
     assert config['permission']['websearch'] == 'deny'
     assert config['permission']['external_directory'] == 'deny'
+    assert config['model'].startswith('exo/')
+    assert 'exo' in config['provider']
+
+
+def test_opencode_uses_builtin_zen_provider_for_big_pickle(tmp_path) -> None:
+    runtime = OpenCodeProcessRuntime(
+        Settings(
+            agent_model_provider_id='opencode',
+            agent_model_name='big-pickle',
+        )
+    )
+    workspace = tmp_path / 'run-1' / 'beaker-worktree'
+    workspace.mkdir(parents=True)
+
+    roots = runtime._write_runtime_config(
+        run_id='run-1',
+        agent=AgentName.BEAKER,
+        workspace=workspace,
+    )
+
+    config = json.loads((roots[0] / 'opencode' / 'opencode.json').read_text())
+    assert config['model'] == 'opencode/big-pickle'
+    assert config['small_model'] == 'opencode/big-pickle'
+    assert 'provider' not in config
 
 
 def test_opencode_repairs_invalid_structured_output(
@@ -869,6 +893,10 @@ def test_opencode_repairs_invalid_structured_output(
     assert message_id == 'message-repaired'
     assert len(requests) == 2
     repair_payload = json.loads(requests[1].content)
+    assert repair_payload['model'] == {
+        'providerID': 'exo',
+        'modelID': 'mlx-community/Qwen3-Coder-Next-4bit',
+    }
     assert 'Correct only the structured result' in (
         repair_payload['parts'][0]['text']
     )

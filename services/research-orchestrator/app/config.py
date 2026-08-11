@@ -60,6 +60,8 @@ class Settings(BaseSettings):
     opencode_turn_timeout_seconds: float = 1800.0
     opencode_repeated_tool_limit: int = 6
     opencode_structured_repair_attempts: int = 1
+    agent_model_provider_id: str = 'exo'
+    agent_model_name: str | None = None
     qwen_base_url: str = 'http://192.168.1.17:52415/v1'
     qwen_model_name: str = 'mlx-community/Qwen3-Coder-Next-4bit'
     opencode_runtime_image: str = (
@@ -98,6 +100,10 @@ class Settings(BaseSettings):
     discord_controls_enabled: bool = False
     discord_admin_role_id: str | None = None
     discord_admin_user_ids: Annotated[list[str], NoDecode] = []
+
+    @property
+    def effective_agent_model_name(self) -> str:
+        return self.agent_model_name or self.qwen_model_name
 
     @field_validator('permitted_job_images', mode='before')
     @classmethod
