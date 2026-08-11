@@ -54,8 +54,10 @@ from .storage import SqliteStore
 SECRET_PATTERNS = (
     re.compile(r'password', re.IGNORECASE),
     re.compile(r'api[_-]?key', re.IGNORECASE),
-    # token/bearer/secret appear in ML text; require credential-like context
-    re.compile(r'(bearer|api|auth|access)\s+token', re.IGNORECASE),
+    # token/bearer/secret appear in ML text; require credential-assignment
+    # context. Bare "bearer token" / "api token" as concept descriptions
+    # are not rejected; only explicit value assignment or long token-format
+    # strings trigger the filter.
     re.compile(r'token[\"\']?\s*[:=]\s*\S+', re.IGNORECASE),
     re.compile(r'(client|api|auth|private|access)\s+secret', re.IGNORECASE),
     re.compile(r'secret\s*(key|token|id)', re.IGNORECASE),
@@ -101,6 +103,8 @@ def digest_text(text: str) -> str:
 
 
 def estimate_tokens(text: str) -> int:
+    # The floor of 1 keeps empty or whitespace-only text from counting as
+    # zero-cost in the token budget; a free chunk would never be trimmed.
     return max(1, len(text.split()))
 
 
@@ -192,6 +196,10 @@ class KnowledgeManager:
         emit_event_for_run: str | None = None,
     ) -> KnowledgeSource:
         """Ingest in-memory text (used only for run-scoped approved artifacts)."""
+        # Unlike ingest_source, the bytes are caller-supplied rather than read
+        # from an allowlisted root, so the default is run-private: only the run
+        # it was ingested under may retrieve it (approved sources are
+        # shareable across approved runs by default).
         if self._text_contains_secrets(text):
             raise KnowledgeError('refusing to index suspected secret material')
         digest = digest_text(text)
@@ -245,6 +253,13 @@ class KnowledgeManager:
         # replace_knowledge_chunks swaps the chunk set in one transaction so a
         # re-ingest/rebuild is atomic from a reader's perspective.
         self.store.replace_knowledge_chunks(saved.source_id, chunks)
+        # Store the normalized text so rebuild() can reproduce the exact same
+        # chunks without reconstructing from overlapping stored fragments.
+        # Without this, successive rebuilds compound because joining
+        # overlapping chunks and re-normalizing grows the text.
+        normalized = re.sub(r'\s+', ' ', text).strip()
+        saved.metadata['_normalized_text'] = normalized
+        self.store.save_knowledge_source(saved)
         if emit_event_for_run is not None:
             self.store.append_event(
                 run_id=emit_event_for_run,
@@ -283,14 +298,17 @@ class KnowledgeManager:
         return reindexed
 
     def _rechunk_source(self, source: KnowledgeSource) -> list[KnowledgeChunk]:
+        # Prefer the stored normalized text so rebuilds are idempotent — the
+        # exact same text is fed to the chunker each time. For old sources
+        # ingested before this became the default, fall back to reconstructing
+        # from stored chunks by deduplicating overlap.
+        normalized: str | None = source.metadata.get('_normalized_text')
+        if normalized:
+            return self._build_chunks(source, normalized)
         stored = self.store.list_knowledge_chunks(source.source_id)
         if not stored:
             return []
-        # Reconstruct the original normalized text by removing the overlap
-        # from each chunk after the first. The chunker produces windows with
-        # up to chunk_overlap characters of overlap; word-boundary rounding
-        # may vary the exact amount. Simply joining chunks duplicates
-        # overlapping content, which compounds each rebuild.
+        # Reconstruct by deduplicating overlap between consecutive chunks.
         parts = [stored[0].text]
         for i in range(1, len(stored)):
             curr = stored[i].text
@@ -303,7 +321,6 @@ class KnowledgeManager:
             if overlap > 0:
                 parts.append(curr[overlap:])
             else:
-                # No overlap detected (unlikely, but safe fallback)
                 parts.append(curr)
         text = ' '.join(p for p in parts if p)
         return self._build_chunks(source, text)
@@ -668,6 +685,8 @@ class KnowledgeManager:
         accepted: list[dict[str, Any]] = []
         for entry in entries:
             tokens = entry['token_count']
+            # Entries are admitted whole or not at all: an entry too large for
+            # the remaining budget is dropped rather than truncated mid-evidence.
             if total + tokens > token_budget:
                 continue
             accepted.append(entry)

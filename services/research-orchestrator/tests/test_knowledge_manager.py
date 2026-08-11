@@ -1,3 +1,11 @@
+"""KnowledgeManager unit behavior: ingest, access control, and retrieval.
+
+Covers allowlist/provenance/secret rules for ingestion, event access-control
+and artifact-uri extraction, digest-based invalidation and dedup, run-scoped
+retrieval with agent-role and source-type filtering, token-budget caps, and
+the untrusted-data framing that blunts retrieval prompt injection.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -219,7 +227,7 @@ def test_ingest_source_rejects_secret_paths_and_content(tmp_path: Path) -> None:
             path=str(secret_path),
         )
     secret_content = approved / 'notes.md'
-    secret_content.write_text('the bearer token is abcdef123456\n')
+    secret_content.write_text('bearer token = abcdef1234567890abcde\n')
     with pytest.raises(KnowledgeError, match='secret'):
         manager.ingest_source(
             source_type=SourceType.DOCUMENTATION,
@@ -499,6 +507,9 @@ def test_agent_role_filtering_scopes_sources(tmp_path: Path) -> None:
 
 
 def test_retrieved_text_is_marked_as_untrusted_data(tmp_path: Path) -> None:
+    # A source containing prompt-injection instructions must still be
+    # retrievable, but framed as untrusted data so the agent does not treat
+    # it as instructions.
     manager, store = _manager(tmp_path)
     run_id = 'run-1'
     _create_run(store, run_id)
@@ -579,3 +590,141 @@ def test_retrieval_quality_fixture_prefers_relevant_source(tmp_path: Path) -> No
     assert packet.exact_text_supplied is not None
     assert 'cosine similarity' in packet.exact_text_supplied
     assert 'sandwiches' not in packet.exact_text_supplied
+
+
+# ------------------------------------------------------------------ #
+# Regression tests for review findings
+# ------------------------------------------------------------------ #
+
+
+def test_ml_text_with_token_is_not_rejected(tmp_path: Path) -> None:
+    manager, _ = _manager(tmp_path)
+    approved = tmp_path / 'approved'
+    approved.mkdir(parents=True)
+    safe_text = approved / 'ml-paper.md'
+    safe_text.write_text(
+        'A transformer token is an input unit. '
+        'The token embedding layer projects each token into a dense vector. '
+        'Bearer bonds are unrelated financial instruments. '
+        'The secret ingredient is the attention mechanism.'
+    )
+    # Must NOT raise — these are legitimate ML terms, not credentials.
+    manager.ingest_source(
+        source_type=SourceType.DOCUMENTATION,
+        path=str(safe_text),
+    )
+
+
+def test_ml_bearer_and_secret_prose_is_not_rejected(tmp_path: Path) -> None:
+    manager, _ = _manager(tmp_path)
+    approved = tmp_path / 'approved'
+    approved.mkdir(parents=True)
+    safe_text = approved / 'survey.md'
+    safe_text.write_text(
+        'Message bearer services deliver push notifications. '
+        'Shamir secret sharing splits a secret among multiple parties. '
+        'The cloud bearer token model is widely deployed. '
+        'OAuth access tokens provide delegated authorization. '
+        'API token rotation is a best practice for service accounts.'
+    )
+    manager.ingest_source(
+        source_type=SourceType.DOCUMENTATION,
+        path=str(safe_text),
+    )
+
+
+def test_credential_assignment_still_rejected(tmp_path: Path) -> None:
+    manager, _ = _manager(tmp_path)
+    approved = tmp_path / 'approved'
+    approved.mkdir(parents=True)
+    secret_text = approved / 'config.md'
+    secret_text.write_text('bearer token = abcdef1234567890abcde\n')
+    with pytest.raises(KnowledgeError, match='secret'):
+        manager.ingest_source(
+            source_type=SourceType.DOCUMENTATION,
+            path=str(secret_text),
+        )
+    secret_text.write_text('  "secret": "abcdef1234567890"  \n')
+    with pytest.raises(KnowledgeError, match='secret'):
+        manager.ingest_source(
+            source_type=SourceType.DOCUMENTATION,
+            path=str(secret_text),
+        )
+
+
+def test_rebuild_produces_stable_chunk_count(tmp_path: Path) -> None:
+    manager, store = _manager(tmp_path)
+    approved = tmp_path / 'approved'
+    approved.mkdir(parents=True)
+    long_text = approved / 'long.md'
+    # Write enough text to produce multiple overlapping chunks with
+    # chunk_size=200 and chunk_overlap=30.
+    paragraph = (
+        'The quick brown fox jumps over the lazy dog. ' * 10
+        + 'She sells seashells by the seashore. ' * 10
+        + 'How much wood would a woodchuck chuck. ' * 10
+    )
+    long_text.write_text(paragraph)
+    source = manager.ingest_source(
+        source_type=SourceType.DOCUMENTATION,
+        path=str(long_text),
+    )
+    chunks_v1 = store.list_knowledge_chunks(source.source_id)
+    assert len(chunks_v1) > 1, 'text must produce multiple chunks'
+
+    # Rebuild once — chunk count must be stable
+    manager.rebuild_index()
+    chunks_v2 = store.list_knowledge_chunks(source.source_id)
+    assert len(chunks_v2) == len(chunks_v1), (
+        f'rebuild changed chunk count: {len(chunks_v1)} -> {len(chunks_v2)}'
+    )
+
+    # Rebuild again — still stable (no compounding)
+    manager.rebuild_index()
+    chunks_v3 = store.list_knowledge_chunks(source.source_id)
+    assert len(chunks_v3) == len(chunks_v1), (
+        f'second rebuild changed chunk count: {len(chunks_v1)} -> {len(chunks_v3)}'
+    )
+
+    # Individual chunk lengths must also be stable (not growing)
+    for i in range(len(chunks_v1)):
+        assert len(chunks_v3[i].text) == len(chunks_v1[i].text), (
+            f'chunk {i} length changed: '
+            f'{len(chunks_v1[i].text)} -> {len(chunks_v3[i].text)}'
+        )
+
+
+def test_fts_source_filtering_not_crowded_out(tmp_path: Path) -> None:
+    manager, store = _manager(tmp_path)
+    approved = tmp_path / 'approved'
+    approved.mkdir(parents=True)
+
+    # Source A: high-BM25 match for "accuracy" but will be excluded
+    noisy = approved / 'noisy.md'
+    noisy.write_text(
+        'accuracy accuracy accuracy accuracy accuracy accuracy '
+        'accuracy accuracy accuracy accuracy accuracy accuracy '
+    )
+    _ = manager.ingest_source(
+        source_type=SourceType.DOCUMENTATION,
+        path=str(noisy),
+    )
+
+    # Source B: a weaker match, but this is the one we want
+    targeted = approved / 'targeted.md'
+    targeted.write_text('The model achieved good accuracy on the test set.')
+    target_source = manager.ingest_source(
+        source_type=SourceType.DOCUMENTATION,
+        path=str(targeted),
+    )
+
+    # Search with only source B's ID — must return results even though
+    # source A has higher BM25 rank.
+    results = store.search_knowledge_chunks(
+        'accuracy',
+        source_ids=[target_source.source_id],
+        limit=10,
+    )
+    assert len(results) == 1
+    assert results[0]['source_id'] == target_source.source_id
+    assert 'test set' in results[0]['text']

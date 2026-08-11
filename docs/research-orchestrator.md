@@ -233,9 +233,9 @@ path-allowlisted ingest operation.
 
 Knowledge sources are ingested with an explicit `SourceType`:
 
-- `documentation`, `technique_card`, `evaluation_contract`, `run_protocol`,
-  `run_report`, `run_artifact`, `implementation_file`, `task_bundle`,
-  `dataset_metadata`, `handoff`, `policy`, `methodology`, `verified_result`
+- `documentation`, `handoff`, `paper`, `technique_card`, `evaluation_contract`,
+  `run_protocol`, `run_report`, `run_artifact`, `implementation_file`,
+  `task_bundle`, `dataset_metadata`
 
 Every source records a SHA-256 digest, a canonical URI, a version, and an
 evidence URI of the form `knowledge://<source_id>`. Re-ingesting identical
