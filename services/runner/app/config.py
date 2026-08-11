@@ -1,3 +1,11 @@
+"""Runner configuration model loaded from environment and manifest.
+
+Settings are instantiated from GLASSLAB_RUNNER_*-prefixed env vars with sensible
+defaults for local dev. The parsed_spec property merges the frozen run spec with
+manifest-side technique context so GPU experiment scoring can tolerate
+spec/manifest drift produced by the orchestrator.
+"""
+
 from __future__ import annotations
 
 import json
@@ -43,6 +51,8 @@ class Settings(BaseSettings):
 
         # Prefer the explicit runner spec, but backfill bounded technique context
         # from manifest inputs so scoring survives spec/manifest drift.
+        # Only the gpu_experiment pipeline needs technique-level fields; other
+        # pipelines pass through the spec unchanged.
         if spec.get('pipeline') == 'gpu_experiment' and isinstance(manifest, dict):
             inputs = manifest.get('inputs', {})
             if isinstance(inputs, dict):
@@ -54,6 +64,8 @@ class Settings(BaseSettings):
                     'technique_task_type',
                     'technique_metrics',
                 ):
+                    # Only backfill: if the spec already provides an explicit
+                    # non-empty value for a key, keep it (spec wins over manifest).
                     if key in inputs and inputs.get(key) not in (None, '', []):
                         merged[key] = inputs[key]
                 return merged

@@ -1,3 +1,13 @@
+"""Kubernetes Job submission and lifecycle observation.
+
+Translates validated RunManifest records into Kubernetes Job specs with
+appropriate volumes, resource requests, security contexts, and evaluation
+contract bindings. The submitter is the only code path that touches the
+Kubernetes API; all callers interact through the abstract submit_run /
+get_live_status / get_live_logs interface. Supports null mode for local
+development without a cluster.
+"""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -84,6 +94,10 @@ def resolve_evaluation_contract(
     manifest: RunManifest,
     settings: Settings,
 ) -> dict[str, str] | None:
+    # Evaluation contracts are immutable and digest-pinned. The workflow can
+    # request a specific (contract_id, version, digest) triple, but only the
+    # trusted catalog (static env + optional JSON file) is consulted; the
+    # workflow never specifies the contract path or image directly.
     requested = manifest.config_payload.get('evaluation_contract')
     if requested is None:
         return None
@@ -542,6 +556,7 @@ class KubernetesJobSubmitter(JobSubmitter):
                 requests=manifest.resource_requests or None,
                 limits=manifest.resource_limits or None,
             ),
+            # Container runs unprivileged: no escalation, no capabilities.
             security_context=self.client.V1SecurityContext(
                 allow_privilege_escalation=False,
                 capabilities=self.client.V1Capabilities(drop=['ALL']),
@@ -627,6 +642,8 @@ class KubernetesJobSubmitter(JobSubmitter):
             priority_class_name=priority_class_name or None,
             runtime_class_name=runtime_class_name,
             node_selector=manifest.node_selector or None,
+            # RuntimeDefault seccomp profile: the workload cannot install
+            # custom seccomp filters or bypass the pod-level sandbox.
             security_context=self.client.V1PodSecurityContext(
                 seccomp_profile=self.client.V1SeccompProfile(type='RuntimeDefault'),
             ),

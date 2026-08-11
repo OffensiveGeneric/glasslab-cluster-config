@@ -1,3 +1,12 @@
+"""Policy validation of a PlannerSpec beyond the Pydantic schema.
+
+The schema guarantees shape and allowed literal values; this pass enforces the
+cross-field and registry rules the planner prompt can drift from: keys match
+the whitelist, models are supported by the pipeline, and gpu-small only pairs
+with GPU-capable models. The result is a ValidationResult that decides whether
+an experiment becomes 'validated' or 'rejected'.
+"""
+
 from __future__ import annotations
 
 from pydantic import ValidationError
@@ -79,4 +88,6 @@ def _format_validation_errors(exc: ValidationError) -> list[str]:
 
 
 def _dedupe(errors: list[str]) -> list[str]:
+    # The same message can arise from both the schema pass and the registry
+    # pass; keep the first occurrence and preserve order.
     return list(dict.fromkeys(errors))

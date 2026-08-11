@@ -1,3 +1,14 @@
+"""Validate and build Interpretation records from external agent draft responses.
+
+Call the interpretation agent for an intake, validate the returned draft
+against the workflow registry (no unapproved workflow IDs, required string
+fields present), merge catalog-enriched technique knowledge with the agent's
+recommendations, and construct the authoritative Interpretation record.
+The interpretation_source field tracks whether the agent returned a primary
+result, fell back to a secondary model backend, or fell back entirely to
+deterministic inference.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -248,6 +259,8 @@ def call_interpretation_agent(
         interpretation_source = 'agent-primary'
         if any('used fallback interpretation backend' in warning for warning in warnings):
             interpretation_source = 'agent-fallback'
+        # All-backends-failed fallback: the caller should probably re-run
+        # with deterministic inference instead of an empty agent result.
         if any('all model backends failed' in warning for warning in warnings):
             interpretation_source = 'agent-deterministic'
         validated_draft = validate_interpretation_agent_draft(draft, intake, registry)

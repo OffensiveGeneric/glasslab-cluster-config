@@ -1,3 +1,15 @@
+"""HTTP routes for the structured scientific investigation lifecycle.
+
+Models a formal hypothesis-driven workflow: create an investigation with
+research question and hypotheses, add plans with bounded execution specs,
+approve a plan (freezing its snapshot), launch runs against the approved plan
+with dependency ordering and data-access scoping, and record evidence-backed
+claims. Confirmatory investigations freeze hypotheses after plan approval and
+reject plan replacement after execution begins. Claim recording validates the
+full evidence chain: run membership, terminal state, artifact digest integrity,
+and evaluator contract conformance.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -425,6 +437,8 @@ def register_investigation_routes(
             and active_approval.plan_id == plan.plan_id
             and active_approval.plan_sha256 == plan_sha256
         ):
+            # Re-approving an unchanged plan is a no-op; the existing
+            # approval record is the authoritative snapshot.
             return investigation
 
         now = datetime.now(timezone.utc)
@@ -701,6 +715,8 @@ def register_investigation_routes(
                 or not artifact_path.is_file()
                 or file_sha256(artifact_path) != artifact_entry.sha256
             ):
+                # The ingested digest is the trust root; any on-disk
+                # mismatch means the evidence chain is broken.
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail=(

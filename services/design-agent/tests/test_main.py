@@ -1,3 +1,10 @@
+"""Behavioral tests for the design agent.
+
+The service is loaded from its source files under a synthetic package name
+rather than imported as `app`, so these tests run regardless of the image layout
+the service is deployed in.
+"""
+
 import sys
 import types
 from importlib.util import module_from_spec, spec_from_file_location
@@ -11,6 +18,9 @@ PACKAGE_NAME = 'design_agent_app'
 
 
 def load_package_module(module_name: str, path: Path):
+    # Executes the file under the synthetic package name so relative imports
+    # (`from .models import ...`) resolve; registering in sys.modules keeps the
+    # module identity single even though pytest imports these files directly.
     spec = spec_from_file_location(module_name, path)
     assert spec is not None
     assert spec.loader is not None
@@ -33,6 +43,9 @@ DesignRequest = models_module.DesignRequest
 
 
 def build_request() -> DesignRequest:
+    # titanic is named in raw_request, so the tabular branch resolves all four
+    # dataset inputs; the notes use the exact 'Literature state: ' and
+    # 'Bounded experiment ideas: ' prefixes the draft propagates.
     return DesignRequest(
         request_id='design-1',
         intake={

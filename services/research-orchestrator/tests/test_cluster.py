@@ -1,3 +1,11 @@
+"""WorkflowApiClusterExecutor submission behavior over a mocked HTTP client.
+
+Covers which fields the submission payload carries for research-workspace
+workloads (fixed registry image, task/source bundles) versus GPU-training
+workloads (validated custom image), and that workflow-api rejection detail is
+preserved verbatim as ClusterExecutorError.
+"""
+
 from __future__ import annotations
 
 import httpx
@@ -51,6 +59,8 @@ def _executor(handler) -> WorkflowApiClusterExecutor:
         workload_id='gpu-experiment',
         experiment_type='gpu-training-job',
     )
+    # Swap the real HTTP client for an in-memory MockTransport so the tests
+    # exercise the exact payload and error mapping without a live workflow-api.
     transport = httpx.MockTransport(handler)
     executor._client = lambda: httpx.Client(  # type: ignore[method-assign]
         base_url='http://workflow-api.test',
@@ -60,6 +70,8 @@ def _executor(handler) -> WorkflowApiClusterExecutor:
 
 
 def test_workspace_submission_defers_fixed_image_to_workflow_registry() -> None:
+    # Research-workspace jobs must NOT send a custom image_ref: the runner
+    # image is pinned by the workload registry, so omitting it is the point.
     captured: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:

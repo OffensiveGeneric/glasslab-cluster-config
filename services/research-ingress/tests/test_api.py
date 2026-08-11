@@ -1,3 +1,11 @@
+"""Tests for the research-ingress inbound surface.
+
+Verifies /healthz and that /inbound relays a message plus a
+channel-namespaced sender identity to the command router, then returns either
+the deterministic router response or the deterministic unsupported-turn text.
+The real network requester is monkeypatched out so no test leaves the process.
+"""
+
 from fastapi.testclient import TestClient
 
 from app.main import Settings, create_app
@@ -23,6 +31,8 @@ def test_inbound_handles_deterministic_command() -> None:
 
     import app.main as main_module
 
+    # Swap the real urllib requester for a scripted fake, restoring it in a
+    # finally so a failed assertion never leaks the stub into other tests.
     original = main_module._request_router
     main_module._request_router = fake_router
     try:

@@ -1,3 +1,13 @@
+"""Durable SQLite store for the research orchestrator.
+
+The store is the single source of truth behind the append-only event log.
+Every run state change, action approval, and job write is emitted as an
+event in the same transaction that performs the write, so the event log and
+the relational rows can never diverge. Records are stored as one JSON
+payload column plus a few typed columns that mirror only the fields needed
+for queries, ordering, and optimistic-versioning guards.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -41,6 +51,8 @@ class ConcurrencyConflict(RuntimeError):
 
 
 def _dump(record: Any) -> str:
+    # The full validated record is stored as JSON in the payload column;
+    # typed columns exist only where the SQL needs to query, filter, or order.
     return record.model_dump_json()
 
 
@@ -55,18 +67,29 @@ class SqliteStore:
         self._ensure_schema()
 
     def _connect(self) -> sqlite3.Connection:
+        # isolation_level=None puts the connection in autocommit mode so the
+        # transaction() context manager controls BEGIN/COMMIT explicitly.
         connection = sqlite3.connect(
             self.database_path,
             timeout=30,
             isolation_level=None,
         )
         connection.row_factory = sqlite3.Row
+        # Enforced per-connection because PRAGMA foreign_keys is not a
+        # persistent database property in SQLite.
         connection.execute('PRAGMA foreign_keys=ON')
+        # Backstop for cross-process contention; the in-process RLock already
+        # serializes writes within one replica.
         connection.execute('PRAGMA busy_timeout=30000')
         return connection
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
+        # BEGIN IMMEDIATE takes the write lock up front: read-then-write
+        # methods (sequence MAX+1, the one-active-run check, run version
+        # bumps) never upgrade a read lock to a write lock mid-transaction,
+        # which is what avoids deadlocks and makes those check-then-act
+        # patterns atomic under the RLock.
         with self._lock:
             connection = self._connect()
             try:
@@ -81,7 +104,12 @@ class SqliteStore:
 
     def _ensure_schema(self) -> None:
         with self._connect() as connection:
+            # WAL is persistent for the database file; it lets the read-only
+            # API connections proceed while a writer holds the transaction.
             connection.execute('PRAGMA journal_mode=WAL')
+            # Additive, idempotent DDL doubles as the migration mechanism:
+            # every CREATE/INDEX uses IF NOT EXISTS, so a new deployment
+            # upgrades an existing file by creating only the missing objects.
             connection.executescript(
                 '''
                 CREATE TABLE IF NOT EXISTS runs (
@@ -153,6 +181,9 @@ class SqliteStore:
                     event_type TEXT NOT NULL,
                     payload TEXT NOT NULL,
                     timestamp TEXT NOT NULL,
+                    -- Sequence numbers must be gap-free and increasing per
+                    -- run; they are allocated under BEGIN IMMEDIATE so the
+                    -- UNIQUE constraint only ever catches programmer error.
                     UNIQUE(run_id, sequence_number)
                 );
                 CREATE INDEX IF NOT EXISTS events_run_idx
@@ -249,6 +280,11 @@ class SqliteStore:
         event_type: str,
         payload: dict[str, Any],
     ) -> EventRecord:
+        # Sequence allocation and the insert share one write transaction:
+        # with BEGIN IMMEDIATE serializing writers, MAX+1 is authoritative and
+        # a rolled-back transaction consumes no sequence number, keeping the
+        # per-run log contiguous. The payload column stores the whole event
+        # record as JSON, so consumers read it back with no column mapping.
         row = connection.execute(
             '''
             SELECT COALESCE(MAX(sequence_number), 0) + 1
@@ -303,6 +339,11 @@ class SqliteStore:
         terminal = tuple(state.value for state in TERMINAL_STATES)
         placeholders = ','.join('?' for _ in terminal)
         with self.transaction() as connection:
+            # The one-active-run invariant is enforced here by ordering the
+            # check and the INSERT inside one write transaction (BEGIN
+            # IMMEDIATE), not by any database constraint. It therefore holds
+            # only when callers pass one_active_run=True, and only across
+            # paths that create runs through this store.
             if one_active_run:
                 active = connection.execute(
                     f'SELECT run_id FROM runs WHERE state NOT IN ({placeholders}) LIMIT 1',
@@ -368,6 +409,11 @@ class SqliteStore:
         return [RunRecord.model_validate_json(row['payload']) for row in rows]
 
     def replace_run(self, record: RunRecord, *, expected_version: int) -> RunRecord:
+        # This is the genuine optimistic-concurrency path: the caller reads a
+        # version outside the lock (e.g. get_run), works on the record, then
+        # replays the write guarded by WHERE version = expected_version. A
+        # concurrent writer between the read and the UPDATE makes rowcount 0,
+        # which raises instead of silently losing the update.
         now = utc_now()
         updated = record.model_copy(
             update={'version': expected_version + 1, 'updated_at': now}
@@ -400,6 +446,10 @@ class SqliteStore:
         *,
         reason: str,
     ) -> RunRecord:
+        # Unlike replace_run, this re-reads the row inside the already-held
+        # write transaction, so the WHERE version = row['version'] guard is
+        # defensive only (no writer can interleave); the budget reset and its
+        # event are committed atomically.
         with self.transaction() as connection:
             row = connection.execute(
                 'SELECT payload, version FROM runs WHERE run_id = ?',
@@ -470,6 +520,12 @@ class SqliteStore:
             validate_transition(current.state, target)
             now = utc_now()
             runtime_updates: dict[str, Any] = {}
+            # The run clock is stored as a base (active_runtime_seconds) plus
+            # an open interval (active_since). Entering a human-wait state
+            # closes the interval into the base; leaving a human-wait state
+            # for work reopens it. PAUSED and terminal transitions are handled
+            # by the engine (pause/resume/check_turn_budget) via `updates`, so
+            # this method deliberately stays out of those paths.
             if (
                 target in HUMAN_WAIT_STATES
                 and current.state not in HUMAN_WAIT_STATES
@@ -517,6 +573,8 @@ class SqliteStore:
             )
             if cursor.rowcount != 1:
                 raise ConcurrencyConflict(f'run was updated concurrently: {run_id}')
+            # The state change and its event commit together, so the event log
+            # is the authoritative record of the transition.
             self._append_event_conn(
                 connection,
                 run_id=run_id,
@@ -531,6 +589,8 @@ class SqliteStore:
         return changed
 
     def save_turn(self, record: TurnRecord) -> TurnRecord:
+        # UPSERT makes turn writes idempotent: recovery and retries may
+        # re-deliver a turn record and must land on the same row.
         with self.transaction() as connection:
             connection.execute(
                 '''
@@ -562,6 +622,10 @@ class SqliteStore:
         return [TurnRecord.model_validate_json(row['payload']) for row in rows]
 
     def mark_running_turns_interrupted(self, run_id: str) -> int:
+        # Recovery sweep: turns left 'running' by a crashed process are marked
+        # failed so they are never resumed as if they completed. Each turn is
+        # rewritten in its own transaction; a crash mid-sweep just re-runs the
+        # sweep, which is safe because finished turns are skipped.
         changed = 0
         for turn in self.list_turns(run_id):
             if turn.status != 'running':
@@ -578,6 +642,9 @@ class SqliteStore:
         return changed
 
     def save_action(self, record: ActionRecord) -> ActionRecord:
+        # The idempotency key is the retry guard: a re-submitted action
+        # resolves to the originally stored record (the winner) and any
+        # differences in the new copy are ignored.
         with self.transaction() as connection:
             existing = connection.execute(
                 'SELECT payload FROM actions WHERE idempotency_key = ?',
@@ -620,6 +687,10 @@ class SqliteStore:
             if row is None:
                 raise RecordNotFound(action_id)
             action = ActionRecord.model_validate_json(row['payload'])
+            # Approval idempotency: only PENDING and AUTOMATICALLY_APPROVED
+            # actions may be finalized by a human, and the status check runs
+            # inside the write transaction, so a second approval of the same
+            # action always raises instead of applying twice.
             if action.approval_status not in {
                 ApprovalStatus.PENDING,
                 ApprovalStatus.AUTOMATICALLY_APPROVED,
@@ -664,6 +735,9 @@ class SqliteStore:
             if row is None:
                 raise RecordNotFound(action_id)
             action = ActionRecord.model_validate_json(row['payload'])
+            # Two-stage approval: Honeydew's sign-off is recorded as a flag
+            # while the action deliberately stays PENDING, waiting for the
+            # human half of the gate.
             if action.approval_status != ApprovalStatus.PENDING:
                 raise ConcurrencyConflict(
                     f'action is not pending: {action.approval_status}'
@@ -703,6 +777,8 @@ class SqliteStore:
             if row is None:
                 raise RecordNotFound(action_id)
             action = ActionRecord.model_validate_json(row['payload'])
+            # Only an APPROVED action may be marked execution-failed; the
+            # terminal status prevents the action from ever being executed.
             if action.approval_status != ApprovalStatus.APPROVED:
                 raise ConcurrencyConflict(
                     f'action is not approved: {action.approval_status}'
@@ -748,6 +824,8 @@ class SqliteStore:
         return [ActionRecord.model_validate_json(row['payload']) for row in rows]
 
     def create_job_if_absent(self, record: JobRecord) -> tuple[JobRecord, bool]:
+        # Returns (stored, False) when the idempotency key already exists so a
+        # retry after a crash never submits a duplicate cluster job.
         with self.transaction() as connection:
             existing = connection.execute(
                 'SELECT payload FROM jobs WHERE idempotency_key = ?',
@@ -776,6 +854,9 @@ class SqliteStore:
         return record, True
 
     def update_job(self, record: JobRecord) -> JobRecord:
+        # Blind write keyed on job_id only (no version guard): the job watcher
+        # is the sole writer and re-reads before every update, so the rowcount
+        # check is purely a not-found signal.
         updated = record.model_copy(update={'updated_at': utc_now()})
         with self.transaction() as connection:
             cursor = connection.execute(
@@ -823,6 +904,8 @@ class SqliteStore:
         return [JobRecord.model_validate_json(row['payload']) for row in rows]
 
     def save_artifact(self, record: ArtifactRecord) -> ArtifactRecord:
+        # INSERT OR IGNORE: artifacts are append-only and immutable, so a
+        # re-delivered artifact id keeps the first write.
         with self.transaction() as connection:
             connection.execute(
                 '''
@@ -868,6 +951,8 @@ class SqliteStore:
                     record.created_at.isoformat(),
                 ),
             )
+        # Re-read the stored row so a duplicate ingest returns the canonical
+        # record (first write wins) rather than the caller's copy.
         return self.get_dataset(record.dataset_id)
 
     def get_dataset(self, dataset_id: str) -> IngestedDatasetRecord:
@@ -896,6 +981,9 @@ class SqliteStore:
         *,
         after_sequence: int = 0,
     ) -> list[EventRecord]:
+        # Cursor-style read for incremental consumers (SSE). Ordering by
+        # sequence_number equals insertion order because appends are
+        # serialized by the write transaction.
         with self._connect() as connection:
             rows = connection.execute(
                 '''

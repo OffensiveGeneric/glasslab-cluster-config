@@ -1,3 +1,5 @@
+"""Integration tests that exercise each pipeline end-to-end and verify artifact output."""
+
 import json
 from pathlib import Path
 

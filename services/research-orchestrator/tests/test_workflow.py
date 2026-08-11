@@ -1,3 +1,12 @@
+"""End-to-end orchestrator workflow over scripted and fault-injecting runtimes.
+
+Exercises the full run lifecycle (protocol -> contract -> implementation ->
+matrix -> jobs -> report) with mock agent runtimes that deny, fail once,
+pause mid-turn, lose files, or return invalid contracts, plus the recovery,
+resume, cancellation, idempotent-submission, and HTTP surfaces that make the
+workflow safe to restart. Cluster execution runs against FakeClusterExecutor.
+"""
+
 from __future__ import annotations
 
 import json
@@ -40,6 +49,9 @@ from conftest import RUNNER_IMAGE
 def test_human_approval_states_stop_active_runtime_clock(
     orchestrator_bundle,
 ) -> None:
+    # Waiting on a human is not "active" run time: entering an awaiting state
+    # freezes active_runtime_seconds and clears active_since, and leaving it
+    # restarts the clock without re-adding the waiting window.
     _, store, _, _, engine = orchestrator_bundle
     run = engine.create_run(
         RunCreateRequest(objective='Exclude human review from active runtime.')
@@ -76,6 +88,9 @@ def test_failed_result_starts_a_fresh_methodology_revision_budget(
     orchestrator_bundle,
     monkeypatch,
 ) -> None:
+    # A post-execution failure resets the revision counter (a new budget for
+    # repairing an executed experiment), distinct from pre-execution review
+    # revisions which share the existing budget.
     _, store, _, _, engine = orchestrator_bundle
     run = engine.create_run(
         RunCreateRequest(objective='Repair a failed executed experiment.')
@@ -228,6 +243,8 @@ def test_evidence_snapshot_rejects_mismatched_or_escaping_artifacts(
 
 
 class DeniedThenValidRuntime(ScriptedMockRuntime):
+    # First Beaker matrix proposal carries an unpermitted image (policy DENY),
+    # then the retry uses the allowed runner image to succeed.
     def run_turn(self, **kwargs):
         if (
             kwargs['agent'].value == 'beaker'
@@ -243,6 +260,8 @@ class DeniedThenValidRuntime(ScriptedMockRuntime):
 
 
 class ContractOversizedThenValidRuntime(ScriptedMockRuntime):
+    # First matrix proposal requests more memory than the evaluation contract
+    # allows (preflight REJECT); the retry is within bounds and succeeds.
     def __init__(self, *, runner_image: str) -> None:
         super().__init__(runner_image=runner_image)
         self._oversized_once = True
@@ -260,6 +279,9 @@ class ContractOversizedThenValidRuntime(ScriptedMockRuntime):
 
 
 class FailOnceImplementationRuntime(ScriptedMockRuntime):
+    # The first Beaker implementation turn raises like a real timeout; the
+    # retry succeeds. The failed session id is remembered so the test can
+    # prove recovery starts a fresh session.
     def __init__(self, *, runner_image: str) -> None:
         super().__init__(runner_image=runner_image)
         self.failed_session_id: str | None = None
@@ -278,6 +300,8 @@ class FailOnceImplementationRuntime(ScriptedMockRuntime):
 
 
 class MissingPlanThenRepairRuntime(ScriptedMockRuntime):
+    # Beaker claims the plan was written but the authoritative file is absent
+    # on the first try, forcing the focused one-shot file repair path.
     def __init__(self, *, runner_image: str) -> None:
         super().__init__(runner_image=runner_image)
         self.removed_first_plan = False
@@ -295,6 +319,8 @@ class MissingPlanThenRepairRuntime(ScriptedMockRuntime):
 
 
 class MissingProtocolThenRepairRuntime(ScriptedMockRuntime):
+    # Honeydew's program.md is missing on the first draft; the focused repair
+    # turn is redirected to a concrete re-draft prompt before it can run.
     def __init__(self, *, runner_image: str) -> None:
         super().__init__(runner_image=runner_image)
         self.removed_first_protocol = False
@@ -322,6 +348,8 @@ class MissingProtocolThenRepairRuntime(ScriptedMockRuntime):
 
 
 class MissingContractProposalThenRepairRuntime(ScriptedMockRuntime):
+    # Honeydew returns no evaluation_contract_proposal on the first turn; the
+    # structured-output repair path must recover the metadata.
     def __init__(self, *, runner_image: str) -> None:
         super().__init__(runner_image=runner_image)
         self.removed_first_proposal = False
@@ -347,6 +375,8 @@ class MissingContractProposalThenRepairRuntime(ScriptedMockRuntime):
 
 
 class PauseDuringImplementationRuntime(ScriptedMockRuntime):
+    # Injects a pause from inside the running Beaker turn, exercising the
+    # pause-during-turn path where pause bypasses the advancement lock.
     def __init__(self, *, runner_image: str) -> None:
         super().__init__(runner_image=runner_image)
         self.engine: ResearchOrchestrator | None = None
@@ -369,6 +399,9 @@ class PauseDuringImplementationRuntime(ScriptedMockRuntime):
 
 
 class NewContractRuntime(ScriptedMockRuntime):
+    # Drives the full contract-candidate flow: Honeydew proposes a new
+    # evaluator, Beaker drafts and seals the candidate (wrong phase kind once
+    # to force a retry), then Honeydew reviews the sealed contract.
     def __init__(self, *, runner_image: str) -> None:
         super().__init__(runner_image=runner_image)
         self.returned_wrong_contract_kind = False
@@ -454,6 +487,8 @@ class NewContractRuntime(ScriptedMockRuntime):
 
 
 class InvalidThenValidContractRuntime(NewContractRuntime):
+    # First sealed candidate is tampered with on disk so its digest check
+    # fails; the retry produces a valid candidate that promotes.
     def __init__(self, *, runner_image: str) -> None:
         super().__init__(runner_image=runner_image)
         self.returned_invalid_candidate = False
@@ -477,6 +512,8 @@ class InvalidThenValidContractRuntime(NewContractRuntime):
 
 
 class FailingContractReviewRuntime(NewContractRuntime):
+    # Honeydew's contract review turn raises, which must pause the run for
+    # recovery instead of terminalizing it.
     def run_turn(self, **kwargs):
         if (
             kwargs['agent'].value == 'honeydew'
@@ -496,6 +533,8 @@ def _pending_action(store, run_id: str, action_type: str):
 
 
 def _advance_to_jobs(engine, store):
+    # Drives a fresh run through protocol approval and matrix approval to the
+    # JOB_RUNNING state, the shared entry point for the job-phase tests.
     run = engine.create_run(
         RunCreateRequest(
             objective='Test the bounded orchestrator workflow with fake evidence.'
@@ -522,6 +561,8 @@ def _advance_to_jobs(engine, store):
 
 
 def _complete_jobs(engine, store, cluster, run_id: str):
+    # FakeClusterExecutor.complete marks each external run done, then
+    # reconcile_run advances the run to AWAITING_FINAL_ACCEPTANCE.
     for job in store.list_jobs(run_id):
         assert job.external_run_id
         cluster.complete(
@@ -646,6 +687,9 @@ def test_invalid_contract_candidate_is_rejected_and_retried(
 def test_recovery_agent_failure_pauses_instead_of_terminalizing(
     orchestrator_bundle,
 ) -> None:
+    # An agent turn that raises mid-approval must park the run in PAUSED with
+    # a fresh session, a recovery checkpoint, and a session-rotated event, so
+    # a later recover() resumes at the exact interrupted phase.
     settings, store, cluster, _, original = orchestrator_bundle
     runtime = FailingContractReviewRuntime(runner_image=RUNNER_IMAGE)
     engine = ResearchOrchestrator(
@@ -875,6 +919,8 @@ def test_bound_legacy_contract_can_supply_missing_proposal(
 
 
 def test_idempotent_job_submission(orchestrator_bundle) -> None:
+    # Resubmitting the same spec must be a no-op in the fake cluster and the
+    # store, guaranteeing recovery never duplicates external cluster jobs.
     _, store, cluster, _, engine = orchestrator_bundle
     run = _advance_to_jobs(engine, store)
     job = store.list_jobs(run.run_id)[0]
@@ -891,6 +937,8 @@ def test_submitted_queued_job_is_inspected_without_resubmission(
     orchestrator_bundle,
     monkeypatch,
 ) -> None:
+    # A submitted-but-queued job must be inspected, never resubmitted: each
+    # reconcile emits exactly one job.submitted event per job.
     _, store, cluster, _, engine = orchestrator_bundle
     original_submit = cluster.submit
     submission_calls = []
@@ -1385,6 +1433,8 @@ def test_deterministic_matrix_execution_failure_requests_revision(
     orchestrator_bundle,
     monkeypatch,
 ) -> None:
+    # A deterministic expansion failure (ValueError, no jobs created) is the
+    # one recovery a human is not needed for: Beaker re-drafts the matrix.
     _, store, _, _, engine = orchestrator_bundle
     run = engine.create_run(
         RunCreateRequest(
@@ -1436,6 +1486,9 @@ def test_deterministic_matrix_execution_failure_requests_revision(
 
 
 def test_restart_recovery_from_job_running(orchestrator_bundle) -> None:
+    # Rebuilds the engine from the same SqliteStore file after jobs completed,
+    # simulating a process restart; recover() must finish the run from durable
+    # state alone, without any in-memory knowledge.
     settings, store, cluster, _, engine = orchestrator_bundle
     run = _advance_to_jobs(engine, store)
     for job in store.list_jobs(run.run_id):
@@ -1482,6 +1535,8 @@ def test_recovery_does_not_replay_stale_approved_matrix(
     orchestrator_bundle,
     monkeypatch,
 ) -> None:
+    # An older APPROVED matrix must never be replayed when a newer PENDING
+    # replacement exists; only the latest proposed action drives recovery.
     _, store, _, _, engine = orchestrator_bundle
     run = engine.create_run(
         RunCreateRequest(objective='Do not replay an obsolete matrix approval.')

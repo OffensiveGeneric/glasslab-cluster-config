@@ -1,3 +1,11 @@
+"""Pre-submission validation of run requests against the workflow registry.
+
+Every run request is checked for required inputs, unknown inputs (with an
+allowlist for technique_* metadata keys), disallowed models, and resource
+profile mismatches. Validation is a gate before the run is committed to the
+store or submitted to Kubernetes; a run with issues is never persisted.
+"""
+
 from __future__ import annotations
 
 from services.common.schemas import WorkflowRegistryEntry

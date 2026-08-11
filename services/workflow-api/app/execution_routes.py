@@ -1,3 +1,12 @@
+"""HTTP routes for run creation, artifact management, logs, and preflight.
+
+Handles two distinct run-creation paths: generic experiments (from raw
+GenericExperimentRunRequest) and designed validation runs (from session design
+drafts). Supports terminal artifact bundle ingestion, live log retrieval,
+multi-run metric comparisons, and execution preflight enriched with
+interpretation context and method-spec readiness checks.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone

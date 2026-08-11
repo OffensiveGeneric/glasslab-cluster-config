@@ -1,3 +1,12 @@
+"""HTTP routes for managing and executing scheduled operations.
+
+Supports two schedule types: digest schedules (read-only summaries keyed by
+cron expressions) and approved-rerun schedules (re-submission of previously
+succeeded runs). Schedules can be listed, disabled, and executed on demand.
+Execution always operates on the current wall-clock time, not a delayed
+trigger, so the caller must invoke /run-due from a cron or timer.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone

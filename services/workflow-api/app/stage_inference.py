@@ -1,3 +1,15 @@
+"""Deterministic inference layer: extract structured interpretation from intakes.
+
+Builds Interpretation records from raw intake context without requiring an
+external agent. Infers source type, workflow candidates, dataset hints,
+evaluation targets, research gaps, and experiment ideas through keyword and
+pattern matching. Aggregates technique knowledge (architectures, baselines,
+losses, packages, split strategies) from keyword lists and the technique
+catalog. Constructs a MethodSpec with execution inputs, blocking reasons, and
+run readiness. This is the fallback path when the interpretation agent is
+unavailable or disabled.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -246,6 +258,8 @@ def reorder_intake_candidates_with_ranker(
         second_score = ranked_candidates[1]['score'] if len(ranked_candidates) > 1 else 0.0
         score_gap = top_score - second_score
         if top_score < settings.ranker_min_top_score:
+            # Reorder is rejected when confidence is too low; the original
+            # intake order survives unchanged rather than trusting a weak signal.
             LOGGER.info(
                 'ranker-intake-order ignored intake_id=%s reason=top-score-below-threshold top_score=%.3f threshold=%.3f',
                 record.intake_id,
@@ -765,6 +779,9 @@ def build_interpretation_record(intake: IntakeRecord, store: RunStore | None = N
         mutation_axes=mutation_axes,
     )
     technique_knowledge = enrich_technique_knowledge_from_catalog(technique_knowledge, matched_catalog_records)
+    # Catalog records can override the inferred defaults per-workflow;
+    # this is the mechanism for technique cards to supply concrete URIs
+    # and execution inputs guided by previously curated knowledge.
     default_dataset_uri = next((record.default_dataset_uri for record in matched_catalog_records if record.default_dataset_uri), None)
     default_evaluation_target = next((record.default_evaluation_target for record in matched_catalog_records if record.default_evaluation_target), None)
     default_training_notes = next((record.default_training_notes for record in matched_catalog_records if record.default_training_notes), None)

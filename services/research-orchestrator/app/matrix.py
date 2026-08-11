@@ -1,3 +1,9 @@
+"""Deterministic experiment-matrix expansion into per-job specs.
+
+The same approved matrix always expands to the same job identities, so
+re-expansion after a restart or replay cannot duplicate cluster jobs.
+"""
+
 from __future__ import annotations
 
 from hashlib import sha256
@@ -17,6 +23,9 @@ class MatrixExpansionError(ValueError):
 
 
 def canonical_json(value: object) -> str:
+    # Deterministic serialization (sorted keys, compact separators) so the same
+    # matrix yields identical identity bytes across processes and Python
+    # versions; json.dumps default key order is insertion order, not sorted.
     return json.dumps(value, sort_keys=True, separators=(',', ':'))
 
 
@@ -28,9 +37,13 @@ def expand_experiment_matrix(
     contract: ResolvedEvaluationContract,
     execution: dict[str, object] | None = None,
 ) -> list[ExpandedJobSpec]:
+    # Contract keys are rejected before expansion so overrides/base_config can
+    # never smuggle evaluator or contract control into the submitted job.
     reject_contract_overrides(matrix.model_dump(mode='json'))
     ceiling = contract.descriptor.resource_constraints
     requested = matrix.resources
+    # Per-contract ceiling: policy.py enforces the global limits, this enforces
+    # what the approved contract allows; both must hold before submission.
     if (
         requested.cpu > ceiling.cpu
         or requested.memory_gib > ceiling.memory_gib
@@ -44,6 +57,8 @@ def expand_experiment_matrix(
     required_artifacts = list(
         dict.fromkeys(
             [
+                # Union of contract-mandated and matrix-requested artifacts,
+                # order-preserving so the contract's requirements stay first.
                 *contract.descriptor.required_artifacts,
                 *matrix.required_artifacts,
             ]
@@ -60,9 +75,16 @@ def expand_experiment_matrix(
                 'overrides': variant.overrides,
                 'contract_digest': contract.digest,
             }
+            # Job identity covers variant, seed, config, and contract digest
+            # but deliberately excludes resources and image: re-expanding the
+            # same approved matrix must reproduce the same jobs, while any
+            # change to the matrix produces a new key and therefore new jobs.
             idempotency_key = sha256(canonical_json(identity).encode()).hexdigest()
             expanded.append(
                 ExpandedJobSpec(
+                    # Derived deterministically (uuid5) from the idempotency
+                    # key, so the orchestrator_job_id is stable across restarts
+                    # and cluster submission stays dedupe-able.
                     orchestrator_job_id=uuid5(
                         NAMESPACE_URL,
                         f'glasslab-job:{idempotency_key}',

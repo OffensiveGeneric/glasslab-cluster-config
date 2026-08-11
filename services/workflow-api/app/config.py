@@ -1,3 +1,12 @@
+"""Settings layer for the workflow-api service.
+
+All runtime configuration is read from environment variables prefixed
+GLASSLAB_WORKFLOW_API_ or a .env file. The single Settings instance is cached
+via lru_cache so repeated calls to get_settings() return the same object.
+Settings owns the contract for store backends, agent endpoints, Kubernetes
+job templates, and evaluation-contract resolution.
+"""
+
 from __future__ import annotations
 
 from functools import lru_cache

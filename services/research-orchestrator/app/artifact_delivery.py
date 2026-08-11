@@ -1,3 +1,11 @@
+"""Bundle a run's digest-verified artifacts for Discord delivery.
+
+Reads artifacts only from the shared mount root, verifies every SHA-256 against
+the authoritative record, and packages the selected set into one zip with a
+manifest. An artifact that fails verification is reported as unavailable rather
+than failing the whole delivery; nothing is ever read from outside the mount.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -43,6 +51,10 @@ class VerifiedArtifactReader:
             if uri.startswith('artifacts/'):
                 candidates.append(self.root / uri.removeprefix('artifacts/'))
 
+        # Candidates are tried in order (explicit metadata path first, then
+        # URI-derived) and the first that is a regular file inside the root AND
+        # hashes to the recorded digest wins. A symlink or any path escaping
+        # the mount is skipped, never followed.
         for candidate in candidates:
             resolved = candidate.resolve()
             if not resolved.is_relative_to(self.root):
@@ -65,6 +77,8 @@ class VerifiedArtifactReader:
     def read(self, artifact: ArtifactRecord, *, maximum_bytes: int) -> bytes:
         path = self.resolve(artifact)
         size = path.stat().st_size
+        # Per-file cap before read_bytes() materializes the file; the aggregate
+        # bundle limit is enforced separately in build_run_artifact_bundle.
         if size > maximum_bytes:
             raise ArtifactDeliveryError(
                 f'artifact exceeds delivery limit: {artifact.uri}'
@@ -73,6 +87,9 @@ class VerifiedArtifactReader:
 
 
 def _safe_archive_name(value: str) -> str:
+    # Normalize to forward slashes and strip leading separators, then reject
+    # any traversal component ('..') or empty part so no archive member can
+    # escape its intended directory inside the zip.
     normalized = value.strip().replace('\\', '/').lstrip('/')
     path = PurePosixPath(normalized)
     if not normalized or '..' in path.parts or any(not part for part in path.parts):
@@ -91,6 +108,9 @@ def _artifact_archive_name(artifact: ArtifactRecord) -> str:
 def _latest_run_artifacts(
     artifacts: Iterable[ArtifactRecord],
 ) -> list[ArtifactRecord]:
+    # Job artifacts are kept verbatim; run-level artifacts are deduplicated by
+    # type with the LAST one winning (dict overwrite), so a re-recorded
+    # artifact does not produce duplicate members in the bundle.
     latest: dict[str, ArtifactRecord] = {}
     job_artifacts: list[ArtifactRecord] = []
     for artifact in artifacts:
@@ -110,6 +130,8 @@ def build_run_artifact_bundle(
     maximum_bytes: int,
     include_source: bool = False,
 ) -> ArtifactBundle:
+    # Only artifacts from succeeded jobs are eligible; a failed or still-running
+    # job has no authoritative evidence worth shipping.
     succeeded_job_ids = {
         job.job_id for job in jobs if job.status == JobStatus.SUCCEEDED
     }
@@ -119,6 +141,8 @@ def build_run_artifact_bundle(
         if artifact.job_id is None or artifact.job_id in succeeded_job_ids
     ]
     if not include_source:
+        # The uploaded task/source archive is bulk and duplicative; by default
+        # it is excluded so the bundle stays within the Discord size budget.
         selected = [
             artifact
             for artifact in selected
@@ -136,6 +160,8 @@ def build_run_artifact_bundle(
             content = reader.read(artifact, maximum_bytes=maximum_bytes)
             archive_name = _artifact_archive_name(artifact)
             if archive_name in used_names:
+                # Distinct artifacts can collide on the derived name; a digest
+                # prefix disambiguates instead of overwriting the first member.
                 archive_name = (
                     f'{archive_name}.{artifact.sha256[:12]}'
                 )
@@ -148,9 +174,13 @@ def build_run_artifact_bundle(
             used_names.add(archive_name)
             delivered.append((artifact, archive_name, content))
         except ArtifactDeliveryError as exc:
+            # A single bad artifact is reported, not fatal: the rest of the run
+            # may still deliver and the manifest records the gap.
             unavailable.append({'uri': artifact.uri, 'reason': str(exc)})
 
     if not delivered:
+        # An empty zip would look like success; fail loudly instead so the
+        # caller can surface that every artifact was unavailable.
         raise ArtifactDeliveryError(
             'no digest-verified artifacts are currently available for this run'
         )

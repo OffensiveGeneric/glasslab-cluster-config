@@ -1,3 +1,13 @@
+"""Deterministic Markdown memo rendering for the reporter service.
+
+render_report is a pure function of the manifest, metrics, and optional
+evaluator comparison: no timestamps, randomness, or service calls, so the same
+records always render the same memo. The memo is a human-facing projection
+only; the manifest, metrics, and artifact index remain the authoritative
+record. The CLI reads those records from the run's mounted artifact directory
+and writes the memo alongside them.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -15,6 +25,9 @@ def render_report(manifest: RunManifest, metrics: Metrics, evaluator_output: dic
 
     primary_metric = None
     if metrics.primary_metric:
+        # The declared primary metric may be absent from values (a workload
+        # that never emitted it); the memo tolerates that by omitting the
+        # line rather than failing the whole report.
         primary_metric = next((item for item in metrics.values if item.name == metrics.primary_metric), None)
 
     lines = ['# Glasslab Run Memo', '']
@@ -37,6 +50,9 @@ def render_report(manifest: RunManifest, metrics: Metrics, evaluator_output: dic
     else:
         lines.append('- This memo covers a single run and has no cross-run evaluator comparison attached.')
     lines.extend(['', '## Next Recommended Steps', ''])
+    # Branch order matters: a run that won the comparison (winning_note equals
+    # its own run_id) falls through to the measured-result advice instead of
+    # the "why did you lose" prompt.
     if winning_note and winning_note != manifest.run_id:
         lines.append('- Inspect why this run did not win the evaluator comparison before promoting it.')
     elif primary_metric is not None:
@@ -54,6 +70,8 @@ def write_report(
 ) -> str:
     manifest = RunManifest.model_validate_json(manifest_path.read_text())
     metrics = Metrics.model_validate_json(metrics_path.read_text())
+    # Records are validated on read so a malformed bundle fails here instead
+    # of rendering a memo that silently drops fields.
     evaluator_output = json.loads(evaluator_path.read_text()) if evaluator_path else None
     report = render_report(manifest, metrics, evaluator_output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -62,6 +80,8 @@ def write_report(
 
 
 def main() -> int:
+    # Container entrypoint: arguments name the run bundle's manifest, metrics,
+    # and (optional) evaluator comparison on the mounted artifact directory.
     parser = argparse.ArgumentParser(description='Render a deterministic Glasslab v2 run memo.')
     parser.add_argument('--manifest', required=True)
     parser.add_argument('--metrics', required=True)

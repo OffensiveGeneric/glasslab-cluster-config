@@ -1,3 +1,5 @@
+"""Smoke test for the GPU technique alignment scoring function."""
+
 from app.runner import infer_gpu_technique_alignment
 
 

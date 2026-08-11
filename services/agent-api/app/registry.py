@@ -1,3 +1,12 @@
+"""Single source of truth for every value the planner is allowed to emit.
+
+Registries are the closed vocabulary the validator and job submitter share:
+the planner may only reference registered pipelines, datasets, models, feature
+profiles, and resource profiles, and only registered profiles are rendered
+into Kubernetes resource requests. ALLOWED_SPEC_KEYS doubles as the key
+whitelist used by validate_spec.
+"""
+
 from __future__ import annotations
 
 PIPELINE_REGISTRY = {
@@ -49,6 +58,9 @@ RESOURCE_PROFILE_REGISTRY = {
     'gpu-small': {
         'requests': {'cpu': '1', 'memory': '4Gi'},
         'limits': {'cpu': '2', 'memory': '6Gi', 'nvidia.com/gpu': '1'},
+        # GPU pods are pinned to GPU-capable nodes and require the nvidia
+        # runtime class; the validator rejects gpu-small unless the spec also
+        # selects a GPU-capable model (xgboost_optional in MODEL_REGISTRY).
         'node_selector': {'glasslab.io/gpu-candidate': 'true'},
         'runtime_class_name': 'nvidia',
     },

@@ -1,3 +1,13 @@
+"""Contrastive learning training loop and metrics for CIFAR-100 unseen-class
+generalization.
+
+The module provides three loss functions (supervised contrastive, triplet,
+shadow), a novel-class generator (L2A-NC), and a training loop that saves the
+best-validation-loss model checkpoint under output_dir. Real implementations
+from search.run_spec and src.metrics.cifar_contrastive are preferred; stubs
+ship as a fallback so the module imports without the full search library tree.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -10,7 +20,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-# Try to import real implementations, fall back to stubs
+# Try to import real implementations, fall back to stubs so the module loads
+# in environments without the search library (e.g., local dev, CI).
 try:
     from search.run_spec import RunSpec
 except (ImportError, ModuleNotFoundError):
@@ -50,17 +61,21 @@ class SupervisedContrastiveLoss(nn.Module):
         
         similarity_matrix = torch.matmul(features, features.T)
         
+        # Create positive-pair mask from label equality.
         mask = torch.eq(labels.unsqueeze(1), labels.unsqueeze(0)).float()
         
         similarity_matrix = similarity_matrix / self.temperature
         
+        # Numerical stability: subtract max before exp.
         logits_max, _ = torch.max(similarity_matrix, dim=1, keepdim=True)
         logits = similarity_matrix - logits_max.detach()
         
         mask = mask.bool()
+        # Exclude self-pair (diagonal) from positives.
         mask = mask ^ torch.eye(batch_size, dtype=torch.bool, device=mask.device)
         
         logits_mask = torch.ones_like(mask).bool()
+        # Exclude self-pair from denominator as well.
         logits_mask = logits_mask ^ torch.eye(batch_size, dtype=torch.bool, device=logits_mask.device)
         
         exp_logits = torch.exp(logits) * logits_mask
@@ -88,6 +103,9 @@ class ShadowLoss(nn.Module):
         
         features = nn.functional.normalize(features, dim=1)
         
+        # O(batch_size²) per-sample loop that computes anchor-projected
+        # distances independently; memory is O(batch_size) instead of O(batch_size²)
+        # for the similarity matrix, enabling larger batches than SupervisedContrastiveLoss.
         loss = 0.0
         count = 0
         
@@ -144,6 +162,9 @@ class TripletLoss(nn.Module):
         loss = 0.0
         count = 0
         
+        # Per-anchor loop over the batch; semi-hard mining selects negatives
+        # that are closer than the mean positive distance but not closer than
+        # the anchor-positive distance.
         for i in range(batch_size):
             anchor_dist = distances[i]
             anchor_label = labels[i]
@@ -252,6 +273,8 @@ def train_contrastive_model(
     learning_rate = trainer_params.get("learning_rate", 1e-4)
     max_epochs = run_spec.budget.get("max_epochs", 25)
     
+    # Backbone selection: both ResNet-50 and ViT-B/16 pull pretrained weights
+    # from PyTorch Hub, then strip the classification head for embedding output.
     if backbone_name == "resnet50":
         backbone = torch.hub.load(
             "pytorch/vision:v0.16.0", "resnet50", pretrained=True
@@ -343,6 +366,9 @@ def train_contrastive_model(
         
         print(f"Epoch {epoch+1}/{max_epochs} - Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
         
+        # Only the metrics for the best validation-loss epoch are persisted;
+        # the model checkpoint itself is not saved (output_dir receives only
+        # metrics.json).
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_metrics = metrics.copy()

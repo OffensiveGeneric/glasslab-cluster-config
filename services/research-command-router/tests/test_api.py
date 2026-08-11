@@ -1,3 +1,11 @@
+"""Tests for the research-command-router dispatch surface.
+
+Drives /dispatch through TestClient with a fake requester that records calls,
+so each test asserts both the chat-visible response text and the exact
+workflow-api endpoint/method/body the router produces for a command. No test
+touches a real backend.
+"""
+
 from fastapi.testclient import TestClient
 
 from app.main import Settings, create_app

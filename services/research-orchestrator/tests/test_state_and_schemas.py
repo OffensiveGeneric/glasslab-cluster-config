@@ -1,3 +1,11 @@
+"""State-machine transition legality and core schema validation.
+
+Covers the allowed run-state edges and that invalid or terminal-state
+transitions raise InvalidTransition, plus strict validation of structured
+agent output (evidence must be artifact URIs), evaluation-contract proposal
+budget limits, and comma-separated environment allowlists.
+"""
+
 from __future__ import annotations
 
 import pytest
@@ -46,6 +54,8 @@ def test_valid_and_invalid_state_transitions() -> None:
 
 
 def test_structured_agent_output_validation() -> None:
+    # Agent claims must cite durable artifact URIs; a bare prose URL is
+    # rejected because prose is not evidence (see AGENTS.md boundaries).
     valid = AgentTurnResult.model_validate(
         {
             'kind': 'verification',
@@ -81,6 +91,8 @@ def test_structured_agent_output_validation() -> None:
 
 
 def test_evaluation_contract_proposal_requires_matching_budget_limit() -> None:
+    # budget_mode='training_exposure' demands a max_samples_seen limit; the
+    # proposal is invalid without it, forcing an explicit sample budget.
     proposal = {
         'evaluator_type': 'cifar100-unseen-v1',
         'primary_metric': {

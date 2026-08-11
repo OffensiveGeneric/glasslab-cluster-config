@@ -1,3 +1,13 @@
+"""HTTP routes for research sessions, literature pipelines, and paper intake.
+
+Covers the full front-door lifecycle: create research sessions from problem
+statements or staged research problems, bootstrap sessions, run literature
+searches (both internal harvester and external API), manage paper intake
+queues, fetch source documents, stage intakes from queued candidates, and
+append session memory. Every route that mutates session state also touches
+the session timestamp for liveness tracking.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone

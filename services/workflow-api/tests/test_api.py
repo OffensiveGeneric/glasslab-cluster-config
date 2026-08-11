@@ -1,3 +1,11 @@
+"""Integration tests for the workflow-api FastAPI application.
+
+Each test builds a fresh ``TestClient`` backed by an in-memory store and
+the real workflow registry.  Import-time module-cache clearing ensures
+tests do not accidentally share ``app.*`` module state across test
+modules or between parametrized runs with different settings.
+"""
+
 import sys
 import json
 from datetime import datetime, timezone
@@ -6,6 +14,9 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+# Prevent stale ``app.*`` module state from leaking between test modules.
+# conftest.py sets up the import paths; each test file must also clear the
+# cache so runs with different Settings or monkeypatches get fresh modules.
 for module_name in list(sys.modules):
     if module_name == 'app' or module_name.startswith('app.'):
         del sys.modules[module_name]
@@ -24,6 +35,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def build_client(artifacts_mount_path: Path | None = None) -> TestClient:
+    # Tests that need on-disk artifacts pass a tmp_path; tests that only
+    # exercise API routes and in-memory state skip it so the default
+    # artifacts_mount_path is not set.
     settings = Settings(
         registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
         **(

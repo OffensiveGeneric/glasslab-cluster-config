@@ -1,3 +1,18 @@
+"""WhatsApp gateway: receive messages via Meta webhook or direct API, enforce
+access policy, forward to the research-ingress service, and persist local
+transcripts as JSONL.
+
+The gateway is the outermost policy boundary for WhatsApp channels: it
+decides whether a sender or group may interact with Glasslab at all, before
+any request reaches the ingress router. Transcript persistence is best-effort
+local state (JSONL files on disk); the research-orchestrator and workflow API
+own the authoritative run and session records.
+
+Meta webhooks deliver push events; the /webhooks/whatsapp/inbound endpoint
+accepts equivalent payloads from other providers so the gateway surface is
+protocol-independent.
+"""
+
 from __future__ import annotations
 
 import json
@@ -16,6 +31,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 def _utc_now_iso() -> str:
+    # Drop microseconds for clean line-by-line diffs; use 'Z' suffix for
+    # maximum ecosystem compatibility.
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
@@ -114,6 +131,8 @@ class WhatsAppInboundRequest(BaseModel):
     @field_validator("message")
     @classmethod
     def normalize_message(cls, value: str) -> str:
+        # Collapse whitespace so an otherwise-empty message (all spaces) is
+        # normalized to '', not passed through as a "whitespace" message.
         return " ".join(value.split()).strip()
 
     @field_validator("session_id")
@@ -214,6 +233,9 @@ def _parse_csv_set(value: str) -> set[str]:
 
 
 def _normalized_sender(sender: str) -> str:
+    # Drop the WhatsApp provider suffix (@s.whatsapp.net) and the legacy
+    # number:NN split, then ensure bare numeric senders get the + prefix so
+    # allowlist and session-key comparisons are deterministic.
     cleaned = " ".join(sender.split()).strip()
     if not cleaned:
         return cleaned
@@ -242,12 +264,17 @@ def _normalized_conversation_id(conversation_id: str | None) -> str:
 
 
 def _session_key(channel: str, sender: str, conversation_id: str | None = None) -> str:
+    # Group chats key on conversation_id so all members share one transcript;
+    # DMs fall back to sender. Non-alphanumeric characters are replaced with
+    # underscores to produce a safe filename component.
     identity = conversation_id or sender
     safe_identity = "".join(ch if ch.isalnum() else "_" for ch in identity)
     return f"{channel}__{safe_identity}"
 
 
 def _session_path(settings: Settings, session_key: str) -> Path:
+    # Ensure the state directory exists on first write; the JSONL file itself
+    # is created implicitly by append-mode open in _append_message.
     state_dir = Path(settings.state_dir)
     state_dir.mkdir(parents=True, exist_ok=True)
     return state_dir / f"{session_key}.jsonl"
@@ -375,6 +402,10 @@ def _find_duplicate_response(
     forwarded_message: str,
     attachments: list[AttachmentRecord],
 ) -> SessionMessage | None:
+    # Only suppresses when the last two messages are a matching user/assistant
+    # pair. Legitimate repeated commands (where the user intentionally sends
+    # the same text again after an intervening response) are not suppressed
+    # because the assistant is the most recent message, not the previous user.
     if len(messages) < 2:
         return None
     last_assistant = messages[-1]
@@ -399,6 +430,7 @@ def _access_decision(
 ) -> tuple[bool, str | None]:
     normalized_sender = _normalized_sender(sender)
     allowed_senders = _parse_csv_set(settings.allow_from)
+    # Owner is always admitted so the operator can never lock themselves out.
     owner = _normalized_sender(settings.owner)
     if owner:
         allowed_senders.add(owner)
@@ -700,6 +732,8 @@ def _handle_inbound(
     prior_messages = _load_messages(active_settings, session_key)
     pinned_session_id = request.session_id or _latest_workflow_session_id(prior_messages)
     provider_message_id = (request.provider_message_id or "").strip() or None
+    # Provider-message-id dedup is checked first so idempotent retries from
+    # the upstream provider skip access-control and content-based dedup.
     if provider_message_id is not None:
         provider_dedupe = _find_response_for_provider_message_id(
             prior_messages,
@@ -789,6 +823,8 @@ def _handle_inbound(
         attachments=request.attachments,
     )
     ingress_payload: dict[str, Any]
+    # !new and !start explicitly request a fresh session; the ingress router
+    # receives no session_id so it creates one instead of resuming.
     ingress_session_id = (
         None
         if forwarded_message.lower().startswith(("!new", "!start"))
@@ -839,6 +875,8 @@ def _handle_inbound(
                 "detail": detail,
             },
         )
+    # Success path: the ingress returned a routable response. The gateway
+    # records it in the local transcript and echoes it back to the caller.
     response_text = str(ingress_payload.get("response_text") or "").strip()
     route = str(ingress_payload.get("route") or "unknown")
     handled = bool(ingress_payload.get("handled"))
@@ -875,6 +913,7 @@ def _handle_inbound(
     )
 
 
+# Factory so tests can inject a custom Settings without mutating globals.
 def create_app(settings: Settings | None = None) -> FastAPI:
     active_settings = settings or Settings()
     app = FastAPI(title="Glasslab WhatsApp Gateway", version="0.1.0")
