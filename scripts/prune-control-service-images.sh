@@ -35,8 +35,11 @@ done
 [[ "$KEEP" =~ ^[1-9][0-9]*$ ]] || { printf '%s\n' '--keep must be a positive integer' >&2; exit 2; }
 command -v docker >/dev/null || { printf '%s\n' 'docker is required' >&2; exit 1; }
 
-mapfile -t RUNNING_IDS < <(docker ps --format '{{.ImageID}}' | sort -u)
-is_running_id() { local id="$1"; local item; for item in "${RUNNING_IDS[@]}"; do [[ "$item" == "$id" ]] && return 0; done; return 1; }
+# `docker ps` does not expose an ImageID template field. Preserve the image
+# references attached to running containers instead, which is exactly the tag
+# this tool might otherwise remove.
+mapfile -t RUNNING_REFS < <(docker ps --format '{{.Image}}' | sort -u)
+is_running_ref() { local ref="$1"; local item; for item in "${RUNNING_REFS[@]}"; do [[ "$item" == "$ref" ]] && return 0; done; return 1; }
 is_retained_tag() { local tag="$1"; local item; for item in "${RETAIN_TAGS[@]}"; do [[ "$item" == "$tag" ]] && return 0; done; return 1; }
 
 removed=0
@@ -49,11 +52,11 @@ for repository in "${REPOSITORIES[@]}"; do
   for row in "${rows[@]}"; do
     IFS='|' read -r _created tag image_id <<<"$row"
     [[ "$tag" == '<none>' ]] && continue
-    if is_running_id "$image_id" || is_retained_tag "$tag" || (( kept < KEEP )); then
+    ref="$repository:$tag"
+    if is_running_ref "$ref" || is_retained_tag "$tag" || (( kept < KEEP )); then
       ((kept+=1))
       continue
     fi
-    ref="$repository:$tag"
     if [[ "$APPLY" == true ]]; then
       printf '[image-retention] removing old tag %s\n' "$ref"
       docker image rm "$ref"
