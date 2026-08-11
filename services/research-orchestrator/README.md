@@ -21,7 +21,9 @@ The agent model is selected with
 `GLASSLAB_ORCHESTRATOR_AGENT_MODEL_NAME`. The live manifest temporarily uses
 `opencode/big-pickle`; it requires `OPENCODE_API_KEY` in the orchestrator
 Secret. The local exo/Qwen settings remain the explicit rollback target and are
-not used as a silent per-turn fallback.
+not used as a silent per-turn fallback. Big Pickle uses prompt-delimited JSON
+because its thinking mode rejects OpenCode's forced JSON-schema tool choice;
+the orchestrator still validates every result against `AgentTurnResult`.
 
 Generic task archives are compiled by Honeydew into a validated TaskSpec and
 then mapped by deterministic policy to fixed CPU or GPU workspace profiles.
