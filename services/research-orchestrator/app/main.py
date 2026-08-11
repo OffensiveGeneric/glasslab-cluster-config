@@ -27,18 +27,25 @@ from .discord_adapter import DisabledDiscordAdapter, DiscordHttpAdapter
 from .discord_controls import DiscordControlGateway
 from .datasets import DatasetIngestionError, DatasetIngestionManager
 from .engine import ResearchOrchestrator, WorkflowError
+from .knowledge_manager import KnowledgeError
 from .opencode_runtime import AgentRuntime, OpenCodeProcessRuntime
 from .policy import ActionPolicy
 from .schemas import (
     ActionRecord,
     ApprovalRequest,
     ArtifactListResponse,
+    ContextPacket,
+    ContextPacketListResponse,
     EventListResponse,
     IngestedDatasetRecord,
+    KnowledgeSource,
+    KnowledgeSourceListResponse,
+    KnowledgeSourceRequest,
     RejectionRequest,
     RunCreateRequest,
     RunListResponse,
     RunRecord,
+    SourceType,
 )
 from .storage import ConcurrencyConflict, RecordNotFound, SqliteStore
 from .task_bundles import (
@@ -253,6 +260,7 @@ def create_app(
                 WorkspaceError,
                 TaskBundleError,
                 DatasetIngestionError,
+                KnowledgeError,
             ),
         ):
             return HTTPException(status_code=409, detail=str(exc))
@@ -402,6 +410,102 @@ def create_app(
             return engine.task_preflight(
                 engine.task_bundles.get(task_id, digest)
             )
+        except Exception as exc:
+            raise map_error(exc) from exc
+
+    @app.post(
+        '/knowledge/sources',
+        response_model=KnowledgeSource,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def ingest_knowledge_source(
+        request: KnowledgeSourceRequest,
+        _: None = Depends(require_operator),
+    ) -> KnowledgeSource:
+        # Operator-only ingestion from a path allowlisted in settings. The
+        # endpoint performs the same allowlist, secret, and size checks as the
+        # in-process ingest path; it never accepts raw text over HTTP.
+        try:
+            return engine.knowledge.ingest_source(
+                source_type=request.source_type,
+                path=request.path,
+                title=request.title,
+                source_version=request.source_version,
+                metadata=request.metadata,
+            )
+        except Exception as exc:
+            raise map_error(exc) from exc
+
+    @app.get(
+        '/knowledge/sources',
+        response_model=KnowledgeSourceListResponse,
+    )
+    def list_knowledge_sources(
+        source_type: str | None = Query(default=None),
+        run_scope: str | None = Query(default=None),
+    ) -> KnowledgeSourceListResponse:
+        source_types = (
+            [SourceType(source_type)] if source_type else None
+        )
+        return KnowledgeSourceListResponse(
+            sources=engine.knowledge.store.list_knowledge_sources(
+                source_types=source_types,
+                run_scope=run_scope,
+            )
+        )
+
+    @app.post(
+        '/knowledge/index/rebuild',
+        response_model=dict[str, object],
+    )
+    def rebuild_knowledge_index(
+        _: None = Depends(require_operator),
+    ) -> dict[str, object]:
+        reindexed = engine.knowledge.rebuild_index()
+        return {'index_version': 'v1', 'reindexed_sources': reindexed}
+
+    @app.delete(
+        '/knowledge/sources/{source_id}',
+        response_model=dict[str, object],
+    )
+    def delete_knowledge_source(
+        source_id: str,
+        _: None = Depends(require_operator),
+    ) -> dict[str, object]:
+        removed = engine.knowledge.delete_source(source_id)
+        return {'source_id': source_id, 'removed': removed}
+
+    @app.delete(
+        '/knowledge/sources/by-digest/{digest}',
+        response_model=dict[str, object],
+    )
+    def invalidate_knowledge_by_digest(
+        digest: str,
+        _: None = Depends(require_operator),
+    ) -> dict[str, object]:
+        removed = engine.knowledge.invalidate_by_digest(digest)
+        return {'digest': digest, 'removed': removed}
+
+    @app.get(
+        '/runs/{run_id}/context-packets',
+        response_model=ContextPacketListResponse,
+    )
+    def list_context_packets(run_id: str) -> ContextPacketListResponse:
+        try:
+            engine.store.get_run(run_id)
+            return ContextPacketListResponse(
+                packets=engine.store.list_context_packets(run_id)
+            )
+        except Exception as exc:
+            raise map_error(exc) from exc
+
+    @app.get(
+        '/context-packets/{packet_id}',
+        response_model=ContextPacket,
+    )
+    def get_context_packet(packet_id: str) -> ContextPacket:
+        try:
+            return engine.knowledge.get_context_packet(packet_id)
         except Exception as exc:
             raise map_error(exc) from exc
 

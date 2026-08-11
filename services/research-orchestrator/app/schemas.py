@@ -74,7 +74,7 @@ class Claim(BaseModel):
         Annotated[
             str,
             Field(
-                pattern=r'^(artifact|git|event|job|contract)://.+$',
+                pattern=r'^(artifact|git|event|job|contract|knowledge)://.+$',
             ),
         ]
     ] = Field(default_factory=list)
@@ -82,7 +82,14 @@ class Claim(BaseModel):
     @field_validator('evidence')
     @classmethod
     def validate_evidence_uris(cls, value: list[str]) -> list[str]:
-        allowed = ('artifact://', 'git://', 'event://', 'job://', 'contract://')
+        allowed = (
+            'artifact://',
+            'git://',
+            'event://',
+            'job://',
+            'contract://',
+            'knowledge://',
+        )
         for uri in value:
             if not uri.startswith(allowed):
                 raise ValueError(f'unsupported evidence URI: {uri}')
@@ -577,6 +584,140 @@ class EventRecord(BaseModel):
     event_type: str
     payload: dict[str, Any] = Field(default_factory=dict)
     timestamp: datetime = Field(default_factory=utc_now)
+
+
+class SourceType(StrEnum):
+    # Knowledge source taxonomy. The split between Honeydew's and Beaker's
+    # sets below is the retrieval access-control boundary: methodology,
+    # evaluation, and verified-result material is Honeydew's; protocol,
+    # repository, implementation, job-log, and artifact material is Beaker's.
+    DOCUMENTATION = 'documentation'
+    HANDOFF = 'handoff'
+    EVALUATION_CONTRACT = 'evaluation_contract'
+    TASK_BUNDLE = 'task_bundle'
+    DATASET_METADATA = 'dataset_metadata'
+    PAPER = 'paper'
+    TECHNIQUE_CARD = 'technique_card'
+    RUN_PROTOCOL = 'run_protocol'
+    RUN_REPORT = 'run_report'
+    RUN_ARTIFACT = 'run_artifact'
+    IMPLEMENTATION_FILE = 'implementation_file'
+
+
+HONEYDEW_SOURCE_TYPES = {
+    SourceType.DOCUMENTATION,
+    SourceType.HANDOFF,
+    SourceType.EVALUATION_CONTRACT,
+    SourceType.TASK_BUNDLE,
+    SourceType.DATASET_METADATA,
+    SourceType.PAPER,
+    SourceType.TECHNIQUE_CARD,
+    SourceType.RUN_PROTOCOL,
+    SourceType.RUN_REPORT,
+    SourceType.RUN_ARTIFACT,
+}
+
+BEAKER_SOURCE_TYPES = {
+    SourceType.DOCUMENTATION,
+    SourceType.HANDOFF,
+    SourceType.EVALUATION_CONTRACT,
+    SourceType.TASK_BUNDLE,
+    SourceType.DATASET_METADATA,
+    SourceType.RUN_PROTOCOL,
+    SourceType.RUN_REPORT,
+    SourceType.RUN_ARTIFACT,
+    SourceType.IMPLEMENTATION_FILE,
+}
+
+
+class KnowledgeSource(BaseModel):
+    """A provenance-carrying source in the knowledge index.
+
+    Sources are ingested only from approved, allowlisted roots. The record
+    never stores the source text; it points at the canonical URI and digests
+    the source bytes so derived chunks stay reproducible. ``source_id`` is the
+    stable surrogate used in ``knowledge://<source_id>`` evidence URIs; the
+    digest enables content invalidation and dedup.
+    """
+
+    model_config = ConfigDict(extra='forbid')
+
+    source_id: str = Field(default_factory=lambda: uuid4().hex)
+    source_type: SourceType
+    canonical_uri: str = Field(min_length=1)
+    run_scope: str | None = None
+    access_policy: Literal['run-private', 'run-approved'] = 'run-approved'
+    source_version: str | None = None
+    digest: str = Field(pattern=r'^[a-f0-9]{64}$')
+    ingested_at: datetime = Field(default_factory=utc_now)
+    index_version: str = 'v1'
+    title: str | None = Field(default=None, max_length=512)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    parent_source_id: str | None = None
+
+    def evidence_uri(self) -> str:
+        return f'knowledge://{self.source_id}'
+
+
+class KnowledgeChunk(BaseModel):
+    """A fixed-size, overlapping fragment of a source ready for FTS indexing."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    chunk_id: str = Field(default_factory=lambda: uuid4().hex)
+    source_id: str = Field(min_length=1)
+    chunk_index: int = Field(ge=0)
+    text: str = Field(min_length=1)
+    digest: str = Field(pattern=r'^[a-f0-9]{64}$')
+    token_count: int = Field(ge=1)
+    index_version: str = 'v1'
+
+
+class ContextPacket(BaseModel):
+    """The durable, versioned context supplied to one agent turn.
+
+    Persisted per turn so a report can cite ``knowledge://context:<packet_id>``
+    as the exact retrieval that grounded a claim. ``ranked_sources`` is the
+    ordered, budget-truncated list; ``exact_text_supplied`` is the literal text
+    prepended to the agent prompt.
+    """
+
+    model_config = ConfigDict(extra='forbid')
+
+    packet_id: str = Field(default_factory=lambda: uuid4().hex)
+    run_id: str
+    agent: AgentName
+    turn_number: int = Field(ge=1)
+    turn_kind: TurnKind
+    query: str
+    index_version: str
+    ranked_sources: list[dict[str, Any]] = Field(default_factory=list)
+    exact_text_supplied: str | None = None
+    token_budget: int = Field(gt=0)
+    created_at: datetime = Field(default_factory=utc_now)
+
+    def evidence_uri(self) -> str:
+        return f'knowledge://context:{self.packet_id}'
+
+
+class KnowledgeSourceRequest(BaseModel):
+    """Typed request to ingest an approved source from an allowlisted root."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    source_type: SourceType
+    path: str = Field(min_length=1)
+    title: str | None = Field(default=None, max_length=512)
+    source_version: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ContextPacketListResponse(BaseModel):
+    packets: list[ContextPacket]
+
+
+class KnowledgeSourceListResponse(BaseModel):
+    sources: list[KnowledgeSource]
 
 
 class RunCreateRequest(BaseModel):
