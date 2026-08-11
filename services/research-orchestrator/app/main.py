@@ -37,6 +37,7 @@ from .discord_adapter import DisabledDiscordAdapter, DiscordHttpAdapter
 from .discord_controls import DiscordControlGateway
 from .datasets import DatasetIngestionError, DatasetIngestionManager
 from .engine import ResearchOrchestrator, WorkflowError
+from .hermes_runtime import HermesProcessRuntime
 from .knowledge_manager import KnowledgeError
 from .opencode_runtime import AgentRuntime, OpenCodeProcessRuntime
 from .policy import ActionPolicy
@@ -68,6 +69,12 @@ from .watcher import JobWatcher
 from .workspaces import WorkspaceError, WorkspaceManager
 
 
+def build_agent_runtime(settings: Settings) -> AgentRuntime:
+    if settings.agent_runtime_backend == 'hermes':
+        return HermesProcessRuntime(settings)
+    return OpenCodeProcessRuntime(settings)
+
+
 def build_engine(
     settings: Settings,
     *,
@@ -79,7 +86,8 @@ def build_engine(
     # mutations share one transaction boundary and one event log. The cluster
     # executor is swapped for a fake when running without a live API.
     store = SqliteStore(settings.database_path)
-    runtime = runtime or OpenCodeProcessRuntime(settings)
+    if runtime is None:
+        runtime = build_agent_runtime(settings)
     if cluster is None:
         cluster = (
             FakeClusterExecutor()

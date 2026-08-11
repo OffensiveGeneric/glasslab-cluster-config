@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     default_evaluation_contract_id: str = 'example-research-v1'
     default_evaluation_contract_version: str = '1.0.0'
 
+    agent_runtime_backend: Literal['opencode', 'hermes'] = 'opencode'
     opencode_executable: str = '/usr/local/bin/opencode'
     opencode_server_host: str = '127.0.0.1'
     opencode_start_port: int = 4210
@@ -92,6 +93,16 @@ class Settings(BaseSettings):
     opencode_runtime_image: str = (
         'ghcr.io/offensivegeneric/glasslab-research-orchestrator:0.1.0'
     )
+    hermes_executable: str = '/usr/local/bin/hermes'
+    hermes_server_host: str = '127.0.0.1'
+    hermes_start_port: int = 4310
+    hermes_start_timeout_seconds: float = 30.0
+    hermes_http_timeout_seconds: float = 30.0
+    hermes_turn_timeout_seconds: float = 1800.0
+    hermes_poll_interval_seconds: float = 1.0
+    hermes_command_timeout_seconds: int = 180
+    hermes_max_iterations: int = 60
+    hermes_structured_repair_attempts: int = 1
 
     cluster_execution_api_url: str = (
         'http://glasslab-workflow-api.glasslab-v2.svc.cluster.local:8080'
