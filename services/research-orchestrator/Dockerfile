@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git nodejs npm ca-certificates curl \
+    && apt-get install -y --no-install-recommends git nodejs npm ca-certificates curl xz-utils \
     && npm install --global "opencode-ai@${OPENCODE_VERSION}" \
     && curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- \
         --branch "${HERMES_VERSION}" --skip-setup --skip-browser --no-skills \
