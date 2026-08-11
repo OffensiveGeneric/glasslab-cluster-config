@@ -613,6 +613,23 @@ class ResearchOrchestrator:
         prompt_head = ' '.join(prompt.split())[:300].strip()
         return f'{turn_kind.value} {objective} {prompt_head}'.strip()
 
+    @staticmethod
+    def _required_turn_kind_instruction(expected_kind: TurnKind) -> str:
+        """Make the workflow-selected result variant unambiguous to the runtime.
+
+        AgentTurnResult permits several valid variants. The state machine has
+        already selected exactly one of them, so the model must not infer that
+        choice from the broader task text or schema alone.
+        """
+        return (
+            '\n\nAUTHORITATIVE STRUCTURED OUTPUT CONTRACT:\n'
+            f'- Set the JSON `kind` field to exactly `{expected_kind.value}`.\n'
+            '- No other `kind` is acceptable for this turn, even if another '
+            'variant appears plausible.\n'
+            '- Complete the requested phase, then return one complete '
+            'AgentTurnResult object with that exact kind.\n'
+        )
+
     def _run_agent_turn(
         self,
         *,
@@ -736,6 +753,10 @@ class ResearchOrchestrator:
                 )
             if recovery_context:
                 prompt = recovery_context + prompt
+            # Append the phase-specific discriminator after all retrieved and
+            # recovery context. Runtime schemas allow many valid kinds, but the
+            # state machine has already chosen the one valid for this turn.
+            prompt += self._required_turn_kind_instruction(expected_kind)
             result, message_id = self.runtime.run_turn(
                 run_id=run_id,
                 agent=agent,
