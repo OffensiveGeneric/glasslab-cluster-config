@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -60,6 +60,9 @@ class Settings(BaseSettings):
     opencode_turn_timeout_seconds: float = 1800.0
     opencode_repeated_tool_limit: int = 6
     opencode_structured_repair_attempts: int = 1
+    opencode_structured_output_mode: Literal['json_schema', 'prompt'] = (
+        'json_schema'
+    )
     agent_model_provider_id: str = 'exo'
     agent_model_name: str | None = None
     qwen_base_url: str = 'http://192.168.1.17:52415/v1'

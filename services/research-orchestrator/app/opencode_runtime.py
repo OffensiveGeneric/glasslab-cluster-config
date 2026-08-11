@@ -108,6 +108,31 @@ def extract_structured_output(body: dict[str, Any]) -> Any | None:
     return info.get('structured_output')
 
 
+def parse_json_text(raw: str) -> Any:
+    """Parse a JSON-only response, tolerating one Markdown JSON fence."""
+    candidate = raw.strip()
+    if candidate.startswith('```') and candidate.endswith('```'):
+        lines = candidate.splitlines()
+        if len(lines) >= 3 and lines[0].strip() in {'```', '```json'}:
+            candidate = '\n'.join(lines[1:-1]).strip()
+    return json.loads(candidate)
+
+
+def provider_error_message(body: dict[str, Any]) -> str | None:
+    info = body.get('info')
+    if not isinstance(info, dict):
+        return None
+    error = info.get('error')
+    if not isinstance(error, dict):
+        return None
+    data = error.get('data')
+    if isinstance(data, dict) and data.get('message'):
+        return str(data['message'])
+    if error.get('name'):
+        return str(error['name'])
+    return 'unknown provider error'
+
+
 def _decode_json_field(value: Any, expected_type: type) -> Any:
     if not isinstance(value, str):
         return value
@@ -550,12 +575,24 @@ class OpenCodeProcessRuntime(AgentRuntime):
                         'agent': 'build',
                         'system': self._system_prompts[agent],
                         'parts': [{'type': 'text', 'text': current_prompt}],
-                        'format': {
-                            'type': 'json_schema',
-                            'schema': AgentTurnResult.model_json_schema(),
-                            'retryCount': 2,
-                        },
                     }
+                    output_format = {
+                        'type': 'json_schema',
+                        'schema': AgentTurnResult.model_json_schema(),
+                        'retryCount': 2,
+                    }
+                    if (
+                        self.settings.opencode_structured_output_mode
+                        == 'json_schema'
+                    ):
+                        payload['format'] = output_format
+                    else:
+                        payload['parts'][0]['text'] = (
+                            f'{current_prompt}\n\n'
+                            'Return only a JSON object, without Markdown '
+                            'fences or commentary, matching this JSON Schema:\n'
+                            + json.dumps(output_format['schema'])
+                        )
                     response = client.post(
                         f'/session/{session_id}/message',
                         params={'directory': str(workspace)},
@@ -563,6 +600,11 @@ class OpenCodeProcessRuntime(AgentRuntime):
                     )
                     response.raise_for_status()
                     body = response.json()
+                    provider_error = provider_error_message(body)
+                    if provider_error:
+                        raise OpenCodeRuntimeError(
+                            f'OpenCode provider error: {provider_error}'
+                        )
                     info = body.get('info', {})
                     message_id = info.get('id')
                     structured = extract_structured_output(body)
@@ -574,7 +616,7 @@ class OpenCodeProcessRuntime(AgentRuntime):
                         ]
                         raw = ''.join(text_parts).strip()
                         try:
-                            structured = json.loads(raw)
+                            structured = parse_json_text(raw)
                         except json.JSONDecodeError as exc:
                             if (
                                 attempt
