@@ -27,6 +27,9 @@ LABEL io.glasslab.build-source="${GLASSLAB_BUILD_SOURCE}"
 COPY app ./app
 COPY prompts ./prompts
 COPY evaluation-contracts ./evaluation-contracts
+# Operational migration tooling is part of the reviewed image so a live store
+# cutover does not depend on copying executable files into a running pod.
+COPY scripts ./scripts
 
 RUN useradd --uid 10001 --create-home orchestrator \
     && mkdir -p /var/lib/glasslab-research-orchestrator \
