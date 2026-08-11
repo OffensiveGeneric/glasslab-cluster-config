@@ -3961,11 +3961,47 @@ class ResearchOrchestrator:
                 ),
             )
             return
-        if state == RunState.PREPARING:
+        if state == RunState.PAUSED:
+            if run.resume_state is not None:
+                self._transition(run_id, run.resume_state)
+                self._recover_run(run_id)
+            return
+        if state == RunState.CREATED:
+            if not run.discord_thread_id:
+                try:
+                    thread_id = self.discord.create_thread(
+                        run_id=run_id,
+                        objective=run.objective,
+                    )
+                    if thread_id:
+                        current = self.store.get_run(run_id)
+                        self.store.replace_run(
+                            current.model_copy(
+                                update={'discord_thread_id': thread_id},
+                            ),
+                            expected_version=current.version,
+                        )
+                except Exception:
+                    pass
+            self._transition(run_id, RunState.PREPARING)
+            self._transition(run_id, RunState.HONEYDEW_DRAFTING_PROTOCOL)
+            self._draft_protocol(run_id)
+        elif state == RunState.PREPARING:
             self._transition(run_id, RunState.HONEYDEW_DRAFTING_PROTOCOL)
             self._draft_protocol(run_id)
         elif state == RunState.HONEYDEW_DRAFTING_PROTOCOL:
             self._draft_protocol(run_id)
+        elif state == RunState.AWAITING_PROTOCOL_APPROVAL:
+            approved = [
+                action
+                for action in self.store.list_actions(run_id)
+                if action.type == 'approve_protocol'
+                and action.approval_status == ApprovalStatus.APPROVED
+            ]
+            if approved:
+                self._resume_approved_action(approved[-1])
+            else:
+                self._publish_latest(run_id)
         elif state == RunState.BEAKER_DRAFTING_CONTRACT:
             self._beaker_draft_contract(run_id)
         elif state == RunState.HONEYDEW_REVIEWING_CONTRACT:
@@ -4045,6 +4081,8 @@ class ResearchOrchestrator:
                 == ApprovalStatus.APPROVED
             ):
                 self._submit_matrix(matrix_actions[-1])
+            else:
+                self._publish_latest(run_id)
         elif state in {RunState.JOB_QUEUED, RunState.JOB_RUNNING}:
             self.reconcile_run(run_id)
         elif state == RunState.BEAKER_ANALYZING:
