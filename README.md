@@ -118,11 +118,6 @@ If you are operating the lab:
 - `docs/glasslab-v2/runbooks/`
 - `ansible/playbooks/`
 
-If you need historical context:
-
-- [docs/glasslab-v2/historical/README.md](docs/glasslab-v2/historical/README.md)
-- [README-OLD.md](README-OLD.md)
-
 ## Canonical Environment
 
 Important distinction:
