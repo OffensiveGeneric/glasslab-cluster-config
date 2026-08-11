@@ -4,6 +4,9 @@ metadata:
   name: glasslab-research-orchestrator-config
   namespace: glasslab-v2
 data:
+  # The record/event store is Postgres. SQLite is retained only as an import
+  # source and local-development fallback.
+  GLASSLAB_ORCHESTRATOR_STORE_BACKEND: postgres
   GLASSLAB_ORCHESTRATOR_DATABASE_PATH: /mnt/artifacts/research-orchestrator/state/orchestrator.db
   GLASSLAB_ORCHESTRATOR_WORKSPACE_ROOT: /mnt/artifacts/research-orchestrator/runs
   GLASSLAB_ORCHESTRATOR_ARTIFACT_ROOT: /mnt/artifacts/research-orchestrator/artifacts

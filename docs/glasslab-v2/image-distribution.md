@@ -57,6 +57,9 @@ The script:
 5. atomically renders each Deployment with the selected image
 6. waits for rollouts
 7. runs workflow-api and orchestrator readiness checks
+8. applies the conservative provisioner-local control-service image tag
+   retention policy after those checks pass (the current and three newest tags
+   per service are retained, along with images used by running containers)
 
 Roll back by selecting a previously published commit:
 
@@ -77,3 +80,21 @@ The local build, push, and containerd-import helpers remain break-glass tools
 for registry outages. They are not the contributor or normal deployment path.
 Node-local imports were useful during bring-up but make scheduling, rollback,
 and provenance depend on hidden machine state.
+
+## Local image retention
+
+`rollout-research-services.sh` calls
+`scripts/prune-control-service-images.sh --apply --retain-tag <deployed-sha>`
+only after a successful rollout and smoke checks. The helper removes old Docker
+*tags* for the two control-service repositories on `.44`; it never runs Docker
+system prune, deletes containers or volumes, or touches unrelated images.
+
+Preview cleanup without changing anything:
+
+```bash
+./scripts/prune-control-service-images.sh
+```
+
+Skip it during investigation with `--skip-image-prune` on the rollout command.
+This policy manages the provisioner's Docker build/pull cache. Kubernetes
+worker-node image eviction remains kubelet/containerd policy.

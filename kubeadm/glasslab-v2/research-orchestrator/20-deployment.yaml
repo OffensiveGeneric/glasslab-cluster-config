@@ -5,10 +5,8 @@ metadata:
   namespace: glasslab-v2
 spec:
   replicas: 1
-  # SQLite WAL supports one orchestrator process. Do not overlap old and new
-  # pods during an update until the service moves to PostgreSQL.
   strategy:
-    type: Recreate
+    type: RollingUpdate
   selector:
     matchLabels:
       app.kubernetes.io/name: glasslab-research-orchestrator
@@ -63,6 +61,12 @@ spec:
             - secretRef:
                 name: glasslab-research-orchestrator
                 optional: true
+          env:
+            - name: GLASSLAB_ORCHESTRATOR_STORE_POSTGRES_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: glasslab-research-orchestrator
+                  key: GLASSLAB_ORCHESTRATOR_STORE_POSTGRES_DSN
           ports:
             - containerPort: 8080
               name: http
