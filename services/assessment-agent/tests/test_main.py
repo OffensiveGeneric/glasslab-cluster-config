@@ -1,3 +1,11 @@
+"""Behavioral tests for the assessment agent.
+
+The service is loaded from its source files under a synthetic package name
+rather than imported as `app`, so these tests run regardless of the image layout
+the service is deployed in. Loading order matters: main.py imports `.models`,
+so models must be registered in sys.modules first.
+"""
+
 import sys
 import types
 from importlib.util import module_from_spec, spec_from_file_location
@@ -11,6 +19,9 @@ PACKAGE_NAME = 'assessment_agent_app'
 
 
 def load_package_module(module_name: str, path: Path):
+    # Executes the file under the synthetic package name so relative imports
+    # (`from .models import ...`) resolve; registering in sys.modules keeps the
+    # module identity single even though pytest imports these files directly.
     spec = spec_from_file_location(module_name, path)
     assert spec is not None
     assert spec.loader is not None
@@ -24,6 +35,8 @@ package = types.ModuleType(PACKAGE_NAME)
 package.__path__ = [str(APP_ROOT)]
 sys.modules[PACKAGE_NAME] = package
 
+# models must load before main: main.py does `from .models import ...` and the
+# relative import is resolved through the synthetic package above.
 models_module = load_package_module(f'{PACKAGE_NAME}.models', APP_ROOT / 'models.py')
 main_module = load_package_module(f'{PACKAGE_NAME}.main', APP_ROOT / 'main.py')
 
@@ -33,6 +46,8 @@ AssessmentRequest = models_module.AssessmentRequest
 
 
 def build_request() -> AssessmentRequest:
+    # titanic hint plus a tier-2-approved tabular candidate and no unresolved
+    # questions: the fixture takes the deterministic proceed path.
     return AssessmentRequest(
         request_id='assessment-1',
         interpretation={

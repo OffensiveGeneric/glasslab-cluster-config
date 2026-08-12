@@ -1,3 +1,12 @@
+"""Scripted test runtime over the same AgentRuntime surface as production.
+
+The smoke path and tests drive this class through the exact same
+ensure_session/run_turn/abort/release call sites the real OpenCode runtime
+uses. Prompts are matched by substring, and every branch writes the workspace
+files it claims to have produced, mirroring how the real runtime materializes
+files so downstream copy/freeze/packaging code sees the same shape.
+"""
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -27,6 +36,7 @@ class ScriptedMockRuntime(AgentRuntime):
         self.turn_counts: defaultdict[AgentName, int] = defaultdict(int)
         self.aborted: list[tuple[str, AgentName, str]] = []
         self.released: list[tuple[str, AgentName]] = []
+        self.prompts: list[tuple[AgentName, str]] = []
 
     def ensure_session(
         self,
@@ -39,6 +49,8 @@ class ScriptedMockRuntime(AgentRuntime):
         key = (run_id, agent)
         session = self.sessions.get(key)
         if session is None:
+            # Sessions are keyed per (run, agent) and an existing_session_id is
+            # honored, matching the real runtime's recovery semantics.
             session = RuntimeSession(
                 runtime_id=f'mock-runtime-{agent.value}-{run_id[:8]}',
                 session_id=existing_session_id
@@ -57,6 +69,7 @@ class ScriptedMockRuntime(AgentRuntime):
         prompt: str,
     ) -> tuple[AgentTurnResult, str | None]:
         self.turn_counts[agent] += 1
+        self.prompts.append((agent, prompt))
         message_id = f'mock-message-{uuid4().hex[:12]}'
         if agent == AgentName.BEAKER and 'Write implementation-plan.md' in prompt:
             (workspace / 'implementation-plan.md').write_text(
@@ -166,6 +179,7 @@ class ScriptedMockRuntime(AgentRuntime):
         if agent == AgentName.BEAKER and (
             'Implement the bounded' in prompt
             or 'Execute the task-specific plan' in prompt
+            or 'Finalize the existing imported benchmark' in prompt
             or 'Revise the implementation' in prompt
         ):
             (workspace / 'experiment.py').write_text(
@@ -292,6 +306,9 @@ class ScriptedMockRuntime(AgentRuntime):
                 ),
                 message_id,
             )
+        # An unmatched prompt fails loudly: silently skipping a turn would let
+        # a smoke-path regression pass while the scripted flow no longer
+        # matches the intended journey.
         raise AssertionError(
             f'unexpected mock turn for {agent.value}: {prompt[:120]}'
         )
@@ -300,5 +317,7 @@ class ScriptedMockRuntime(AgentRuntime):
         self.aborted.append((run_id, agent, session_id))
 
     def release(self, *, run_id: str, agent: AgentName) -> None:
+        # Mirror the real runtime's lifecycle: releasing drops the session just
+        # as OpenCodeProcessRuntime stops its per-run process.
         self.released.append((run_id, agent))
         self.sessions.pop((run_id, agent), None)

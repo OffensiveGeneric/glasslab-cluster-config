@@ -1,3 +1,12 @@
+"""Build and create Kubernetes Jobs for approved Titanic baseline runs.
+
+The Job is the only execution boundary: a validated PlannerSpec plus the
+selected resource profile become a single bounded pod that reads the dataset
+read-only and writes results into the shared artifacts PVC. Runner identity and
+trace context are passed via env vars and labels so every artifact and log can
+be correlated back to its experiment.
+"""
+
 from __future__ import annotations
 
 import json
@@ -44,6 +53,8 @@ class JobSubmitter:
             'glasslab.io/trace-id': _sanitize_label(trace_id),
         }
 
+        # The full validated spec travels to the runner as JSON so the workload
+        # executes exactly what was approved, not a re-parse by the API.
         env = [
             client.V1EnvVar(name='GLASSLAB_RUNNER_EXPERIMENT_ID', value=experiment_id),
             client.V1EnvVar(name='GLASSLAB_RUNNER_TRACE_ID', value=trace_id),
@@ -103,6 +114,9 @@ class JobSubmitter:
 
         job = client.V1Job(
             metadata=client.V1ObjectMeta(name=job_name, labels=labels),
+            # backoff_limit=0 paired with restart_policy='Never' above means a
+            # Job is never re-run: a failed run stays failed and is evidence,
+            # not something the control loop retries automatically.
             spec=client.V1JobSpec(
                 backoff_limit=self.settings.runner_backoff_limit,
                 ttl_seconds_after_finished=self.settings.runner_job_ttl_seconds,
@@ -122,9 +136,13 @@ class JobSubmitter:
 
 
 def _build_job_name(experiment_id: str) -> str:
+    # Kubernetes object names must be DNS-1123 labels (<= 63 chars); the first
+    # 8 hex chars keep the name short while staying stable per experiment.
     return f'titanic-baseline-{experiment_id[:8]}'
 
 
 def _sanitize_label(value: str) -> str:
+    # Label values must match [a-zA-Z0-9-.], be <= 63 chars, and start/end
+    # alphanumeric; '-' replaces everything else and the value is truncated.
     cleaned = re.sub(r'[^a-zA-Z0-9-.]+', '-', value).strip('-').lower()
     return cleaned[:63] or 'trace'

@@ -10,7 +10,7 @@ spec:
     spec:
       containers:
         - name: titanic-trainer
-          image: ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.7-local
+          image: ghcr.io/ccny-glasslab/glasslab-gpu-experiment-runner:0.1.7-local
           command: ["python", "/app/titanic_train.py"]
           resources:
             limits:

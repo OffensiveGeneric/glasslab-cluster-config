@@ -1,8 +1,16 @@
+"""Application settings loaded from the GLASSLAB_ORCHESTRATOR_ env prefix.
+
+Kept as a single pydantic-settings model so every knob is documented in one
+place. Secret-bearing fields (operator_api_token, discord_bot_token,
+discord_webhook_url) must never be rendered into prompts, events, or logs;
+nothing in the app logs Settings as a whole.
+"""
+
 from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -21,9 +29,26 @@ class Settings(BaseSettings):
 
     app_name: str = 'glasslab-research-orchestrator'
     app_version: str = '0.1.0'
+    store_backend: Literal['sqlite', 'postgres'] = 'sqlite'
+    store_postgres_dsn: str | None = None
     database_path: str = '/tmp/glasslab-research-orchestrator/orchestrator.db'
     workspace_root: str = '/tmp/glasslab-research-orchestrator/runs'
     artifact_root: str = '/tmp/glasslab-research-orchestrator/artifacts'
+    # Knowledge store: chunk sizing and the per-turn retrieval budget bound
+    # context cost regardless of model or content; the allowlist roots are the
+    # only places ingestion may read from (in production these are the mounted
+    # cluster-config docs and evaluation-contract directories).
+    knowledge_root: str = '/tmp/glasslab-research-orchestrator/knowledge'
+    knowledge_chunk_size: int = 1500
+    knowledge_chunk_overlap: int = 150
+    knowledge_max_source_bytes: int = 2 * 1024 * 1024
+    knowledge_max_results: int = 10
+    knowledge_token_budget: int = 4000
+    knowledge_allowlist_roots: Annotated[list[str], NoDecode] = [
+        '/workspace/cluster-config/docs',
+        '/workspace/cluster-config/services/research-orchestrator/evaluation-contracts',
+    ]
+    evidence_excerpt_max_bytes: int = 32 * 1024
     approved_repo_path: str = '/workspace/cluster-config'
     approved_repo_ref: str = 'main'
     evaluation_contract_root: str = str(SERVICE_ROOT / 'evaluation-contracts')
@@ -45,23 +70,41 @@ class Settings(BaseSettings):
     )
     maximum_dataset_upload_bytes: int = 2 * 1024 * 1024 * 1024
     maximum_discord_dataset_upload_bytes: int = 100 * 1024 * 1024
+    maximum_discord_artifact_bundle_bytes: int = 24 * 1024 * 1024
     benchmark_dataset_catalog_path: str = (
         '/tmp/glasslab-research-orchestrator/datasets/catalog.json'
     )
     default_evaluation_contract_id: str = 'example-research-v1'
     default_evaluation_contract_version: str = '1.0.0'
 
+    agent_runtime_backend: Literal['opencode', 'hermes'] = 'opencode'
     opencode_executable: str = '/usr/local/bin/opencode'
     opencode_server_host: str = '127.0.0.1'
     opencode_start_port: int = 4210
     opencode_start_timeout_seconds: float = 15.0
     opencode_turn_timeout_seconds: float = 1800.0
+    opencode_repeated_tool_limit: int = 6
     opencode_structured_repair_attempts: int = 1
-    qwen_base_url: str = 'http://192.168.1.18:52415/v1'
+    opencode_structured_output_mode: Literal['json_schema', 'prompt'] = (
+        'json_schema'
+    )
+    agent_model_provider_id: str = 'exo'
+    agent_model_name: str | None = None
+    qwen_base_url: str = 'http://192.168.1.17:52415/v1'
     qwen_model_name: str = 'mlx-community/Qwen3-Coder-Next-4bit'
     opencode_runtime_image: str = (
-        'ghcr.io/offensivegeneric/glasslab-research-orchestrator:0.1.0'
+        'ghcr.io/ccny-glasslab/glasslab-research-orchestrator:0.1.0'
     )
+    hermes_executable: str = '/usr/local/bin/hermes'
+    hermes_server_host: str = '127.0.0.1'
+    hermes_start_port: int = 4310
+    hermes_start_timeout_seconds: float = 30.0
+    hermes_http_timeout_seconds: float = 30.0
+    hermes_turn_timeout_seconds: float = 1800.0
+    hermes_poll_interval_seconds: float = 1.0
+    hermes_command_timeout_seconds: int = 180
+    hermes_max_iterations: int = 60
+    hermes_structured_repair_attempts: int = 1
 
     cluster_execution_api_url: str = (
         'http://glasslab-workflow-api.glasslab-v2.svc.cluster.local:8080'
@@ -71,10 +114,11 @@ class Settings(BaseSettings):
     cluster_execution_experiment_type: str = 'gpu-training-job'
     kubernetes_namespace: str = 'glasslab-v2'
     permitted_job_images: Annotated[list[str], NoDecode] = [
-        'ghcr.io/offensivegeneric/glasslab-metric-search:latest',
+        'ghcr.io/ccny-glasslab/glasslab-metric-search:latest',
     ]
 
     maximum_turns: int = 20
+    maximum_methodology_revisions: int = 2
     maximum_runtime_seconds: int = 86400
     maximum_cpu: float = 8.0
     maximum_memory_gib: float = 32.0
@@ -95,9 +139,23 @@ class Settings(BaseSettings):
     discord_admin_role_id: str | None = None
     discord_admin_user_ids: Annotated[list[str], NoDecode] = []
 
+    @property
+    def effective_agent_model_name(self) -> str:
+        return self.agent_model_name or self.qwen_model_name
+
+    @field_validator('store_postgres_dsn')
+    @classmethod
+    def require_postgres_dsn(cls, value: str | None, info) -> str | None:
+        if info.data.get('store_backend') == 'postgres' and not (value or '').strip():
+            raise ValueError('postgres store backend requires a non-empty store_postgres_dsn')
+        return value
+
     @field_validator('permitted_job_images', mode='before')
     @classmethod
     def parse_image_allowlist(cls, value: object) -> object:
+        # pydantic-settings passes the raw env string for list fields; NoDecode
+        # stops its JSON attempt, and this validator splits the conventional
+        # comma-separated spelling instead.
         if isinstance(value, str):
             return [item.strip() for item in value.split(',') if item.strip()]
         return value
@@ -112,4 +170,6 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
+    # Single cached instance so every module that needs settings observes the
+    # same env snapshot for the process lifetime.
     return Settings()

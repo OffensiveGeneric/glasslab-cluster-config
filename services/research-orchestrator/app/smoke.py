@@ -1,3 +1,13 @@
+"""Dependency-free end-to-end orchestrator smoke run.
+
+Exercises the full bounded workflow - create run, Honeydew protocol, human
+approval, Beaker implementation, fake cluster execution, report acceptance,
+knowledge retrieval and citation - using a scripted mock runtime and a fake
+cluster executor, so it runs anywhere with no external model or cluster. The
+assertions below mirror the real acceptance criteria, and the returned summary
+is JSON so CI can consume it.
+"""
+
 from __future__ import annotations
 
 import json
@@ -13,15 +23,22 @@ from .discord_adapter import DisabledDiscordAdapter
 from .engine import ResearchOrchestrator
 from .mock_runtime import ScriptedMockRuntime
 from .policy import ActionPolicy
-from .schemas import ApprovalStatus, RunCreateRequest, RunState
+from .schemas import (
+    ApprovalStatus,
+    RunCreateRequest,
+    RunState,
+    SourceType,
+)
 from .storage import SqliteStore
 from .workspaces import WorkspaceManager
 
 
-RUNNER_IMAGE = 'ghcr.io/offensivegeneric/glasslab-smoke-runner:test'
+RUNNER_IMAGE = 'ghcr.io/ccny-glasslab/glasslab-smoke-runner:test'
 
 
 def _create_repo(root: Path) -> Path:
+    # The approved repository is a real git repo so workspace installation,
+    # source snapshotting, and evidence URIs behave like production.
     repo = root / 'approved-repo'
     repo.mkdir()
     subprocess.run(['git', 'init', '-b', 'main'], cwd=repo, check=True)
@@ -52,6 +69,16 @@ def run_smoke() -> dict[str, object]:
     with tempfile.TemporaryDirectory(prefix='glasslab-orchestrator-smoke-') as raw:
         root = Path(raw)
         repo = _create_repo(root)
+        # Knowledge smoke setup: a small allowlisted directory mirrors the
+        # deployment's approved knowledge root, so ingest -> retrieve -> cite
+        # can be exercised without any external model or cluster.
+        approved = root / 'knowledge-approved'
+        approved.mkdir()
+        (approved / 'technique-card.md').write_text(
+            'Technique card: metric-search over GPU clusters. Prefer cosine '
+            'similarity for embedding retrieval and report verified metrics '
+            'with a fixed seed.'
+        )
         settings = Settings(
             database_path=str(root / 'orchestrator.db'),
             workspace_root=str(root / 'runs'),
@@ -75,6 +102,8 @@ def run_smoke() -> dict[str, object]:
             benchmark_dataset_catalog_path=str(
                 root / 'datasets' / 'catalog.json'
             ),
+            knowledge_root=str(root / 'knowledge'),
+            knowledge_allowlist_roots=[str(approved)],
             one_active_run=True,
             maximum_parallel_jobs=2,
         )
@@ -109,6 +138,14 @@ def run_smoke() -> dict[str, object]:
             cluster=cluster,
             discord=DisabledDiscordAdapter(),
         )
+        source = engine.knowledge.ingest_source(
+            source_type=SourceType.TECHNIQUE_CARD,
+            path=str(approved / 'technique-card.md'),
+            title='GPU metric-search technique card',
+        )
+        # The technique card becomes the approved knowledge the mock agents
+        # will retrieve and cite; its stable knowledge:// evidence URI is
+        # returned in the smoke summary to prove the citable surface.
         run = engine.create_run(
             RunCreateRequest(
                 objective='Prove the complete bounded orchestrator smoke workflow.'
@@ -161,6 +198,25 @@ def run_smoke() -> dict[str, object]:
         )
         run = store.get_run(run.run_id)
         assert run.state == RunState.COMPLETE
+        # Knowledge assertions: every completed run records durable context
+        # packets, at least one turn actually consumed ranked sources, and the
+        # attachment was logged as an event so the packet is citable with a
+        # knowledge://context:<id> evidence URI.
+        packets = store.list_context_packets(run.run_id)
+        assert packets, 'completed smoke run must record context packets'
+        retrieved = [p for p in packets if p.ranked_sources]
+        assert retrieved, 'at least one turn must consume retrieved context'
+        attached_events = [
+            event
+            for event in store.list_events(run.run_id)
+            if event.event_type == 'agent.context_attached'
+        ]
+        assert attached_events, 'context attachment events must be recorded'
+        assert (
+            engine.knowledge.get_context_packet(packets[0].packet_id)
+            .evidence_uri()
+            == f'knowledge://context:{packets[0].packet_id}'
+        )
         return {
             'run_id': run.run_id,
             'state': run.state.value,
@@ -170,6 +226,10 @@ def run_smoke() -> dict[str, object]:
             'events': len(store.list_events(run.run_id)),
             'protocol_path': run.protocol_path,
             'report_path': str(Path(run.reports_path) / 'report.md'),
+            'knowledge_sources': len(store.list_knowledge_sources()),
+            'context_packets': len(packets),
+            'citable_packet': packets[0].evidence_uri(),
+            'ingested_source': source.evidence_uri(),
         }
 
 

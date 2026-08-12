@@ -1,3 +1,13 @@
+"""Deterministic command surface in front of workflow-api.
+
+Maps a small explicit ``!command`` vocabulary to workflow-api research-session
+endpoints and renders deterministic chat text from the backend payload. There
+is no free-form chat fallback: anything that does not match a supported
+command is rejected with the same message that points at !help. The router is
+a compatibility shim between chat ingress and the research-session API, so all
+state and policy live in workflow-api; do not add new workflow logic here.
+"""
+
 from __future__ import annotations
 
 import json
@@ -37,6 +47,8 @@ class DispatchRequest(BaseModel):
     @field_validator("message")
     @classmethod
     def validate_message(cls, value: str) -> str:
+        # Collapse all whitespace runs to single spaces so command matching
+        # below sees canonical text regardless of how the user typed it.
         cleaned = " ".join(value.split()).strip()
         if not cleaned:
             raise ValueError("message must not be empty")
@@ -89,6 +101,9 @@ def _request_json(
             return endpoint, payload
     except urllib_error.HTTPError as exc:
         try:
+            # workflow-api errors carry a FastAPI `detail`; prefer its wording
+            # so the chat-visible message matches the backend, falling back to
+            # the HTTP reason when the body is not JSON.
             detail = json.loads(exc.read().decode("utf-8"))
         except Exception:
             detail = {"detail": exc.reason}
@@ -136,6 +151,8 @@ def _parse_command(message: str) -> tuple[str, str] | None:
             return command, ""
         if lowered.startswith(f"{raw_prefix} "):
             return command, text[len(raw_prefix) :].strip()
+        # ':'-suffixed aliases (new:, add:, ...) also match without a space,
+        # so "add: note" and "add:note" both route the same way.
         if raw_prefix.endswith(":") and lowered.startswith(raw_prefix):
             return command, text[len(raw_prefix) :].strip()
     return None
@@ -243,6 +260,9 @@ def _is_missing_campaign_error(exc: HTTPException) -> bool:
 def _scope_session_path(path: str, session_id: str | None) -> str:
     if not session_id:
         return path
+    # Without a pinned session id, backend calls target the "latest" session;
+    # a pinned id rewrites the /research-sessions/latest prefix to the concrete
+    # session so concurrent users never share the implicit "latest" session.
     prefix = "/research-sessions/latest"
     if path == prefix:
         return f"/research-sessions/{session_id}"
@@ -270,6 +290,8 @@ def _dispatch(
     submitted_by = request.submitted_by or settings.default_submitted_by
     pinned_session_id = request.session_id
 
+    # Every session-relative backend call goes through this closure so a
+    # pinned session_id is applied uniformly (see _scope_session_path).
     def scoped_requester(
         local_settings: Settings,
         path: str,
@@ -292,6 +314,8 @@ def _dispatch(
         )
 
     if command == "new":
+        # A bare threshold to reject degenerate goals; the backend session
+        # schema is the real validation boundary.
         if len(argument) < 12:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -345,6 +369,9 @@ def _dispatch(
                 f"with {len(iterations)} iteration(s)."
             )
         except HTTPException as exc:
+            # A missing campaign is a normal early-state condition, not an
+            # error: degrade to a no-campaign note while every other failure
+            # (auth, unreachable backend) propagates as-is.
             if not _is_missing_campaign_error(exc):
                 raise
             response_text += " No autoresearch campaign yet."
@@ -464,6 +491,9 @@ def _dispatch(
             )
         except HTTPException as exc:
             if _is_missing_campaign_error(exc):
+                # Same early-state degradation as !state, but !compare has no
+                # surrounding text to append to, so it returns a standalone
+                # message instead of re-raising the backend 404.
                 return DispatchResponse(
                     matched=True,
                     command=command,
@@ -528,6 +558,9 @@ def _dispatch(
             payload=payload,
         )
 
+    # Unreachable while _parse_command's prefix table and the chain above cover
+    # the same command set; kept as the deterministic rejection if they ever
+    # drift apart.
     return DispatchResponse(
         matched=False,
         response_text=(

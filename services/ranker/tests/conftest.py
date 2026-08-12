@@ -1,3 +1,9 @@
+"""Test path setup for the ranker.
+
+Inserts the service root on sys.path so tests import `app` as a top-level
+package regardless of how pytest is launched.
+"""
+
 from __future__ import annotations
 
 import sys

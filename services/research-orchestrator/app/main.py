@@ -1,3 +1,13 @@
+"""FastAPI operator surface for the research orchestrator.
+
+The app is a thin HTTP projection over the ResearchOrchestrator engine: it
+validates requests, gates mutations behind the operator token, and maps
+domain errors to HTTP statuses. State and policy live in the engine and
+store, not here. All read endpoints are intentionally unauthenticated because
+the service binds to an internal network; only state-changing endpoints
+require the operator token.
+"""
+
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -27,20 +37,29 @@ from .discord_adapter import DisabledDiscordAdapter, DiscordHttpAdapter
 from .discord_controls import DiscordControlGateway
 from .datasets import DatasetIngestionError, DatasetIngestionManager
 from .engine import ResearchOrchestrator, WorkflowError
+from .hermes_runtime import HermesProcessRuntime
+from .knowledge_manager import KnowledgeError
 from .opencode_runtime import AgentRuntime, OpenCodeProcessRuntime
 from .policy import ActionPolicy
 from .schemas import (
     ActionRecord,
     ApprovalRequest,
     ArtifactListResponse,
+    ContextPacket,
+    ContextPacketListResponse,
     EventListResponse,
     IngestedDatasetRecord,
+    KnowledgeSource,
+    KnowledgeSourceListResponse,
+    KnowledgeSourceRequest,
     RejectionRequest,
     RunCreateRequest,
     RunListResponse,
     RunRecord,
+    SourceType,
 )
 from .storage import ConcurrencyConflict, RecordNotFound, SqliteStore
+from .postgres_store import PostgresStore
 from .task_bundles import (
     TaskBundleError,
     TaskBundleManager,
@@ -51,6 +70,12 @@ from .watcher import JobWatcher
 from .workspaces import WorkspaceError, WorkspaceManager
 
 
+def build_agent_runtime(settings: Settings) -> AgentRuntime:
+    if settings.agent_runtime_backend == 'hermes':
+        return HermesProcessRuntime(settings)
+    return OpenCodeProcessRuntime(settings)
+
+
 def build_engine(
     settings: Settings,
     *,
@@ -58,8 +83,16 @@ def build_engine(
     cluster=None,
     discord=None,
 ) -> ResearchOrchestrator:
-    store = SqliteStore(settings.database_path)
-    runtime = runtime or OpenCodeProcessRuntime(settings)
+    # Composition root: wires every subsystem against the same store so all
+    # mutations share one transaction boundary and one event log. The cluster
+    # executor is swapped for a fake when running without a live API.
+    store = (
+        PostgresStore(settings.store_postgres_dsn)
+        if settings.store_backend == 'postgres'
+        else SqliteStore(settings.database_path)
+    )
+    if runtime is None:
+        runtime = build_agent_runtime(settings)
     if cluster is None:
         cluster = (
             FakeClusterExecutor()
@@ -90,14 +123,17 @@ def build_engine(
         shared_mount_root=settings.shared_mount_root,
     )
     baked_root = SERVICE_ROOT / 'evaluation-contracts'
-    for contract_id in (
-        'generic-task-integrity-v1',
-        'ml-benchmark-adult-income-v1',
-        'ml-benchmark-wine-clustering-v1',
-        'ml-benchmark-fashion-contrastive-v1',
+    # Repository-baked contracts are installed at startup so the trusted
+    # catalog is never empty even on a fresh deployment.
+    for contract_id, version in (
+        ('generic-task-integrity-v1', '1.0.0'),
+        ('ml-benchmark-adult-income-v1', '1.0.0'),
+        ('ml-benchmark-adult-income-v1', '1.1.0'),
+        ('ml-benchmark-wine-clustering-v1', '1.0.0'),
+        ('ml-benchmark-fashion-contrastive-v1', '1.0.0'),
     ):
         contract_candidates.install_repository_contract(
-            baked_root / contract_id / '1.0.0'
+            baked_root / contract_id / version
         )
     datasets = DatasetIngestionManager(
         store=store,
@@ -168,10 +204,17 @@ def create_app(
             maximum_dataset_upload_bytes=(
                 settings.maximum_discord_dataset_upload_bytes
             ),
+            maximum_artifact_bundle_bytes=(
+                settings.maximum_discord_artifact_bundle_bytes
+            ),
         )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        # Recovery runs on a background thread while the API is already
+        # serving: restart-crash sweeps (interrupted turns) and in-flight job
+        # reconciliation must not block operator requests. Shutdown stops the
+        # watcher and closes agent runtimes first, then drains the tasks.
         recovery_task = asyncio.create_task(
             asyncio.to_thread(engine.recover),
             name='research-orchestrator-recovery',
@@ -224,6 +267,8 @@ def create_app(
             return
         expected = settings.operator_api_token
         if not expected:
+            # Fail loudly (503) rather than silently allowing requests through
+            # when auth is required but no token is configured.
             raise HTTPException(
                 status_code=503,
                 detail='operator authentication is required but not configured',
@@ -232,12 +277,16 @@ def create_app(
             supplied_token,
             expected,
         ):
+            # compare_digest makes the token comparison constant-time.
             raise HTTPException(
                 status_code=401,
                 detail='valid operator token required',
             )
 
     def map_error(exc: Exception) -> HTTPException:
+        # 404 for missing records, 409 for domain conflicts and integrity
+        # violations (callers may retry after fixing the conflict), 500 for
+        # anything unexpected. Domain errors never leak stack traces.
         if isinstance(exc, RecordNotFound):
             return HTTPException(status_code=404, detail=str(exc))
         if isinstance(
@@ -249,6 +298,7 @@ def create_app(
                 WorkspaceError,
                 TaskBundleError,
                 DatasetIngestionError,
+                KnowledgeError,
             ),
         ):
             return HTTPException(status_code=409, detail=str(exc))
@@ -401,8 +451,112 @@ def create_app(
         except Exception as exc:
             raise map_error(exc) from exc
 
+    @app.post(
+        '/knowledge/sources',
+        response_model=KnowledgeSource,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def ingest_knowledge_source(
+        request: KnowledgeSourceRequest,
+        _: None = Depends(require_operator),
+    ) -> KnowledgeSource:
+        # Operator-only ingestion from a path allowlisted in settings. The
+        # endpoint performs the same allowlist, secret, and size checks as the
+        # in-process ingest path; it never accepts raw text over HTTP.
+        try:
+            return engine.knowledge.ingest_source(
+                source_type=request.source_type,
+                path=request.path,
+                title=request.title,
+                source_version=request.source_version,
+                metadata=request.metadata,
+            )
+        except Exception as exc:
+            raise map_error(exc) from exc
+
+    @app.get(
+        '/knowledge/sources',
+        response_model=KnowledgeSourceListResponse,
+    )
+    def list_knowledge_sources(
+        source_type: str | None = Query(default=None),
+        run_scope: str | None = Query(default=None),
+    ) -> KnowledgeSourceListResponse:
+        source_types = (
+            [SourceType(source_type)] if source_type else None
+        )
+        return KnowledgeSourceListResponse(
+            sources=engine.knowledge.store.list_knowledge_sources(
+                source_types=source_types,
+                run_scope=run_scope,
+            )
+        )
+
+    @app.post(
+        '/knowledge/index/rebuild',
+        response_model=dict[str, object],
+    )
+    def rebuild_knowledge_index(
+        _: None = Depends(require_operator),
+    ) -> dict[str, object]:
+        reindexed = engine.knowledge.rebuild_index()
+        return {'index_version': 'v1', 'reindexed_sources': reindexed}
+
+    @app.delete(
+        '/knowledge/sources/{source_id}',
+        response_model=dict[str, object],
+    )
+    def delete_knowledge_source(
+        source_id: str,
+        _: None = Depends(require_operator),
+    ) -> dict[str, object]:
+        removed = engine.knowledge.delete_source(source_id)
+        return {'source_id': source_id, 'removed': removed}
+
+    @app.delete(
+        '/knowledge/sources/by-digest/{digest}',
+        response_model=dict[str, object],
+    )
+    def invalidate_knowledge_by_digest(
+        digest: str,
+        _: None = Depends(require_operator),
+    ) -> dict[str, object]:
+        removed = engine.knowledge.invalidate_by_digest(digest)
+        return {'digest': digest, 'removed': removed}
+
+    @app.get(
+        '/runs/{run_id}/context-packets',
+        response_model=ContextPacketListResponse,
+    )
+    def list_context_packets(
+        run_id: str,
+        _: None = Depends(require_operator),
+    ) -> ContextPacketListResponse:
+        try:
+            engine.store.get_run(run_id)
+            return ContextPacketListResponse(
+                packets=engine.store.list_context_packets(run_id)
+            )
+        except Exception as exc:
+            raise map_error(exc) from exc
+
+    @app.get(
+        '/context-packets/{packet_id}',
+        response_model=ContextPacket,
+    )
+    def get_context_packet(
+        packet_id: str,
+        _: None = Depends(require_operator),
+    ) -> ContextPacket:
+        try:
+            return engine.knowledge.get_context_packet(packet_id)
+        except Exception as exc:
+            raise map_error(exc) from exc
+
     @app.get('/runs', response_model=RunListResponse)
     def list_runs() -> RunListResponse:
+        # Read endpoints are intentionally unauthenticated (internal-only
+        # network); the operator token gates only state-changing endpoints.
         return RunListResponse(runs=engine.store.list_runs())
 
     @app.get('/runs/{run_id}', response_model=RunRecord)
@@ -516,6 +670,9 @@ def create_app(
             raise map_error(exc) from exc
 
         async def generate() -> AsyncIterator[str]:
+            # Each event is emitted with id: <sequence_number> so a reconnecting
+            # client can resume with after_sequence=<last id>; list_events is
+            # gap-free and ordered, so the cursor never skips or duplicates.
             cursor = after_sequence
             while True:
                 events = engine.store.list_events(
@@ -544,3 +701,6 @@ def create_app(
 
 
 app = create_app()
+# Module import builds the single app instance; uvicorn imports this module
+# and serves the already-constructed app, so startup side effects (schema
+# ensure, contract install) run exactly once per process.

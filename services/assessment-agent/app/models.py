@@ -1,3 +1,11 @@
+"""Request/response contracts for the assessment-agent HTTP surface.
+
+All models use extra='forbid' so unknown fields from callers fail validation
+instead of silently round-tripping. InterpretationPayload is the wire copy of
+the interpretation-agent's output; its list validators strip blank entries and
+reject duplicates so readiness scoring never sees ambiguous inputs.
+"""
+
 from __future__ import annotations
 
 from typing import Any

@@ -1,5 +1,5 @@
 {
-  "container_image_digest": "ghcr.io/offensivegeneric/glasslab-evaluation-contract-example@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "container_image_digest": "ghcr.io/ccny-glasslab/glasslab-evaluation-contract-example@sha256:1111111111111111111111111111111111111111111111111111111111111111",
   "contract_id": "example-research-v1",
   "evaluation_entry_point": "evaluator.py",
   "execution_wrapper": "run_contract.py",

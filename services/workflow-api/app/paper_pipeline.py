@@ -1,3 +1,12 @@
+"""Build intake requests and auto-resolve design inputs from paper pipeline inputs.
+
+Translates FreshPaperPipelineRequest into IntakeCreateRequest and resolves
+workflow-specific declared inputs (dataset URIs, repository URLs, evaluation
+targets) from combined intake + interpretation + request context. The
+auto-resolution prefers deterministic rules over agent guesses so the design
+draft is always traceable to concrete source references.
+"""
+
 from __future__ import annotations
 
 from typing import Any

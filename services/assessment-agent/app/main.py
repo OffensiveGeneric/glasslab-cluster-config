@@ -1,3 +1,11 @@
+"""FastAPI surface for the assessment stage-agent.
+
+Exposes POST /assess-interpretation plus /healthz. Drafts are produced by
+deterministic scaffold logic in build_assessment_draft (the future model call
+would replace it), so the endpoint always returns the same warnings block.
+Caller is workflow-api.
+"""
+
 from __future__ import annotations
 
 import os
@@ -12,6 +20,9 @@ from .models import (
     ModelBackendMetadata,
 )
 
+# Backend metadata is read from env once at import time and echoed on every
+# response; defaults point at the shared mlx Qwen endpoint a live implementation
+# would call. Kept out of the request path so it is immutable per process.
 MODEL_BACKEND = ModelBackendMetadata(
     provider=os.getenv('GLASSLAB_ASSESSMENT_AGENT_PROVIDER_API', 'openai-compatible').strip()
     or 'openai-compatible',
@@ -24,6 +35,8 @@ MODEL_BACKEND = ModelBackendMetadata(
 
 def build_assessment_draft(request: AssessmentRequest) -> AssessmentDraft:
     interpretation = request.interpretation
+    # Callers supply only registry-approved workflows, so a candidate that is
+    # missing here was filtered out upstream and is simply skipped.
     workflows = {workflow.workflow_id: workflow for workflow in request.available_workflows}
 
     recommended_workflow = None
@@ -33,6 +46,8 @@ def build_assessment_draft(request: AssessmentRequest) -> AssessmentDraft:
             continue
         if recommended_workflow is None:
             recommended_workflow = workflow
+        # Titanic maps deterministically to the generic tabular benchmark and
+        # outranks any earlier family candidate.
         if workflow.workflow_id == 'generic-tabular-benchmark' and 'titanic' in interpretation.dataset_hints:
             recommended_workflow = workflow
             break
@@ -52,6 +67,8 @@ def build_assessment_draft(request: AssessmentRequest) -> AssessmentDraft:
         )
 
     if recommended_workflow is None:
+        # No approved workflow matched: a hard reject, not needs_review, because
+        # there is nothing yet for a reviewer to approve.
         return AssessmentDraft(
             recommendation='reject',
             recommended_workflow_id=None,

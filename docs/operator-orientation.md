@@ -1,5 +1,11 @@
 # Operator Orientation
 
+> **Historical orientation:** this document predates the deployed
+> Honeydew/Beaker research orchestrator and still describes OpenClaw as the
+> operator layer. For current agent and operator context, start with
+> [`../AGENTS.md`](../AGENTS.md) and
+> [`research-orchestrator-command-surface.md`](research-orchestrator-command-surface.md).
+
 This document is for one purpose: to let you remember what Glasslab is without reloading the whole repo into your head.
 
 It is not a deployment runbook. It is the map.
@@ -285,7 +291,6 @@ These constraints explain most of the weirdness in the repo.
 
 The provisioner is simultaneously:
 
-- bastion
 - Ansible control host
 - `kubectl` workstation
 - image build point
@@ -293,6 +298,9 @@ The provisioner is simultaneously:
 - place where some runtime state is materialized
 
 That is why so much operational truth sits there.
+
+The public SSH gateway at `glasslab.org` is a separate machine. It provides
+the hop into the lab but does not own these provisioner responsibilities.
 
 ### Constraint 2: No Clean Shared Storage Yet
 

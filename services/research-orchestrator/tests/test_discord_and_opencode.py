@@ -1,3 +1,11 @@
+"""Discord rendering/controls and OpenCode runtime behavior.
+
+Covers Discord message rendering and approval controls, the control-policy
+gates and actor identity recording, HTTP adapter thread/status handling, and
+the OpenCode runtime: event normalization, structured-output extraction and
+repair, workspace-file materialization, and per-agent runtime isolation.
+"""
+
 from __future__ import annotations
 
 import json
@@ -6,6 +14,7 @@ from unittest.mock import Mock
 
 import discord
 import httpx
+import pytest
 
 from app.discord_adapter import DiscordHttpAdapter, DiscordRenderer
 from app.config import Settings
@@ -21,10 +30,12 @@ from app.discord_controls import (
 )
 from app.opencode_runtime import (
     OpenCodeProcessRuntime,
+    OpenCodeRuntimeError,
     extract_structured_output,
     materialize_declared_workspace_files,
     normalize_opencode_event,
     normalize_structured_output,
+    parse_json_text,
 )
 from app.schemas import AgentName, AgentTurnResult, EventRecord
 
@@ -150,6 +161,21 @@ def test_discord_matrix_waits_for_honeydew_before_showing_controls() -> None:
         'objective': 'Compare naive and semi-hard triplet mining.',
         'reason': 'The matrix requires methodology and human approval.',
         'effect': 'Authorize bounded cluster submission.',
+        'preflight': {
+            'passed': True,
+            'job_count': 6,
+            'checks': [
+                'candidate config parsed',
+                'deterministic expansion produces 6 jobs',
+            ],
+            'comparisons': {
+                'miner': ['naive', 'semi_hard'],
+            },
+            'decisions': {
+                'encoding': ['one_hot'],
+            },
+            'errors': [],
+        },
         'arguments': {
             'variants': [
                 {'name': 'naive-mining', 'overrides': {}},
@@ -182,6 +208,8 @@ def test_discord_matrix_waits_for_honeydew_before_showing_controls() -> None:
     assert proposed.components is None
     assert '6 jobs' in proposed.content
     assert '1 GPU' in proposed.content
+    assert '**Deterministic preflight**' in proposed.content
+    assert 'miner=[naive, semi_hard]' in proposed.content
 
     requested = renderer.render(
         EventRecord(
@@ -345,6 +373,7 @@ def test_discord_gateway_registers_component_handler() -> None:
     for command_name in (
         'research-pause',
         'research-resume',
+        'research-artifacts',
         'dataset-upload',
     ):
         assert gateway.tree.get_command(
@@ -624,6 +653,48 @@ def test_opencode_event_normalization() -> None:
     ) is None
 
 
+def test_opencode_terminal_tool_signatures_ignore_incomplete_calls() -> None:
+    messages = [
+        {
+            'parts': [
+                {
+                    'type': 'tool',
+                    'tool': 'read',
+                    'state': {
+                        'status': 'completed',
+                        'input': {'filePath': '/workspace/run.py', 'offset': 15},
+                    },
+                },
+                {
+                    'type': 'tool',
+                    'tool': 'read',
+                    'state': {
+                        'status': 'pending',
+                        'input': {'filePath': '/workspace/other.py'},
+                    },
+                },
+            ]
+        },
+        {
+            'parts': [
+                {
+                    'type': 'tool',
+                    'tool': 'read',
+                    'state': {
+                        'status': 'error',
+                        'input': {'offset': 15, 'filePath': '/workspace/run.py'},
+                    },
+                }
+            ]
+        },
+    ]
+
+    signatures = OpenCodeProcessRuntime._terminal_tool_signatures(messages)
+
+    assert len(signatures) == 2
+    assert signatures[0] == signatures[1]
+
+
 def test_extracts_current_and_legacy_opencode_structured_output() -> None:
     current = {'info': {'structured': {'kind': 'protocol_draft'}}}
     legacy = {'info': {'structured_output': {'kind': 'protocol_draft'}}}
@@ -744,6 +815,141 @@ def test_opencode_writable_runtime_directories_are_per_agent(
     assert config['permission']['task'] == 'deny'
     assert config['permission']['websearch'] == 'deny'
     assert config['permission']['external_directory'] == 'deny'
+    assert config['model'].startswith('exo/')
+    assert 'exo' in config['provider']
+
+
+def test_opencode_uses_builtin_zen_provider_for_big_pickle(tmp_path) -> None:
+    runtime = OpenCodeProcessRuntime(
+        Settings(
+            agent_model_provider_id='opencode',
+            agent_model_name='big-pickle',
+        )
+    )
+    workspace = tmp_path / 'run-1' / 'beaker-worktree'
+    workspace.mkdir(parents=True)
+
+    roots = runtime._write_runtime_config(
+        run_id='run-1',
+        agent=AgentName.BEAKER,
+        workspace=workspace,
+    )
+
+    config = json.loads((roots[0] / 'opencode' / 'opencode.json').read_text())
+    assert config['model'] == 'opencode/big-pickle'
+    assert config['small_model'] == 'opencode/big-pickle'
+    assert 'provider' not in config
+
+
+def test_prompt_structured_output_avoids_forced_tool_choice(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                'info': {'id': 'message-prompt-json'},
+                'parts': [
+                    {
+                        'type': 'text',
+                        'text': json.dumps(
+                            {
+                                'kind': 'verification',
+                                'summary': 'Prompt JSON validated.',
+                            }
+                        ),
+                    }
+                ],
+            },
+        )
+
+    runtime = OpenCodeProcessRuntime(
+        Settings(
+            agent_model_provider_id='opencode',
+            agent_model_name='big-pickle',
+            opencode_structured_output_mode='prompt',
+        )
+    )
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    handle = SimpleNamespace(
+        base_url='http://opencode.test',
+        password='password',
+    )
+    monkeypatch.setattr(runtime, '_start_process', lambda **_: handle)
+    monkeypatch.setattr(
+        runtime,
+        '_client',
+        lambda _: httpx.Client(
+            base_url=handle.base_url,
+            transport=httpx.MockTransport(respond),
+        ),
+    )
+
+    result, _ = runtime.run_turn(
+        run_id='run-1',
+        agent=AgentName.BEAKER,
+        workspace=workspace,
+        session_id='session-1',
+        prompt='Verify provider compatibility.',
+    )
+
+    assert result.summary == 'Prompt JSON validated.'
+    payload = json.loads(requests[0].content)
+    assert 'format' not in payload
+    assert 'Return only a JSON object' in payload['parts'][0]['text']
+    assert 'AgentTurnResult' in payload['parts'][0]['text']
+
+
+def test_opencode_provider_error_is_reported(tmp_path, monkeypatch) -> None:
+    def respond(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                'info': {
+                    'error': {
+                        'name': 'APIError',
+                        'data': {'message': 'provider rejected request'},
+                    }
+                }
+            },
+        )
+
+    runtime = OpenCodeProcessRuntime(Settings())
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    handle = SimpleNamespace(
+        base_url='http://opencode.test',
+        password='password',
+    )
+    monkeypatch.setattr(runtime, '_start_process', lambda **_: handle)
+    monkeypatch.setattr(
+        runtime,
+        '_client',
+        lambda _: httpx.Client(
+            base_url=handle.base_url,
+            transport=httpx.MockTransport(respond),
+        ),
+    )
+
+    with pytest.raises(OpenCodeRuntimeError, match='provider rejected request'):
+        runtime.run_turn(
+            run_id='run-1',
+            agent=AgentName.BEAKER,
+            workspace=workspace,
+            session_id='session-1',
+            prompt='Run.',
+        )
+
+
+def test_parse_json_text_accepts_json_markdown_fence() -> None:
+    assert parse_json_text('```json\n{"kind": "verification"}\n```') == {
+        'kind': 'verification'
+    }
 
 
 def test_opencode_repairs_invalid_structured_output(
@@ -809,6 +1015,10 @@ def test_opencode_repairs_invalid_structured_output(
     assert message_id == 'message-repaired'
     assert len(requests) == 2
     repair_payload = json.loads(requests[1].content)
+    assert repair_payload['model'] == {
+        'providerID': 'exo',
+        'modelID': 'mlx-community/Qwen3-Coder-Next-4bit',
+    }
     assert 'Correct only the structured result' in (
         repair_payload['parts'][0]['text']
     )

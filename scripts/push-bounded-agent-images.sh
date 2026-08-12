@@ -3,14 +3,14 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REGISTRY_HOST="${GLASSLAB_AGENT_REGISTRY_HOST:-ghcr.io}"
-REGISTRY_USERNAME="${GHCR_USERNAME:-${GITHUB_ACTOR:-OffensiveGeneric}}"
+REGISTRY_USERNAME="${GHCR_USERNAME:-${GITHUB_ACTOR:-ccny-glasslab}}"
 REGISTRY_TOKEN="${GHCR_TOKEN:-}"
 
-INTAKE_IMAGE_REF="${GLASSLAB_INTAKE_AGENT_IMAGE_REF:-ghcr.io/offensivegeneric/glasslab-intake-agent:0.1.0}"
-INTERPRETATION_IMAGE_REF="${GLASSLAB_INTERPRETATION_AGENT_IMAGE_REF:-ghcr.io/offensivegeneric/glasslab-interpretation-agent:0.1.0}"
-ASSESSMENT_IMAGE_REF="${GLASSLAB_ASSESSMENT_AGENT_IMAGE_REF:-ghcr.io/offensivegeneric/glasslab-assessment-agent:0.1.0}"
-DESIGN_IMAGE_REF="${GLASSLAB_DESIGN_AGENT_IMAGE_REF:-ghcr.io/offensivegeneric/glasslab-design-agent:0.1.0}"
-SCHEDULE_WORKER_IMAGE_REF="${GLASSLAB_SCHEDULE_WORKER_IMAGE_REF:-ghcr.io/offensivegeneric/glasslab-schedule-worker:0.1.0}"
+INTAKE_IMAGE_REF="${GLASSLAB_INTAKE_AGENT_IMAGE_REF:-ghcr.io/ccny-glasslab/glasslab-intake-agent:0.1.0}"
+INTERPRETATION_IMAGE_REF="${GLASSLAB_INTERPRETATION_AGENT_IMAGE_REF:-ghcr.io/ccny-glasslab/glasslab-interpretation-agent:0.1.0}"
+ASSESSMENT_IMAGE_REF="${GLASSLAB_ASSESSMENT_AGENT_IMAGE_REF:-ghcr.io/ccny-glasslab/glasslab-assessment-agent:0.1.0}"
+DESIGN_IMAGE_REF="${GLASSLAB_DESIGN_AGENT_IMAGE_REF:-ghcr.io/ccny-glasslab/glasslab-design-agent:0.1.0}"
+SCHEDULE_WORKER_IMAGE_REF="${GLASSLAB_SCHEDULE_WORKER_IMAGE_REF:-ghcr.io/ccny-glasslab/glasslab-schedule-worker:0.1.0}"
 
 usage() {
   cat <<'USAGE'
@@ -20,7 +20,7 @@ Build and push the bounded stage-agent images to GHCR.
 
 Environment:
   GHCR_TOKEN    GitHub token with package write access
-  GHCR_USERNAME Registry username. Defaults to OffensiveGeneric.
+  GHCR_USERNAME Registry username. Defaults to ccny-glasslab.
 USAGE
 }
 

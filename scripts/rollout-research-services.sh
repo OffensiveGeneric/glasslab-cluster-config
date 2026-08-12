@@ -8,6 +8,7 @@ SERVICE="all"
 IMAGE_TAG=""
 SYNC=false
 SKIP_SMOKE=false
+SKIP_IMAGE_PRUNE=false
 
 usage() {
   cat <<'USAGE'
@@ -21,6 +22,7 @@ Options:
   --tag <tag>       GHCR image tag. Default: full SHA of the checked-out commit
   --sync            Fast-forward the canonical checkout to origin/main first
   --skip-smoke      Skip post-rollout service health checks
+  --skip-image-prune  Do not apply the local control-service tag retention policy
   -h, --help        Show this help
 USAGE
 }
@@ -49,7 +51,7 @@ require_object() {
 }
 
 rollout_workflow_api() {
-  local image="ghcr.io/offensivegeneric/glasslab-workflow-api:${IMAGE_TAG}"
+  local image="ghcr.io/ccny-glasslab/glasslab-workflow-api:${IMAGE_TAG}"
 
   require_object persistentvolumeclaim glasslab-shared-datasets
   require_object persistentvolumeclaim glasslab-shared-artifacts
@@ -69,7 +71,7 @@ rollout_workflow_api() {
 }
 
 rollout_research_orchestrator() {
-  local image="ghcr.io/offensivegeneric/glasslab-research-orchestrator:${IMAGE_TAG}"
+  local image="ghcr.io/ccny-glasslab/glasslab-research-orchestrator:${IMAGE_TAG}"
 
   require_object persistentvolumeclaim glasslab-shared-artifacts
   apply_manifest "$ROOT_DIR/kubeadm/glasslab-v2/research-orchestrator/00-service-account.yaml"
@@ -101,6 +103,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-smoke)
       SKIP_SMOKE=true
+      shift
+      ;;
+    --skip-image-prune)
+      SKIP_IMAGE_PRUNE=true
       shift
       ;;
     -h|--help)
@@ -175,6 +181,11 @@ if [[ "$SKIP_SMOKE" != true ]]; then
   "$KUBECTL" -n "$NAMESPACE" exec \
     deployment/glasslab-research-orchestrator -c orchestrator -- \
     python -c 'import json, urllib.request; print(json.load(urllib.request.urlopen("http://127.0.0.1:8080/ready")))'
+fi
+
+if [[ "$SKIP_IMAGE_PRUNE" != true ]]; then
+  "$ROOT_DIR/scripts/prune-control-service-images.sh" --apply \
+    --retain-tag "$IMAGE_TAG"
 fi
 
 printf '[rollout-research-services] done\n'

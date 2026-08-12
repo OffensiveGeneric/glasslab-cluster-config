@@ -1,3 +1,13 @@
+"""Kubernetes Job submission and lifecycle observation.
+
+Translates validated RunManifest records into Kubernetes Job specs with
+appropriate volumes, resource requests, security contexts, and evaluation
+contract bindings. The submitter is the only code path that touches the
+Kubernetes API; all callers interact through the abstract submit_run /
+get_live_status / get_live_logs interface. Supports null mode for local
+development without a cluster.
+"""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -6,13 +16,45 @@ from hashlib import sha256
 import json
 from pathlib import Path, PurePosixPath
 import re
-
+import socket
+import ssl
 from typing import Any
+
+import urllib3
 
 from services.common.schemas import RunManifest, RunStatus
 
 from .config import Settings
 from .schemas import JobSubmissionReceipt, LogEntry, RunRecord
+
+
+class LiveStatusUnavailableError(Exception):
+    """The Kubernetes live-status lookup failed for an expected infrastructure
+    reason (API error, DNS/connection failure, or TLS transport failure).
+
+    Raised instead of returning a fabricated status so callers can surface the
+    durable stored status with an explicit degradation note. Deliberately not a
+    subclass of the transport exceptions below, and never raised for
+    programming errors, which continue to propagate unchanged.
+    """
+
+
+# Transport exceptions the Kubernetes Python client raises for expected
+# infrastructure outages, kept distinct from ApiException and from unrelated
+# programming errors. urllib3.MaxRetryError is the umbrella for DNS,
+# connection-refused, timeout, and TLS failures; the narrower classes cover
+# connection timeouts, read timeouts, and the raw stdlib equivalents that
+# occasionally escape urllib3's wrapping.
+_KUBE_TRANSPORT_EXCEPTIONS = (
+    urllib3.exceptions.MaxRetryError,
+    urllib3.exceptions.NewConnectionError,
+    urllib3.exceptions.ConnectionError,
+    urllib3.exceptions.ConnectTimeoutError,
+    urllib3.exceptions.ReadTimeoutError,
+    urllib3.exceptions.SSLError,
+    ssl.SSLError,
+    socket.gaierror,
+)
 
 
 def workflow_submission_ready(workflow: RunManifest | Any) -> tuple[bool, list[str]]:
@@ -84,6 +126,10 @@ def resolve_evaluation_contract(
     manifest: RunManifest,
     settings: Settings,
 ) -> dict[str, str] | None:
+    # Evaluation contracts are immutable and digest-pinned. The workflow can
+    # request a specific (contract_id, version, digest) triple, but only the
+    # trusted catalog (static env + optional JSON file) is consulted; the
+    # workflow never specifies the contract path or image directly.
     requested = manifest.config_payload.get('evaluation_contract')
     if requested is None:
         return None
@@ -542,6 +588,7 @@ class KubernetesJobSubmitter(JobSubmitter):
                 requests=manifest.resource_requests or None,
                 limits=manifest.resource_limits or None,
             ),
+            # Container runs unprivileged: no escalation, no capabilities.
             security_context=self.client.V1SecurityContext(
                 allow_privilege_escalation=False,
                 capabilities=self.client.V1Capabilities(drop=['ALL']),
@@ -627,6 +674,8 @@ class KubernetesJobSubmitter(JobSubmitter):
             priority_class_name=priority_class_name or None,
             runtime_class_name=runtime_class_name,
             node_selector=manifest.node_selector or None,
+            # RuntimeDefault seccomp profile: the workload cannot install
+            # custom seccomp filters or bypass the pod-level sandbox.
             security_context=self.client.V1PodSecurityContext(
                 seccomp_profile=self.client.V1SeccompProfile(type='RuntimeDefault'),
             ),
@@ -747,8 +796,14 @@ class KubernetesJobSubmitter(JobSubmitter):
                 name=record.job_submission.job_name,
                 namespace=record.job_submission.namespace,
             )
-        except self.api_exception:
-            return None
+        except self.api_exception as exc:
+            raise LiveStatusUnavailableError(
+                'Kubernetes API error during live status lookup'
+            ) from exc
+        except _KUBE_TRANSPORT_EXCEPTIONS as exc:
+            raise LiveStatusUnavailableError(
+                'Kubernetes transport failure during live status lookup'
+            ) from exc
 
         now = datetime.now(timezone.utc)
         status = job.status

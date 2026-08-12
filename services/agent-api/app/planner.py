@@ -1,3 +1,12 @@
+"""Normalize plain-English experiment requests into a validated PlannerSpec.
+
+The Qwen planner model is asked for JSON matching the approved schema; if the
+model output is unusable or the endpoint is down, a deterministic keyword
+fallback produces a safe spec for Titanic requests. Anything that cannot be
+normalized to the closed schema raises PlannerError, which the API records as a
+failed experiment rather than inventing pipeline parameters.
+"""
+
 from __future__ import annotations
 
 import json
@@ -55,6 +64,9 @@ def plan_request(request_text: str, qwen_client: QwenClient) -> PlannerDecision:
         spec = PlannerSpec.model_validate(parsed)
         return PlannerDecision(spec=spec, source='model', raw_output=raw_output)
     except (PlannerError, QwenClientError, JSONDecodeError, ValueError) as exc:
+        # Any planner failure degrades to the deterministic fallback so the
+        # control loop keeps working without the model; only requests that fit
+        # neither path raise PlannerError.
         fallback = fallback_plan_request(request_text)
         if fallback is None:
             raise PlannerError(f'planner failed and no deterministic fallback matched: {exc}') from exc
@@ -105,6 +117,8 @@ def fallback_plan_request(request_text: str) -> dict | None:
 
 
 def _load_json_object(raw_output: str) -> dict:
+    # Models often wrap JSON in ``` fences or prose; extract the first balanced
+    # {…} object and tolerate trailing text.
     candidate = raw_output.strip()
     if candidate.startswith('```'):
         parts = candidate.split('```')

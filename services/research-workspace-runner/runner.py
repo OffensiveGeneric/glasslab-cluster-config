@@ -1,3 +1,13 @@
+"""Execute one frozen research workspace under the generic Glasslab run contract.
+
+Bounded execution: verify input digests, run one declared command under a
+wall-clock timeout, then write a terminal bundle (manifest, config, artifact
+index, status) even when verification or execution fails. The workload emits
+metrics and evidence only; this module never writes evaluation.json or any
+scoring record. The deterministic evaluator owns scoring and writes
+evaluation.json after the run.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -14,6 +24,10 @@ from urllib.parse import urlparse
 import zipfile
 
 
+# Names reserved for deterministic machinery (runner + evaluator), never the
+# workload. The required-artifact check skips these, so a workload can never
+# be required to emit evaluation material; evaluation.json is reserved for the
+# evaluator and is deliberately not written here.
 BASE_GENERATED_ARTIFACTS = {
     'run_manifest.json',
     'config.json',
@@ -36,10 +50,12 @@ def _read_json_env(env: Mapping[str, str], name: str) -> dict[str, Any]:
 
 def _write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    # sort_keys keeps emitted records byte-stable across runs for clean diffs.
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + '\n')
 
 
 def _file_sha256(path: Path) -> str:
+    # Chunked read keeps memory flat for multi-GB datasets and artifacts.
     digest = sha256()
     with path.open('rb') as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b''):
@@ -58,6 +74,8 @@ def resolve_asset_uri(
     dataset_root: Path,
     artifacts_root: Path,
 ) -> Path:
+    # s3:// prefixes are namespace conventions mapped into the two approved
+    # roots; file:// and bare absolute paths must still land inside them.
     if uri.startswith('s3://datasets/'):
         path = dataset_root / uri.removeprefix('s3://datasets/')
     elif uri.startswith('s3://glasslab-datasets/'):
@@ -74,6 +92,8 @@ def resolve_asset_uri(
     roots = [dataset_root.resolve(), artifacts_root.resolve()]
     if not _is_within(path, roots):
         raise ValueError(f'asset path is outside approved mounted roots: {path}')
+    # Deny symlinks even when the resolved target stays inside the roots:
+    # evidence provenance must be the actual on-disk file, not an alias.
     if path.is_symlink():
         raise ValueError(f'asset path cannot be a symlink: {path}')
     if not path.is_file():
@@ -82,6 +102,8 @@ def resolve_asset_uri(
 
 
 def _safe_zip_extract(archive: Path, destination: Path) -> None:
+    # Validate every member (no traversal, no symlinks) before extracting so a
+    # hostile archive cannot write outside the destination.
     with zipfile.ZipFile(archive) as handle:
         for member in handle.infolist():
             target = destination / member.filename
@@ -101,6 +123,8 @@ def _safe_tar_extract(archive: Path, destination: Path) -> None:
                 raise ValueError(f'tar member escapes workspace: {member.name}')
             if member.issym() or member.islnk():
                 raise ValueError(f'tar links are not allowed: {member.name}')
+        # filter='data' additionally blocks special-file and setuid entries;
+        # the explicit link checks above keep the failure messages precise.
         handle.extractall(destination, filter='data')
 
 
@@ -126,6 +150,10 @@ def materialize_asset(
         raise ValueError(
             f'asset digest mismatch for {uri}: expected {expected_sha256}, got {actual_sha256}'
         )
+
+    # Digest is verified against the archive file itself before anything is
+    # extracted; only archive media are unpacked, everything else is copied
+    # verbatim so the workspace sees byte-identical inputs.
 
     destination.mkdir(parents=True, exist_ok=True)
     if zipfile.is_zipfile(source):
@@ -175,6 +203,9 @@ def verify_dataset_bindings(
                 f'dataset digest mismatch for {name}: '
                 f'expected {expected_sha256}, got {actual_sha256}'
             )
+    # Reverse-direction check closes the loop: every resolved binding must be
+    # declared by a contract, so the workload can never be handed undeclared
+    # files through the environment.
     unexpected_names = sorted(set(resolved_bindings) - expected_names)
     if unexpected_names:
         raise ValueError(
@@ -184,6 +215,9 @@ def verify_dataset_bindings(
 
 
 def _artifact_exists(run_root: Path, name: str) -> bool:
+    # Symlinks and anything escaping the run root can never satisfy a required
+    # artifact; directory names must carry the trailing slash used by the
+    # manifest naming convention.
     path = run_root / name.rstrip('/')
     if path.is_symlink() or not _is_within(path, [run_root.resolve()]):
         return False
@@ -191,6 +225,10 @@ def _artifact_exists(run_root: Path, name: str) -> bool:
 
 
 def _build_artifact_index(run_id: str, run_root: Path, required: set[str]) -> dict[str, Any]:
+    # Snapshots every regular file under the run root so all evidence plus the
+    # runner records present at this point are enumerated with digests. Runs
+    # before status.json and the index itself are written, so those two are
+    # intentionally absent rather than self-referential entries.
     artifacts: list[dict[str, Any]] = []
     for path in sorted(run_root.rglob('*')):
         if (
@@ -224,6 +262,8 @@ def _write_terminal_bundle(
     terminal_status: str,
     detail: str,
 ) -> list[str]:
+    # The bundle is always written, even after a failed verification or run,
+    # so a run id always has readable terminal state.
     _write_json(run_root / 'run_manifest.json', manifest)
     _write_json(run_root / 'config.json', config)
     required = set(manifest.get('expected_artifacts', {}).get('required', []))
@@ -236,6 +276,9 @@ def _write_terminal_bundle(
         )
     )
     if missing and terminal_status == 'succeeded':
+        # A successful exit is not enough: a run is still failed when declared
+        # workload artifacts are absent, so evidence obligations are enforced
+        # regardless of the command's exit code.
         terminal_status = 'failed'
         detail = 'workspace command exited successfully but required artifacts are missing: ' + ', '.join(missing)
     _write_json(
@@ -249,6 +292,8 @@ def _write_terminal_bundle(
     }
     status_path = run_root / 'status.json'
     temporary_status_path = run_root / '.status.json.tmp'
+    # Temp-then-rename keeps status.json atomic; a reader never observes a
+    # partially written terminal status.
     _write_json(temporary_status_path, status_payload)
     temporary_status_path.replace(status_path)
     return missing
@@ -270,6 +315,9 @@ def run_from_environment(env: Mapping[str, str] | None = None) -> int:
     dataset_root = Path(env.get('GLASSLAB_DATASET_ROOT', '/mnt/datasets'))
     workspace_root = Path(env.get('GLASSLAB_WORKSPACE_ROOT', '/work'))
     run_root = artifacts_root / run_id
+    # run_root is both the workload's writable output directory and the home
+    # of the authoritative terminal bundle, so evidence and records stay in
+    # one per-run location.
     logs_dir = run_root / 'logs'
     logs_dir.mkdir(parents=True, exist_ok=True)
     runner_log = logs_dir / 'runner.log'
@@ -313,6 +361,10 @@ def run_from_environment(env: Mapping[str, str] | None = None) -> int:
 
         output_path = Path(str(workspace.get('output_directory', '/outputs')))
         if output_path != run_root:
+            # Point the configured output path at run_root instead of copying,
+            # so the workload writes straight into the authoritative run
+            # directory. An existing path is only tolerated when it already
+            # resolves to this run's root.
             if output_path.is_symlink() or output_path.exists():
                 if output_path.resolve() != run_root.resolve():
                     raise ValueError(f'workspace output path already exists: {output_path}')
@@ -340,18 +392,36 @@ def run_from_environment(env: Mapping[str, str] | None = None) -> int:
                 sort_keys=True,
             ),
         }
+        # The workload sees only resolved, read-only inputs plus its output
+        # directory; no evaluation contract or rubric is exposed here, so
+        # self-scoring cannot reference scoring inputs from this process.
+        normalized_bindings: dict[str, str] = {}
+        # Bindings are also exposed as an uppercase normalized env namespace;
+        # the collision check keeps that namespace unambiguous.
         for name, path in resolved_bindings.items():
             normalized_name = ''.join(
                 char if char.isalnum() else '_'
                 for char in str(name).upper()
             )
+            previous = normalized_bindings.get(normalized_name)
+            if previous is not None:
+                raise ValueError(
+                    'dataset binding names collide after environment '
+                    f'normalization: {previous}, {name}'
+                )
+            normalized_bindings[normalized_name] = str(name)
             process_env[f'GLASSLAB_DATASET_{normalized_name}'] = str(path)
+            process_env[f'{normalized_name}_PATH'] = str(path)
 
         budget = manifest.get('budget', {})
         max_minutes = int(budget.get('max_wallclock_minutes', 0))
         if max_minutes < 1:
             raise ValueError('manifest budget.max_wallclock_minutes must be positive')
         timeout_seconds = max(1, max_minutes * 60 - 5)
+
+        # Five seconds of headroom before the platform budget expires, so the
+        # runner can still write the terminal bundle instead of being killed
+        # mid-run.
 
         with runner_log.open('a', encoding='utf-8') as log_handle:
             log_handle.write('Executing frozen workspace command: ' + json.dumps(command) + '\n')
@@ -364,6 +434,8 @@ def run_from_environment(env: Mapping[str, str] | None = None) -> int:
                 timeout=timeout_seconds,
                 check=False,
             )
+            # check=False: the exit code is recorded and mapped to terminal
+            # status here, and the bundle is written either way.
             log_handle.write(f'Workspace command exit code: {completed.returncode}\n')
         if completed.returncode != 0:
             detail = f'workspace command failed with exit code {completed.returncode}'
@@ -378,6 +450,8 @@ def run_from_environment(env: Mapping[str, str] | None = None) -> int:
         with runner_log.open('a', encoding='utf-8') as log_handle:
             log_handle.write(traceback.format_exc())
 
+    # Terminal records are written outside the try so even failures produce a
+    # complete bundle; the exit code reflects the final terminal status.
     missing = _write_terminal_bundle(
         run_id=run_id,
         run_root=run_root,

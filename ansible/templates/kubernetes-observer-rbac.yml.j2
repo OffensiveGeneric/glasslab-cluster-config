@@ -1,0 +1,47 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: glasslab-contributor-observer
+  labels:
+    app.kubernetes.io/managed-by: glasslab-identity-ansible
+rules:
+  - apiGroups: [""]
+    resources:
+      - events
+      - pods
+      - pods/log
+      - pods/status
+      - persistentvolumeclaims
+      - services
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources:
+      - daemonsets
+      - deployments
+      - replicasets
+      - statefulsets
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+    verbs: ["get", "list", "watch"]
+{% for namespace in glasslab_kubernetes_observer_namespaces %}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: glasslab-contributor-observers
+  namespace: {{ namespace }}
+  labels:
+    app.kubernetes.io/managed-by: glasslab-identity-ansible
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: glasslab-contributor-observer
+subjects:
+{% for user in glasslab_kubernetes_observer_users %}
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: {{ user.username }}
+{% endfor %}
+{% endfor %}

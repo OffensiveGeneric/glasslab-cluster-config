@@ -1,3 +1,12 @@
+"""Shared fixtures for the research-orchestrator test suite.
+
+Builds a production-wired engine against a temp git repo and fake runtimes:
+real SqliteStore, FakeClusterExecutor, ScriptedMockRuntime, and a disabled
+Discord adapter, so no test ever touches a live cluster or model. The
+orchestrator_bundle fixture returns (settings, store, cluster, runtime,
+engine) in that fixed order.
+"""
+
 from __future__ import annotations
 
 import os
@@ -8,6 +17,8 @@ import tempfile
 import pytest
 
 
+# Env vars are set before the app imports below because app.config reads
+# these at import time; setdefault keeps a real environment's overrides.
 _IMPORT_ROOT = Path(tempfile.mkdtemp(prefix='glasslab-orchestrator-import-'))
 for _name, _relative in {
     'DATABASE_PATH': 'orchestrator.db',
@@ -39,10 +50,12 @@ from app.storage import SqliteStore
 from app.workspaces import WorkspaceManager
 
 
-RUNNER_IMAGE = 'ghcr.io/offensivegeneric/glasslab-test-runner:test'
+RUNNER_IMAGE = 'ghcr.io/ccny-glasslab/glasslab-test-runner:test'
 
 
 def create_test_repo(root: Path) -> Path:
+    # Every fixture workspace needs a real git repository with a committed
+    # baseline config: WorkspaceManager clones it and stages worktrees from it.
     repo = root / 'repo'
     repo.mkdir()
     subprocess.run(

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import timedelta
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -9,6 +8,8 @@ from threading import RLock
 from typing import Any
 from uuid import uuid4, uuid5, NAMESPACE_URL
 
+from .analysis_notebook import write_analysis_notebook
+from .artifact_delivery import ArtifactDeliveryError
 from .cluster import ClusterExecutor
 from .config import Settings
 from .contract_candidates import ContractCandidateManager
@@ -18,6 +19,7 @@ from .datasets import DatasetIngestionManager
 from .matrix import expand_experiment_matrix
 from .opencode_runtime import AgentRuntime
 from .policy import ActionPolicy
+from .preflight import MatrixPreflightReport, preflight_matrix
 from .schemas import (
     ActionRecord,
     AgentName,
@@ -25,7 +27,9 @@ from .schemas import (
     ApprovalStatus,
     ArtifactRecord,
     ContractCandidateRequest,
+    ContextPacket,
     EvaluationContractDescriptor,
+    EvaluationContractProposal,
     ExperimentMatrix,
     JOB_TERMINAL_STATUSES,
     JobRecord,
@@ -47,6 +51,7 @@ from .task_bundles import (
     TaskPreflight,
 )
 from .workspaces import WorkspaceManager
+from .knowledge_manager import KnowledgeManager
 
 
 class WorkflowError(RuntimeError):
@@ -68,6 +73,7 @@ class ResearchOrchestrator:
         discord: DiscordAdapter,
         task_bundles: TaskBundleManager | None = None,
         datasets: DatasetIngestionManager | None = None,
+        knowledge: KnowledgeManager | None = None,
     ) -> None:
         self.settings = settings
         self.store = store
@@ -89,9 +95,25 @@ class ResearchOrchestrator:
             maximum_asset_bytes=settings.maximum_task_asset_bytes,
             ingested_datasets=self.datasets,
         )
+        # Knowledge context is additive and failure-tolerant: the manager is
+        # constructed from settings and wired into every turn (see
+        # _get_agent_context). None of it is allowed to block a run.
+        self.knowledge = knowledge or KnowledgeManager(
+            store=store,
+            root=Path(settings.knowledge_root),
+            allowlist_roots=[Path(p) for p in settings.knowledge_allowlist_roots],
+            chunk_size=settings.knowledge_chunk_size,
+            chunk_overlap=settings.knowledge_chunk_overlap,
+            max_source_bytes=settings.knowledge_max_source_bytes,
+            max_results=settings.knowledge_max_results,
+            token_budget=settings.knowledge_token_budget,
+        )
         self.policy = policy
         self.cluster = cluster
         self.discord = discord
+        # Serializes all run-advancing mutations in this process. Pause and
+        # cancel deliberately do NOT take this lock so they can abort a model
+        # turn that currently holds it (see pause_run).
         self._advance_lock = RLock()
 
     def _publish_latest(self, run_id: str) -> None:
@@ -214,11 +236,14 @@ class ResearchOrchestrator:
                     request.maximum_runtime_seconds
                     or self.settings.maximum_runtime_seconds
                 ),
+                # Cap the per-run concurrency at the service ceiling even when
+                # the request explicitly asks for more; the cap is global policy.
                 maximum_parallel_jobs=min(
                     request.maximum_parallel_jobs
                     or self.settings.maximum_parallel_jobs,
                     self.settings.maximum_parallel_jobs,
                 ),
+                active_since=now,
                 created_at=now,
                 updated_at=now,
             )
@@ -232,6 +257,8 @@ class ResearchOrchestrator:
                     objective=request.objective,
                 )
             except Exception:
+                # Discord is a replaceable projection; a thread failure must not
+                # fail run creation (the run itself is already committed above).
                 thread_id = None
             if thread_id:
                 current = self.store.get_run(run_id)
@@ -242,6 +269,10 @@ class ResearchOrchestrator:
                     expected_version=current.version,
                 )
             self._publish_latest(run_id)
+            # Walk through PREPARING explicitly even though the next line moves
+            # straight on: if the process dies between these transitions,
+            # recover() sees a run in PREPARING and resumes drafting, which is
+            # the only signal that workspace setup finished.
             self._transition(run_id, RunState.PREPARING)
             self._transition(run_id, RunState.HONEYDEW_DRAFTING_PROTOCOL)
             try:
@@ -272,11 +303,15 @@ class ResearchOrchestrator:
         digest = sha256(content).hexdigest()
         existing = self.task_bundles.find_by_digest(digest)
         if existing is not None:
+            # Re-import of identical bytes is a no-op: the compiled bundle is
+            # keyed by content digest, so the archive is only ever compiled once.
             return existing
         staged = self.task_bundles.stage_archive(
             filename=filename,
             content=content,
         )
+        # The session is keyed by a digest-derived id rather than a real run id,
+        # so a recompiled archive never leaks into a research run's workspace.
         compiler_id = f'task-compiler-{staged.digest[:16]}'
         workspace = staged.root / 'normalized'
         try:
@@ -347,6 +382,10 @@ class ResearchOrchestrator:
         )
 
     def _check_turn_budget(self, run: RunRecord) -> None:
+        # Both limits are soft caps checked only at turn boundaries: they stop a
+        # turn from STARTING once exhausted, but never interrupt an in-flight
+        # model turn. turn_number is incremented after this check, so `>=`
+        # admits exactly maximum_turns completed turns.
         if run.turn_number >= run.maximum_turns:
             self._transition(
                 run.run_id,
@@ -354,13 +393,25 @@ class ResearchOrchestrator:
                 payload={'reason': 'maximum turn count reached'},
             )
             raise WorkflowError('maximum turn count reached')
-        if utc_now() > run.created_at + timedelta(seconds=run.maximum_runtime_seconds):
+        active_runtime = run.active_runtime_seconds
+        if run.active_since is not None:
+            # active_runtime_seconds is the accumulated base stored by
+            # storage.transition_run; add the time elapsed since the clock last
+            # started (set on creation and on every resume/approval).
+            active_runtime += max(
+                0.0,
+                (utc_now() - run.active_since).total_seconds(),
+            )
+        if active_runtime > run.maximum_runtime_seconds:
             self._transition(
                 run.run_id,
                 RunState.TIMED_OUT,
-                payload={'reason': 'maximum runtime reached'},
+                payload={
+                    'reason': 'maximum active runtime reached',
+                    'active_runtime_seconds': active_runtime,
+                },
             )
-            raise WorkflowError('maximum runtime reached')
+            raise WorkflowError('maximum active runtime reached')
 
     def _write_recovery_checkpoint(
         self,
@@ -376,12 +427,17 @@ class ResearchOrchestrator:
             if agent == AgentName.HONEYDEW
             else run.beaker_workspace
         )
+        # Only the last few structured outputs travel into the recovery prompt;
+        # the full history lives in the event log, and unbounded transcripts
+        # would blow the replacement session's context window.
         completed = [
             turn
             for turn in self.store.list_turns(run_id)
             if turn.status == 'completed' and turn.structured_output is not None
         ][-4:]
         try:
+            # git status is best-effort context for the fresh session; the
+            # worktree itself is the authoritative state.
             status = subprocess.run(
                 ['git', 'status', '--short'],
                 cwd=workspace,
@@ -444,6 +500,9 @@ class ResearchOrchestrator:
         except Exception as exc:
             release_error = str(exc)
         current = self.store.get_run(run_id)
+        # Clear the session ids from the authoritative record BEFORE writing the
+        # checkpoint: any later recovery then sees a fresh-session run and must
+        # rebuild from the checkpoint instead of reusing a poisoned session.
         updates: dict[str, Any] = {'current_agent': None}
         if agent == AgentName.HONEYDEW:
             updates.update(
@@ -503,6 +562,74 @@ class ResearchOrchestrator:
             + '\n\nCurrent bounded task:\n'
         )
 
+    def _get_agent_context(
+        self,
+        *,
+        run_id: str,
+        agent: AgentName,
+        turn_number: int,
+        turn_kind: TurnKind,
+        query: str,
+    ) -> ContextPacket | None:
+        """Retrieve and persist scoped context for an agent turn.
+
+        The fallback to None on any retrieval failure is deliberate: knowledge
+        is additive context, never a hard dependency of a turn. The workflow
+        must not stall an experiment because the index or embedding endpoint
+        is briefly unavailable. Scope is decided inside KnowledgeManager.retrieve
+        from the agent/turn_kind, so this caller cannot widen it.
+        """
+        try:
+            return self.knowledge.retrieve(
+                run_id=run_id,
+                agent=agent.value,
+                turn_number=turn_number,
+                turn_kind=turn_kind.value,
+                query=query,
+                index_version='v1',
+                max_results=self.settings.knowledge_max_results,
+                token_budget=self.settings.knowledge_token_budget,
+                run_scope=run_id,
+                allowed_source_types=None,
+            )
+        except Exception:
+            return None
+
+    def _retrieval_query(
+        self,
+        *,
+        run_id: str,
+        objective: str,
+        prompt: str,
+        turn_kind: TurnKind,
+    ) -> str:
+        """Derive a compact, deterministic retrieval intent for a turn.
+
+        Combining the turn kind, the run objective, and the first 300 chars of
+        the prompt gives stable lexical signal without letting the agent steer
+        the query toward arbitrary material.
+        """
+        objective = (objective or '').strip()
+        prompt_head = ' '.join(prompt.split())[:300].strip()
+        return f'{turn_kind.value} {objective} {prompt_head}'.strip()
+
+    @staticmethod
+    def _required_turn_kind_instruction(expected_kind: TurnKind) -> str:
+        """Make the workflow-selected result variant unambiguous to the runtime.
+
+        AgentTurnResult permits several valid variants. The state machine has
+        already selected exactly one of them, so the model must not infer that
+        choice from the broader task text or schema alone.
+        """
+        return (
+            '\n\nAUTHORITATIVE STRUCTURED OUTPUT CONTRACT:\n'
+            f'- Set the JSON `kind` field to exactly `{expected_kind.value}`.\n'
+            '- No other `kind` is acceptable for this turn, even if another '
+            'variant appears plausible.\n'
+            '- Complete the requested phase, then return one complete '
+            'AgentTurnResult object with that exact kind.\n'
+        )
+
     def _run_agent_turn(
         self,
         *,
@@ -524,11 +651,15 @@ class ResearchOrchestrator:
             if agent == AgentName.HONEYDEW
             else run.beaker_session_id
         )
+        recovery_context = ''
         if existing_session is None:
-            prompt = self._recovery_context(
+            # The recovery checkpoint is injected only into a brand-new session
+            # (after a rotation or a restart). A continuing session already has
+            # the previous turns in its own context.
+            recovery_context = self._recovery_context(
                 run_id=run_id,
                 agent=agent,
-            ) + prompt
+            )
         session = self.runtime.ensure_session(
             run_id=run_id,
             agent=agent,
@@ -536,6 +667,9 @@ class ResearchOrchestrator:
             existing_session_id=existing_session,
         )
         run = self.store.get_run(run_id)
+        # Persist the live session and turn number before the model does any
+        # work, so a crash or pause mid-turn can find and abort the right
+        # session (see recover() and pause_run).
         session_updates = {
             'current_agent': agent,
             'turn_number': run.turn_number + 1,
@@ -577,6 +711,52 @@ class ResearchOrchestrator:
             },
         )
         try:
+            # Per-turn knowledge retrieval (see KnowledgeManager). The query is
+            # derived from the turn's prompt and objective; the result is scoped
+            # by agent role + turn kind and persisted as a ContextPacket before
+            # the agent sees any of it. Attachment is recorded as an event so
+            # the packet is citable (knowledge://context:<id>) and auditable.
+            context_packet = self._get_agent_context(
+                run_id=run_id,
+                agent=agent,
+                turn_number=run.turn_number + 1,
+                turn_kind=expected_kind,
+                query=self._retrieval_query(
+                    run_id=run_id,
+                    objective=run.objective,
+                    prompt=prompt,
+                    turn_kind=expected_kind,
+                ),
+            )
+            if context_packet and context_packet.exact_text_supplied:
+                prompt = (
+                    context_packet.exact_text_supplied + '\n\n' + prompt
+                )
+                self._event(
+                    run_id,
+                    source='orchestrator',
+                    event_type='agent.context_attached',
+                    payload={
+                        'turn_id': turn.turn_id,
+                        'packet_id': context_packet.packet_id,
+                        'agent': agent.value,
+                        'turn_kind': expected_kind.value,
+                        'ranked_count': len(context_packet.ranked_sources),
+                        'token_count': (
+                            context_packet.exact_text_supplied
+                            and len(
+                                context_packet.exact_text_supplied.split()
+                            )
+                            or 0
+                        ),
+                    },
+                )
+            if recovery_context:
+                prompt = recovery_context + prompt
+            # Append the phase-specific discriminator after all retrieved and
+            # recovery context. Runtime schemas allow many valid kinds, but the
+            # state machine has already chosen the one valid for this turn.
+            prompt += self._required_turn_kind_instruction(expected_kind)
             result, message_id = self.runtime.run_turn(
                 run_id=run_id,
                 agent=agent,
@@ -603,13 +783,14 @@ class ResearchOrchestrator:
                     workspace=workspace,
                     session_id=session.session_id,
                     prompt=(
-                        'Structured kind correction. Your previous response '
-                        f'used kind `{returned_kind.value}`, but this turn '
-                        f'requires kind `{expected_kind.value}`. Complete the '
-                        'original task and return a complete AgentTurnResult '
-                        'with exactly that kind. Do not repeat an earlier '
-                        'workflow phase.\n\nOriginal task:\n'
-                        + prompt
+                        prompt
+                        + '\n\nStructured kind correction. Your previous '
+                        f'response used kind `{returned_kind.value}`, but this '
+                        f'turn requires kind `{expected_kind.value}` and no '
+                        'other. Complete the original task and return a '
+                        'complete AgentTurnResult with exactly that kind. Do '
+                        'not repeat an earlier workflow phase and do not '
+                        'request actions.'
                     ),
                 )
                 if result.kind != expected_kind:
@@ -647,7 +828,6 @@ class ResearchOrchestrator:
                     'message_to_other_agent': result.message_to_other_agent,
                 },
             )
-            return completed, result
         except Exception as exc:
             failed = turn.model_copy(
                 update={
@@ -657,6 +837,7 @@ class ResearchOrchestrator:
                 }
             )
             self.store.save_turn(failed)
+            failure_class = getattr(exc, 'failure_class', None)
             self._event(
                 run_id,
                 source=agent.value,
@@ -665,6 +846,7 @@ class ResearchOrchestrator:
                     'turn_id': turn.turn_id,
                     'status': 'failed',
                     'error': str(exc),
+                    'failure_class': failure_class,
                 },
             )
             self._rotate_agent_session(
@@ -674,6 +856,17 @@ class ResearchOrchestrator:
                 error=str(exc),
             )
             raise
+        current = self.store.get_run(run_id)
+        # Pause/cancel bypass the advancement lock (they must be able to abort a
+        # running turn), so the run may have left this phase while the model was
+        # working. Refuse to let the caller drive the next transition on a
+        # stalled run; recovery resumes at the correct phase instead.
+        if current.state == RunState.PAUSED or current.state in TERMINAL_STATES:
+            raise WorkflowError(
+                'workflow advancement stopped after agent turn because run is '
+                f'{current.state.value}'
+            )
+        return completed, result
 
     def _record_requested_actions(
         self,
@@ -810,6 +1003,21 @@ class ResearchOrchestrator:
                     'sha256': candidate.sha256,
                 }
                 payload['contract_candidate'] = candidate.metadata
+        if action.type == 'submit_experiment_matrix':
+            try:
+                payload['preflight'] = self._matrix_preflight_report(
+                    run_id=action.run_id,
+                    action=action,
+                ).model_dump(mode='json')
+            except Exception as exc:
+                payload['preflight'] = {
+                    'passed': False,
+                    'job_count': 0,
+                    'checks': [],
+                    'comparisons': {},
+                    'decisions': {},
+                    'errors': [str(exc)],
+                }
         if action.type == 'approve_protocol':
             payload['protocol_version'] = run.protocol_version
         return payload
@@ -851,6 +1059,9 @@ class ResearchOrchestrator:
         digest: str,
         metadata: dict[str, Any],
     ) -> ArtifactRecord:
+        # The artifact id is a deterministic function of (run, uri, digest), not
+        # random: re-delivering the same content re-derives the same id, which
+        # makes recovery backfill idempotent (storage uses INSERT OR IGNORE).
         artifact = ArtifactRecord(
             artifact_id=uuid5(
                 NAMESPACE_URL,
@@ -879,6 +1090,12 @@ class ResearchOrchestrator:
         return proposal if isinstance(proposal, dict) else None
 
     def _contract_binding_compatible(self, run_id: str) -> bool:
+        # Re-derives the Honeydew proposal from the stored artifact (not from
+        # memory) and checks it against the currently installed contract. The
+        # digest equality pins the check to the exact contract the run was bound
+        # to, so this is also what forces a promoted candidate to match before
+        # execution. Missing resource keys default to sentinel values that FAIL
+        # the check (the proposal must be explicit about limits).
         run = self.store.get_run(run_id)
         proposal = self._latest_contract_proposal(run_id)
         if proposal is None:
@@ -977,13 +1194,23 @@ class ResearchOrchestrator:
             'and dependent variables, controls, baselines, source references, '
             'required artifacts, evaluation criteria, budgets, stopping '
             'conditions, and explicit approval gates. Return it as a produced '
-            'file with purpose "protocol". Also populate '
+            'file with purpose "protocol". The produced_files metadata does not '
+            'create the file: use OpenCode\'s workspace file tool to write '
+            '`program.md`, then read it back before returning. Also populate '
             'evaluation_contract_proposal with the scientific evaluator type, '
             'primary metric and direction, minimum meaningful effect, '
             'guardrails, required artifacts, budget policy, resource ceilings, '
             'and rationale. Propose data and metrics only. Do not propose '
             'executable paths, container images, commands, or checksums; those '
-            'remain controlled by the orchestrator.'
+            'remain controlled by the orchestrator. The experiment workload '
+            'must emit metrics and evidence only. `evaluation.json`, '
+            '`rubric_score`, and `integrity_pass` are evaluator-owned outputs: '
+            'the protocol may require them as final artifacts, but must not '
+            'instruct Beaker or workload code to create, format, read, or score '
+            'them. When the installed contract declares methodology '
+            'requirements, only entries with mode `comparison` are experiment '
+            'axes. Entries with mode `decision` require one justified choice; '
+            'do not invent an ablation or improvement hypothesis for them.'
             + task_context
         )
         if feedback:
@@ -998,12 +1225,188 @@ class ResearchOrchestrator:
         protocol_files = [
             item for item in result.produced_files if item.purpose == 'protocol'
         ]
+        if not protocol_files:
+            # Honeydew returned a formally valid protocol_draft turn but declared
+            # no protocol file at all. This is a contract violation distinct from
+            # a declared-but-missing file (handled below): the workspace action
+            # was never attempted, so the repair must name the exact file and
+            # purpose and revalidate before the run may advance.
+            self._event(
+                run_id,
+                source='orchestrator',
+                event_type='agent.output_rejected',
+                payload={
+                    'turn_id': turn.turn_id,
+                    'expected_field': 'produced_files',
+                    'expected_purpose': 'protocol',
+                    'repair_attempted': True,
+                },
+            )
+            _, result = self._run_agent_turn(
+                run_id=run_id,
+                agent=AgentName.HONEYDEW,
+                prompt=(
+                    'Focused protocol-file repair. Your previous protocol_draft '
+                    'turn did not declare any produced protocol file. Write '
+                    '`program.md` in your workspace now, then read it back to '
+                    'confirm it exists. Declare exactly that file in '
+                    '`produced_files` with purpose `protocol` and request no '
+                    'actions. Do not redesign the protocol. Return kind '
+                    '`protocol_draft` only after the file is written and '
+                    'verified.'
+                ),
+                expected_kind=TurnKind.PROTOCOL_DRAFT,
+                input_event={
+                    'repair': 'missing_protocol_declaration',
+                    'required_path': 'program.md',
+                    'required_purpose': 'protocol',
+                },
+            )
+            protocol_files = [
+                item
+                for item in result.produced_files
+                if item.purpose == 'protocol'
+            ]
+            if result.requested_actions:
+                raise WorkflowError(
+                    'Honeydew protocol-file repair must request no actions'
+                )
         if len(protocol_files) != 1:
+            # Exactly one declared protocol file keeps the artifact binding
+            # unambiguous; a declared-but-missing file is repaired below rather
+            # than silently accepted from the structured response.
             raise WorkflowError('Honeydew must produce exactly one protocol file')
+        protocol_path = Path(run.honeydew_workspace) / protocol_files[0].path
+        if not protocol_path.is_file():
+            self._event(
+                run_id,
+                source='orchestrator',
+                event_type='agent.file_repair_requested',
+                payload={
+                    'agent': AgentName.HONEYDEW.value,
+                    'path': protocol_files[0].path,
+                    'reason': (
+                        'The structured response declared the protocol, but no '
+                        'workspace file existed.'
+                    ),
+                },
+            )
+            _, repaired = self._run_agent_turn(
+                run_id=run_id,
+                agent=AgentName.HONEYDEW,
+                prompt=(
+                    'Focused workspace repair. Your previous structured response '
+                    f'declared `{protocol_files[0].path}`, but the authoritative '
+                    'workspace does not contain that file. Write it now using '
+                    'OpenCode\'s workspace file tool, then read it back. Do not '
+                    'redesign the protocol or request actions. Return kind '
+                    '`protocol_draft`, declare exactly that file with purpose '
+                    '`protocol`, and only claim completion after verifying the '
+                    'file exists.'
+                ),
+                expected_kind=TurnKind.PROTOCOL_DRAFT,
+                input_event={
+                    'repair': 'missing_workspace_file',
+                    'path': protocol_files[0].path,
+                },
+            )
+            repaired_protocols = [
+                item
+                for item in repaired.produced_files
+                if item.path == protocol_files[0].path
+                and item.purpose == 'protocol'
+            ]
+            if len(repaired_protocols) != 1 or repaired.requested_actions:
+                raise WorkflowError(
+                    'Honeydew protocol repair must produce the declared file '
+                    'and no actions'
+                )
+            if not protocol_path.is_file():
+                raise WorkflowError(
+                    'Honeydew did not create the protocol after one focused '
+                    'repair turn'
+                )
+            self._event(
+                run_id,
+                source='honeydew',
+                event_type='agent.file_repair_completed',
+                payload={'path': protocol_files[0].path},
+            )
+        resolved_contract = self.contracts.resolve(
+            run.evaluation_contract_id,
+            run.evaluation_contract_version,
+        )
+        descriptor = resolved_contract.descriptor
         proposal = result.evaluation_contract_proposal
-        if proposal is None:
-            raise WorkflowError(
-                'Honeydew must return an evaluation contract proposal'
+        proposal_turn_id = turn.turn_id
+        proposal_origin = 'honeydew'
+        legacy_bound_task = bool(
+            run.task_definition
+            and run.task_definition.get('compilation_source') == 'legacy'
+        )
+        if proposal is None and legacy_bound_task:
+            proposal = self._proposal_from_bound_contract(descriptor)
+            proposal_origin = 'installed_contract'
+            self._event(
+                run_id,
+                source='orchestrator',
+                event_type='contract.proposal_bound',
+                payload={
+                    'turn_id': turn.turn_id,
+                    'contract_id': descriptor.contract_id,
+                    'contract_version': descriptor.version,
+                    'reason': (
+                        'The imported legacy task already has an immutable '
+                        'repository-controlled evaluation contract.'
+                    ),
+                },
+            )
+        elif proposal is None:
+            self._event(
+                run_id,
+                source='orchestrator',
+                event_type='agent.output_rejected',
+                payload={
+                    'turn_id': turn.turn_id,
+                    'expected_field': 'evaluation_contract_proposal',
+                    'repair_attempted': True,
+                },
+            )
+            proposal_turn, repaired = self._run_agent_turn(
+                run_id=run_id,
+                agent=AgentName.HONEYDEW,
+                prompt=(
+                    'Focused structured-output repair. Your protocol was '
+                    'written successfully, but the prior response omitted '
+                    '`evaluation_contract_proposal`. Do not edit program.md '
+                    'or request actions. Return kind `protocol_draft` and '
+                    'populate evaluation_contract_proposal with the scientific '
+                    'evaluator type, primary metric and direction, minimum '
+                    'meaningful effect, guardrails, required artifacts, budget '
+                    'policy, resource ceilings, and rationale. Do not include '
+                    'executable paths, commands, images, or checksums.'
+                ),
+                expected_kind=TurnKind.PROTOCOL_DRAFT,
+                input_event={
+                    'repair': 'missing_evaluation_contract_proposal',
+                    'protocol_turn_id': turn.turn_id,
+                },
+            )
+            proposal = repaired.evaluation_contract_proposal
+            if proposal is None or repaired.requested_actions:
+                raise WorkflowError(
+                    'Honeydew contract-proposal repair did not return the '
+                    'required bounded proposal'
+                )
+            proposal_turn_id = proposal_turn.turn_id
+            self._event(
+                run_id,
+                source='honeydew',
+                event_type='agent.output_repaired',
+                payload={
+                    'turn_id': proposal_turn.turn_id,
+                    'field': 'evaluation_contract_proposal',
+                },
             )
         proposal_resources = proposal.resource_constraints
         if (
@@ -1054,11 +1457,6 @@ class ResearchOrchestrator:
                 'turn_id': turn.turn_id,
             },
         )
-        resolved_contract = self.contracts.resolve(
-            run.evaluation_contract_id,
-            run.evaluation_contract_version,
-        )
-        descriptor = resolved_contract.descriptor
         technical_primary_metric = str(
             descriptor.manifest.get('primary_metric', '')
         )
@@ -1092,6 +1490,9 @@ class ResearchOrchestrator:
             / 'evaluation-contract-proposal.json'
         )
         proposal_path.parent.mkdir(parents=True, exist_ok=True)
+        # Persist the proposal next to the worktrees so the approval UI and
+        # later routing (see _contract_binding_compatible) read the same bytes
+        # that were recorded as an artifact, instead of trusting agent memory.
         proposal_bytes = (
             json.dumps(proposal_payload, indent=2, sort_keys=True) + '\n'
         ).encode()
@@ -1118,7 +1519,8 @@ class ResearchOrchestrator:
             digest=proposal_digest,
             metadata={
                 'path': str(proposal_path),
-                'turn_id': turn.turn_id,
+                'turn_id': proposal_turn_id,
+                'origin': proposal_origin,
                 'proposal': proposal_payload,
                 'technical_binding': technical_binding,
             },
@@ -1132,7 +1534,8 @@ class ResearchOrchestrator:
                 'uri': proposal_uri,
                 'path': str(proposal_path),
                 'sha256': proposal_digest,
-                'turn_id': turn.turn_id,
+                'turn_id': proposal_turn_id,
+                'origin': proposal_origin,
                 'proposal': proposal_payload,
                 'technical_binding': technical_binding,
             },
@@ -1144,6 +1547,34 @@ class ResearchOrchestrator:
         )
         self._transition(run_id, RunState.AWAITING_PROTOCOL_APPROVAL)
 
+    @staticmethod
+    def _proposal_from_bound_contract(
+        descriptor: EvaluationContractDescriptor,
+    ) -> EvaluationContractProposal:
+        """Project an immutable legacy contract into the scientific proposal."""
+        resources = descriptor.resource_constraints
+        return EvaluationContractProposal.model_validate(
+            {
+                'evaluator_type': descriptor.contract_id,
+                'primary_metric': {
+                    'name': descriptor.manifest['primary_metric'],
+                    'direction': descriptor.manifest[
+                        'primary_metric_direction'
+                    ],
+                    'minimum_effect': 0.0,
+                },
+                'guardrails': [],
+                'required_artifacts': descriptor.required_artifacts,
+                'budget_mode': 'wallclock',
+                'max_wallclock_minutes': resources.wallclock_minutes,
+                'resource_constraints': resources.model_dump(mode='json'),
+                'rationale': (
+                    'This imported task is bound to an immutable '
+                    'repository-controlled evaluation contract.'
+                ),
+            }
+        )
+
     def approve_action(
         self,
         action_id: str,
@@ -1154,6 +1585,11 @@ class ResearchOrchestrator:
         with self._advance_lock:
             action = self.store.get_action(action_id)
             if action.approval_status == ApprovalStatus.APPROVED:
+                # Re-approval is the crash-recovery retry: the first approval may
+                # have committed the action but died before (or during) resume.
+                # Re-running resume is safe because _resume_approved_action
+                # re-checks the run state and becomes a no-op once the run has
+                # moved past the awaiting state.
                 self._resume_approved_action(action)
                 return self.store.get_action(action_id)
             if action.approval_status != ApprovalStatus.PENDING:
@@ -1195,6 +1631,11 @@ class ResearchOrchestrator:
             for job in self.store.list_jobs(action.run_id)
             if job.action_id == action.action_id
         ]
+        # A deterministic matrix failure (ValueError from expansion, no jobs
+        # created yet) is the one failure the workflow can recover from without
+        # a human: it is a defect in the proposed matrix, so Beaker revises.
+        # Everything else pauses the run so the human can reconcile any partial
+        # job/artifact state before deciding what happens next.
         deterministic_matrix_failure = (
             action.type == 'submit_experiment_matrix'
             and isinstance(exc, ValueError)
@@ -1256,6 +1697,9 @@ class ResearchOrchestrator:
 
     def _resume_approved_action(self, action: ActionRecord) -> None:
         run = self.store.get_run(action.run_id)
+        # Every branch is gated on the run state, so a stale or duplicate
+        # approval click is a silent no-op once the run has already advanced;
+        # this is what makes re-approval safe as a recovery retry.
         if action.type == 'approve_protocol':
             if run.state != RunState.AWAITING_PROTOCOL_APPROVAL:
                 return
@@ -1392,7 +1836,13 @@ class ResearchOrchestrator:
             'JSON schemas, and concise test vectors or tests. The descriptor '
             'must contain only the EvaluationContractDescriptor fields, set '
             'container_image_digest to null, and put both primary_metric and '
-            'primary_metric_direction in manifest. execution_wrapper and '
+            'primary_metric_direction in manifest. When the binding task '
+            'requires explicit methodological choices or comparisons, encode '
+            'them as manifest.methodology_requirements entries with '
+            'requirement_id, config_path, mode (`decision` or `comparison`), '
+            'minimum_distinct_values, optional maximum_distinct_values, and '
+            'description. Do not turn a required choice into a comparison. '
+            'execution_wrapper and '
             'evaluation_entry_point must each be a relative path to a real '
             'Python file inside the candidate directory, not a command or '
             'module reference. Do not write '
@@ -1440,6 +1890,10 @@ class ResearchOrchestrator:
         source = (workspace / request.candidate_path).resolve()
         if not source.is_relative_to(workspace):
             raise WorkflowError('contract candidate escapes Beaker workspace')
+        # The orchestrator seals the candidate itself and validates the sealed
+        # descriptor against the approved scientific proposal, so the agent can
+        # neither invent an evaluation entry point nor slip an override past the
+        # policy layer (which only checked the action schema).
         try:
             sealed = self.contract_candidates.seal(
                 source=source,
@@ -1494,6 +1948,10 @@ class ResearchOrchestrator:
                     'retrying': True,
                 },
             )
+            # Rejection here is a deterministic retry: Beaker re-drafts with the
+            # concrete failure as feedback. The retry chain is bounded by the
+            # per-run turn budget, which eventually transitions the run to
+            # TIMED_OUT if the candidate never becomes valid.
             self._beaker_draft_contract(
                 run_id,
                 feedback=feedback_message,
@@ -1608,6 +2066,9 @@ class ResearchOrchestrator:
             action.action_id,
             review_turn_id=turn.turn_id,
         )
+        # Honeydew review is recorded on the action itself (satisfying the
+        # HONEYDEW_AND_HUMAN_APPROVAL gate in approve_action), then the run
+        # moves to a human-wait state where promotion can be approved.
         self._event(
             run_id,
             source='honeydew',
@@ -1650,6 +2111,9 @@ class ResearchOrchestrator:
             artifact.metadata['descriptor']
         )
         current = self.store.get_run(action.run_id)
+        # The run's binding is rewritten to the promoted contract; the resolve
+        # below re-reads the trusted catalog so the digest check proves the
+        # promoted artifact is the one actually installed.
         self.store.replace_run(
             current.model_copy(
                 update={
@@ -1699,7 +2163,11 @@ class ResearchOrchestrator:
             agent=AgentName.BEAKER,
             prompt=(
                 'Read the approved read-only program.md and inspect the existing '
-                'worktree. Write implementation-plan.md containing a concise, '
+                'worktree. Write implementation-plan.md using OpenCode\'s '
+                'workspace file tool before returning structured output, then read '
+                'the file back to verify it exists. A produced_files declaration '
+                'is metadata and does not create the file. The file must contain '
+                'a concise, '
                 'task-specific sequence of independently checkable implementation '
                 'steps, the files likely to change, lightweight local checks, and '
                 'the intended experiment-matrix shape. Preserve freedom to revise '
@@ -1727,7 +2195,61 @@ class ResearchOrchestrator:
             )
         plan_path = Path(run.beaker_workspace) / 'implementation-plan.md'
         if not plan_path.is_file():
-            raise WorkflowError('Beaker did not create implementation-plan.md')
+            self._event(
+                run_id,
+                source='orchestrator',
+                event_type='agent.file_repair_requested',
+                payload={
+                    'agent': AgentName.BEAKER.value,
+                    'path': 'implementation-plan.md',
+                    'reason': (
+                        'The structured response declared the plan, but no '
+                        'workspace file existed.'
+                    ),
+                },
+            )
+            _, repaired = self._run_agent_turn(
+                run_id=run_id,
+                agent=AgentName.BEAKER,
+                prompt=(
+                    'Focused workspace repair. Your previous structured response '
+                    'declared `implementation-plan.md`, but the authoritative '
+                    'workspace does not contain that file. Write '
+                    'implementation-plan.md now using OpenCode\'s workspace file '
+                    'tool, then read it back. Do not implement experiment code, '
+                    'request actions, or repeat methodology work. Return kind '
+                    '`implementation_plan`, declare exactly that file with purpose '
+                    '`implementation`, and only claim completion after verifying '
+                    'the file exists.'
+                ),
+                expected_kind=TurnKind.IMPLEMENTATION_PLAN,
+                input_event={
+                    'repair': 'missing_workspace_file',
+                    'path': 'implementation-plan.md',
+                },
+            )
+            repaired_plans = [
+                item
+                for item in repaired.produced_files
+                if item.path == 'implementation-plan.md'
+                and item.purpose == 'implementation'
+            ]
+            if len(repaired_plans) != 1 or repaired.requested_actions:
+                raise WorkflowError(
+                    'Beaker plan repair must produce implementation-plan.md '
+                    'and no actions'
+                )
+            if not plan_path.is_file():
+                raise WorkflowError(
+                    'Beaker did not create implementation-plan.md after one '
+                    'focused repair turn'
+                )
+            self._event(
+                run_id,
+                source='beaker',
+                event_type='agent.file_repair_completed',
+                payload={'path': 'implementation-plan.md'},
+            )
         digest = sha256(plan_path.read_bytes()).hexdigest()
         self._event(
             run_id,
@@ -1751,14 +2273,45 @@ class ResearchOrchestrator:
         task_context = ''
         if run.task_definition:
             source = run.task_definition['source_subdirectory']
+            contract = self.contracts.resolve(
+                run.evaluation_contract_id,
+                run.evaluation_contract_version,
+            )
+            required_metric_keys = list(
+                contract.descriptor.manifest.get('required_metric_keys', [])
+            )
+            dataset_binding_example = {
+                dataset['name']: f'/mnt/datasets/{dataset["name"]}'
+                for dataset in run.task_definition['datasets']
+            }
             task_context = (
                 '\nThis is an imported benchmark task. Read '
                 '`benchmark-task/problem.md`, `benchmark-task/eval_agent_prompt.md`, '
                 'and the frozen `program.md`. Put the complete executable '
                 f'solution under `{source}/`, including `run.py`. The run must '
                 'use only dataset paths supplied through '
-                '`GLASSLAB_DATASET_BINDINGS_JSON`, write all outputs beneath '
+                '`GLASSLAB_DATASET_BINDINGS_JSON`. That JSON object is keyed '
+                'by each exact declared dataset `name`, not by its `role`; use '
+                'the dataset list below to bind names to train, test, or other '
+                'roles. Do not assume generic keys such as `train` or `test` '
+                'unless those are the declared names. Write all outputs beneath '
                 '`GLASSLAB_OUTPUT_DIR`, and make no network calls. Use the '
+                'following object shape in the loader (paths are illustrative):\n'
+                + json.dumps(dataset_binding_example, indent=2, sort_keys=True)
+                + '\nRun a loader-only smoke check by setting that environment '
+                'variable to tiny local fixture paths and verifying each '
+                'declared name resolves. Do not run the full benchmark, '
+                'hyperparameter search, bootstrap evaluation, or generate '
+                'dataset-sized local fixtures; those belong in the approved '
+                'cluster job. Use the '
+                '`metrics.json` document root for every evaluator-required '
+                'metric key listed below. For multi-model workloads, place the '
+                'selected headline model values at the root; nested per-model '
+                'details may be additional fields but do not satisfy the root '
+                'contract. Include row counts, bootstrap counts, and confidence '
+                'bounds at the root when named here:\n'
+                + json.dumps(required_metric_keys, indent=2)
+                + '\nUse the '
                 'exact preselected runner image and resource request:\n'
                 + json.dumps(
                     {
@@ -1781,7 +2334,10 @@ class ResearchOrchestrator:
             'propose one submit_experiment_matrix action. The action arguments '
             'must match the ExperimentMatrix schema and must not contain an '
             'evaluation entry point, Kubernetes manifest, contract file, or '
-            'contract override. Do not execute cluster work.'
+            'contract override. Do not execute cluster work. The workload must '
+            'emit metrics and evidence only. Do not create, read, or score '
+            '`evaluation.json`, `rubric_score`, or `integrity_pass`; those '
+            'outputs belong exclusively to the immutable evaluation contract.'
             f'\n\nPermitted runner images: '
             f'{json.dumps(sorted(self.policy.permitted_images))}'
             '\nResource ceilings: '
@@ -1790,6 +2346,18 @@ class ResearchOrchestrator:
             f'gpus={self.policy.maximum_gpus}, '
             'maximum_parallel_jobs='
             f'{self.policy.maximum_parallel_jobs}.'
+            '\n\nRequired submit_experiment_matrix action shape:\n'
+            + json.dumps(
+                self._matrix_action_template(run),
+                indent=2,
+                sort_keys=True,
+            )
+            + '\nKeep reason beside type and arguments. Put the ExperimentMatrix '
+            'fields directly in arguments; do not add a matrix or evaluator_type '
+            'wrapper. Matrix seeds create separate cluster jobs. If the workload '
+            'already runs an internal seed list for stability analysis, keep '
+            'that list in the implementation and use one outer matrix seed; do '
+            'not mirror the internal list into the matrix.'
             + task_context
         )
         turn, result = self._run_agent_turn(
@@ -1808,6 +2376,118 @@ class ResearchOrchestrator:
             result=result,
             turn_number=self.store.get_run(run_id).turn_number,
         )
+        self._advance_after_matrix_proposal(
+            run_id=run_id,
+            implementation_turn_id=turn.turn_id,
+            actions=actions,
+        )
+
+    def _beaker_finalize(self, run_id: str) -> None:
+        run = self.store.get_run(run_id)
+        if not self._has_imported_task_implementation(run):
+            self._transition(run_id, RunState.BEAKER_IMPLEMENTING)
+            self._beaker_implement(run_id)
+            return
+        task = run.task_definition
+        assert task is not None
+        config_path = Path(run.beaker_workspace) / 'configs' / 'candidate.yaml'
+        matrix_only = config_path.is_file() and not config_path.is_symlink()
+        if matrix_only:
+            task_instruction = (
+                'Finalize the existing imported benchmark structured handoff. '
+                'The preserved runner and configs/candidate.yaml already exist '
+                'from the previous bounded turn. Do not use any tools, inspect '
+                'files, edit files, rerun checks, or repeat implementation work. '
+                'Return one implementation_proposal result containing exactly '
+                'one submit_experiment_matrix action in the required shape below.'
+            )
+        else:
+            task_instruction = (
+                'Finalize the existing imported benchmark implementation after '
+                'an interrupted implementation turn. Inspect '
+                'implementation-plan.md and '
+                f'`{task["source_subdirectory"]}/run.py` as the preserved '
+                'checkpoint. Do not redesign or broadly rewrite the solution and '
+                'do not run the full benchmark. Run only narrow local validation '
+                'such as Python compilation and the smallest available smoke '
+                'check. Fix concrete blocking defects you observe, create '
+                'configs/candidate.yaml if it is missing, and return exactly one '
+                'submit_experiment_matrix action. Do not execute cluster work.'
+            )
+        prompt = (
+            task_instruction
+            + '\n\nThe workload must emit metrics and evidence only. Do not '
+            'create, read, or score `evaluation.json`, `rubric_score`, or '
+            '`integrity_pass`; the immutable contract owns those outputs.'
+            + '\n\nUse exactly this imported-task execution boundary:\n'
+            + json.dumps(
+                {
+                    'runner_image': task['runner_image'],
+                    'resources': task['resources'],
+                    'required_artifacts': task['required_artifacts'],
+                    'datasets': task['datasets'],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + '\n\nPermitted runner images: '
+            + json.dumps(sorted(self.policy.permitted_images))
+            + '\nResource ceilings: '
+            f'cpu={self.policy.maximum_cpu}, '
+            f'memory_gib={self.policy.maximum_memory_gib}, '
+            f'gpus={self.policy.maximum_gpus}, '
+            'maximum_parallel_jobs='
+            f'{self.policy.maximum_parallel_jobs}.'
+            '\n\nRequired submit_experiment_matrix action shape:\n'
+            + json.dumps(
+                self._matrix_action_template(run),
+                indent=2,
+                sort_keys=True,
+            )
+            + '\nKeep reason beside type and arguments. Put the ExperimentMatrix '
+            'fields directly in arguments; do not add a matrix or evaluator_type '
+            'wrapper. Matrix seeds create separate cluster jobs. If the workload '
+            'already runs an internal seed list for stability analysis, keep '
+            'that list in the implementation and use one outer matrix seed; do '
+            'not mirror the internal list into the matrix.'
+        )
+        turn, result = self._run_agent_turn(
+            run_id=run_id,
+            agent=AgentName.BEAKER,
+            prompt=prompt,
+            expected_kind=TurnKind.IMPLEMENTATION_PROPOSAL,
+            input_event={
+                'protocol_path': run.protocol_path,
+                'protocol_version': run.protocol_version,
+                'checkpoint': (
+                    f'{task["source_subdirectory"]}/run.py'
+                ),
+                'recovery_mode': (
+                    'emit_existing_matrix'
+                    if matrix_only
+                    else 'finalize_existing_implementation'
+                ),
+            },
+        )
+        actions = self._record_requested_actions(
+            run_id=run_id,
+            agent=AgentName.BEAKER,
+            result=result,
+            turn_number=self.store.get_run(run_id).turn_number,
+        )
+        self._advance_after_matrix_proposal(
+            run_id=run_id,
+            implementation_turn_id=turn.turn_id,
+            actions=actions,
+        )
+
+    def _advance_after_matrix_proposal(
+        self,
+        *,
+        run_id: str,
+        implementation_turn_id: str,
+        actions: list[ActionRecord],
+    ) -> None:
         pending = any(
             action.type == 'submit_experiment_matrix'
             and action.approval_status == ApprovalStatus.PENDING
@@ -1815,14 +2495,70 @@ class ResearchOrchestrator:
         )
         if not pending:
             feedback = self._matrix_revision_feedback(actions)
-            self._transition(run_id, RunState.BEAKER_REVISING)
-            self._beaker_revise(
+            self._request_methodology_revision(
                 run_id,
                 feedback=feedback,
             )
             return
         self._transition(run_id, RunState.HONEYDEW_REVIEWING)
-        self._honeydew_review(run_id, implementation_turn_id=turn.turn_id)
+        self._honeydew_review(
+            run_id,
+            implementation_turn_id=implementation_turn_id,
+        )
+
+    @staticmethod
+    def _has_imported_task_implementation(run: RunRecord) -> bool:
+        if not run.task_definition:
+            return False
+        workspace = Path(run.beaker_workspace).resolve()
+        source = (
+            workspace / str(run.task_definition['source_subdirectory'])
+        ).resolve()
+        entrypoint = source / 'run.py'
+        return (
+            source.is_relative_to(workspace)
+            and entrypoint.is_file()
+            and not entrypoint.is_symlink()
+        )
+
+    def _matrix_action_template(self, run: RunRecord) -> dict[str, Any]:
+        if run.task_definition:
+            task = run.task_definition
+            runner_image = str(task['runner_image'])
+            resources = dict(task['resources'])
+            required_artifacts = list(task['required_artifacts'])
+        else:
+            runner_image = sorted(self.policy.permitted_images)[0]
+            resources = {
+                'cpu': min(1.0, self.policy.maximum_cpu),
+                'memory_gib': min(2.0, self.policy.maximum_memory_gib),
+                'gpus': 0,
+                'wallclock_minutes': 30,
+            }
+            required_artifacts = ['metrics.json']
+        return {
+            'type': 'submit_experiment_matrix',
+            'arguments': {
+                'base_config': 'configs/candidate.yaml',
+                'variants': [
+                    {
+                        'name': 'candidate',
+                        'overrides': {},
+                    }
+                ],
+                'seeds': [17],
+                'maximum_parallel_jobs': min(
+                    1,
+                    self.policy.maximum_parallel_jobs,
+                ),
+                'runner_image': runner_image,
+                'resources': resources,
+                'required_artifacts': required_artifacts,
+            },
+            'reason': (
+                'Run the bounded candidate for methodology and human review.'
+            ),
+        }
 
     @staticmethod
     def _matrix_revision_feedback(actions: list[ActionRecord]) -> str:
@@ -1860,13 +2596,84 @@ class ResearchOrchestrator:
         implementation_turn_id: str,
     ) -> None:
         action = self._latest_pending_matrix_action(run_id)
+        preflight = self._matrix_preflight_report(
+            run_id=run_id,
+            action=action,
+        )
+        if not preflight.passed:
+            rejection_reason = (
+                'Deterministic matrix preflight failed: '
+                + '; '.join(preflight.errors)
+            )
+            self.store.update_action(
+                action.action_id,
+                approval_status=ApprovalStatus.REJECTED,
+                reviewer='orchestrator',
+                reason=rejection_reason,
+            )
+            self._event(
+                run_id,
+                source='orchestrator',
+                event_type='action.rejected',
+                payload={
+                    'action_id': action.action_id,
+                    'reason': rejection_reason,
+                    'preflight': preflight.model_dump(mode='json'),
+                },
+            )
+            self._request_methodology_revision(
+                run_id,
+                feedback=rejection_reason,
+            )
+            return
+        snapshot_path, snapshot_manifest = self._create_methodology_review_snapshot(
+            run_id=run_id,
+            action=action,
+        )
+        run = self.store.get_run(run_id)
+        contract = self.contracts.resolve(
+            run.evaluation_contract_id,
+            run.evaluation_contract_version,
+        )
+        required_metric_keys = list(
+            contract.descriptor.manifest.get('required_metric_keys', [])
+        )
         prompt = (
             'Review Beaker\'s implementation and proposed experiment matrix. '
             'Check controls, confounds, data leakage, comparability, resource '
             'bounds, required artifacts, and alignment with program.md and the '
-            'immutable evaluation contract. Set done=true only when the matrix '
-            'is methodologically acceptable. Do not submit the job.\n\n'
+            'immutable evaluation contract. Beaker\'s files are available as a '
+            'bounded snapshot under `.glasslab-review/` in your workspace. Read '
+            '`.glasslab-review/manifest.json`, the candidate config, and the '
+            'included implementation files before deciding. The snapshot is a '
+            'copy for review; editing it cannot modify Beaker\'s worktree. Set '
+            'done=true only when the matrix is methodologically acceptable. Do '
+            'not submit the job. The deterministic preflight below is '
+            'authoritative about which settings are required comparisons and '
+            'which are one-time methodological decisions. Do not turn a '
+            '`decision` into a required experiment axis unless the binding '
+            'task explicitly requires that comparison. Inspect the actual '
+            'metrics serialization code and reject the matrix unless every '
+            'evaluator-required metric key below is emitted at the document '
+            'root of `metrics.json`; nested copies do not satisfy the contract.\n'
+            'Required root metric keys:\n'
+            f'{json.dumps(required_metric_keys, indent=2)}\n\n'
+            'Deterministic preflight:\n'
+            f'{preflight.model_dump_json(indent=2)}\n\n'
+            'Review snapshot manifest:\n'
+            f'{json.dumps(snapshot_manifest, indent=2, sort_keys=True)}\n\n'
             f'Proposed matrix:\n{json.dumps(action.arguments, indent=2, sort_keys=True)}'
+        )
+        self._event(
+            run_id,
+            source='orchestrator',
+            event_type='agent.review_snapshot_created',
+            payload={
+                'implementation_turn_id': implementation_turn_id,
+                'action_id': action.action_id,
+                'path': str(snapshot_path),
+                'files': snapshot_manifest,
+            },
         )
         turn, result = self._run_agent_turn(
             run_id=run_id,
@@ -1878,16 +2685,8 @@ class ResearchOrchestrator:
                 'action_id': action.action_id,
             },
         )
-        preflight_error = self._matrix_preflight_error(
-            run_id=run_id,
-            action=action,
-        )
-        if not result.done or preflight_error:
-            rejection_reason = (
-                f'Deterministic matrix preflight failed: {preflight_error}'
-                if preflight_error
-                else result.summary
-            )
+        if not result.done:
+            rejection_reason = result.summary
             self.store.update_action(
                 action.action_id,
                 approval_status=ApprovalStatus.REJECTED,
@@ -1903,13 +2702,10 @@ class ResearchOrchestrator:
                     'reason': rejection_reason,
                 },
             )
-            self._transition(run_id, RunState.BEAKER_REVISING)
-            feedback = result.message_to_other_agent.strip()
-            if preflight_error:
-                feedback = (
-                    f'{feedback}\n\n' if feedback else ''
-                ) + rejection_reason
-            self._beaker_revise(run_id, feedback=feedback or rejection_reason)
+            self._request_methodology_revision(
+                run_id,
+                feedback=self._methodology_feedback(result),
+            )
             return
         approved_action = self.store.mark_action_honeydew_approved(
             action.action_id,
@@ -1936,17 +2732,83 @@ class ResearchOrchestrator:
             ),
         )
 
-    def _matrix_preflight_error(
+    def _create_methodology_review_snapshot(
         self,
         *,
         run_id: str,
         action: ActionRecord,
-    ) -> str | None:
+    ) -> tuple[Path, list[dict[str, object]]]:
+        run = self.store.get_run(run_id)
+        matrix = ExperimentMatrix.model_validate(action.arguments)
+        workspace = Path(run.beaker_workspace).resolve()
+        relative_paths = {
+            matrix.base_config,
+            'implementation-plan.md',
+        }
+        if run.task_definition:
+            source = (
+                workspace
+                / str(run.task_definition['source_subdirectory'])
+            ).resolve()
+            if not source.is_relative_to(workspace) or not source.is_dir():
+                raise WorkflowError(
+                    'imported task source directory is missing from Beaker workspace'
+                )
+            relative_paths.update(
+                path.relative_to(workspace).as_posix()
+                for path in source.rglob('*')
+                if path.is_file() and not path.is_symlink()
+            )
+        else:
+            for command in (
+                ['git', 'diff', '--name-only', '-z', 'HEAD'],
+                ['git', 'ls-files', '--others', '--exclude-standard', '-z'],
+            ):
+                completed = subprocess.run(
+                    command,
+                    cwd=workspace,
+                    capture_output=True,
+                    check=False,
+                    timeout=10,
+                )
+                if completed.returncode != 0:
+                    raise WorkflowError(
+                        completed.stderr.decode(errors='replace').strip()
+                        or 'failed to enumerate Beaker review files'
+                    )
+                relative_paths.update(
+                    item.decode(errors='strict')
+                    for item in completed.stdout.split(b'\0')
+                    if item
+                )
+        relative_paths = {
+            relative
+            for relative in relative_paths
+            if '__pycache__' not in Path(relative).parts
+            and Path(relative).suffix not in {'.pyc', '.pyo'}
+        }
+        try:
+            return self.workspaces.create_review_snapshot(
+                run_id=run_id,
+                relative_paths=list(relative_paths),
+            )
+        except Exception as exc:
+            raise WorkflowError(
+                f'failed to create Honeydew review snapshot: {exc}'
+            ) from exc
+
+    def _matrix_preflight_report(
+        self,
+        *,
+        run_id: str,
+        action: ActionRecord,
+    ) -> MatrixPreflightReport:
+        errors: list[str] = []
         try:
             matrix = ExperimentMatrix.model_validate(action.arguments)
             run = self.store.get_run(run_id)
             if not self._contract_binding_compatible(run_id):
-                return (
+                errors.append(
                     'installed evaluation contract is incompatible with the '
                     'approved protocol; promote a matching contract first'
                 )
@@ -1956,7 +2818,7 @@ class ResearchOrchestrator:
                 not base_config.is_relative_to(workspace)
                 or not base_config.is_file()
             ):
-                return (
+                errors.append(
                     'base_config does not exist inside the Beaker workspace: '
                     f'{matrix.base_config}'
                 )
@@ -1964,12 +2826,12 @@ class ResearchOrchestrator:
                 expected_image = str(run.task_definition['runner_image'])
                 expected_resources = run.task_definition['resources']
                 if matrix.runner_image != expected_image:
-                    return (
+                    errors.append(
                         'imported benchmark requires runner_image '
                         f'{expected_image}'
                     )
                 if matrix.resources.model_dump(mode='json') != expected_resources:
-                    return (
+                    errors.append(
                         'imported benchmark resources must exactly match the '
                         'preselected task resource profile'
                     )
@@ -1978,16 +2840,117 @@ class ResearchOrchestrator:
                 run.evaluation_contract_version,
             )
             if contract.digest != run.evaluation_contract_digest:
-                return 'evaluation contract changed after run creation'
+                errors.append('evaluation contract changed after run creation')
             expand_experiment_matrix(
                 run_id=run_id,
                 action_id=action.action_id,
                 matrix=matrix,
                 contract=contract,
             )
+            report = preflight_matrix(
+                run=run,
+                matrix=matrix,
+                contract=contract,
+            )
+            if errors:
+                return report.model_copy(
+                    update={
+                        'passed': False,
+                        'errors': [*errors, *report.errors],
+                    }
+                )
+            return report
         except ValueError as exc:
-            return str(exc)
-        return None
+            errors.append(str(exc))
+        return MatrixPreflightReport(
+            passed=False,
+            job_count=0,
+            errors=errors,
+        )
+
+    def _matrix_preflight_error(
+        self,
+        *,
+        run_id: str,
+        action: ActionRecord,
+    ) -> str | None:
+        report = self._matrix_preflight_report(
+            run_id=run_id,
+            action=action,
+        )
+        return '; '.join(report.errors) if report.errors else None
+
+    @staticmethod
+    def _methodology_feedback(result: AgentTurnResult) -> str:
+        sections = [result.summary]
+        if result.claims:
+            sections.append(
+                'Concrete findings:\n'
+                + '\n'.join(
+                    f'- {claim.text}'
+                    + (
+                        f' Evidence: {", ".join(claim.evidence)}'
+                        if claim.evidence
+                        else ''
+                    )
+                    for claim in result.claims
+                )
+            )
+        if result.message_to_other_agent.strip():
+            sections.append(result.message_to_other_agent.strip())
+        return '\n\n'.join(section for section in sections if section)
+
+    def _request_methodology_revision(
+        self,
+        run_id: str,
+        *,
+        feedback: str,
+    ) -> None:
+        run = self.store.get_run(run_id)
+        revision_count = run.methodology_revision_count + 1
+        run = self.store.replace_run(
+            run.model_copy(
+                update={'methodology_revision_count': revision_count}
+            ),
+            expected_version=run.version,
+        )
+        if run.state != RunState.BEAKER_REVISING:
+            self._transition(run_id, RunState.BEAKER_REVISING)
+        self._event(
+            run_id,
+            source='orchestrator',
+            event_type='methodology.revision_requested',
+            payload={
+                'revision_count': revision_count,
+                'maximum_revisions': (
+                    self.settings.maximum_methodology_revisions
+                ),
+                'feedback': feedback,
+            },
+        )
+        if revision_count > self.settings.maximum_methodology_revisions:
+            self._event(
+                run_id,
+                source='orchestrator',
+                event_type='methodology.human_resolution_requested',
+                payload={
+                    'revision_count': revision_count,
+                    'maximum_revisions': (
+                        self.settings.maximum_methodology_revisions
+                    ),
+                    'feedback': feedback,
+                },
+            )
+            self.pause_run(
+                run_id,
+                requested_by='orchestrator',
+                reason=(
+                    'Methodology review exceeded the automatic revision '
+                    'limit. Human resolution is required.'
+                ),
+            )
+            return
+        self._beaker_revise(run_id, feedback=feedback)
 
     def _beaker_revise(self, run_id: str, *, feedback: str) -> None:
         run = self.store.get_run(run_id)
@@ -1997,12 +2960,57 @@ class ResearchOrchestrator:
                 '\nPreserve the imported benchmark boundary: all executable '
                 f'files stay under `{run.task_definition["source_subdirectory"]}`, '
                 'datasets come only from the provided bindings, and the '
-                'preselected image/resources must not change.'
+                'preselected image/resources must not change. The OpenCode '
+                'runtime is not the approved experiment-runner image and may '
+                'lack workload dependencies. Attempt each local command only '
+                'once. If a check fails with ModuleNotFoundError, do not install '
+                'packages, repeat the command, or inspect outputs that were not '
+                'created. Run dependency-free checks such as Python compilation, '
+                'record that the dependency-backed smoke check is deferred to '
+                'the approved runner, and complete the structured handoff. Any '
+                'claim evidence must use an allowed artifact://, git://, '
+                'event://, job://, or contract:// URI rather than a bare path.'
+            )
+        preflight_focus = ''
+        if feedback.startswith('Deterministic matrix preflight failed:'):
+            rejected_matrices = [
+                action
+                for action in self.store.list_actions(run_id)
+                if action.type == 'submit_experiment_matrix'
+                and action.approval_status == ApprovalStatus.REJECTED
+            ]
+            base_config = (
+                str(rejected_matrices[-1].arguments.get('base_config', ''))
+                if rejected_matrices
+                else ''
+            )
+            preflight_focus = (
+                '\nThis is a focused deterministic-preflight correction, not '
+                'a new implementation pass. The validator has already inspected '
+                'the implementation. Read the rejected base config'
+                + (f' `{base_config}`' if base_config else '')
+                + ' and only the directly relevant protocol or source files. '
+                'Every backticked config_path in the validator errors is an '
+                'exact dotted path from the root of that config. For example, '
+                '`experiment_dimensions.model` must be written beneath the '
+                'top-level `experiment_dimensions` key, not beneath '
+                '`methodology` or another wrapper. The exact path must directly '
+                'contain its scalar or list of values; do not add `description` '
+                'or `values` metadata wrappers. Correct every validator error '
+                'exactly, then read back each required dotted path and run the '
+                'narrowest applicable check before returning the replacement '
+                'action. Do not browse unrelated repository files or redesign '
+                'working code unless an error explicitly names that code.\n'
             )
         prompt = (
             'Revise the implementation and experiment matrix in response to '
             'the review below. Run local checks and return a replacement '
             'submit_experiment_matrix action. Do not execute cluster work.\n\n'
+            + preflight_focus
+            + 'The workload must emit metrics and evidence only. Remove any '
+            'workload code that creates, reads, or scores `evaluation.json`, '
+            '`rubric_score`, or `integrity_pass`; the immutable contract owns '
+            'those outputs.\n\n'
             f'Permitted runner images: '
             f'{json.dumps(sorted(self.policy.permitted_images))}\n'
             'Resource ceilings: '
@@ -2011,6 +3019,18 @@ class ResearchOrchestrator:
             f'gpus={self.policy.maximum_gpus}, '
             'maximum_parallel_jobs='
             f'{self.policy.maximum_parallel_jobs}.\n\n'
+            'Required submit_experiment_matrix action shape:\n'
+            + json.dumps(
+                self._matrix_action_template(run),
+                indent=2,
+                sort_keys=True,
+            )
+            + '\nKeep reason beside type and arguments. Put the ExperimentMatrix '
+            'fields directly in arguments; do not add a matrix or evaluator_type '
+            'wrapper. Matrix seeds create separate cluster jobs. If the workload '
+            'already runs an internal seed list for stability analysis, keep '
+            'that list in the implementation and use one outer matrix seed; do '
+            'not mirror the internal list into the matrix.\n\n'
             f'Review feedback:\n{feedback}'
             + task_context
         )
@@ -2033,7 +3053,7 @@ class ResearchOrchestrator:
             for item in actions
         )
         if not pending:
-            self._beaker_revise(
+            self._request_methodology_revision(
                 run_id,
                 feedback=self._matrix_revision_feedback(actions),
             )
@@ -2140,16 +3160,26 @@ class ResearchOrchestrator:
 
     def _fill_job_capacity(self, run_id: str) -> None:
         run = self.store.get_run(run_id)
-        active = self.store.list_jobs(
+        capacity_jobs = self.store.list_jobs(
             run_id,
             statuses={
+                JobStatus.QUEUED,
                 JobStatus.SUBMITTING,
                 JobStatus.RUNNING,
                 JobStatus.UNKNOWN,
             },
         )
+        active = [
+            job
+            for job in capacity_jobs
+            if job.status != JobStatus.QUEUED or job.external_run_id
+        ]
         slots = max(0, run.maximum_parallel_jobs - len(active))
-        queued = self.store.list_jobs(run_id, statuses={JobStatus.QUEUED})
+        queued = [
+            job
+            for job in capacity_jobs
+            if job.status == JobStatus.QUEUED and not job.external_run_id
+        ]
         for job in queued[:slots]:
             submitting = self.store.update_job(
                 job.model_copy(update={'status': JobStatus.SUBMITTING})
@@ -2235,7 +3265,7 @@ class ResearchOrchestrator:
                 },
             )
             for job in jobs:
-                if job.status == JobStatus.QUEUED:
+                if job.status == JobStatus.QUEUED and not job.external_run_id:
                     continue
                 if not job.external_run_id:
                     try:
@@ -2295,6 +3325,7 @@ class ResearchOrchestrator:
                     )
                 )
                 if snapshot.status in JOB_TERMINAL_STATUSES:
+                    recorded_artifacts: list[ArtifactRecord] = []
                     for artifact in snapshot.artifacts:
                         artifact_id = uuid5(
                             NAMESPACE_URL,
@@ -2303,7 +3334,7 @@ class ResearchOrchestrator:
                                 f'{artifact.sha256}'
                             ),
                         ).hex
-                        self.store.save_artifact(
+                        recorded = self.store.save_artifact(
                             ArtifactRecord(
                                 artifact_id=artifact_id,
                                 run_id=run_id,
@@ -2325,6 +3356,7 @@ class ResearchOrchestrator:
                                 },
                             )
                         )
+                        recorded_artifacts.append(recorded)
                         self._event(
                             run_id,
                             source='cluster',
@@ -2350,6 +3382,12 @@ class ResearchOrchestrator:
                             'exit_information': updated.exit_information,
                         },
                     )
+                    if updated.status == JobStatus.SUCCEEDED:
+                        self._generate_analysis_notebook(
+                            run_id=run_id,
+                            job=updated,
+                            source_artifacts=recorded_artifacts,
+                        )
                 elif snapshot.status == JobStatus.RUNNING:
                     self._event(
                         run_id,
@@ -2360,7 +3398,66 @@ class ResearchOrchestrator:
             self._fill_job_capacity(run_id)
             return self.store.get_run(run_id)
 
+    def _generate_analysis_notebook(
+        self,
+        *,
+        run_id: str,
+        job: JobRecord,
+        source_artifacts: list[ArtifactRecord],
+    ) -> None:
+        run = self.store.get_run(run_id)
+        destination = Path(run.reports_path) / 'analysis.ipynb'
+        try:
+            digest, provenance = write_analysis_notebook(
+                destination=destination,
+                run_id=run_id,
+                job_id=job.job_id,
+                artifacts=source_artifacts,
+                shared_mount_root=self.settings.shared_mount_root,
+            )
+        except (ArtifactDeliveryError, OSError, ValueError) as exc:
+            self._event(
+                run_id,
+                source='orchestrator',
+                event_type='artifact.generation_failed',
+                payload={
+                    'type': 'analysis_notebook',
+                    'job_id': job.job_id,
+                    'error': str(exc),
+                },
+            )
+            return
+
+        uri = f'artifact://{run_id}/reports/analysis.ipynb'
+        artifact = self._save_local_artifact(
+            run_id=run_id,
+            artifact_type='analysis_notebook',
+            uri=uri,
+            digest=digest,
+            metadata={
+                'path': str(destination),
+                'job_id': job.job_id,
+                'derived_from': provenance,
+                'authoritative': False,
+            },
+        )
+        self._event(
+            run_id,
+            source='orchestrator',
+            event_type='artifact.recorded',
+            payload={
+                'artifact_id': artifact.artifact_id,
+                'type': artifact.type,
+                'uri': artifact.uri,
+                'path': str(destination),
+                'sha256': artifact.sha256,
+                'job_id': job.job_id,
+                'authoritative': False,
+            },
+        )
+
     def _evidence_snapshot(self, run_id: str) -> dict[str, Any]:
+        artifacts = self.store.list_artifacts(run_id)
         return {
             'jobs': [
                 job.model_dump(mode='json')
@@ -2368,8 +3465,72 @@ class ResearchOrchestrator:
             ],
             'artifacts': [
                 artifact.model_dump(mode='json')
-                for artifact in self.store.list_artifacts(run_id)
+                for artifact in artifacts
             ],
+            'artifact_contents': [
+                excerpt
+                for artifact in artifacts
+                if (excerpt := self._artifact_evidence_excerpt(artifact))
+                is not None
+            ],
+        }
+
+    def _artifact_evidence_excerpt(
+        self,
+        artifact: ArtifactRecord,
+    ) -> dict[str, Any] | None:
+        relative = Path(artifact.uri)
+        if relative.name not in {
+            'runner.log',
+            'status.json',
+            'evaluation.json',
+            'metrics.json',
+            'metrics.csv',
+            'fairness.csv',
+            'report.md',
+        }:
+            return None
+        shared_root = Path(self.settings.shared_mount_root).resolve()
+        path = (shared_root / relative).resolve()
+        if not path.is_relative_to(shared_root) or not path.is_file():
+            return None
+        digest = sha256()
+        with path.open('rb') as handle:
+            while chunk := handle.read(1024 * 1024):
+                digest.update(chunk)
+        if digest.hexdigest() != artifact.sha256:
+            return {
+                'uri': f'artifact://{artifact.uri}',
+                'type': artifact.type,
+                'sha256': artifact.sha256,
+                'content_unavailable': 'artifact digest mismatch',
+            }
+        maximum = self.settings.evidence_excerpt_max_bytes
+        size = path.stat().st_size
+        with path.open('rb') as handle:
+            if relative.name == 'runner.log' and size > maximum:
+                handle.seek(-maximum, 2)
+            content = handle.read(maximum)
+        text = content.decode('utf-8', errors='replace')
+        parsed: Any = text
+        if relative.suffix == '.json' and size <= maximum:
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                parsed = text
+        return {
+            'uri': f'artifact://{artifact.uri}',
+            'type': artifact.type,
+            'sha256': artifact.sha256,
+            'digest_verified': True,
+            'size_bytes': size,
+            'truncated': size > maximum,
+            'excerpt_position': (
+                'tail'
+                if relative.name == 'runner.log' and size > maximum
+                else 'head'
+            ),
+            'content': parsed,
         }
 
     def _analyze_results(self, run_id: str) -> None:
@@ -2412,6 +3573,14 @@ class ResearchOrchestrator:
             input_event=evidence,
         )
         if not result.done:
+            self.store.reset_methodology_revision_budget(
+                run_id,
+                reason=(
+                    'new cluster evidence requires a post-execution repair '
+                    'cycle'
+                ),
+            )
+            self._publish_latest(run_id)
             self._transition(run_id, RunState.BEAKER_REVISING)
             self._beaker_revise(
                 run_id,
@@ -2492,10 +3661,21 @@ class ResearchOrchestrator:
         if run.state in TERMINAL_STATES or run.state == RunState.PAUSED:
             return run
         self._abort_agent_turns(run)
+        now = utc_now()
+        active_runtime = run.active_runtime_seconds
+        if run.active_since is not None:
+            active_runtime += max(
+                0.0,
+                (now - run.active_since).total_seconds(),
+            )
         paused = self._transition(
             run_id,
             RunState.PAUSED,
-            updates={'resume_state': run.state},
+            updates={
+                'resume_state': run.state,
+                'active_runtime_seconds': active_runtime,
+                'active_since': None,
+            },
         )
         self._event(
             run_id,
@@ -2526,7 +3706,10 @@ class ResearchOrchestrator:
             resumed = self._transition(
                 run_id,
                 target,
-                updates={'resume_state': None},
+                updates={
+                    'resume_state': None,
+                    'active_since': utc_now(),
+                },
             )
             self._event(
                 run_id,
@@ -2568,6 +3751,10 @@ class ResearchOrchestrator:
                 TurnKind.IMPLEMENTATION_PLAN,
             ),
             RunState.BEAKER_IMPLEMENTING: (
+                AgentName.BEAKER,
+                TurnKind.IMPLEMENTATION_PROPOSAL,
+            ),
+            RunState.BEAKER_FINALIZING: (
                 AgentName.BEAKER,
                 TurnKind.IMPLEMENTATION_PROPOSAL,
             ),
@@ -2745,6 +3932,7 @@ class ResearchOrchestrator:
                     RunState.HONEYDEW_REVIEWING_CONTRACT,
                     RunState.BEAKER_PLANNING,
                     RunState.BEAKER_IMPLEMENTING,
+                    RunState.BEAKER_FINALIZING,
                     RunState.HONEYDEW_REVIEWING,
                     RunState.BEAKER_REVISING,
                     RunState.BEAKER_ANALYZING,
@@ -2811,6 +3999,7 @@ class ResearchOrchestrator:
         contract_sensitive_states = {
             RunState.BEAKER_PLANNING,
             RunState.BEAKER_IMPLEMENTING,
+            RunState.BEAKER_FINALIZING,
             RunState.HONEYDEW_REVIEWING,
             RunState.BEAKER_REVISING,
             RunState.AWAITING_EXECUTION_APPROVAL,
@@ -2893,8 +4082,13 @@ class ResearchOrchestrator:
                     run_id,
                     implementation_turn_id='recovered',
                 )
+            elif self._has_imported_task_implementation(run):
+                self._transition(run_id, RunState.BEAKER_FINALIZING)
+                self._beaker_finalize(run_id)
             else:
                 self._beaker_implement(run_id)
+        elif state == RunState.BEAKER_FINALIZING:
+            self._beaker_finalize(run_id)
         elif state == RunState.HONEYDEW_REVIEWING:
             self._honeydew_review(
                 run_id,
@@ -2910,14 +4104,17 @@ class ResearchOrchestrator:
             feedback = rejected[-1].reason if rejected else 'Resume the bounded revision.'
             self._beaker_revise(run_id, feedback=feedback)
         elif state == RunState.AWAITING_EXECUTION_APPROVAL:
-            approved = [
+            matrix_actions = [
                 action
                 for action in self.store.list_actions(run_id)
                 if action.type == 'submit_experiment_matrix'
-                and action.approval_status == ApprovalStatus.APPROVED
             ]
-            if approved:
-                self._submit_matrix(approved[-1])
+            if (
+                matrix_actions
+                and matrix_actions[-1].approval_status
+                == ApprovalStatus.APPROVED
+            ):
+                self._submit_matrix(matrix_actions[-1])
         elif state in {RunState.JOB_QUEUED, RunState.JOB_RUNNING}:
             self.reconcile_run(run_id)
         elif state == RunState.BEAKER_ANALYZING:

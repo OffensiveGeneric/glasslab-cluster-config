@@ -1,3 +1,12 @@
+"""Minimal cron-based scheduling for read-only digest operations.
+
+Parses five-field cron expressions with comma-separated token syntax (no
+step values) and matches them against wall-clock time. Schedule execution is
+idempotent: a schedule that fires again in the same calendar minute is
+suppressed. Digests produce summary payloads (run counts per workflow/status)
+and record ScheduledExecution records without mutating any run state.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -88,6 +97,8 @@ def execute_due_digest_schedules(
             continue
         if schedule.last_execution_at is not None:
             last = schedule.last_execution_at.astimezone(timezone.utc)
+            # Same-minute guard: a human triggering /run-due repeatedly
+            # will not produce duplicate executions for the same schedule.
             if last.year == now.year and last.month == now.month and last.day == now.day and last.hour == now.hour and last.minute == now.minute:
                 continue
 

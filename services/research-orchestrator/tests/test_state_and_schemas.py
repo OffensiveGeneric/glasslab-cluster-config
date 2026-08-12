@@ -1,3 +1,11 @@
+"""State-machine transition legality and core schema validation.
+
+Covers the allowed run-state edges and that invalid or terminal-state
+transitions raise InvalidTransition, plus strict validation of structured
+agent output (evidence must be artifact URIs), evaluation-contract proposal
+budget limits, and comma-separated environment allowlists.
+"""
+
 from __future__ import annotations
 
 import pytest
@@ -19,6 +27,14 @@ def test_valid_and_invalid_state_transitions() -> None:
         RunState.BEAKER_REVISING,
     )
     validate_transition(
+        RunState.BEAKER_IMPLEMENTING,
+        RunState.BEAKER_FINALIZING,
+    )
+    validate_transition(
+        RunState.BEAKER_FINALIZING,
+        RunState.HONEYDEW_REVIEWING,
+    )
+    validate_transition(
         RunState.AWAITING_PROTOCOL_APPROVAL,
         RunState.HONEYDEW_DRAFTING_PROTOCOL,
     )
@@ -31,13 +47,18 @@ def test_valid_and_invalid_state_transitions() -> None:
         RunState.BEAKER_PLANNING,
     )
     validate_transition(RunState.BEAKER_PLANNING, RunState.BEAKER_IMPLEMENTING)
+    validate_transition(RunState.PAUSED, RunState.CANCELLED)
     with pytest.raises(InvalidTransition):
         validate_transition(RunState.CREATED, RunState.COMPLETE)
+    with pytest.raises(InvalidTransition):
+        validate_transition(RunState.PAUSED, RunState.COMPLETE)
     with pytest.raises(InvalidTransition):
         validate_transition(RunState.COMPLETE, RunState.PREPARING)
 
 
 def test_structured_agent_output_validation() -> None:
+    # Agent claims must cite durable artifact URIs; a bare prose URL is
+    # rejected because prose is not evidence (see AGENTS.md boundaries).
     valid = AgentTurnResult.model_validate(
         {
             'kind': 'verification',
@@ -73,6 +94,8 @@ def test_structured_agent_output_validation() -> None:
 
 
 def test_evaluation_contract_proposal_requires_matching_budget_limit() -> None:
+    # budget_mode='training_exposure' demands a max_samples_seen limit; the
+    # proposal is invalid without it, forcing an explicit sample budget.
     proposal = {
         'evaluator_type': 'cifar100-unseen-v1',
         'primary_metric': {
@@ -112,3 +135,14 @@ def test_comma_separated_image_allowlist_from_environment(
         'ghcr.io/example/runner:a',
         'ghcr.io/example/runner:b',
     ]
+
+
+def test_postgres_backend_requires_an_explicit_dsn() -> None:
+    with pytest.raises(ValueError, match='non-empty store_postgres_dsn'):
+        Settings(store_backend='postgres')
+
+    settings = Settings(
+        store_backend='postgres',
+        store_postgres_dsn='postgresql://glasslab:test@localhost/glasslab',
+    )
+    assert settings.store_backend == 'postgres'

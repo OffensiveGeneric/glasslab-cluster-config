@@ -57,11 +57,16 @@ Important consequence:
 
 ## 4. Current Physical / Cluster Topology
 
-### Provisioner / Bastion
+### Public Gateway
+
+- `glasslab.org`
+- public SSH entry point
+- separate from the internal provisioner
+
+### Provisioner
 
 - `192.168.1.44`
 - PXE host
-- bastion
 - Ansible control host
 - `kubectl` admin workstation
 - canonical repo checkout location in the live lab

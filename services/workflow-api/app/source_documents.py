@@ -1,3 +1,11 @@
+"""Fetch, parse, validate, and persist source documents (papers, web pages, PDFs).
+
+Source documents are fetched via HTTP, parsed for title/abstract/hint metadata,
+validated against an expected title when supplied, and persisted to either
+local filesystem or MinIO. The extracted hints feed the interpretation and
+design stages without requiring a live model call per document.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -211,6 +219,11 @@ def validate_document_identity(
     if normalized_expected and normalized_fetched and normalized_expected == normalized_fetched:
         return 'matched', ['fetched title exactly matched the expected paper title']
 
+    # Validation uses term-level matching, not fuzzy string similarity,
+    # because paper titles from different sources often differ by punctuation
+    # or word order rather than content. Two matching terms is sufficient
+    # to confirm identity when the expected title has at least two
+    # distinctive words.
     haystack = ' '.join(part for part in [fetched_title or '', text_excerpt or '']).lower()
     matched_terms = [term for term in expected_terms if term in haystack]
     if len(matched_terms) >= min(2, len(expected_terms)):

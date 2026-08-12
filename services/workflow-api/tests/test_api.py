@@ -1,3 +1,11 @@
+"""Integration tests for the workflow-api FastAPI application.
+
+Each test builds a fresh ``TestClient`` backed by an in-memory store and
+the real workflow registry.  Import-time module-cache clearing ensures
+tests do not accidentally share ``app.*`` module state across test
+modules or between parametrized runs with different settings.
+"""
+
 import sys
 import json
 from datetime import datetime, timezone
@@ -6,6 +14,9 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+# Prevent stale ``app.*`` module state from leaking between test modules.
+# conftest.py sets up the import paths; each test file must also clear the
+# cache so runs with different Settings or monkeypatches get fresh modules.
 for module_name in list(sys.modules):
     if module_name == 'app' or module_name.startswith('app.'):
         del sys.modules[module_name]
@@ -14,6 +25,7 @@ from app.config import Settings
 import app.autoresearch as autoresearch_module
 import app.main as main_module
 import app.source_documents as source_documents
+from app.job_submission import LiveStatusUnavailableError, NullJobSubmitter
 from app.schemas import AutoresearchDecisionRecord, AutoresearchIterationRecord, EvaluatorContract
 from app.stage_interpretation import build_interpretation_record_from_agent_draft, validate_interpretation_agent_draft
 from app.main import create_app
@@ -24,6 +36,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def build_client(artifacts_mount_path: Path | None = None) -> TestClient:
+    # Tests that need on-disk artifacts pass a tmp_path; tests that only
+    # exercise API routes and in-memory state skip it so the default
+    # artifacts_mount_path is not set.
     settings = Settings(
         registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
         **(
@@ -5418,7 +5433,7 @@ def test_gpu_workflow_execution_preflight_reports_gpu_contract() -> None:
     payload = response.json()
     assert payload['workflow_id'] == 'gpu-experiment'
     assert payload['resource_profile'] == 'gpu-small'
-    assert payload['runner_image'] == 'ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.7-local'
+    assert payload['runner_image'] == 'ghcr.io/ccny-glasslab/glasslab-gpu-experiment-runner:0.1.7-local'
     assert payload['resource_requests'] == {'cpu': '2', 'memory': '4Gi', 'nvidia.com/gpu': '1'}
     assert payload['resource_limits'] == {'cpu': '4', 'memory': '8Gi', 'nvidia.com/gpu': '1'}
     assert payload['node_selector'] == {
@@ -6773,3 +6788,48 @@ def test_autoresearch_notebook_refinement_uses_coding_model_response(tmp_path, m
 
     path = Path(payload['storage_uri'].removeprefix('file://'))
     assert path.exists()
+
+
+def test_run_status_route_returns_200_during_kube_outage() -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+
+    class OutageSubmitter(NullJobSubmitter):
+        def get_live_status(self, record):
+            raise LiveStatusUnavailableError(
+                'Kubernetes transport failure during live status lookup'
+            )
+
+    client = TestClient(
+        create_app(
+            settings=settings,
+            registry=registry,
+            store=store,
+            submitter=OutageSubmitter(namespace='default'),
+        )
+    )
+
+    create = client.post(
+        '/experiments/runs',
+        json={
+            'objective': 'Observe a run during a Kubernetes outage.',
+            'experiment_type': 'gpu-training-job',
+            'workload_id': 'metric-search-v0',
+            'entrypoint': ['python3', 'scripts/run_experiment.py'],
+            'config_payload': {'search_space_id': 'art-metric-baseline'},
+            'dataset_bindings': {'train_uri': 's3://datasets/art/train.parquet'},
+            'budget': {'max_epochs': 1, 'max_wallclock_minutes': 5},
+            'submitted_by': 'test-suite',
+        },
+    )
+    assert create.status_code == 201
+    run_id = create.json()['run_id']
+
+    got = client.get(f'/runs/{run_id}')
+    assert got.status_code == 200
+    status = got.json()['status']
+    assert 'Live Kubernetes status unavailable' in status['detail']
+    assert 'showing durable stored status' in status['detail']

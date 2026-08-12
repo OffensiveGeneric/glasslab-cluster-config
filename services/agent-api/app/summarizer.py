@@ -1,3 +1,11 @@
+"""Produce a short result summary for a completed experiment.
+
+Uses the shared Qwen model when enabled and available; any LLM failure or a
+disabled flag falls back to a deterministic template so a succeeded run always
+gets a summary string. The deterministic template never throws on a malformed
+payload (unknown values degrade to 'unavailable').
+"""
+
 from __future__ import annotations
 
 import json
@@ -31,6 +39,8 @@ class ResultSummarizer:
                 if summary:
                     return summary
             except Exception:
+                # A summary is a nicety, not authority: a model failure must
+                # never fail finalization of an already succeeded job.
                 pass
         return deterministic_summary(result_payload)
 

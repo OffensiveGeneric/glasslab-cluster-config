@@ -1,3 +1,10 @@
+"""Test path setup for the evaluator service.
+
+The service has no installable package metadata, so tests must be able to import
+`app` and `services.common` from a plain checkout: both the service root and the
+repo root are inserted into sys.path before any test module is imported.
+"""
+
 import sys
 from pathlib import Path
 

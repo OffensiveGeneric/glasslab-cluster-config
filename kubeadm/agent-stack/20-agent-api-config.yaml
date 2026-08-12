@@ -9,7 +9,7 @@ data:
   GLASSLAB_AGENT_QWEN_API_BASE: http://vllm.glasslab-agents.svc.cluster.local:8000/v1
   GLASSLAB_AGENT_RUNNER_NAMESPACE: glasslab-agents
   GLASSLAB_AGENT_RUNNER_SERVICE_ACCOUNT_NAME: glasslab-agent-api
-  GLASSLAB_AGENT_RUNNER_IMAGE: ghcr.io/offensivegeneric/glasslab-titanic-runner:0.1.0
+  GLASSLAB_AGENT_RUNNER_IMAGE: ghcr.io/ccny-glasslab/glasslab-titanic-runner:0.1.0
   GLASSLAB_AGENT_RUNNER_IMAGE_PULL_POLICY: IfNotPresent
   GLASSLAB_AGENT_RUNNER_BACKOFF_LIMIT: "0"
   GLASSLAB_AGENT_RUNNER_JOB_TTL_SECONDS: "86400"

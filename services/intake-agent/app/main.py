@@ -1,3 +1,13 @@
+"""FastAPI service for intake normalization and paper-harvester planning.
+
+Two deterministic concerns live here: (1) normalizing a free-form research
+intake into a bounded draft with workflow-family candidates, and (2) building
+literature-harvest plans by scoring the approved seed manifest against explicit
+track filters or a problem statement. All matching is lexical; the model backend
+is declared but not yet used for scoring. Seed data comes from
+seeds/glasslab_paper_harvester_seed_manifest.yaml.
+"""
+
 from __future__ import annotations
 
 from functools import lru_cache
@@ -30,6 +40,8 @@ TOKEN_RE = re.compile(r"[a-z0-9]+")
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SEED_MANIFEST = SERVICE_ROOT / 'seeds' / 'glasslab_paper_harvester_seed_manifest.yaml'
 
+# Backend metadata is resolved once at import from env, with sensible local
+# defaults; it is only reported to callers, never used for scoring yet.
 MODEL_BACKEND = ModelBackendMetadata(
     provider=os.getenv('GLASSLAB_INTAKE_AGENT_PROVIDER_API', 'openai-compatible').strip() or 'openai-compatible',
     base_url=os.getenv('GLASSLAB_INTAKE_AGENT_PROVIDER_BASE_URL', 'http://192.168.1.21:52415').strip(),
@@ -44,12 +56,15 @@ def normalize_host(value: str) -> str | None:
     host = parsed.netloc.strip().lower()
     if not host:
         return None
+    # Strip a www. prefix so www.jmlr.org and jmlr.org compare as the same host.
     if host.startswith('www.'):
         host = host[4:]
     return host or None
 
 
 def tokenize(value: str) -> set[str]:
+    # Lowercased alphanumeric tokens are the shared matching vocabulary for
+    # tracks, papers, and problem statements; nothing else carries signal.
     return set(TOKEN_RE.findall(value.lower()))
 
 
@@ -76,6 +91,8 @@ def load_approved_sources_summary() -> ApprovedSourcesSummary:
 
 @lru_cache(maxsize=1)
 def load_seed_manifest() -> dict:
+    # The seed manifest is static for the life of the process; caching the YAML
+    # parse avoids re-reading the file on every plan request.
     return yaml.safe_load(DEFAULT_SEED_MANIFEST.read_text())
 
 
@@ -146,10 +163,14 @@ def summarize_intake(raw_request: str, notes: list[str]) -> str:
     if notes:
         note_preview = '; '.join(' '.join(item.split()) for item in notes[:2])
         summary = f'{summary} Notes: {note_preview}'
+    # Cap the stored summary so a bloated intake never overflows downstream
+    # context windows or logs.
     return summary[:500]
 
 
 def infer_source_type(raw_request: str, source_refs: list[str], source_type: str | None) -> str:
+    # Explicit caller intent wins, then URL evidence, then keyword heuristics;
+    # the order matters because these are mutually exclusive labels.
     if source_type:
         return source_type.strip()
     if any(ref.startswith(('http://', 'https://')) for ref in source_refs):
@@ -163,6 +184,8 @@ def infer_source_type(raw_request: str, source_refs: list[str], source_type: str
 
 
 def infer_workflow_candidates(raw_request: str) -> list[str]:
+    # Keyword sets are order-independent; candidates are deduplicated and the
+    # general literature workflow is the fallback when nothing specific matches.
     lowered = raw_request.lower()
     matches: list[str] = []
     if any(token in lowered for token in ('replicate', 'replication', 'reproduce', 're-run')):
@@ -203,6 +226,9 @@ def build_approval_warnings(request: NormalizeIntakeRequest) -> list[str]:
         host = normalize_host(ref)
         if not host:
             continue
+        # A source ref is only in policy when its host is on the approved seed
+        # manifest's venue allowlist; anything else is surfaced as a warning so
+        # an operator can vet it before the draft moves forward.
         if host not in approved_sources.approved_hosts:
             out_of_policy_hosts.append(host)
     deduped = list(dict.fromkeys(out_of_policy_hosts))
@@ -222,6 +248,9 @@ def filter_seed_papers(track_ids: list[str], priorities: list[str], max_papers: 
     if priorities:
         priority_set = set(priorities)
         papers = [paper for paper in papers if paper.priority in priority_set]
+    # Prefer high bounded-job-fit, then low replication complexity, then a
+    # stable id tiebreak; this is the baseline corpus order before any
+    # problem-specific re-ranking.
     papers.sort(key=lambda paper: (-paper.bounded_job_fit, paper.replication_complexity, paper.paper_id))
     return papers[:max_papers]
 

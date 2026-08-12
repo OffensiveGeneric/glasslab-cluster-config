@@ -1,3 +1,13 @@
+"""Discord transcript projection.
+
+Discord is an interface, not authoritative memory or state. Every publish and
+thread-creation call is guarded by the engine so a Discord outage can only
+silence the transcript, never fail or block the workflow. Rendering is a
+pure function over the append-only event log; the bot token is used only to
+post, and approval decisions are persisted by the engine, not derived from
+button clicks.
+"""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -14,6 +24,9 @@ from .schemas import EventRecord
 class DiscordMessage:
     identity: str
     content: str
+    # Status messages are edited in place rather than posted anew so a run's
+    # status line does not spam the thread; the status_message_id is persisted
+    # on the run record by the engine.
     is_status: bool = False
     components: list[dict[str, Any]] | None = None
 
@@ -198,6 +211,42 @@ def _render_action_context(payload: dict[str, Any]) -> str:
                 ),
             ]
         )
+        preflight = payload.get('preflight')
+        if isinstance(preflight, dict):
+            checks = preflight.get('checks')
+            comparisons = preflight.get('comparisons')
+            decisions = preflight.get('decisions')
+            errors = preflight.get('errors')
+            if not isinstance(checks, list):
+                checks = []
+            if not isinstance(comparisons, dict):
+                comparisons = {}
+            if not isinstance(decisions, dict):
+                decisions = {}
+            if not isinstance(errors, list):
+                errors = []
+            methodology = [
+                f"{name}=[{', '.join(map(str, values))}]"
+                for name, values in {**comparisons, **decisions}.items()
+                if isinstance(values, list)
+            ]
+            lines.extend(
+                [
+                    '',
+                    '**Deterministic preflight**',
+                    (
+                        f"{'Passed' if preflight.get('passed') else 'Failed'}; "
+                        f"{preflight.get('job_count', job_count)} job(s). "
+                        f"{'; '.join(map(str, checks)) or 'No checks recorded.'}"
+                    ),
+                    (
+                        'Methodology: '
+                        + (', '.join(methodology) or 'no declared dimensions')
+                    ),
+                ]
+            )
+            if errors:
+                lines.append('Blocking findings: ' + '; '.join(map(str, errors)))
     elif action_type == 'accept_final_report':
         artifact = payload.get('artifact')
         if not isinstance(artifact, dict):
@@ -239,6 +288,8 @@ def _render_action_context(payload: dict[str, Any]) -> str:
     content = '\n'.join(lines)
     if len(content) <= 1900:
         return content
+    # Discord caps a message at 2000 chars and the webhook path prefixes a
+    # username; truncate below the cap so a rendered review is never rejected.
     return content[:1885].rstrip() + '\n...[details truncated]'
 
 
@@ -280,6 +331,9 @@ class DiscordRenderer:
             'action.human_approval_requested',
         }:
             components = None
+            # Default to human-reviewable unless the policy explicitly marks
+            # the action as requiring only Honeydew review first; buttons are
+            # only rendered once the action is actually awaiting approval.
             human_approval_ready = bool(
                 payload.get(
                     'human_approval_ready',
@@ -466,6 +520,8 @@ class DiscordHttpAdapter(DiscordAdapter):
         self.bot_token = bot_token
         self.channel_id = channel_id
         self.webhook_url = webhook_url
+        # Test seam: lets the test suite inject a mock transport and assert on
+        # request shape without network access.
         self.transport = transport
         self.renderer = DiscordRenderer()
 
@@ -527,6 +583,9 @@ class DiscordHttpAdapter(DiscordAdapter):
         event: EventRecord,
     ) -> str | None:
         if thread_id is None:
+            # Run has no attached Discord thread yet (disabled or creation
+            # failed); keep the caller's status id so a later attach still
+            # works. No exception: this path must never fail the workflow.
             return status_message_id
         message = self.renderer.render(event)
         if message is None:
@@ -536,6 +595,10 @@ class DiscordHttpAdapter(DiscordAdapter):
             and not message.is_status
             and not message.components
         ):
+            # Plain non-status messages go through the webhook so they are
+            # authored with a friendly username. Status edits and component
+            # rows cannot use webhooks (they need the bot API), so those fall
+            # through to the bot path.
             self._publish_webhook(thread_id=thread_id, message=message)
             return status_message_id
         content = f'**{message.identity}:** {message.content}'[:2000]

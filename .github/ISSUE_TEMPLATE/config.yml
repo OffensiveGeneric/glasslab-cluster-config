@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Glasslab contributor guide
+    url: https://github.com/ccny-glasslab/glasslab-cluster-config/blob/main/CONTRIBUTING.md
+    about: Read the architecture, access, issue, branch, test, and pull-request workflow.

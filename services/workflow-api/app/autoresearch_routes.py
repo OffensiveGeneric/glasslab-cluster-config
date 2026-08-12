@@ -1,3 +1,12 @@
+"""HTTP routes for the automated iterative experiment campaign lifecycle.
+
+Exposes endpoints to create campaigns, draft initial methodology variants,
+launch iterations (single or batch), decide keep/discard/escalate outcomes,
+generate scaffold analysis notebooks, and advance campaigns through a
+composite transition that chains draft→decide→launch. Session-scoped
+aliases (/research-sessions/latest/transitions/*) simplify operator control.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -82,6 +91,9 @@ def register_autoresearch_routes(
         evaluator_contract = resolve_evaluator_contract(child_draft, campaign)
         child_summary = summarize_iteration_run(child_run, settings=settings, submitter=submitter, evaluator_contract=evaluator_contract)
         if iteration.decision is not None:
+            # If a decision was already recorded, reuse it — except when it was
+            # a stale escalation that is now actionable because the run succeeded
+            # and produced numeric metrics.
             existing = next(
                 (
                     record

@@ -1,3 +1,11 @@
+"""CLI and library entrypoint for comparing Glasslab v2 run bundles.
+
+Reads each bundle's runner records, ranks the runs deterministically, and writes
+comparison.json plus a markdown summary. write_outputs dispatches on
+evaluator_type (art-retrieval-v1) and otherwise applies the generic
+tabular-metric-max comparison.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -38,6 +46,8 @@ def rank_runs(runs: list[ComparedRun]) -> tuple[list[ComparedRun], str]:
         return [], 'no runs supplied'
 
     def sort_key(item: ComparedRun):
+        # status first, then metric presence, so a failed or metric-less run
+        # loses to a complete one no matter how large its raw value is.
         status_weight = 0 if item.status == 'succeeded' else 1
         metric_missing = 1 if item.primary_metric_value is None else 0
         direction = item.primary_metric_direction or 'maximize'
@@ -47,6 +57,7 @@ def rank_runs(runs: list[ComparedRun]) -> tuple[list[ComparedRun], str]:
             metric_sort = item.primary_metric_value
         else:
             metric_sort = -item.primary_metric_value
+        # Missing runtime ties break last; run_id makes the order total.
         runtime_sort = item.runtime_seconds if item.runtime_seconds is not None else float('inf')
         return (status_weight, metric_missing, metric_sort, runtime_sort, item.run_id)
 

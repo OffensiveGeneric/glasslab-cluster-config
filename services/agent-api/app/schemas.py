@@ -1,3 +1,11 @@
+"""Pydantic contracts for the API: planner spec, validation, and records.
+
+PlannerSpec is the closed schema the planner must produce and the validator
+checks; extra fields are forbidden so an unknown key fails fast instead of
+round-tripping into the cluster. ExperimentRecord is the wire form of a row in
+the SQLite state store.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -26,6 +34,8 @@ class PlannerSpec(BaseModel):
     @field_validator('models')
     @classmethod
     def validate_models(cls, value: list[AllowedModel]) -> list[AllowedModel]:
+        # Non-empty and unique so a malformed list from the planner fails here
+        # instead of producing ambiguous downstream behavior.
         if not value:
             raise ValueError('models must not be empty')
         if len(set(value)) != len(value):

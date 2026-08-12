@@ -10,7 +10,7 @@ spec:
     spec:
       containers:
         - name: faiss-test
-          image: ghcr.io/offensivegeneric/glasslab-gpu-experiment-runner:0.1.7-local
+          image: ghcr.io/ccny-glasslab/glasslab-gpu-experiment-runner:0.1.7-local
           command: ["python", "/app/faiss_integration_test.py"]
           resources:
             limits:

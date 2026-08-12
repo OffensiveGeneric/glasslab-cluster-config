@@ -1,3 +1,14 @@
+"""Transform an interpretation into a concrete, bounded design draft.
+
+Builds ReplicabilityAssessment records (deterministic or via an assessment
+agent), selects a workflow from the registry, derives declared inputs and
+unresolved slots from the intake context, constructs a MethodSpec with
+execution inputs, blocking reasons, and run readiness, and produces a
+DesignDraft ready for human review or direct run creation. Unresolved
+inputs are marked with the UNRESOLVED_ prefix so downstream validation
+can distinguish them from approved defaults.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -82,6 +93,8 @@ def build_replicability_assessment(
             recommendation = 'proceed'
             status_value = 'ready_for_design'
             assessment_notes.append('Interpretation can proceed toward design drafting.')
+    # If no workflow matched, return 'reject' instead of 'needs_review' so
+    # the pipeline does not silently retry an unmappable interpretation.
     else:
         recommendation = 'reject'
         status_value = 'rejected'
@@ -238,6 +251,8 @@ def choose_workflow_for_intake(intake: IntakeRecord, registry: WorkflowRegistry)
     if 'titanic' in lowered and 'generic-tabular-benchmark' in candidate_ids:
         candidate_ids = ['generic-tabular-benchmark', *[item for item in candidate_ids if item != 'generic-tabular-benchmark']]
 
+    # Iterate candidate IDs in priority order; 'generic-tabular-benchmark'
+    # takes precedence when Titanic-like keywords are present.
     for workflow_id in candidate_ids:
         workflow = registry.get_workflow(workflow_id)
         if workflow is not None:
@@ -515,6 +530,9 @@ def build_design_method_spec(
     interpretation: InterpretationRecord | None,
 ) -> MethodSpecRecord:
     execution_inputs = dict(declared_inputs)
+    # Interpretation-backed defaults fill unresolvable slots so the method
+    # spec benefits from previously inferred knowledge without silently
+    # overwriting concrete declared inputs.
     if interpretation is not None and interpretation.method_spec is not None:
         for key, value in interpretation.method_spec.execution_inputs.items():
             if key not in execution_inputs or (

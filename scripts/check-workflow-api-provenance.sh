@@ -13,7 +13,7 @@ Usage: check-workflow-api-provenance.sh [--target <ssh-host>] [--local]
 Print the live workflow-api deployment image and /healthz provenance.
 
 By default the script uses local kubectl when it can reach the configured
-namespace, otherwise it falls back to ssh target glasslab-44.
+namespace, otherwise it falls back to ssh target glasslab-provisioner.
 USAGE
 }
 
@@ -44,7 +44,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$SSH_TARGET" ]] && ! kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
-  SSH_TARGET="glasslab-44"
+  SSH_TARGET="glasslab-provisioner"
 fi
 
 run_shell() {

@@ -1,3 +1,11 @@
+"""Tests for the persistence layer: JSON file store and Postgres backend.
+
+Validates that both backends round-trip records correctly and survive a
+simulated restart (reloading the store), and that settings reject invalid
+or blank backend configuration.  The Postgres tests use a fake psycopg
+adapter so they run without a live database.
+"""
+
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -203,6 +211,11 @@ def test_postgres_store_requires_dsn() -> None:
 
 
 def test_postgres_store_round_trips_through_psycopg_adapter(monkeypatch) -> None:
+    # Fake psycopg adapter: intercepts INSERT and SELECT on the single
+    # workflow_state table.  The real PostgresStore issues a CREATE TABLE
+    # IF NOT EXISTS on initialization; the fake silently ignores that DDL
+    # because the test only needs to verify payload round-trip, not schema
+    # creation.
     state: dict[str, object] = {}
 
     class FakeCursor:

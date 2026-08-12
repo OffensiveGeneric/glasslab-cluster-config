@@ -1,0 +1,4 @@
+---
+# Compatibility entry point. Identity policy is now cluster-wide and comes
+# from group_vars/identity_hosts.yml.
+- import_playbook: manage-lab-identities.yml

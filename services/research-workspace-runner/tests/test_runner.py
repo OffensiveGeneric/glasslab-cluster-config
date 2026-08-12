@@ -144,6 +144,69 @@ def test_dataset_digest_is_verified_before_workspace_execution(tmp_path: Path) -
     assert 'dataset digest mismatch for adult_train' in status['detail']
 
 
+def test_dataset_bindings_expose_canonical_and_path_compatibility_env(
+    tmp_path: Path,
+) -> None:
+    dataset_root = tmp_path / 'datasets'
+    dataset_root.mkdir(parents=True)
+    train_path = dataset_root / 'adult.data'
+    test_path = dataset_root / 'adult.test'
+    train_path.write_text('train row\n')
+    test_path.write_text('test row\n')
+    source_path = dataset_root / 'source.zip'
+    source_digest = _zip(
+        source_path,
+        {
+            'run.py': (
+                'import json, os\n'
+                'from pathlib import Path\n'
+                'bindings = json.loads('
+                'os.environ["GLASSLAB_DATASET_BINDINGS_JSON"])\n'
+                'assert os.environ["ADULT_TRAIN_PATH"] == '
+                'bindings["adult_train"]\n'
+                'assert os.environ["ADULT_TEST_PATH"] == '
+                'bindings["adult_test"]\n'
+                'assert os.environ["GLASSLAB_DATASET_ADULT_TRAIN"] == '
+                'bindings["adult_train"]\n'
+                'out = Path(os.environ["GLASSLAB_OUTPUT_DIR"])\n'
+                '(out / "metrics.json").write_text('
+                'json.dumps({"rubric_score": 100}))\n'
+                '(out / "report.md").write_text("# Compatible\\n")\n'
+            )
+        },
+    )
+    env = _environment(tmp_path, source_digest=source_digest)
+    config = json.loads(env['GLASSLAB_GENERIC_CONFIG_JSON'])
+    config['dataset_contracts'] = [
+        {
+            'name': name,
+            'asset': {
+                'uri': f's3://datasets/{path.name}',
+                'sha256': sha256(path.read_bytes()).hexdigest(),
+            },
+        }
+        for name, path in (
+            ('adult_train', train_path),
+            ('adult_test', test_path),
+        )
+    ]
+    env['GLASSLAB_GENERIC_CONFIG_JSON'] = json.dumps(config)
+    env['GLASSLAB_GENERIC_DATASET_BINDINGS_JSON'] = json.dumps(
+        {
+            'adult_train': str(train_path),
+            'adult_test': str(test_path),
+        }
+    )
+
+    result = run_from_environment(env)
+
+    run_root = tmp_path / 'artifacts' / 'run-1'
+    assert result == 0
+    assert json.loads((run_root / 'status.json').read_text())['status'] == (
+        'succeeded'
+    )
+
+
 def test_symlink_cannot_satisfy_required_workspace_artifact(tmp_path: Path) -> None:
     dataset_root = tmp_path / 'datasets'
     dataset_root.mkdir(parents=True)

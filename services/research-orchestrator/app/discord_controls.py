@@ -1,12 +1,23 @@
+"""Outbound Discord command and button control surface.
+
+Slash commands and component buttons are only ever a UI; every handler funnels
+into engine calls that persist to the authoritative store, and authorization is
+re-checked server-side at the point of execution (never trusted from the
+rendered button). Heavy engine work is pushed to threads so the discord.py
+event loop is never blocked.
+"""
+
 from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import io
 from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
 
+from .artifact_delivery import ArtifactBundle, build_run_artifact_bundle
 from .schemas import (
     ApprovalStatus,
     IngestedDatasetRecord,
@@ -30,6 +41,8 @@ class DiscordControlActor:
 
     @property
     def reviewer(self) -> str:
+        # Human actor identity written into the authoritative event log; the
+        # user id plus display name makes approvals attributable after the fact.
         return f'discord:{self.user_id}:{self.display_name}'
 
 
@@ -46,6 +59,9 @@ class DiscordControlPolicy:
         self.admin_user_ids = frozenset(admin_user_ids)
 
     def is_authorized(self, actor: DiscordControlActor) -> bool:
+        # Controls are guild-bound: an interaction from any other guild (or
+        # with a spoofed role set from DMs) is rejected. Explicit user ids
+        # override the role check so operator accounts survive role churn.
         if actor.guild_id != self.guild_id:
             return False
         if actor.user_id in self.admin_user_ids:
@@ -64,6 +80,8 @@ def execute_discord_action(
     actor: DiscordControlActor,
     reason: str | None = None,
 ) -> None:
+    # Whitelist the operation so a malformed custom_id can never reach the
+    # engine as anything other than approve or reject.
     if operation == 'approve':
         engine.approve_action(
             action_id,
@@ -160,6 +178,8 @@ def execute_discord_task_creation(
     )
     preflight = engine.task_preflight(task)
     if not preflight.ready:
+        # Fail closed: a task that does not compile, have its assets, or pass
+        # checksum verification must never be turned into a run.
         raise ValueError(
             'task compiled but is not ready: '
             + '; '.join(preflight.blocking_issues)
@@ -171,6 +191,24 @@ def execute_discord_task_creation(
             task_id=task.task_id,
             task_bundle_digest=task.digest,
         )
+    )
+
+
+def execute_discord_artifact_export(
+    engine: ResearchOrchestrator,
+    *,
+    run_id: str,
+    maximum_bytes: int,
+    include_source: bool,
+) -> ArtifactBundle:
+    engine.store.get_run(run_id)
+    return build_run_artifact_bundle(
+        run_id=run_id,
+        artifacts=engine.store.list_artifacts(run_id),
+        jobs=engine.store.list_jobs(run_id),
+        shared_mount_root=engine.settings.shared_mount_root,
+        maximum_bytes=maximum_bytes,
+        include_source=include_source,
     )
 
 
@@ -191,11 +229,13 @@ class DiscordControlGateway:
         admin_role_id: str | None,
         admin_user_ids: list[str],
         maximum_dataset_upload_bytes: int,
+        maximum_artifact_bundle_bytes: int = 24 * 1024 * 1024,
     ) -> None:
         self.engine = engine
         self.bot_token = bot_token
         self.channel_id = channel_id
         self.maximum_dataset_upload_bytes = maximum_dataset_upload_bytes
+        self.maximum_artifact_bundle_bytes = maximum_artifact_bundle_bytes
         self.policy = DiscordControlPolicy(
             guild_id=guild_id,
             admin_role_id=admin_role_id,
@@ -206,6 +246,8 @@ class DiscordControlGateway:
         self.client = discord.Client(intents=intents)
         self.guild = discord.Object(id=int(guild_id))
         self.tree = app_commands.CommandTree(self.client)
+        # Slash commands are guild-scoped: syncing to the explicit guild object
+        # avoids global sync rate limits and rollout delays.
         self._commands_synced = False
         self._register_commands()
         self.client.on_ready = self._on_ready
@@ -322,6 +364,26 @@ class DiscordControlGateway:
                 contains_labels=contains_labels,
             )
 
+        @self.tree.command(
+            name='research-artifacts',
+            description='Download verified artifacts for a Glasslab research run.',
+            guild=self.guild,
+        )
+        @app_commands.describe(
+            run_id='Optional in a run thread; required from the main channel.',
+            include_source='Include frozen source and task ZIP files.',
+        )
+        async def research_artifacts(
+            interaction: discord.Interaction,
+            run_id: str | None = None,
+            include_source: bool = False,
+        ) -> None:
+            await self._on_research_artifacts(
+                interaction,
+                run_id=run_id,
+                include_source=include_source,
+            )
+
     def _register_run_control_command(self, operation: str) -> None:
         async def callback(
             interaction: discord.Interaction,
@@ -336,6 +398,9 @@ class DiscordControlGateway:
             )
 
         callback.__name__ = f'research_{operation}'
+        # discord.py derives the command signature from the callback's name and
+        # type annotations, so the dynamically generated pause/resume callbacks
+        # must carry real ones even though they are built at runtime.
         callback.__annotations__['interaction'] = discord.Interaction
         self.tree.command(
             name=f'research-{operation}',
@@ -351,6 +416,8 @@ class DiscordControlGateway:
     async def _on_ready(self) -> None:
         if self._commands_synced:
             return
+        # Sync exactly once per process lifetime to keep command registrations
+        # stable across reconnects and avoid hammering the sync endpoint.
         await self.tree.sync(guild=self.guild)
         self._commands_synced = True
 
@@ -432,6 +499,8 @@ class DiscordControlGateway:
         objective: str,
     ) -> None:
         try:
+            # Engine work is synchronous and disk/DB bound; run it in a worker
+            # thread so the gateway event loop stays responsive.
             run = await asyncio.to_thread(
                 execute_discord_run_creation,
                 self.engine,
@@ -523,6 +592,9 @@ class DiscordControlGateway:
         if run_id:
             run = self.engine.store.get_run(run_id)
         else:
+            # Outside a run thread a run id is required; inside the thread the
+            # run is resolved from the thread's own id, so commands issued in
+            # the thread never need a run id.
             run = next(
                 (
                     candidate
@@ -535,6 +607,8 @@ class DiscordControlGateway:
                 raise ValueError(
                     'run_id is required outside a Glasslab research thread'
                 )
+        # Control is scoped to the run's own thread or the configured channel;
+        # a run cannot be paused/cancelled from an unrelated channel.
         if channel_id not in {self.channel_id, run.discord_thread_id}:
             raise ValueError(
                 'control the run from its research thread or the configured '
@@ -678,6 +752,57 @@ class DiscordControlGateway:
                 allowed_mentions=discord.AllowedMentions.none(),
             )
 
+    async def _on_research_artifacts(
+        self,
+        interaction: discord.Interaction,
+        *,
+        run_id: str | None,
+        include_source: bool,
+    ) -> None:
+        actor = self._actor(interaction)
+        if not self.policy.is_authorized(actor):
+            await self._respond(
+                interaction,
+                'You are not authorized to download Glasslab artifacts.',
+            )
+            return
+        try:
+            run = self._resolve_controlled_run(
+                channel_id=str(interaction.channel_id),
+                run_id=run_id,
+            )
+        except Exception as exc:
+            await self._respond(interaction, f'Artifact export failed: {exc}')
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            bundle = await asyncio.to_thread(
+                execute_discord_artifact_export,
+                self.engine,
+                run_id=run.run_id,
+                maximum_bytes=self.maximum_artifact_bundle_bytes,
+                include_source=include_source,
+            )
+            await interaction.followup.send(
+                (
+                    f'Digest-verified artifact bundle for `{run.run_id}` '
+                    f'({bundle.artifact_count} files).'
+                ),
+                file=discord.File(
+                    io.BytesIO(bundle.content),
+                    filename=bundle.filename,
+                ),
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except Exception as exc:
+            await interaction.followup.send(
+                f'Artifact export failed: {exc}',
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+
     async def _on_research_cancel(
         self,
         interaction: discord.Interaction,
@@ -738,6 +863,9 @@ class DiscordControlGateway:
                 'You are not authorized to control Glasslab research runs.',
             )
             return
+        # The button row is only a hint: authorization, thread attachment, and
+        # the stored approval status are re-checked here because the engine
+        # never trusts Discord state.
         try:
             action = self.engine.store.get_action(action_id)
             run = self.engine.store.get_run(action.run_id)
@@ -761,6 +889,8 @@ class DiscordControlGateway:
             return
 
         if operation == 'reject':
+            # Rejection requires revision feedback, so collect it through a
+            # modal instead of acting on the click alone.
             await interaction.response.send_modal(
                 RejectActionModal(
                     gateway=self,

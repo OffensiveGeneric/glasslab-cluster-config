@@ -17,7 +17,7 @@ spec:
         - name: glasslab-ghcr-pull
       containers:
         - name: schedule-worker
-          image: ghcr.io/offensivegeneric/glasslab-schedule-worker:0.1.0
+          image: ghcr.io/ccny-glasslab/glasslab-schedule-worker:0.1.0
           imagePullPolicy: IfNotPresent
           env:
             - name: GLASSLAB_SCHEDULE_WORKER_WORKFLOW_API_URL

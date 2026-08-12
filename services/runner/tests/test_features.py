@@ -1,3 +1,5 @@
+"""Tests for Titanic feature engineering and preprocessing pipelines."""
+
 import pandas as pd
 
 from app.features import build_preprocessor, engineer_features

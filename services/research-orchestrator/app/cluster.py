@@ -1,3 +1,12 @@
+"""Cluster adapters behind one interface.
+
+The orchestrator never talks to Kubernetes directly: the fake and the real
+adapter implement the same submit/inspect/cancel contract so the engine is
+interchangeable between test and production. The fake therefore mirrors the
+real adapter's observable behavior (status vocabulary, idempotent submission,
+digest-carrying artifacts), not just its signatures.
+"""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -58,9 +67,13 @@ class FakeClusterExecutor(ClusterExecutor):
         self.snapshots: dict[str, ClusterJobSnapshot] = {}
 
     def submit(self, spec: ExpandedJobSpec) -> ClusterSubmission:
+        # Submission is idempotent on the orchestrator-generated key: a replay
+        # returns the original submission, matching the real adapter.
         existing = self.submissions.get(spec.idempotency_key)
         if existing is not None:
             return existing
+        # External ids are derived deterministically from orchestrator ids so
+        # restarts observe the same runs, as the real adapter's run ids do.
         submission = ClusterSubmission(
             external_run_id=f'fake-{spec.orchestrator_job_id}',
             job_name=f'fake-{spec.variant_name}-{spec.seed}',
@@ -88,6 +101,9 @@ class FakeClusterExecutor(ClusterExecutor):
         succeeded: bool = True,
         metrics: dict[str, Any] | None = None,
     ) -> None:
+        # The fake emits the same artifact shape the real adapter reports: a
+        # metrics artifact with a sha256 over canonical JSON so downstream
+        # digest verification has something real to check.
         payload = json.dumps(metrics or {'score': 1.0}, sort_keys=True).encode()
         artifact = ClusterArtifact(
             type='metrics',
@@ -111,6 +127,8 @@ class FakeClusterExecutor(ClusterExecutor):
 
 
 WORKFLOW_STATUS_MAP = {
+    # Collapse the workflow-api's richer status vocabulary onto JobStatus;
+    # unrecognized values map to UNKNOWN rather than being guessed.
     'accepted': JobStatus.QUEUED,
     'submitted': JobStatus.QUEUED,
     'pending': JobStatus.QUEUED,
@@ -156,7 +174,6 @@ class WorkflowApiClusterExecutor(ClusterExecutor):
             'experiment_type': spec.experiment_type or self.experiment_type,
             'workload_id': spec.workload_id or self.workload_id,
             'campaign_id': spec.run_id,
-            'image_ref': spec.runner_image,
             'config_payload': {
                 'orchestrator_job_id': spec.orchestrator_job_id,
                 'variant_name': spec.variant_name,
@@ -168,6 +185,9 @@ class WorkflowApiClusterExecutor(ClusterExecutor):
                     'version': spec.evaluation_contract_version,
                     'digest': spec.evaluation_contract_digest,
                 },
+                # Task/source bundles mean a fixed workspace runner executes the
+                # bounded workload; dataset bindings and the task spec are only
+                # meaningful in that mode, so both are omitted otherwise.
                 **(
                     {
                         'workspace': {
@@ -191,10 +211,16 @@ class WorkflowApiClusterExecutor(ClusterExecutor):
                 'max_wallclock_minutes': spec.resources.wallclock_minutes,
             },
             'artifact_contract': {
+                # required_artifacts already unions the contract's and the
+                # matrix's requirements during expansion; the cluster is told
+                # exactly which evidence files must survive.
                 'required': spec.required_artifacts,
                 'optional': [],
             },
             'metric_contract': {
+                # Carries the contract digest into the cluster so the evaluator
+                # can confirm the metrics it scores came from the approved
+                # contract, not a relabeled one.
                 'evaluation_contract_id': spec.evaluation_contract_id,
                 'evaluation_contract_version': spec.evaluation_contract_version,
                 'evaluation_contract_digest': spec.evaluation_contract_digest,
@@ -202,9 +228,22 @@ class WorkflowApiClusterExecutor(ClusterExecutor):
             'submitted_by': 'research-orchestrator',
             'run_priority': 'user',
         }
+        # Workspace runner images are fixed by the workflow registry. Omitting
+        # image_ref prevents a persisted task bundle from overriding a newer,
+        # compatible registry image after an orchestrator upgrade.
+        if not (spec.task_bundle and spec.source_bundle):
+            body['image_ref'] = spec.runner_image
         with self._client() as client:
             response = client.post('/experiments/runs', json=body)
-            response.raise_for_status()
+            if response.is_error:
+                try:
+                    detail = response.json().get('detail')
+                except (ValueError, AttributeError):
+                    detail = response.text
+                raise ClusterExecutorError(
+                    'workflow-api rejected experiment submission '
+                    f'({response.status_code}): {detail or response.reason_phrase}'
+                )
             payload = response.json()
         submission_payload = payload.get('job_submission') or {}
         raw_status = str((payload.get('status') or {}).get('status', 'accepted'))
@@ -234,6 +273,8 @@ class WorkflowApiClusterExecutor(ClusterExecutor):
             ):
                 digest = str(item.get('sha256') or '')
                 if len(digest) != 64:
+                    # A malformed digest means the artifact is not trustworthy
+                    # evidence; skip it rather than passing it on to delivery.
                     continue
                 artifacts.append(
                     ClusterArtifact(
@@ -257,6 +298,9 @@ class WorkflowApiClusterExecutor(ClusterExecutor):
         with self._client() as client:
             response = client.post(f'/runs/{external_run_id}/cancel')
         if response.status_code == 404:
+            # 404 means this workflow-api build has no bounded cancellation
+            # surface; surface that as a hard error instead of silently
+            # reporting the run as cancelled.
             raise ClusterExecutorError(
                 'configured workflow-api does not expose bounded cancellation'
             )

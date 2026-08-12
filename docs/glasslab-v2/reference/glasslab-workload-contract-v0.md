@@ -62,7 +62,7 @@ Each run must reference an approved workflow from the registry:
   "description": "Run approved baseline models against a tabular dataset",
   "required_inputs": [...],
   "allowed_models": [...],
-  "runner_image": "ghcr.io/offensivegeneric/glasslab-tabular-runner:0.1.2",
+  "runner_image": "ghcr.io/ccny-glasslab/glasslab-tabular-runner:0.1.2",
   "evaluator_type": "tabular-metric-max",
   "expected_artifacts": {...},
   "resource_profile": {...},
@@ -483,11 +483,11 @@ class ComparisonResult(BaseModel):
 
 | Service | Image Pattern | Approval |
 |---------|---------------|----------|
-| workflow-api | ghcr.io/offensivegeneric/glasslab-workflow-api | GHCR |
-| intake-agent | ghcr.io/offensivegeneric/glasslab-intake-agent | GHCR |
-| interpretation-agent | ghcr.io/offensivegeneric/glasslab-interpretation-agent | GHCR |
-| assessment-agent | ghcr.io/offensivegeneric/glasslab-assessment-agent | GHCR |
-| design-agent | ghcr.io/offensivegeneric/glasslab-design-agent | GHCR |
+| workflow-api | ghcr.io/ccny-glasslab/glasslab-workflow-api | GHCR |
+| intake-agent | ghcr.io/ccny-glasslab/glasslab-intake-agent | GHCR |
+| interpretation-agent | ghcr.io/ccny-glasslab/glasslab-interpretation-agent | GHCR |
+| assessment-agent | ghcr.io/ccny-glasslab/glasslab-assessment-agent | GHCR |
+| design-agent | ghcr.io/ccny-glasslab/glasslab-design-agent | GHCR |
 
 ### 8.3 Environment Variables
 
