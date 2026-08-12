@@ -161,6 +161,90 @@ class WorkspaceManager:
             shutil.copy2(protocol, target)
             target.chmod(0o444)
 
+    def create_terminal_retry_checkpoint(
+        self, *, parent_run_id: str, child_run_id: str, protocol_digest: str,
+        contract: dict[str, str], maximum_files: int = 128,
+        maximum_bytes: int = 4 * 1024 * 1024,
+    ) -> tuple[Path, str]:
+        """Copy a small, unambiguous workspace delta into a retry child.
+
+        Committed, deleted, renamed and conflicted worktrees are intentionally
+        rejected.  A retry must be evidence-preserving, not a best-effort copy
+        of an arbitrary Git history.
+        """
+        parent = self.paths(parent_run_id)
+        child = self.paths(child_run_id)
+        source_protocol = parent.protocol / 'program.md'
+        if not source_protocol.is_file() or source_protocol.is_symlink():
+            raise WorkspaceError('retry source protocol is unavailable')
+        if sha256(source_protocol.read_bytes()).hexdigest() != protocol_digest:
+            raise WorkspaceError('retry source protocol checksum mismatch')
+        target_protocol = child.protocol / 'program.md'
+        shutil.copy2(source_protocol, target_protocol)
+        files: list[dict[str, object]] = []
+        total = 0
+        expected_head = self._git(self.approved_repo_path, 'rev-parse', self.approved_repo_ref)
+        for name, source_root, target_root in (
+            ('beaker', parent.beaker, child.beaker),
+            ('honeydew', parent.honeydew, child.honeydew),
+        ):
+            if self._git(source_root, 'rev-parse', 'HEAD') != expected_head:
+                raise WorkspaceError('retry source contains an unbounded committed checkpoint')
+            status = self._git(source_root, 'status', '--porcelain=v1')
+            for line in status.splitlines():
+                code, relative = line[:2], line[3:]
+                if code not in {' M', 'M ', '??'}:
+                    raise WorkspaceError(f'retry source has ambiguous worktree change: {line}')
+                rel = Path(relative)
+                if rel.is_absolute() or '..' in rel.parts:
+                    raise WorkspaceError('retry source path escapes worktree')
+                source = source_root / rel
+                if source.is_symlink() or not source.is_file():
+                    raise WorkspaceError(f'retry source is not a regular file: {relative}')
+                if len(files) >= maximum_files:
+                    raise WorkspaceError('retry checkpoint exceeds file limit')
+                size = source.stat().st_size
+                if total + size > maximum_bytes:
+                    raise WorkspaceError('retry checkpoint exceeds byte limit')
+                target = target_root / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, target)
+                digest = sha256(target.read_bytes()).hexdigest()
+                files.append({'workspace': name, 'path': rel.as_posix(), 'size_bytes': size, 'sha256': digest})
+                total += size
+        manifest_path = child.events / 'terminal-retry-checkpoint.json'
+        manifest = {'schema_version': 'glasslab-terminal-retry-checkpoint-v1', 'parent_run_id': parent_run_id, 'protocol': {'path': 'protocol/program.md', 'sha256': protocol_digest}, 'contract': contract, 'files': files, 'total_bytes': total}
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+        digest = sha256(manifest_path.read_bytes()).hexdigest()
+        return manifest_path, digest
+
+    def verify_terminal_retry_checkpoint(self, run_id: str, checkpoint_digest: str) -> dict:
+        path = self.paths(run_id).events / 'terminal-retry-checkpoint.json'
+        if not path.is_file() or path.is_symlink() or sha256(path.read_bytes()).hexdigest() != checkpoint_digest:
+            raise WorkspaceError('retry checkpoint manifest checksum mismatch')
+        manifest = json.loads(path.read_text(encoding='utf-8'))
+        if manifest.get('schema_version') != 'glasslab-terminal-retry-checkpoint-v1':
+            raise WorkspaceError('retry checkpoint schema is unsupported')
+        protocol = manifest.get('protocol', {})
+        protocol_path = self.paths(run_id).root / str(protocol.get('path', ''))
+        if not protocol_path.is_file() or protocol_path.is_symlink() or sha256(protocol_path.read_bytes()).hexdigest() != protocol.get('sha256'):
+            raise WorkspaceError('retry protocol checksum mismatch')
+        for item in manifest.get('files', []):
+            if not isinstance(item, dict): raise WorkspaceError('retry checkpoint file entry is invalid')
+            root = self.paths(run_id).beaker if item.get('workspace') == 'beaker' else self.paths(run_id).honeydew if item.get('workspace') == 'honeydew' else None
+            rel = Path(str(item.get('path', '')))
+            if root is None or rel.is_absolute() or '..' in rel.parts: raise WorkspaceError('retry checkpoint path is invalid')
+            candidate = root / rel
+            if not candidate.is_file() or candidate.is_symlink() or sha256(candidate.read_bytes()).hexdigest() != item.get('sha256'):
+                raise WorkspaceError('retry checkpoint file checksum mismatch')
+        return manifest
+
+    @staticmethod
+    def _git(path: Path, *args: str) -> str:
+        result = subprocess.run(['git', '-C', str(path), *args], capture_output=True, text=True, check=False)
+        if result.returncode != 0: raise WorkspaceError(result.stderr.strip() or 'git inspection failed')
+        return result.stdout.strip()
+
     def create_review_snapshot(
         self,
         *,

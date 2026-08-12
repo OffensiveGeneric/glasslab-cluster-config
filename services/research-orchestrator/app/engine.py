@@ -39,6 +39,7 @@ from .schemas import (
     RunCreateRequest,
     RunRecord,
     RunState,
+    TerminalRetryRequest,
     TERMINAL_STATES,
     TurnKind,
     TurnRecord,
@@ -1035,20 +1036,142 @@ class ResearchOrchestrator:
             arguments={},
             reason=reason,
         )
-        record = self.policy.build_record(
+        candidate = self.policy.build_record(
             run_id=run_id,
             proposed_by=AgentName.ORCHESTRATOR,
             action=requested,
             ordinal=run.turn_number * 1000 + len(self.store.list_actions(run_id)),
         )
-        record = self.store.save_action(record)
-        self._event(
-            run_id,
-            source='orchestrator',
-            event_type='action.proposed',
-            payload=self._approval_event_payload(record),
-        )
+        record = self.store.save_action(candidate)
+        # save_action can return a pre-crash action by its deterministic key.
+        # Do not duplicate its append-only proposal event during recovery.
+        if record.action_id == candidate.action_id:
+            self._event(
+                run_id,
+                source='orchestrator',
+                event_type='action.proposed',
+                payload=self._approval_event_payload(record),
+            )
         return record
+
+    def retry_terminal_run(
+        self, parent_run_id: str, request: TerminalRetryRequest,
+    ) -> RunRecord:
+        """Create one fresh child from a sealed terminal protocol checkpoint."""
+        with self._advance_lock:
+            parent = self.store.get_run(parent_run_id)
+            if parent.state not in {RunState.FAILED, RunState.TIMED_OUT}:
+                raise WorkflowError('only FAILED or TIMED_OUT runs can be retried')
+            existing_child = self.store.get_terminal_retry_child(parent_run_id)
+            if existing_child is not None:
+                return existing_child
+            protocol_artifacts = [
+                artifact for artifact in self.store.list_artifacts(parent_run_id)
+                if artifact.type == 'protocol'
+            ]
+            if len(protocol_artifacts) != 1:
+                raise WorkflowError('terminal retry requires exactly one approved protocol artifact')
+            if not any(
+                action.type == 'approve_protocol'
+                and action.approval_status == ApprovalStatus.APPROVED
+                for action in self.store.list_actions(parent_run_id)
+            ):
+                raise WorkflowError('terminal retry requires a human-approved protocol checkpoint')
+            protocol = protocol_artifacts[0]
+            source_protocol = Path(parent.protocol_path or '')
+            if not source_protocol.is_file() or source_protocol.is_symlink():
+                raise WorkflowError('terminal retry protocol checkpoint is unavailable')
+            if sha256(source_protocol.read_bytes()).hexdigest() != protocol.sha256:
+                raise WorkflowError('terminal retry protocol checksum mismatch')
+            # Resolve again; a record of a contract is not proof that the
+            # immutable contract still exists or has the same content.
+            contract = self.contracts.resolve(
+                parent.evaluation_contract_id, parent.evaluation_contract_version,
+            )
+            if contract.digest != parent.evaluation_contract_digest:
+                raise WorkflowError('terminal retry evaluation contract checksum mismatch')
+            task = None
+            if parent.task_id:
+                task = self.task_bundles.get(parent.task_id, parent.task_bundle_digest)
+                if task.digest != parent.task_bundle_digest:
+                    raise WorkflowError('terminal retry task binding checksum mismatch')
+            child_id = uuid4().hex
+            paths = self.workspaces.prepare(child_id)
+            if task:
+                self.workspaces.install_task_bundle(
+                    run_id=child_id, problem_path=task.problem_path,
+                    evaluator_prompt_path=task.evaluator_prompt_path,
+                )
+            manifest_path, checkpoint_digest = self.workspaces.create_terminal_retry_checkpoint(
+                parent_run_id=parent_run_id,
+                child_run_id=child_id,
+                protocol_digest=protocol.sha256,
+                contract={'contract_id': parent.evaluation_contract_id, 'version': parent.evaluation_contract_version, 'digest': parent.evaluation_contract_digest},
+            )
+            retry_key = request.idempotency_key or sha256(
+                f'terminal-retry-v1:{parent_run_id}:{checkpoint_digest}'.encode()
+            ).hexdigest()
+            now = utc_now()
+            child = RunRecord(
+                run_id=child_id, parent_run_id=parent_run_id,
+                retry_checkpoint_digest=checkpoint_digest, objective=parent.objective,
+                state=RunState.PREPARING, protocol_path=str(paths.protocol / 'program.md'),
+                protocol_version=parent.protocol_version,
+                evaluation_contract_id=parent.evaluation_contract_id,
+                evaluation_contract_version=parent.evaluation_contract_version,
+                evaluation_contract_digest=parent.evaluation_contract_digest,
+                task_id=parent.task_id, task_bundle_digest=parent.task_bundle_digest,
+                task_bundle_path=parent.task_bundle_path, task_definition=parent.task_definition,
+                beaker_workspace=str(paths.beaker), honeydew_workspace=str(paths.honeydew),
+                shared_artifacts_path=str(paths.shared_artifacts), reports_path=str(paths.reports),
+                maximum_turns=self.settings.maximum_turns,
+                maximum_runtime_seconds=self.settings.maximum_runtime_seconds,
+                maximum_parallel_jobs=self.settings.maximum_parallel_jobs,
+                active_since=now, created_at=now, updated_at=now,
+            )
+            child, created = self.store.create_terminal_retry(
+                child, parent_run_id=parent_run_id, retry_key=retry_key,
+                checkpoint_digest=checkpoint_digest, one_active_run=self.settings.one_active_run,
+            )
+            if not created:
+                return child
+            self._event(child.run_id, source='orchestrator', event_type='retry.checkpoint_recorded', payload={'path': str(manifest_path), 'sha256': checkpoint_digest, 'parent_run_id': parent_run_id})
+            try:
+                self._resume_terminal_retry(child.run_id)
+            except Exception as exc:
+                self._fail_run(child.run_id, exc)
+                raise
+            # Parent may have an existing thread; this event is durable first
+            # and Discord remains a best-effort projection.
+            self._publish_latest(parent_run_id)
+            return self.store.get_run(child.run_id)
+
+    def _resume_terminal_retry(self, run_id: str) -> None:
+        run = self.store.get_run(run_id)
+        if run.state != RunState.PREPARING or not run.parent_run_id or not run.retry_checkpoint_digest:
+            return
+        manifest = self.workspaces.verify_terminal_retry_checkpoint(run_id, run.retry_checkpoint_digest)
+        contract = manifest.get('contract', {})
+        if contract != {'contract_id': run.evaluation_contract_id, 'version': run.evaluation_contract_version, 'digest': run.evaluation_contract_digest}:
+            raise WorkflowError('retry checkpoint contract binding is invalid')
+        descriptor = self.contracts.resolve(run.evaluation_contract_id, run.evaluation_contract_version)
+        if descriptor.digest != run.evaluation_contract_digest:
+            raise WorkflowError('retry contract digest no longer matches')
+        self._save_local_artifact(
+            run_id=run_id, artifact_type='protocol',
+            uri=f'artifact://{run_id}/protocol/program.md',
+            digest=str(manifest['protocol']['sha256']),
+            metadata={'path': str(self.workspaces.paths(run_id).protocol / 'program.md'), 'parent_run_id': run.parent_run_id, 'retry_checkpoint_digest': run.retry_checkpoint_digest},
+        )
+        if not any(
+            action.type == 'approve_protocol'
+            for action in self.store.list_actions(run_id)
+        ):
+            self._create_human_action(
+                run_id=run_id, action_type='approve_protocol',
+                reason='A terminal retry reuses a verified protocol but requires fresh human approval.',
+            )
+        self._transition(run_id, RunState.AWAITING_PROTOCOL_APPROVAL, payload={'retry_parent_run_id': run.parent_run_id})
 
     def _save_local_artifact(
         self,
@@ -4032,6 +4155,9 @@ class ResearchOrchestrator:
             )
             return
         if state == RunState.PREPARING:
+            if run.parent_run_id and run.retry_checkpoint_digest:
+                self._resume_terminal_retry(run_id)
+                return
             self._transition(run_id, RunState.HONEYDEW_DRAFTING_PROTOCOL)
             self._draft_protocol(run_id)
         elif state == RunState.HONEYDEW_DRAFTING_PROTOCOL:
