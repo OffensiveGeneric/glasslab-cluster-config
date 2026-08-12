@@ -38,6 +38,7 @@ from app.schemas import (
     RunCreateRequest,
     RunState,
     TurnKind,
+    TurnRecord,
     utc_now,
 )
 from app.storage import SqliteStore
@@ -1801,6 +1802,75 @@ def test_event_sequence_is_append_only_and_ordered(orchestrator_bundle) -> None:
     )
     assert events[0].event_type == 'run.created'
     assert any(event.event_type == 'action.proposed' for event in events)
+
+
+def test_http_turns_endpoint_redacts_and_bounds_history(
+    orchestrator_bundle,
+) -> None:
+    settings, store, _, _, engine = orchestrator_bundle
+    run = engine.create_run(
+        RunCreateRequest(
+            objective='Expose structured turn history through a read-only API.'
+        )
+    )
+    # The scripted runtime already recorded a real Honeydew protocol_draft
+    # turn; add a synthetic turn carrying credential-shaped content in both
+    # input_event and error so redaction is exercised end to end, not just
+    # unit-tested in isolation (see test_redaction.py).
+    store.save_turn(
+        TurnRecord(
+            run_id=run.run_id,
+            agent=AgentName.BEAKER,
+            input_event={
+                'objective': run.objective,
+                'discord_bot_token': 'not-a-real-token',
+            },
+            status='failed',
+            error='provider rejected request: Bearer abcdefghijklmnop0123456789',
+        )
+    )
+
+    app = create_app(settings, engine=engine, start_watcher=False)
+    with TestClient(app) as client:
+        assert client.get('/runs/not-a-real-run/turns').status_code == 404
+
+        response = client.get(f'/runs/{run.run_id}/turns')
+        assert response.status_code == 200
+        turns = response.json()['turns']
+        assert len(turns) == 2
+
+        protocol_turn = next(
+            item for item in turns if item['agent'] == 'honeydew'
+        )
+        assert protocol_turn['status'] == 'completed'
+        assert protocol_turn['output']['kind'] == 'protocol_draft'
+        assert protocol_turn['started_at'] is not None
+        assert protocol_turn['ended_at'] is not None
+
+        failed_turn = next(item for item in turns if item['agent'] == 'beaker')
+        assert failed_turn['status'] == 'failed'
+        assert failed_turn['ended_at'] is not None
+        assert 'not-a-real-token' not in json.dumps(failed_turn)
+        assert failed_turn['input']['discord_bot_token'] == '[REDACTED]'
+        assert 'abcdefghijklmnop0123456789' not in failed_turn['error']
+        assert failed_turn['error'] == '[REDACTED]'
+
+        bounded = client.get(f'/runs/{run.run_id}/turns', params={'limit': 1})
+        assert bounded.status_code == 200
+        bounded_turns = bounded.json()['turns']
+        assert len(bounded_turns) == 1
+        # limit keeps the most recent turn(s), in original chronological
+        # order, matching summarize_turns' documented behavior.
+        assert bounded_turns[0]['turn_id'] == failed_turn['turn_id']
+
+        assert client.get(
+            f'/runs/{run.run_id}/turns',
+            params={'limit': 0},
+        ).status_code == 422
+        assert client.get(
+            f'/runs/{run.run_id}/turns',
+            params={'limit': 10000},
+        ).status_code == 422
 
 
 def test_http_api_with_mock_runtime(orchestrator_bundle) -> None:

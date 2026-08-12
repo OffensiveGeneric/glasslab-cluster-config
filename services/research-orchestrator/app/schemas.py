@@ -808,3 +808,31 @@ class EventListResponse(BaseModel):
 
 class ArtifactListResponse(BaseModel):
     artifacts: list[ArtifactRecord]
+
+
+class TurnSummary(BaseModel):
+    """Redacted, read-only projection of a TurnRecord.
+
+    Returned by GET /runs/{run_id}/turns and the /research-turns Discord
+    command (see turn_inspection.py). ``input``/``output`` are the turn's
+    input_event and structured_output after app.redaction.redact_payload has
+    scrubbed credential-shaped content; this is a convenience view over the
+    persisted TurnRecord, not a new source of truth — the normalized event
+    log remains authoritative.
+    """
+
+    model_config = ConfigDict(extra='forbid')
+
+    turn_id: str
+    run_id: str
+    agent: AgentName
+    status: Literal['running', 'completed', 'failed', 'aborted']
+    error: str | None = None
+    input: dict[str, Any] = Field(default_factory=dict)
+    output: dict[str, Any] | None = None
+    started_at: datetime
+    ended_at: datetime | None = None
+
+
+class TurnListResponse(BaseModel):
+    turns: list[TurnSummary]

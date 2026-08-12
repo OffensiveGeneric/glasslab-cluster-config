@@ -27,6 +27,7 @@ from app.discord_controls import (
     execute_discord_run_control,
     execute_discord_run_cancellation,
     execute_discord_run_creation,
+    execute_discord_turn_history,
 )
 from app.opencode_runtime import (
     OpenCodeProcessRuntime,
@@ -37,7 +38,16 @@ from app.opencode_runtime import (
     normalize_structured_output,
     parse_json_text,
 )
-from app.schemas import AgentName, AgentTurnResult, EventRecord
+from app.schemas import (
+    AgentName,
+    AgentTurnResult,
+    EventRecord,
+    RunRecord,
+    RunState,
+    TurnKind,
+    TurnRecord,
+    utc_now,
+)
 
 
 def test_discord_renderer_has_no_live_api_dependency() -> None:
@@ -374,6 +384,7 @@ def test_discord_gateway_registers_component_handler() -> None:
         'research-pause',
         'research-resume',
         'research-artifacts',
+        'research-turns',
         'dataset-upload',
     ):
         assert gateway.tree.get_command(
@@ -478,6 +489,102 @@ def test_discord_dataset_ingestion_records_actor() -> None:
         media_type='text/csv',
         uploaded_by='discord:142100176322953216:Tyler',
     )
+
+
+def _run_record(**overrides) -> RunRecord:
+    now = utc_now()
+    fields = dict(
+        run_id='run-1',
+        objective='Inspect turn history through Discord.',
+        state=RunState.BEAKER_IMPLEMENTING,
+        evaluation_contract_id='contract-1',
+        evaluation_contract_version='1.0.0',
+        evaluation_contract_digest='a' * 64,
+        beaker_workspace='/tmp/beaker',
+        honeydew_workspace='/tmp/honeydew',
+        shared_artifacts_path='/tmp/shared',
+        reports_path='/tmp/reports',
+        maximum_turns=20,
+        maximum_runtime_seconds=86400,
+        maximum_parallel_jobs=1,
+        created_at=now,
+        updated_at=now,
+    )
+    fields.update(overrides)
+    return RunRecord(**fields)
+
+
+def test_discord_turn_history_redacts_credentials() -> None:
+    engine = Mock()
+    engine.store.get_run.return_value = _run_record()
+    engine.store.list_turns.return_value = [
+        TurnRecord(
+            run_id='run-1',
+            agent=AgentName.HONEYDEW,
+            input_event={'objective': 'Inspect turn history through Discord.'},
+            structured_output=AgentTurnResult(
+                kind=TurnKind.PROTOCOL_DRAFT,
+                summary='Drafted the initial protocol.',
+            ),
+            status='completed',
+        ),
+        TurnRecord(
+            run_id='run-1',
+            agent=AgentName.BEAKER,
+            input_event={
+                'objective': 'Inspect turn history through Discord.',
+                'discord_bot_token': 'should-not-appear',
+            },
+            status='failed',
+            error='provider rejected request: Bearer abcdefghijklmnop0123456789',
+        ),
+    ]
+
+    message = execute_discord_turn_history(engine, run_id='run-1', limit=5)
+
+    assert 'should-not-appear' not in message
+    assert 'abcdefghijklmnop0123456789' not in message
+    assert 'Honeydew' in message
+    assert 'Beaker' in message
+    assert 'Drafted the initial protocol.' in message
+    engine.store.get_run.assert_called_once_with('run-1')
+    engine.store.list_turns.assert_called_once_with('run-1')
+
+
+def test_discord_turn_history_message_is_bounded() -> None:
+    engine = Mock()
+    engine.store.get_run.return_value = _run_record()
+    engine.store.list_turns.return_value = [
+        TurnRecord(
+            run_id='run-1',
+            agent=AgentName.BEAKER if index % 2 else AgentName.HONEYDEW,
+            input_event={},
+            structured_output=AgentTurnResult(
+                kind=TurnKind.REVISION,
+                summary='x' * 500,
+            ),
+            status='completed',
+        )
+        for index in range(20)
+    ]
+
+    message = execute_discord_turn_history(engine, run_id='run-1', limit=20)
+
+    # Discord messages are capped at 2000 characters; the command must never
+    # produce a payload that Discord would itself reject.
+    assert len(message) < 2000
+    assert 'truncated' in message
+
+
+def test_discord_turn_history_reports_no_turns() -> None:
+    engine = Mock()
+    engine.store.get_run.return_value = _run_record()
+    engine.store.list_turns.return_value = []
+
+    message = execute_discord_turn_history(engine, run_id='run-1', limit=5)
+
+    assert 'run-1' in message
+    assert 'no recorded agent turns' in message
 
 
 def test_discord_run_creation_uses_objective_without_http() -> None:

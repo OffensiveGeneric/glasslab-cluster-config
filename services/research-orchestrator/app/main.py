@@ -57,9 +57,11 @@ from .schemas import (
     RunListResponse,
     RunRecord,
     SourceType,
+    TurnListResponse,
 )
 from .storage import ConcurrencyConflict, RecordNotFound, SqliteStore
 from .postgres_store import PostgresStore
+from .turn_inspection import DEFAULT_TURN_LIMIT, MAXIMUM_TURN_LIMIT, summarize_turns
 from .task_bundles import (
     TaskBundleError,
     TaskBundleManager,
@@ -588,6 +590,29 @@ def create_app(
             engine.store.get_run(run_id)
             return ArtifactListResponse(
                 artifacts=engine.store.list_artifacts(run_id)
+            )
+        except Exception as exc:
+            raise map_error(exc) from exc
+
+    @app.get('/runs/{run_id}/turns', response_model=TurnListResponse)
+    def get_turns(
+        run_id: str,
+        limit: int = Query(
+            default=DEFAULT_TURN_LIMIT,
+            ge=1,
+            le=MAXIMUM_TURN_LIMIT,
+        ),
+    ) -> TurnListResponse:
+        # Convenience view over already-persisted TurnRecords (see
+        # turn_inspection.py): redacted and bounded, but never a second
+        # source of truth. The normalized event log remains authoritative.
+        try:
+            engine.store.get_run(run_id)
+            return TurnListResponse(
+                turns=summarize_turns(
+                    engine.store.list_turns(run_id),
+                    limit=limit,
+                )
             )
         except Exception as exc:
             raise map_error(exc) from exc
