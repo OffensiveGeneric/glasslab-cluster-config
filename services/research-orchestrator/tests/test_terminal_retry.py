@@ -7,8 +7,23 @@ import zipfile
 
 import pytest
 
+from app.discord_adapter import DiscordAdapter
 from app.engine import WorkflowError
-from app.schemas import ApprovalStatus, RunCreateRequest, RunState, TerminalRetryRequest
+from app.schemas import AgentName, ApprovalStatus, EventRecord, RequestedAction, RunCreateRequest, RunState, TerminalRetryRequest
+
+
+class RecordingDiscord(DiscordAdapter):
+    def __init__(self) -> None:
+        self.created: list[str] = []
+        self.published: list[tuple[str | None, EventRecord]] = []
+
+    def create_thread(self, *, run_id: str, objective: str) -> str | None:
+        self.created.append(run_id)
+        return f'thread-{len(self.created)}'
+
+    def publish(self, *, thread_id: str | None, status_message_id: str | None, event: EventRecord) -> str | None:
+        self.published.append((thread_id, event))
+        return status_message_id
 
 
 def _terminal_parent(engine, store):
@@ -158,13 +173,19 @@ def test_task_bound_retry_copies_real_delta_and_allows_fresh_approval(orchestrat
     source.parent.mkdir()
     source.write_text('print("retry me")\n', encoding='utf-8')
     store.replace_run(
-        parent.model_copy(update={'state': RunState.FAILED}),
+        parent.model_copy(update={
+            'state': RunState.FAILED,
+            'task_definition': {'obsolete': True},
+            'task_bundle_path': '/obsolete/task.zip',
+        }),
         expected_version=parent.version,
     )
 
     child = engine.retry_terminal_run(parent.run_id, TerminalRetryRequest())
     assert (Path(child.beaker_workspace) / 'benchmark-task' / 'problem.md').is_file()
     assert (Path(child.beaker_workspace) / 'implementation' / 'train.py').read_text() == 'print("retry me")\n'
+    assert child.task_definition == task.model_dump(mode='json')
+    assert child.task_bundle_path == task.archive_path
     child_approval = next(action for action in store.list_actions(child.run_id) if action.type == 'approve_protocol')
     engine.approve_action(child_approval.action_id, reviewer='test-reviewer', reason='Fresh retry approval.')
     assert Path(child.beaker_workspace, 'program.md').stat().st_mode & 0o200 == 0
@@ -199,3 +220,52 @@ def test_retry_selects_the_current_approved_protocol_after_revision(orchestrator
     child = engine.retry_terminal_run(parent.run_id, TerminalRetryRequest())
     assert child.protocol_version == 2
     assert child.state == RunState.AWAITING_PROTOCOL_APPROVAL
+
+
+def test_retry_creates_a_fresh_discord_thread_and_projects_approval(orchestrator_bundle):
+    _, store, _, _, engine = orchestrator_bundle
+    discord = RecordingDiscord()
+    engine.discord = discord
+    parent = _terminal_parent(engine, store)
+    child = engine.retry_terminal_run(parent.run_id, TerminalRetryRequest())
+
+    assert parent.discord_thread_id == 'thread-1'
+    assert child.discord_thread_id == 'thread-2'
+    approval = next(action for action in store.list_actions(child.run_id) if action.type == 'approve_protocol')
+    assert any(
+        thread_id == 'thread-2'
+        and event.event_type == 'action.proposed'
+        and event.payload.get('action_id') == approval.action_id
+        for thread_id, event in discord.published
+    )
+
+
+def test_retry_recovery_rejects_extra_child_worktree_delta(orchestrator_bundle):
+    _, store, _, _, engine = orchestrator_bundle
+    parent = _terminal_parent(engine, store)
+    child = engine.retry_terminal_run(parent.run_id, TerminalRetryRequest())
+    (Path(child.beaker_workspace) / 'unexpected.py').write_text('x = 1\n')
+    current = store.get_run(child.run_id)
+    store.replace_run(current.model_copy(update={'state': RunState.PREPARING}), expected_version=current.version)
+    with pytest.raises(Exception, match='delta'):
+        engine._resume_terminal_retry(child.run_id)
+
+
+def test_legacy_action_without_event_is_repaired_with_persisted_identity(orchestrator_bundle):
+    _, store, _, _, engine = orchestrator_bundle
+    run = engine.create_run(RunCreateRequest(objective='Repair a legacy action proposal event.'))
+    # The real creator will use this turn-local ordinal after this manually
+    # persisted legacy row becomes the second action.
+    legacy = engine.policy.build_record(
+        run_id=run.run_id,
+        proposed_by=AgentName.ORCHESTRATOR,
+        action=RequestedAction(type='accept_final_report', arguments={}, reason='Legacy action.'),
+        ordinal=run.turn_number * 1000 + 2,
+    )
+    store.save_action(legacy)
+    repaired = engine._create_human_action(
+        run_id=run.run_id, action_type='accept_final_report', reason='Legacy action.',
+    )
+    assert repaired.action_id == legacy.action_id
+    proposals = [event for event in store.list_events(run.run_id) if event.event_type == 'action.proposed']
+    assert any(event.payload.get('action_id') == legacy.action_id for event in proposals)

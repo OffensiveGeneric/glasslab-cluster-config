@@ -174,7 +174,8 @@ class WorkspaceManager:
 
     def create_terminal_retry_checkpoint(
         self, *, parent_run_id: str, child_run_id: str, protocol_digest: str,
-        contract: dict[str, str], base_commit: str, maximum_files: int = 128,
+        contract: dict[str, str], task_binding: dict | None, base_commit: str,
+        maximum_files: int = 128,
         maximum_bytes: int = 4 * 1024 * 1024,
     ) -> tuple[Path, str]:
         """Copy a small, unambiguous workspace delta into a retry child.
@@ -237,7 +238,7 @@ class WorkspaceManager:
                 files.append({'workspace': name, 'path': rel.as_posix(), 'size_bytes': size, 'sha256': digest})
                 total += size
         manifest_path = child.events / 'terminal-retry-checkpoint.json'
-        manifest = {'schema_version': 'glasslab-terminal-retry-checkpoint-v1', 'parent_run_id': parent_run_id, 'base_commit': base_commit, 'protocol': {'path': 'protocol/program.md', 'sha256': protocol_digest}, 'contract': contract, 'files': files, 'total_bytes': total}
+        manifest = {'schema_version': 'glasslab-terminal-retry-checkpoint-v1', 'parent_run_id': parent_run_id, 'base_commit': base_commit, 'protocol': {'path': 'protocol/program.md', 'sha256': protocol_digest}, 'contract': contract, 'task_binding': task_binding, 'files': files, 'total_bytes': total}
         manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n', encoding='utf-8')
         digest = sha256(manifest_path.read_bytes()).hexdigest()
         return manifest_path, digest
@@ -249,10 +250,14 @@ class WorkspaceManager:
         manifest = json.loads(path.read_text(encoding='utf-8'))
         if manifest.get('schema_version') != 'glasslab-terminal-retry-checkpoint-v1':
             raise WorkspaceError('retry checkpoint schema is unsupported')
+        base_commit = manifest.get('base_commit')
+        if not isinstance(base_commit, str) or self.worktree_base_commit(run_id) != base_commit:
+            raise WorkspaceError('retry worktree base commit mismatch')
         protocol = manifest.get('protocol', {})
         protocol_path = self.paths(run_id).root / str(protocol.get('path', ''))
         if not protocol_path.is_file() or protocol_path.is_symlink() or sha256(protocol_path.read_bytes()).hexdigest() != protocol.get('sha256'):
             raise WorkspaceError('retry protocol checksum mismatch')
+        manifest_files: set[tuple[str, str]] = set()
         for item in manifest.get('files', []):
             if not isinstance(item, dict): raise WorkspaceError('retry checkpoint file entry is invalid')
             root = self.paths(run_id).beaker if item.get('workspace') == 'beaker' else self.paths(run_id).honeydew if item.get('workspace') == 'honeydew' else None
@@ -261,6 +266,23 @@ class WorkspaceManager:
             candidate = root / rel
             if not candidate.is_file() or candidate.is_symlink() or sha256(candidate.read_bytes()).hexdigest() != item.get('sha256'):
                 raise WorkspaceError('retry checkpoint file checksum mismatch')
+            manifest_files.add((str(item['workspace']), rel.as_posix()))
+        observed_files: set[tuple[str, str]] = set()
+        for name, root in (('beaker', self.paths(run_id).beaker), ('honeydew', self.paths(run_id).honeydew)):
+            status = self._git_bytes(root, 'status', '--porcelain=v1', '-z', '--untracked-files=all')
+            for entry in status.split(b'\0'):
+                if not entry:
+                    continue
+                code = entry[:2].decode('ascii')
+                relative = entry[3:].decode('utf-8', errors='surrogateescape')
+                rel = Path(relative)
+                if code not in {' M', 'M ', '??'} or rel.is_absolute() or '..' in rel.parts:
+                    raise WorkspaceError('retry child worktree delta is ambiguous')
+                if rel == Path('program.md') or rel.parts[0] == 'benchmark-task':
+                    continue
+                observed_files.add((name, rel.as_posix()))
+        if observed_files != manifest_files:
+            raise WorkspaceError('retry child worktree delta does not match manifest')
         return manifest
 
     @staticmethod

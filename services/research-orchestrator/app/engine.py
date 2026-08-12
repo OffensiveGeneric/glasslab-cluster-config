@@ -145,6 +145,24 @@ class ResearchOrchestrator:
             # Discord is a replaceable projection and cannot fail the workflow.
             return
 
+    def _attach_discord_thread(self, run_id: str) -> RunRecord:
+        """Attach one independent, best-effort transcript thread to a run."""
+        run = self.store.get_run(run_id)
+        if run.discord_thread_id:
+            return run
+        try:
+            thread_id = self.discord.create_thread(
+                run_id=run_id, objective=run.objective,
+            )
+        except Exception:
+            return run
+        if not thread_id:
+            return run
+        return self.store.replace_run(
+            run.model_copy(update={'discord_thread_id': thread_id}),
+            expected_version=run.version,
+        )
+
     def _event(
         self,
         run_id: str,
@@ -896,7 +914,8 @@ class ResearchOrchestrator:
                 self._publish_latest(run_id)
             else:
                 self._repair_action_proposed_event(
-                    record, source=agent.value, payload=payload,
+                    record, source=agent.value,
+                    payload=self._approval_event_payload(record),
                 )
         return records
 
@@ -1055,7 +1074,8 @@ class ResearchOrchestrator:
             self._publish_latest(run_id)
         else:
             self._repair_action_proposed_event(
-                record, source='orchestrator', payload=payload,
+                record, source='orchestrator',
+                payload=self._approval_event_payload(record),
             )
         return record
 
@@ -1122,10 +1142,18 @@ class ResearchOrchestrator:
             if contract.digest != parent.evaluation_contract_digest:
                 raise WorkflowError('terminal retry evaluation contract checksum mismatch')
             task = None
+            task_binding = None
             if parent.task_id:
                 task = self.task_bundles.get(parent.task_id, parent.task_bundle_digest)
                 if task.digest != parent.task_bundle_digest:
                     raise WorkflowError('terminal retry task binding checksum mismatch')
+                preflight = self.task_preflight(task)
+                if not preflight.ready:
+                    raise WorkflowError(
+                        'terminal retry task preflight failed: '
+                        + '; '.join(preflight.blocking_issues)
+                    )
+                task_binding = task.model_dump(mode='json')
             parent_base_commit = (
                 parent.workspace_base_commit
                 or self.workspaces.worktree_base_commit(parent_run_id)
@@ -1142,6 +1170,7 @@ class ResearchOrchestrator:
                 child_run_id=child_id,
                 protocol_digest=protocol.sha256,
                 contract={'contract_id': parent.evaluation_contract_id, 'version': parent.evaluation_contract_version, 'digest': parent.evaluation_contract_digest},
+                task_binding=task_binding,
                 base_commit=parent_base_commit,
             )
             retry_key = request.idempotency_key or sha256(
@@ -1157,8 +1186,10 @@ class ResearchOrchestrator:
                 evaluation_contract_id=parent.evaluation_contract_id,
                 evaluation_contract_version=parent.evaluation_contract_version,
                 evaluation_contract_digest=parent.evaluation_contract_digest,
-                task_id=parent.task_id, task_bundle_digest=parent.task_bundle_digest,
-                task_bundle_path=parent.task_bundle_path, task_definition=parent.task_definition,
+                task_id=task.task_id if task else None,
+                task_bundle_digest=task.digest if task else None,
+                task_bundle_path=task.archive_path if task else None,
+                task_definition=task_binding,
                 beaker_workspace=str(paths.beaker), honeydew_workspace=str(paths.honeydew),
                 shared_artifacts_path=str(paths.shared_artifacts), reports_path=str(paths.reports),
                 maximum_turns=self.settings.maximum_turns,
@@ -1172,6 +1203,7 @@ class ResearchOrchestrator:
             )
             if not created:
                 return child
+            self._attach_discord_thread(child.run_id)
             self._event(child.run_id, source='orchestrator', event_type='retry.checkpoint_recorded', payload={'path': str(manifest_path), 'sha256': checkpoint_digest, 'parent_run_id': parent_run_id})
             try:
                 self._resume_terminal_retry(child.run_id)
@@ -1193,6 +1225,22 @@ class ResearchOrchestrator:
             raise WorkflowError('retry checkpoint contract binding is invalid')
         if manifest.get('base_commit') != run.workspace_base_commit:
             raise WorkflowError('retry checkpoint base commit is invalid')
+        if run.task_id:
+            task = self.task_bundles.get(run.task_id, run.task_bundle_digest)
+            preflight = self.task_preflight(task)
+            if not preflight.ready:
+                raise WorkflowError(
+                    'retry task preflight failed: '
+                    + '; '.join(preflight.blocking_issues)
+                )
+            if (
+                manifest.get('task_binding') != task.model_dump(mode='json')
+                or run.task_definition != task.model_dump(mode='json')
+                or run.task_bundle_path != task.archive_path
+            ):
+                raise WorkflowError('retry task binding no longer matches checkpoint')
+        elif manifest.get('task_binding') is not None:
+            raise WorkflowError('retry checkpoint unexpectedly contains a task binding')
         descriptor = self.contracts.resolve(run.evaluation_contract_id, run.evaluation_contract_version)
         if descriptor.digest != run.evaluation_contract_digest:
             raise WorkflowError('retry contract digest no longer matches')
