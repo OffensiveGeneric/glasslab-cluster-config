@@ -195,12 +195,13 @@ def select_runs_for_list(
     limit: int = RUN_LIST_LIMIT,
 ) -> list[RunRecord]:
     # Active runs first, then the most recently updated terminal runs, capped at
-    # `limit`. Both halves are ordered by updated_at (newest first) so the
-    # result is deterministic regardless of the store's creation order.
+    # `limit`. Both halves are ordered by updated_at (newest first); run_id is a
+    # stable tie-breaker so equal timestamps still produce a deterministic order
+    # regardless of the store's creation order.
     active = [run for run in runs if run.state not in TERMINAL_STATES]
     terminal = [run for run in runs if run.state in TERMINAL_STATES]
-    active.sort(key=lambda run: run.updated_at, reverse=True)
-    terminal.sort(key=lambda run: run.updated_at, reverse=True)
+    active.sort(key=lambda run: (run.updated_at, run.run_id), reverse=True)
+    terminal.sort(key=lambda run: (run.updated_at, run.run_id), reverse=True)
     return (active + terminal)[:limit]
 
 

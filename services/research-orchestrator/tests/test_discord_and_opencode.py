@@ -1489,6 +1489,24 @@ def test_run_list_caps_at_ten() -> None:
     assert len(selected) == 10
 
 
+def test_run_list_uses_stable_tie_breaker() -> None:
+    ts = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    runs = [
+        _run(run_id='run-b', state=RunState.JOB_RUNNING, updated_at=ts),
+        _run(run_id='run-a', state=RunState.JOB_RUNNING, updated_at=ts),
+        _run(run_id='run-c', state=RunState.JOB_RUNNING, updated_at=ts),
+    ]
+
+    forward = select_runs_for_list(runs)
+    reversed_ = select_runs_for_list(list(reversed(runs)))
+
+    # Equal updated_at must order identically regardless of input order.
+    assert [run.run_id for run in forward] == [
+        run.run_id for run in reversed_
+    ]
+    assert len(set(run.run_id for run in forward)) == 3
+
+
 def test_render_run_status_includes_durable_fields() -> None:
     run = _run(run_id='run-1', state=RunState.AWAITING_EXECUTION_APPROVAL)
     actions = [
