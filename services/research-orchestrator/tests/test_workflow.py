@@ -374,6 +374,57 @@ class MissingContractProposalThenRepairRuntime(ScriptedMockRuntime):
         return result, message_id
 
 
+class MissingProtocolDeclarationThenRepairRuntime(ScriptedMockRuntime):
+    # Honeydew's first protocol_draft turn declares no produced protocol file
+    # (and no program.md exists on disk), reproducing the live contract
+    # violation where a formally valid turn skipped the required workspace
+    # action. The focused repair turn must name program.md and produce it.
+    def __init__(self, *, runner_image: str) -> None:
+        super().__init__(runner_image=runner_image)
+        self.omitted_protocol_once = False
+
+    def run_turn(self, **kwargs):
+        prompt = kwargs['prompt']
+        if 'Focused protocol-file repair' in prompt:
+            return super().run_turn(
+                **{
+                    **kwargs,
+                    'prompt': 'Draft a concrete program.md',
+                }
+            )
+        result, message_id = super().run_turn(**kwargs)
+        if (
+            kwargs['agent'] == AgentName.HONEYDEW
+            and 'Draft a concrete program.md' in prompt
+            and not self.omitted_protocol_once
+        ):
+            (kwargs['workspace'] / 'program.md').unlink(missing_ok=True)
+            result.produced_files = []
+            self.omitted_protocol_once = True
+        return result, message_id
+
+
+class RepeatedWrongKindRuntime(ScriptedMockRuntime):
+    # Honeydew returns a valid-but-wrong kind on every protocol-draft attempt,
+    # exhausting the single focused repair and proving the run fails safely
+    # without advancing state or requesting any action/job.
+    def run_turn(self, **kwargs):
+        self.turn_counts[kwargs['agent']] += 1
+        if (
+            kwargs['agent'] == AgentName.HONEYDEW
+            and 'Draft a concrete program.md' in kwargs['prompt']
+        ):
+            return (
+                AgentTurnResult(
+                    kind=TurnKind.VERIFICATION,
+                    summary='Persistently wrong kind.',
+                    done=True,
+                ),
+                'mock-wrong-kind',
+            )
+        return super().run_turn(**kwargs)
+
+
 class PauseDuringImplementationRuntime(ScriptedMockRuntime):
     # Injects a pause from inside the running Beaker turn, exercising the
     # pause-during-turn path where pause bypasses the advancement lock.
@@ -869,6 +920,53 @@ def test_missing_honeydew_protocol_file_gets_one_focused_repair(
     assert 'agent.file_repair_requested' in event_types
     assert 'agent.file_repair_completed' in event_types
     assert runtime.turn_counts[AgentName.HONEYDEW] == 2
+
+
+def test_missing_protocol_declaration_gets_one_focused_repair(
+    orchestrator_bundle,
+) -> None:
+    _, store, _, _, engine = orchestrator_bundle
+    runtime = MissingProtocolDeclarationThenRepairRuntime(
+        runner_image=RUNNER_IMAGE
+    )
+    engine.runtime = runtime
+
+    run = engine.create_run(
+        RunCreateRequest(objective='Repair a missing protocol declaration.')
+    )
+
+    current = store.get_run(run.run_id)
+    assert current.state == RunState.AWAITING_PROTOCOL_APPROVAL
+    assert Path(current.protocol_path or '').is_file()
+    assert runtime.omitted_protocol_once
+    event_types = {
+        event.event_type for event in store.list_events(run.run_id)
+    }
+    assert 'agent.output_rejected' in event_types
+    assert runtime.turn_counts[AgentName.HONEYDEW] == 2
+
+
+def test_repeated_wrong_kind_fails_without_advancing(
+    orchestrator_bundle,
+) -> None:
+    _, store, cluster, _, engine = orchestrator_bundle
+    runtime = RepeatedWrongKindRuntime(runner_image=RUNNER_IMAGE)
+    engine.runtime = runtime
+
+    with pytest.raises(WorkflowError):
+        engine.create_run(
+            RunCreateRequest(objective='Wrong kind on every draft attempt.')
+        )
+
+    run = next(iter(store.list_runs()))
+    assert run.state == RunState.FAILED
+    assert runtime.turn_counts[AgentName.HONEYDEW] == 2
+    # The failed run must not have advanced: no approval action, no submitted
+    # job, and no duplicated event stream beyond the two attempted turns.
+    actions = store.list_actions(run.run_id)
+    assert all(action.type != 'approve_protocol' for action in actions)
+    assert not store.list_jobs(run.run_id)
+    assert not cluster.submissions
 
 
 def test_missing_contract_proposal_gets_one_focused_repair(

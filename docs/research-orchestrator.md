@@ -175,6 +175,39 @@ Evidence references must use `artifact://`, `git://`, or `event://`. A turn
 cannot establish that a job ran. Only persisted job and artifact records can do
 that.
 
+### Structured-output failure handling
+
+The orchestrator validates every turn and never infers intent from prose. A
+turn that is malformed, schema-invalid, or of the wrong `kind` is rejected
+rather than trusted, and each failure is distinguishable in the durable event
+log:
+
+- A turn that returns no JSON, unparseable JSON, or JSON that fails
+  `AgentTurnResult` validation raises a runtime error whose `failure_class` is
+  `not_text`, `malformed_json`, or `schema_invalid` respectively. The failed
+  turn is recorded as `agent.turn_completed` with `status: failed` and that
+  `failure_class` in the payload.
+- A turn that validates but returns the wrong `kind` (for example
+  `verification` where `protocol_draft` was required) is recorded as
+  `agent.output_rejected` with both `returned_kind` and `expected_kind`. The
+  orchestrator issues exactly one focused repair turn that names the only
+  allowed kind, then fails the run if the repair is still wrong.
+
+A repair turn is always placed after any retrieved/context material and may
+only request actions that the policy layer already authorizes; it cannot
+advance state or duplicate an action or job on its own. A protocol draft that
+returns a valid `protocol_draft` but declares no produced `protocol` file — the
+live contract violation observed in run `7a1cef60dd3b49e0b565759ea988edb6` — is
+rejected as `agent.output_rejected` and repaired with one focused turn that
+names `program.md`, requires purpose `protocol`, and forbids actions. The
+repair is revalidated (exactly one declared protocol file that exists on disk)
+before the run may advance to `AWAITING_PROTOCOL_APPROVAL`.
+
+Known limitation: the focused repair is a single turn per failure class. A
+runtime that repeats the same failure in its repair turn ends the run
+`FAILED` rather than looping; resuming from a terminal state is not yet
+supported and is tracked as terminal-checkpoint retry (#92).
+
 ## Evaluation Integrity
 
 Contracts live under
