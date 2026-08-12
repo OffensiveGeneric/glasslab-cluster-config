@@ -14,11 +14,11 @@ usage() {
   cat <<'USAGE'
 Usage: rollout-research-services.sh [options]
 
-Roll out CI-published workflow-api and research-orchestrator images. Images are
-selected by immutable Git commit tag; this script does not build or push.
+Roll out CI-published Glasslab control-service images. Images are selected by
+immutable Git commit tag; this script does not build or push.
 
 Options:
-  --service <name>  all, workflow-api, or research-orchestrator. Default: all
+  --service <name>  all or one supported control service. Default: all
   --tag <tag>       GHCR image tag. Default: full SHA of the checked-out commit
   --sync            Fast-forward the canonical checkout to origin/main first
   --skip-smoke      Skip post-rollout service health checks
@@ -87,6 +87,37 @@ rollout_research_orchestrator() {
     deployment/glasslab-research-orchestrator --timeout=300s
 }
 
+rollout_control_service() {
+  local service="$1"
+  local deployment="glasslab-${service}"
+  local manifest="$ROOT_DIR/kubeadm/glasslab-v2/${service}/10-deployment.yaml"
+  local image="ghcr.io/ccny-glasslab/glasslab-${service}:${IMAGE_TAG}"
+
+  [[ -f "$manifest" ]] || {
+    printf '[rollout-research-services] missing manifest for %s: %s\n' "$service" "$manifest" >&2
+    exit 1
+  }
+
+  printf '[rollout-research-services] deploying %s image %s\n' "$deployment" "$image"
+  "$KUBECTL" set image -f "$manifest" "${service}=${image}" --local -o yaml |
+    "$KUBECTL" apply -f -
+  "$KUBECTL" -n "$NAMESPACE" rollout status "deployment/${deployment}" --timeout=300s
+}
+
+SUPPORTED_SERVICES=(
+  workflow-api
+  research-orchestrator
+  research-command-router
+  research-ingress
+  intake-agent
+  interpretation-agent
+  assessment-agent
+  design-agent
+  schedule-worker
+  whatsapp-gateway
+  whatsapp-web-bridge
+)
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --service)
@@ -121,13 +152,19 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-case "$SERVICE" in
-  all|workflow-api|research-orchestrator) ;;
-  *)
+if [[ "$SERVICE" != "all" ]]; then
+  found=false
+  for candidate in "${SUPPORTED_SERVICES[@]}"; do
+    if [[ "$SERVICE" == "$candidate" ]]; then
+      found=true
+      break
+    fi
+  done
+  if [[ "$found" != true ]]; then
     printf '[rollout-research-services] invalid service: %s\n' "$SERVICE" >&2
     exit 1
-    ;;
-esac
+  fi
+fi
 
 need_cmd git
 need_cmd "$KUBECTL"
@@ -158,18 +195,16 @@ fi
 
 require_object secret glasslab-ghcr-pull
 
-case "$SERVICE" in
-  all)
-    rollout_workflow_api
-    rollout_research_orchestrator
-    ;;
-  workflow-api)
-    rollout_workflow_api
-    ;;
-  research-orchestrator)
-    rollout_research_orchestrator
-    ;;
-esac
+for candidate in "${SUPPORTED_SERVICES[@]}"; do
+  if [[ "$SERVICE" != "all" && "$SERVICE" != "$candidate" ]]; then
+    continue
+  fi
+  case "$candidate" in
+    workflow-api) rollout_workflow_api ;;
+    research-orchestrator) rollout_research_orchestrator ;;
+    *) rollout_control_service "$candidate" ;;
+  esac
+done
 
 printf '[rollout-research-services] deployed images\n'
 "$KUBECTL" -n "$NAMESPACE" get deployment \

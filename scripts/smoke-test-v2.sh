@@ -68,6 +68,8 @@ need_cmd "$CURL"
 printf '[smoke-test-v2] checking namespace %s\n' "$NAMESPACE"
 "$KUBECTL" get namespace "$NAMESPACE" >/dev/null
 
+"$(dirname "$0")/preflight-glasslab-v2.sh"
+
 printf '[smoke-test-v2] checking rollout status for core services\n'
 "$KUBECTL" -n "$NAMESPACE" rollout status deployment/glasslab-nats --timeout=120s
 "$KUBECTL" -n "$NAMESPACE" rollout status deployment/glasslab-minio --timeout=120s

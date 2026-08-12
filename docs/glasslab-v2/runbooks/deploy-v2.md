@@ -29,8 +29,8 @@ Back them up separately. Git and `scripts/snapshot-provisioner-config.sh` do not
 ```
 
 5. Confirm that the `Publish Service Images` workflow succeeded for the commit
-being deployed. It publishes `workflow-api` and `research-orchestrator` images
-under the full Git commit SHA.
+being deployed. It publishes every active custom control-service image under
+the full Git commit SHA.
 
 ```bash
 git rev-parse HEAD
@@ -69,7 +69,10 @@ It also applies the first explicit scheduling lanes:
 - `glasslab-autonomous-low`
 
 Current storage caveat:
-- Postgres and MinIO are still non-durable until the storage plan under `docs/glasslab-v2/storage-and-state.md` is implemented
+- the deploy script applies the explicit retained local PV/PVC manifests and
+  the retained NFS-backed shared dataset/artifact PVCs before stateful services
+- the one-shot NFS smoke pod remains manual and is never applied by the deploy
+  script
 
 7. Roll out the CI-published control services. For routine updates this is the
 only deployment command required:
@@ -78,8 +81,9 @@ only deployment command required:
 ./scripts/rollout-research-services.sh --sync
 ```
 
-Deploy one service with `--service workflow-api` or
-`--service research-orchestrator`. Roll back with
+Deploy all active control services with `--service all`, or select one service
+such as `workflow-api`, `research-orchestrator`, or `research-command-router`.
+Roll back with
 `--tag <previous-full-commit-sha>`.
 
 8. Verify rollout state and health endpoints.
@@ -88,6 +92,7 @@ Deploy one service with `--service workflow-api` or
 ./scripts/smoke-test-v2.sh
 ./scripts/smoke-test-v2.sh --include-bounded-agents
 ./scripts/check-live-provenance.sh
+./scripts/preflight-glasslab-v2.sh
 ```
 
 The provenance check should make drift obvious:
