@@ -8,7 +8,10 @@ complete terminal bundles, and rejecting symlink artifacts.
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 from app.config import Settings
+from app.job_submission import KubernetesJobSubmitter, LiveStatusUnavailableError
 from app.run_artifacts import (
     artifact_run_dir,
     build_artifacts_from_directory,
@@ -229,3 +232,127 @@ def test_terminal_bundle_rejects_symlink_artifact(tmp_path) -> None:
         assert 'report.md' in str(exc)
     else:
         raise AssertionError('symlink artifact must reject successful ingestion')
+
+
+class _UnavailableSubmitter:
+    def __init__(self, exc: Exception) -> None:
+        self.exc = exc
+
+    def get_live_status(self, record):
+        raise self.exc
+
+
+def _queued_record(run_id: str) -> RunRecord:
+    return build_run_record(
+        run_id,
+        RunStatus(
+            run_id=run_id,
+            status='queued',
+            updated_at=datetime(2026, 3, 26, 11, 59, tzinfo=timezone.utc),
+            detail='accepted, awaiting scheduling',
+        ),
+    )
+
+
+def test_resolve_run_status_degrades_on_live_status_unavailable(tmp_path) -> None:
+    settings = build_settings(tmp_path)
+    record = _queued_record('run-degrade')
+    submitter = _UnavailableSubmitter(
+        LiveStatusUnavailableError('Kubernetes API error during live status lookup')
+    )
+
+    resolved = resolve_run_status(record, settings, submitter)
+
+    assert resolved.status == 'queued'
+    assert resolved.run_id == 'run-degrade'
+    assert 'accepted, awaiting scheduling' in resolved.detail
+    assert 'Live Kubernetes status unavailable' in resolved.detail
+    assert 'showing durable stored status' in resolved.detail
+
+
+def test_resolve_run_status_unexpected_exception_propagates(tmp_path) -> None:
+    settings = build_settings(tmp_path)
+    record = _queued_record('run-program-error')
+    submitter = _UnavailableSubmitter(RuntimeError('unexpected bug'))
+
+    with pytest.raises(RuntimeError):
+        resolve_run_status(record, settings, submitter)
+
+
+def test_resolve_run_status_disk_terminal_authoritative_during_outage(tmp_path) -> None:
+    settings = build_settings(tmp_path)
+    run_id = 'run-disk-authoritative'
+    run_dir = artifact_run_dir(settings, run_id)
+    run_dir.mkdir(parents=True)
+    (run_dir / 'status.json').write_text(
+        '{"run_id":"run-disk-authoritative","status":"succeeded",'
+        '"updated_at":"2026-03-26T12:00:00Z","detail":"done"}'
+    )
+    record = _queued_record(run_id)
+    submitter = _UnavailableSubmitter(
+        LiveStatusUnavailableError('Kubernetes transport failure during live status lookup')
+    )
+
+    resolved = resolve_run_status(record, settings, submitter)
+
+    assert resolved.status == 'succeeded'
+    assert 'Live Kubernetes status unavailable' not in (resolved.detail or '')
+
+
+def test_get_live_status_maps_expected_exceptions_to_unavailable() -> None:
+    import socket
+    import ssl
+    import urllib3
+    from kubernetes.client.exceptions import ApiException
+
+    submitter = KubernetesJobSubmitter.__new__(KubernetesJobSubmitter)
+    submitter.api_exception = ApiException
+    record = _queued_record('run-live-status')
+
+    cases = [
+        ApiException(status=503, reason='Service Unavailable'),
+        socket.gaierror('Name or service not known'),
+        ssl.SSLError(1, 'TLS handshake failure'),
+        urllib3.exceptions.MaxRetryError(
+            urllib3.connectionpool.HTTPConnectionPool(host='k8s', port=443),
+            '/apis/batch/v1/namespaces/default/jobs/job',
+        ),
+        urllib3.exceptions.NewConnectionError(
+            urllib3.connectionpool.HTTPConnectionPool(host='k8s', port=443),
+            'Connection refused',
+        ),
+        urllib3.exceptions.SSLError('TLS handshake failure'),
+        urllib3.exceptions.ConnectTimeoutError(
+            urllib3.connectionpool.HTTPConnectionPool(host='k8s', port=443),
+            'connection timed out',
+        ),
+        urllib3.exceptions.ReadTimeoutError(
+            urllib3.connectionpool.HTTPConnectionPool(host='k8s', port=443),
+            '/apis/batch/v1/namespaces/default/jobs/job',
+            'read timed out',
+        ),
+    ]
+
+    for exc in cases:
+        class _FailingBatchApi:
+            def read_namespaced_job(self, **kwargs):
+                raise exc
+
+        submitter.batch_api = _FailingBatchApi()
+        with pytest.raises(LiveStatusUnavailableError):
+            submitter.get_live_status(record)
+
+
+def test_get_live_status_lets_programming_errors_propagate() -> None:
+    from kubernetes.client.exceptions import ApiException
+
+    submitter = KubernetesJobSubmitter.__new__(KubernetesJobSubmitter)
+    submitter.api_exception = ApiException
+
+    class _ExplodingBatchApi:
+        def read_namespaced_job(self, **kwargs):
+            raise RuntimeError('unexpected bug')
+
+    submitter.batch_api = _ExplodingBatchApi()
+    with pytest.raises(RuntimeError):
+        submitter.get_live_status(_queued_record('run-live-program-error'))

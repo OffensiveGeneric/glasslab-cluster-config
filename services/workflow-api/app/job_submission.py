@@ -16,13 +16,45 @@ from hashlib import sha256
 import json
 from pathlib import Path, PurePosixPath
 import re
-
+import socket
+import ssl
 from typing import Any
+
+import urllib3
 
 from services.common.schemas import RunManifest, RunStatus
 
 from .config import Settings
 from .schemas import JobSubmissionReceipt, LogEntry, RunRecord
+
+
+class LiveStatusUnavailableError(Exception):
+    """The Kubernetes live-status lookup failed for an expected infrastructure
+    reason (API error, DNS/connection failure, or TLS transport failure).
+
+    Raised instead of returning a fabricated status so callers can surface the
+    durable stored status with an explicit degradation note. Deliberately not a
+    subclass of the transport exceptions below, and never raised for
+    programming errors, which continue to propagate unchanged.
+    """
+
+
+# Transport exceptions the Kubernetes Python client raises for expected
+# infrastructure outages, kept distinct from ApiException and from unrelated
+# programming errors. urllib3.MaxRetryError is the umbrella for DNS,
+# connection-refused, timeout, and TLS failures; the narrower classes cover
+# connection timeouts, read timeouts, and the raw stdlib equivalents that
+# occasionally escape urllib3's wrapping.
+_KUBE_TRANSPORT_EXCEPTIONS = (
+    urllib3.exceptions.MaxRetryError,
+    urllib3.exceptions.NewConnectionError,
+    urllib3.exceptions.ConnectionError,
+    urllib3.exceptions.ConnectTimeoutError,
+    urllib3.exceptions.ReadTimeoutError,
+    urllib3.exceptions.SSLError,
+    ssl.SSLError,
+    socket.gaierror,
+)
 
 
 def workflow_submission_ready(workflow: RunManifest | Any) -> tuple[bool, list[str]]:
@@ -764,8 +796,14 @@ class KubernetesJobSubmitter(JobSubmitter):
                 name=record.job_submission.job_name,
                 namespace=record.job_submission.namespace,
             )
-        except self.api_exception:
-            return None
+        except self.api_exception as exc:
+            raise LiveStatusUnavailableError(
+                'Kubernetes API error during live status lookup'
+            ) from exc
+        except _KUBE_TRANSPORT_EXCEPTIONS as exc:
+            raise LiveStatusUnavailableError(
+                'Kubernetes transport failure during live status lookup'
+            ) from exc
 
         now = datetime.now(timezone.utc)
         status = job.status
