@@ -234,6 +234,17 @@ def test_task_bound_retry_rejects_tampered_archive(orchestrator_bundle):
         engine.retry_terminal_run(parent.run_id, TerminalRetryRequest())
 
 
+def test_retry_rejects_legacy_parent_without_recorded_base_commit(orchestrator_bundle):
+    _, store, _, _, engine = orchestrator_bundle
+    parent = _terminal_parent(engine, store)
+    store.replace_run(
+        parent.model_copy(update={'workspace_base_commit': None}),
+        expected_version=parent.version,
+    )
+    with pytest.raises(WorkflowError, match='durably recorded'):
+        engine.retry_terminal_run(parent.run_id, TerminalRetryRequest())
+
+
 def test_task_bound_retry_rejects_missing_verified_asset(orchestrator_bundle):
     settings, store, _, _, engine = orchestrator_bundle
     task, parent = _terminal_task_parent(engine, store)
@@ -267,6 +278,18 @@ def test_task_bound_retry_rebinds_current_runner_metadata(orchestrator_bundle):
     child = engine.retry_terminal_run(parent.run_id, TerminalRetryRequest())
     assert child.task_definition['runner_image'] == rebound.runner_image
     assert child.task_definition['runner_image'] != payload['runner_image']
+
+
+def test_task_bound_retry_rejects_mismatched_task_identifier(orchestrator_bundle):
+    _, store, _, _, engine = orchestrator_bundle
+    task, parent = _terminal_task_parent(engine, store)
+    metadata = Path(task.archive_path).with_name('task.json')
+    metadata.chmod(metadata.stat().st_mode | 0o200)
+    payload = task.model_dump(mode='json')
+    payload['task_id'] = 'task-other-identifier'
+    metadata.write_text(json.dumps(payload), encoding='utf-8')
+    with pytest.raises(WorkflowError, match='binding checksum'):
+        engine.retry_terminal_run(parent.run_id, TerminalRetryRequest())
 
 
 def test_retry_uses_recorded_historical_base_commit(orchestrator_bundle):
@@ -348,6 +371,72 @@ def test_retry_recovery_rejects_extra_child_worktree_delta(orchestrator_bundle):
     store.replace_run(current.model_copy(update={'state': RunState.PREPARING}), expected_version=current.version)
     with pytest.raises(Exception, match='delta'):
         engine._resume_terminal_retry(child.run_id)
+
+
+def test_taskless_retry_rejects_benchmark_task_content(orchestrator_bundle):
+    _, store, _, _, engine = orchestrator_bundle
+    parent = _terminal_parent(engine, store)
+    child = engine.retry_terminal_run(parent.run_id, TerminalRetryRequest())
+    injected = Path(child.beaker_workspace) / 'benchmark-task' / 'unmanifested.txt'
+    injected.parent.mkdir()
+    injected.write_text('unexpected\n')
+    current = store.get_run(child.run_id)
+    store.replace_run(current.model_copy(update={'state': RunState.PREPARING}), expected_version=current.version)
+    with pytest.raises(Exception, match='taskless'):
+        engine._resume_terminal_retry(child.run_id)
+
+
+@pytest.mark.parametrize('mutation, expected', [
+    ('extra', 'unexpected or missing'),
+    ('missing', 'unexpected or missing'),
+    ('changed', 'task input checksum'),
+])
+def test_task_bound_retry_verifies_exact_managed_task_inputs(
+    orchestrator_bundle, mutation, expected,
+):
+    _, store, _, _, engine = orchestrator_bundle
+    _, parent = _terminal_task_parent(engine, store)
+    child = engine.retry_terminal_run(parent.run_id, TerminalRetryRequest())
+    task_root = Path(child.beaker_workspace) / 'benchmark-task'
+    task_root.chmod(0o755)
+    if mutation == 'extra':
+        (task_root / 'extra.txt').write_text('unexpected\n')
+    elif mutation == 'missing':
+        (task_root / 'problem.md').chmod(0o644)
+        (task_root / 'problem.md').unlink()
+    else:
+        source = task_root / 'problem.md'
+        source.chmod(0o644)
+        source.write_text('tampered\n')
+    current = store.get_run(child.run_id)
+    store.replace_run(current.model_copy(update={'state': RunState.PREPARING}), expected_version=current.version)
+    with pytest.raises(Exception, match=expected):
+        engine._resume_terminal_retry(child.run_id)
+
+
+def test_retry_recovery_rejects_worktree_protocol_not_matching_authority(orchestrator_bundle):
+    _, store, _, _, engine = orchestrator_bundle
+    parent = _terminal_parent(engine, store)
+    child = engine.retry_terminal_run(parent.run_id, TerminalRetryRequest())
+    protocol = Path(child.beaker_workspace) / 'program.md'
+    protocol.write_text('not authoritative\n')
+    current = store.get_run(child.run_id)
+    store.replace_run(current.model_copy(update={'state': RunState.PREPARING}), expected_version=current.version)
+    with pytest.raises(Exception, match='protocol does not match'):
+        engine._resume_terminal_retry(child.run_id)
+
+
+def test_retry_recovery_accepts_matching_worktree_protocol(orchestrator_bundle):
+    _, store, _, _, engine = orchestrator_bundle
+    parent = _terminal_parent(engine, store)
+    child = engine.retry_terminal_run(parent.run_id, TerminalRetryRequest())
+    source = Path(child.protocol_path)
+    target = Path(child.beaker_workspace) / 'program.md'
+    target.write_bytes(source.read_bytes())
+    current = store.get_run(child.run_id)
+    store.replace_run(current.model_copy(update={'state': RunState.PREPARING}), expected_version=current.version)
+    engine._resume_terminal_retry(child.run_id)
+    assert store.get_run(child.run_id).state == RunState.AWAITING_PROTOCOL_APPROVAL
 
 
 @pytest.mark.parametrize('mutation, expected', [

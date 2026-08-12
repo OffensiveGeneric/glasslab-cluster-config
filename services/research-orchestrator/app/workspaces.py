@@ -193,6 +193,7 @@ class WorkspaceManager:
             raise WorkspaceError('retry source protocol checksum mismatch')
         target_protocol = child.protocol / 'program.md'
         shutil.copy2(source_protocol, target_protocol)
+        managed_task_files = self._managed_task_files(task_binding)
         files: list[dict[str, object]] = []
         total = 0
         for name, source_root, target_root in (
@@ -238,7 +239,7 @@ class WorkspaceManager:
                 files.append({'workspace': name, 'path': rel.as_posix(), 'size_bytes': size, 'sha256': digest})
                 total += size
         manifest_path = child.events / 'terminal-retry-checkpoint.json'
-        manifest = {'schema_version': 'glasslab-terminal-retry-checkpoint-v1', 'parent_run_id': parent_run_id, 'base_commit': base_commit, 'protocol': {'path': 'protocol/program.md', 'sha256': protocol_digest}, 'contract': contract, 'task_binding': task_binding, 'files': files, 'total_bytes': total}
+        manifest = {'schema_version': 'glasslab-terminal-retry-checkpoint-v1', 'parent_run_id': parent_run_id, 'base_commit': base_commit, 'protocol': {'path': 'protocol/program.md', 'sha256': protocol_digest}, 'contract': contract, 'task_binding': task_binding, 'managed_task_files': managed_task_files, 'files': files, 'total_bytes': total}
         manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n', encoding='utf-8')
         digest = sha256(manifest_path.read_bytes()).hexdigest()
         return manifest_path, digest
@@ -257,6 +258,48 @@ class WorkspaceManager:
         protocol_path = self.paths(run_id).root / str(protocol.get('path', ''))
         if not protocol_path.is_file() or protocol_path.is_symlink() or sha256(protocol_path.read_bytes()).hexdigest() != protocol.get('sha256'):
             raise WorkspaceError('retry protocol checksum mismatch')
+        managed_task_files = manifest.get('managed_task_files')
+        if not isinstance(managed_task_files, list):
+            raise WorkspaceError('retry managed task manifest is invalid')
+        for workspace in (self.paths(run_id).beaker, self.paths(run_id).honeydew):
+            worktree_protocol = workspace / 'program.md'
+            if worktree_protocol.exists() and (
+                not worktree_protocol.is_file()
+                or worktree_protocol.is_symlink()
+                or sha256(worktree_protocol.read_bytes()).hexdigest()
+                != protocol.get('sha256')
+            ):
+                raise WorkspaceError('retry worktree protocol does not match authoritative protocol')
+            task_root = workspace / 'benchmark-task'
+            if not managed_task_files:
+                if task_root.exists() and any(task_root.rglob('*')):
+                    raise WorkspaceError('taskless retry contains benchmark-task content')
+                continue
+            if not task_root.is_dir() or task_root.is_symlink():
+                raise WorkspaceError('retry task inputs are unavailable')
+            expected_task_files = {
+                str(item.get('path')): str(item.get('sha256'))
+                for item in managed_task_files
+                if isinstance(item, dict)
+            }
+            if set(expected_task_files) != {
+                'problem.md', 'eval_agent_prompt.md'
+            }:
+                raise WorkspaceError('retry managed task manifest is invalid')
+            actual_task_files = {
+                candidate.relative_to(task_root).as_posix()
+                for candidate in task_root.rglob('*')
+                if candidate.is_file() or candidate.is_symlink()
+            }
+            if actual_task_files != set(expected_task_files):
+                raise WorkspaceError('retry task inputs contain unexpected or missing files')
+            for relative, digest in expected_task_files.items():
+                candidate = task_root / relative
+                if (
+                    candidate.is_symlink() or not candidate.is_file()
+                    or sha256(candidate.read_bytes()).hexdigest() != digest
+                ):
+                    raise WorkspaceError('retry task input checksum mismatch')
         manifest_files: set[tuple[str, str]] = set()
         for item in manifest.get('files', []):
             if not isinstance(item, dict): raise WorkspaceError('retry checkpoint file entry is invalid')
@@ -297,6 +340,25 @@ class WorkspaceManager:
         if result.returncode != 0:
             raise WorkspaceError(result.stderr.decode().strip() or 'git inspection failed')
         return result.stdout
+
+    @staticmethod
+    def _managed_task_files(task_binding: dict | None) -> list[dict[str, str]]:
+        if task_binding is None:
+            return []
+        paths = {
+            'problem.md': task_binding.get('problem_path'),
+            'eval_agent_prompt.md': task_binding.get('evaluator_prompt_path'),
+        }
+        files: list[dict[str, str]] = []
+        for destination, raw_source in paths.items():
+            source = Path(str(raw_source or '')).resolve()
+            if source.is_symlink() or not source.is_file():
+                raise WorkspaceError('retry task source is unavailable')
+            files.append({
+                'path': destination,
+                'sha256': sha256(source.read_bytes()).hexdigest(),
+            })
+        return files
 
     def create_review_snapshot(
         self,

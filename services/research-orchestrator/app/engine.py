@@ -1163,7 +1163,10 @@ class ResearchOrchestrator:
             task_binding = None
             if parent.task_id:
                 task = self.task_bundles.get(parent.task_id, parent.task_bundle_digest)
-                if task.digest != parent.task_bundle_digest:
+                if (
+                    task.digest != parent.task_bundle_digest
+                    or task.task_id != parent.task_id
+                ):
                     raise WorkflowError('terminal retry task binding checksum mismatch')
                 preflight = self.task_preflight(task)
                 if not preflight.ready:
@@ -1172,10 +1175,11 @@ class ResearchOrchestrator:
                         + '; '.join(preflight.blocking_issues)
                     )
                 task_binding = task.model_dump(mode='json')
-            parent_base_commit = (
-                parent.workspace_base_commit
-                or self.workspaces.worktree_base_commit(parent_run_id)
-            )
+            if not parent.workspace_base_commit:
+                raise WorkflowError(
+                    'terminal retry requires a durably recorded workspace base commit'
+                )
+            parent_base_commit = parent.workspace_base_commit
             child_id = uuid4().hex
             paths = self.workspaces.prepare(child_id, repo_ref=parent_base_commit)
             if task:
