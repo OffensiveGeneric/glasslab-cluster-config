@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import httpx
+import pytest
 import yaml
 
 from app.config import Settings
@@ -201,3 +202,21 @@ def test_hermes_structured_output_accepts_plain_or_fenced_json() -> None:
     assert _decode_structured_output(
         f'```json\n{payload}\n```'
     ).kind == TurnKind.VERIFICATION
+
+
+def test_hermes_structured_output_failures_are_distinguishable() -> None:
+    from app.hermes_runtime import HermesRuntimeError
+
+    with pytest.raises(HermesRuntimeError) as not_text:
+        _decode_structured_output(['not', 'a', 'string'])
+    assert not_text.value.failure_class == 'not_text'
+
+    with pytest.raises(HermesRuntimeError) as malformed:
+        _decode_structured_output('this is not json')
+    assert malformed.value.failure_class == 'malformed_json'
+
+    with pytest.raises(HermesRuntimeError) as invalid:
+        _decode_structured_output(
+            json.dumps({'kind': 'protocol_draft', 'summary': ''})
+        )
+    assert invalid.value.failure_class == 'schema_invalid'

@@ -20,7 +20,17 @@ from .schemas import AgentName, AgentTurnResult
 
 
 class HermesRuntimeError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure_class: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        # Machine-readable classifier so the engine can distinguish
+        # malformed output from schema-invalid output from a wrong turn kind
+        # in durable normalized events, without string-matching the message.
+        self.failure_class = failure_class
 
 
 @dataclass
@@ -47,7 +57,10 @@ def _structured_prompt(prompt: str) -> str:
 
 def _decode_structured_output(output: Any) -> AgentTurnResult:
     if not isinstance(output, str):
-        raise HermesRuntimeError('Hermes run output was not text')
+        raise HermesRuntimeError(
+            'Hermes run output was not text',
+            failure_class='not_text',
+        )
     candidate = output.strip()
     if candidate.startswith('```') and candidate.endswith('```'):
         lines = candidate.splitlines()
@@ -56,7 +69,8 @@ def _decode_structured_output(output: Any) -> AgentTurnResult:
         payload = json.loads(candidate)
     except json.JSONDecodeError as exc:
         raise HermesRuntimeError(
-            'Hermes turn did not return a JSON object'
+            'Hermes turn did not return a JSON object',
+            failure_class='malformed_json',
         ) from exc
     try:
         return AgentTurnResult.model_validate(payload)
@@ -66,7 +80,8 @@ def _decode_structured_output(output: Any) -> AgentTurnResult:
             for item in exc.errors(include_url=False, include_input=False)[:8]
         )
         raise HermesRuntimeError(
-            f'Hermes structured output failed validation: {details}'
+            f'Hermes structured output failed validation: {details}',
+            failure_class='schema_invalid',
         ) from exc
 
 

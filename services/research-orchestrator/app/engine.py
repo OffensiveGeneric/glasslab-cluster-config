@@ -762,13 +762,14 @@ class ResearchOrchestrator:
                     workspace=workspace,
                     session_id=session.session_id,
                     prompt=(
-                        'Structured kind correction. Your previous response '
-                        f'used kind `{returned_kind.value}`, but this turn '
-                        f'requires kind `{expected_kind.value}`. Complete the '
-                        'original task and return a complete AgentTurnResult '
-                        'with exactly that kind. Do not repeat an earlier '
-                        'workflow phase.\n\nOriginal task:\n'
-                        + prompt
+                        prompt
+                        + '\n\nStructured kind correction. Your previous '
+                        f'response used kind `{returned_kind.value}`, but this '
+                        f'turn requires kind `{expected_kind.value}` and no '
+                        'other. Complete the original task and return a '
+                        'complete AgentTurnResult with exactly that kind. Do '
+                        'not repeat an earlier workflow phase and do not '
+                        'request actions.'
                     ),
                 )
                 if result.kind != expected_kind:
@@ -815,6 +816,7 @@ class ResearchOrchestrator:
                 }
             )
             self.store.save_turn(failed)
+            failure_class = getattr(exc, 'failure_class', None)
             self._event(
                 run_id,
                 source=agent.value,
@@ -823,6 +825,7 @@ class ResearchOrchestrator:
                     'turn_id': turn.turn_id,
                     'status': 'failed',
                     'error': str(exc),
+                    'failure_class': failure_class,
                 },
             )
             self._rotate_agent_session(
@@ -1201,6 +1204,52 @@ class ResearchOrchestrator:
         protocol_files = [
             item for item in result.produced_files if item.purpose == 'protocol'
         ]
+        if not protocol_files:
+            # Honeydew returned a formally valid protocol_draft turn but declared
+            # no protocol file at all. This is a contract violation distinct from
+            # a declared-but-missing file (handled below): the workspace action
+            # was never attempted, so the repair must name the exact file and
+            # purpose and revalidate before the run may advance.
+            self._event(
+                run_id,
+                source='orchestrator',
+                event_type='agent.output_rejected',
+                payload={
+                    'turn_id': turn.turn_id,
+                    'expected_field': 'produced_files',
+                    'expected_purpose': 'protocol',
+                    'repair_attempted': True,
+                },
+            )
+            _, result = self._run_agent_turn(
+                run_id=run_id,
+                agent=AgentName.HONEYDEW,
+                prompt=(
+                    'Focused protocol-file repair. Your previous protocol_draft '
+                    'turn did not declare any produced protocol file. Write '
+                    '`program.md` in your workspace now, then read it back to '
+                    'confirm it exists. Declare exactly that file in '
+                    '`produced_files` with purpose `protocol` and request no '
+                    'actions. Do not redesign the protocol. Return kind '
+                    '`protocol_draft` only after the file is written and '
+                    'verified.'
+                ),
+                expected_kind=TurnKind.PROTOCOL_DRAFT,
+                input_event={
+                    'repair': 'missing_protocol_declaration',
+                    'required_path': 'program.md',
+                    'required_purpose': 'protocol',
+                },
+            )
+            protocol_files = [
+                item
+                for item in result.produced_files
+                if item.purpose == 'protocol'
+            ]
+            if result.requested_actions:
+                raise WorkflowError(
+                    'Honeydew protocol-file repair must request no actions'
+                )
         if len(protocol_files) != 1:
             # Exactly one declared protocol file keeps the artifact binding
             # unambiguous; a declared-but-missing file is repaired below rather
