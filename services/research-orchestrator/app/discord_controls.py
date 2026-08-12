@@ -100,14 +100,10 @@ _NEXT_ACTION_BY_STATE = {
     RunState.HONEYDEW_WRITING_REPORT: 'Honeydew is writing the report',
 }
 
-# Statuses whose counts are always rendered in a fixed order.
-_RENDERED_JOB_STATUSES = (
-    JobStatus.QUEUED,
-    JobStatus.RUNNING,
-    JobStatus.SUCCEEDED,
-    JobStatus.FAILED,
-    JobStatus.CANCELLED,
-)
+# Statuses whose counts are always rendered in a fixed order. Every JobStatus
+# is included so queued/running/succeeded/failed/cancelled/submitting/unknown
+# jobs are never silently omitted from the projection.
+_RENDERED_JOB_STATUSES = tuple(JobStatus)
 
 
 @dataclass(frozen=True)
@@ -124,14 +120,19 @@ class RunStatusView:
 
 def pending_human_approval(actions: list[ActionRecord]) -> ActionRecord | None:
     # Only actions that still require a human decision are "next action" worthy.
-    # HONEYDEW_AND_HUMAN_APPROVAL counts because the human gate is still open.
+    # A combined HONEYDEW_AND_HUMAN_APPROVAL gate is not human-ready until
+    # Honeydew has signed off (honeydew_approved); before that, the next action
+    # is derived from the current Honeydew-review state instead.
     for action in actions:
         if action.approval_status != ApprovalStatus.PENDING:
             continue
-        if action.policy_classification in {
-            PolicyClassification.HUMAN_APPROVAL,
-            PolicyClassification.HONEYDEW_AND_HUMAN_APPROVAL,
-        }:
+        if action.policy_classification == PolicyClassification.HUMAN_APPROVAL:
+            return action
+        if (
+            action.policy_classification
+            == PolicyClassification.HONEYDEW_AND_HUMAN_APPROVAL
+            and action.honeydew_approved
+        ):
             return action
     return None
 
@@ -1169,20 +1170,36 @@ class DiscordControlGateway:
             )
             return
         try:
-            run = self._resolve_controlled_run(
+            run, actions, jobs = await asyncio.to_thread(
+                self._load_run_status,
                 channel_id=str(interaction.channel_id),
                 run_id=run_id,
             )
         except Exception as exc:
             await self._respond(interaction, f'Status lookup failed: {exc}')
             return
-        actions = self.engine.store.list_actions(run.run_id)
-        jobs = self.engine.store.list_jobs(run.run_id)
         view = build_run_status_view(run, actions, jobs)
         await self._respond(
             interaction,
             bound_discord_message(render_run_status(view)),
         )
+
+    def _load_run_status(
+        self,
+        *,
+        channel_id: str,
+        run_id: str | None,
+    ) -> tuple[RunRecord, list[ActionRecord], list[JobRecord]]:
+        # Synchronous, disk/DB-bound reads run in a worker thread so the
+        # gateway event loop stays responsive; resolution is re-checked against
+        # the durable store at this point, never trusted from Discord.
+        run = self._resolve_controlled_run(
+            channel_id=channel_id,
+            run_id=run_id,
+        )
+        actions = self.engine.store.list_actions(run.run_id)
+        jobs = self.engine.store.list_jobs(run.run_id)
+        return run, actions, jobs
 
     async def _on_research_list(self, interaction: discord.Interaction) -> None:
         actor = self._actor(interaction)
@@ -1192,7 +1209,17 @@ class DiscordControlGateway:
                 'You are not authorized to list Glasslab research runs.',
             )
             return
-        runs = self.engine.store.list_runs()
+        if str(interaction.channel_id) != self.channel_id:
+            await self._respond(
+                interaction,
+                'List research runs from the configured Glasslab channel.',
+            )
+            return
+        try:
+            runs = await asyncio.to_thread(self.engine.store.list_runs)
+        except Exception as exc:
+            await self._respond(interaction, f'Run list failed: {exc}')
+            return
         await self._respond(
             interaction,
             bound_discord_message(render_run_list(select_runs_for_list(runs))),

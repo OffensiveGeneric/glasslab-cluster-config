@@ -1275,11 +1275,13 @@ def _action(
     type_: str,
     classification: PolicyClassification,
     status: ApprovalStatus = ApprovalStatus.PENDING,
+    honeydew_approved: bool = False,
 ):
     return SimpleNamespace(
         type=type_,
         policy_classification=classification,
         approval_status=status,
+        honeydew_approved=honeydew_approved,
     )
 
 
@@ -1423,30 +1425,61 @@ def test_next_action_prefers_pending_approval(
     action_type, classification, expected,
 ) -> None:
     run = _run(run_id='run-1', state=RunState.AWAITING_PROTOCOL_APPROVAL)
-    actions = [_action(type_=action_type, classification=classification)]
+    actions = [
+        _action(
+            type_=action_type,
+            classification=classification,
+            honeydew_approved=(
+                classification
+                == PolicyClassification.HONEYDEW_AND_HUMAN_APPROVAL
+            ),
+        )
+    ]
 
     assert next_action_for(run, actions) == expected
+
+
+def test_pending_human_approval_requires_honeydew_gate() -> None:
+    # A combined gate is not human-ready until Honeydew has signed off; before
+    # that, the next action is derived from the Honeydew-review state.
+    run = _run(run_id='run-1', state=RunState.HONEYDEW_REVIEWING)
+    actions = [
+        _action(
+            type_='submit_experiment_matrix',
+            classification=PolicyClassification.HONEYDEW_AND_HUMAN_APPROVAL,
+            honeydew_approved=False,
+        ),
+    ]
+
+    assert pending_human_approval(actions) is None
+    assert next_action_for(run, actions) == (
+        'Honeydew is reviewing the implementation'
+    )
 
 
 def test_job_status_counts_across_states() -> None:
     jobs = [
         _job(JobStatus.QUEUED),
         _job(JobStatus.QUEUED),
+        _job(JobStatus.SUBMITTING),
         _job(JobStatus.RUNNING),
         _job(JobStatus.SUCCEEDED),
         _job(JobStatus.SUCCEEDED),
         _job(JobStatus.SUCCEEDED),
         _job(JobStatus.FAILED),
+        _job(JobStatus.UNKNOWN),
     ]
 
     counts = job_status_counts(jobs)
 
     assert counts == {
         'queued': 2,
+        'submitting': 1,
         'running': 1,
         'succeeded': 3,
         'failed': 1,
         'cancelled': 0,
+        'unknown': 1,
     }
 
 
@@ -1513,6 +1546,7 @@ def test_render_run_status_includes_durable_fields() -> None:
         _action(
             type_='submit_experiment_matrix',
             classification=PolicyClassification.HONEYDEW_AND_HUMAN_APPROVAL,
+            honeydew_approved=True,
         ),
     ]
     jobs = [_job(JobStatus.SUCCEEDED), _job(JobStatus.RUNNING)]
