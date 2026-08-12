@@ -43,11 +43,14 @@ class LiveStatusUnavailableError(Exception):
 # infrastructure outages, kept distinct from ApiException and from unrelated
 # programming errors. urllib3.MaxRetryError is the umbrella for DNS,
 # connection-refused, timeout, and TLS failures; the narrower classes cover
-# the raw stdlib equivalents that occasionally escape urllib3's wrapping.
+# connection timeouts, read timeouts, and the raw stdlib equivalents that
+# occasionally escape urllib3's wrapping.
 _KUBE_TRANSPORT_EXCEPTIONS = (
     urllib3.exceptions.MaxRetryError,
     urllib3.exceptions.NewConnectionError,
     urllib3.exceptions.ConnectionError,
+    urllib3.exceptions.ConnectTimeoutError,
+    urllib3.exceptions.ReadTimeoutError,
     urllib3.exceptions.SSLError,
     ssl.SSLError,
     socket.gaierror,

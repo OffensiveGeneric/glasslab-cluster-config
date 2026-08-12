@@ -322,6 +322,15 @@ def test_get_live_status_maps_expected_exceptions_to_unavailable() -> None:
             'Connection refused',
         ),
         urllib3.exceptions.SSLError('TLS handshake failure'),
+        urllib3.exceptions.ConnectTimeoutError(
+            urllib3.connectionpool.HTTPConnectionPool(host='k8s', port=443),
+            'connection timed out',
+        ),
+        urllib3.exceptions.ReadTimeoutError(
+            urllib3.connectionpool.HTTPConnectionPool(host='k8s', port=443),
+            '/apis/batch/v1/namespaces/default/jobs/job',
+            'read timed out',
+        ),
     ]
 
     for exc in cases:

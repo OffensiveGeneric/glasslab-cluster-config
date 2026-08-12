@@ -191,7 +191,7 @@ def resolve_run_status(record: RunRecord, settings: Settings, submitter: JobSubm
         return disk_status
     try:
         live_status = submitter.get_live_status(record)
-    except LiveStatusUnavailableError as exc:
+    except LiveStatusUnavailableError:
         durable = record.status
         durable_detail = f'{durable.detail}; ' if durable.detail else ''
         return RunStatus(
@@ -199,8 +199,8 @@ def resolve_run_status(record: RunRecord, settings: Settings, submitter: JobSubm
             status=durable.status,
             updated_at=durable.updated_at,
             detail=(
-                f'{durable_detail}Live Kubernetes status unavailable '
-                f'({exc}); showing durable stored status.'
+                f'{durable_detail}Live Kubernetes status unavailable; '
+                'showing durable stored status.'
             ),
         )
     if live_status is not None:
