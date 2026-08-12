@@ -59,7 +59,7 @@ class WorkspaceManager:
             events=root / 'events',
         )
 
-    def prepare(self, run_id: str) -> RunWorkspaces:
+    def prepare(self, run_id: str, *, repo_ref: str | None = None) -> RunWorkspaces:
         paths = self.paths(run_id)
         for path in (
             paths.root,
@@ -73,11 +73,12 @@ class WorkspaceManager:
             raise WorkspaceError(
                 f'approved repository is not a Git checkout: {self.approved_repo_path}'
             )
-        self._ensure_worktree(paths.beaker)
-        self._ensure_worktree(paths.honeydew)
+        ref = repo_ref or self.approved_repo_ref
+        self._ensure_worktree(paths.beaker, ref)
+        self._ensure_worktree(paths.honeydew, ref)
         return paths
 
-    def _ensure_worktree(self, destination: Path) -> None:
+    def _ensure_worktree(self, destination: Path, repo_ref: str) -> None:
         # Worktrees give each agent an isolated working tree while sharing the
         # approved repository's objects; detached HEAD means agents never
         # advance a branch in the approved checkout.
@@ -99,7 +100,7 @@ class WorkspaceManager:
                 'add',
                 '--detach',
                 str(destination),
-                self.approved_repo_ref,
+                repo_ref,
             ],
             capture_output=True,
             text=True,
@@ -107,6 +108,14 @@ class WorkspaceManager:
         )
         if completed.returncode != 0:
             raise WorkspaceError(completed.stderr.strip() or 'git worktree add failed')
+
+    def worktree_base_commit(self, run_id: str) -> str:
+        paths = self.paths(run_id)
+        beaker = self._git(paths.beaker, 'rev-parse', 'HEAD')
+        honeydew = self._git(paths.honeydew, 'rev-parse', 'HEAD')
+        if beaker != honeydew:
+            raise WorkspaceError('agent worktrees do not share a base commit')
+        return beaker
 
     def agent_workspace(self, run_id: str, agent: AgentName) -> Path:
         paths = self.paths(run_id)
@@ -158,12 +167,14 @@ class WorkspaceManager:
             self.paths(run_id).honeydew,
         ):
             target = workspace / 'program.md'
+            if target.exists():
+                target.chmod(target.stat().st_mode | 0o200)
             shutil.copy2(protocol, target)
             target.chmod(0o444)
 
     def create_terminal_retry_checkpoint(
         self, *, parent_run_id: str, child_run_id: str, protocol_digest: str,
-        contract: dict[str, str], maximum_files: int = 128,
+        contract: dict[str, str], base_commit: str, maximum_files: int = 128,
         maximum_bytes: int = 4 * 1024 * 1024,
     ) -> tuple[Path, str]:
         """Copy a small, unambiguous workspace delta into a retry child.
@@ -183,21 +194,33 @@ class WorkspaceManager:
         shutil.copy2(source_protocol, target_protocol)
         files: list[dict[str, object]] = []
         total = 0
-        expected_head = self._git(self.approved_repo_path, 'rev-parse', self.approved_repo_ref)
         for name, source_root, target_root in (
             ('beaker', parent.beaker, child.beaker),
             ('honeydew', parent.honeydew, child.honeydew),
         ):
-            if self._git(source_root, 'rev-parse', 'HEAD') != expected_head:
+            if self._git(source_root, 'rev-parse', 'HEAD') != base_commit:
                 raise WorkspaceError('retry source contains an unbounded committed checkpoint')
-            status = self._git(source_root, 'status', '--porcelain=v1')
-            for line in status.splitlines():
-                code, relative = line[:2], line[3:]
+            if self._git(target_root, 'rev-parse', 'HEAD') != base_commit:
+                raise WorkspaceError('retry child was not created from source base commit')
+            status = self._git_bytes(
+                source_root, 'status', '--porcelain=v1', '-z',
+                '--untracked-files=all',
+            )
+            for entry in status.split(b'\0'):
+                if not entry:
+                    continue
+                code = entry[:2].decode('ascii')
+                relative = entry[3:].decode('utf-8', errors='surrogateescape')
                 if code not in {' M', 'M ', '??'}:
-                    raise WorkspaceError(f'retry source has ambiguous worktree change: {line}')
+                    raise WorkspaceError(f'retry source has ambiguous worktree change: {entry!r}')
                 rel = Path(relative)
                 if rel.is_absolute() or '..' in rel.parts:
                     raise WorkspaceError('retry source path escapes worktree')
+                # These are reconstructed by the orchestrator from their
+                # authoritative sources; copying them as a delta would either
+                # duplicate immutable task inputs or retain mode 0444.
+                if rel == Path('program.md') or rel.parts[0] == 'benchmark-task':
+                    continue
                 source = source_root / rel
                 if source.is_symlink() or not source.is_file():
                     raise WorkspaceError(f'retry source is not a regular file: {relative}')
@@ -209,11 +232,12 @@ class WorkspaceManager:
                 target = target_root / rel
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(source, target)
+                target.chmod(target.stat().st_mode | 0o200)
                 digest = sha256(target.read_bytes()).hexdigest()
                 files.append({'workspace': name, 'path': rel.as_posix(), 'size_bytes': size, 'sha256': digest})
                 total += size
         manifest_path = child.events / 'terminal-retry-checkpoint.json'
-        manifest = {'schema_version': 'glasslab-terminal-retry-checkpoint-v1', 'parent_run_id': parent_run_id, 'protocol': {'path': 'protocol/program.md', 'sha256': protocol_digest}, 'contract': contract, 'files': files, 'total_bytes': total}
+        manifest = {'schema_version': 'glasslab-terminal-retry-checkpoint-v1', 'parent_run_id': parent_run_id, 'base_commit': base_commit, 'protocol': {'path': 'protocol/program.md', 'sha256': protocol_digest}, 'contract': contract, 'files': files, 'total_bytes': total}
         manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n', encoding='utf-8')
         digest = sha256(manifest_path.read_bytes()).hexdigest()
         return manifest_path, digest
@@ -244,6 +268,13 @@ class WorkspaceManager:
         result = subprocess.run(['git', '-C', str(path), *args], capture_output=True, text=True, check=False)
         if result.returncode != 0: raise WorkspaceError(result.stderr.strip() or 'git inspection failed')
         return result.stdout.strip()
+
+    @staticmethod
+    def _git_bytes(path: Path, *args: str) -> bytes:
+        result = subprocess.run(['git', '-C', str(path), *args], capture_output=True, check=False)
+        if result.returncode != 0:
+            raise WorkspaceError(result.stderr.decode().strip() or 'git inspection failed')
+        return result.stdout
 
     def create_review_snapshot(
         self,

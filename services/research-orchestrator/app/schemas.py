@@ -433,6 +433,11 @@ class RunRecord(BaseModel):
     # lineage edge; terminal parents are never reopened or rewritten.
     parent_run_id: str | None = None
     retry_checkpoint_digest: str | None = None
+    # The exact Git commit used to create both isolated worktrees.  Retry
+    # children are pinned here instead of resolving a moving branch name.
+    workspace_base_commit: str | None = Field(
+        default=None, pattern=r'^[a-f0-9]{40}$'
+    )
     objective: str
     state: RunState
     protocol_path: str | None = None

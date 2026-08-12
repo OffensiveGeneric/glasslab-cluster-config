@@ -242,6 +242,14 @@ class PostgresStore:
 
     def save_action(self, record: ActionRecord) -> ActionRecord:
         return self._save_payload('orchestrator_actions', 'action_id', record, columns={'run_id': record.run_id, 'approval_status': record.approval_status.value, 'idempotency_key': record.idempotency_key, 'created_at': record.created_at, 'updated_at': record.updated_at}, conflict='return_existing')
+    def save_action_with_event(self, record: ActionRecord, *, source: str, payload: dict[str, Any]) -> tuple[ActionRecord, bool]:
+        with self.transaction() as conn:
+            existing = conn.execute('SELECT payload FROM orchestrator_actions WHERE idempotency_key=%s', (record.idempotency_key,)).fetchone()
+            if existing:
+                return ActionRecord.model_validate(existing['payload']), False
+            conn.execute('INSERT INTO orchestrator_actions (action_id, run_id, approval_status, idempotency_key, payload, created_at, updated_at) VALUES (%s,%s,%s,%s,%s,%s,%s)', (record.action_id, record.run_id, record.approval_status.value, record.idempotency_key, self._payload(record), record.created_at, record.updated_at))
+            self._append_event_conn(conn, run_id=record.run_id, source=source, event_type='action.proposed', payload=payload)
+        return record, True
     def get_action(self, action_id: str) -> ActionRecord:
         with self._connect() as conn:
             row = conn.execute('SELECT payload FROM orchestrator_actions WHERE action_id=%s', (action_id,)).fetchone()

@@ -208,6 +208,7 @@ class ResearchOrchestrator:
                     )
             run_id = uuid4().hex
             paths = self.workspaces.prepare(run_id)
+            base_commit = self.workspaces.worktree_base_commit(run_id)
             if task:
                 self.workspaces.install_task_bundle(
                     run_id=run_id,
@@ -228,6 +229,7 @@ class ResearchOrchestrator:
                 task_definition=(
                     task.model_dump(mode='json') if task else None
                 ),
+                workspace_base_commit=base_commit,
                 beaker_workspace=str(paths.beaker),
                 honeydew_workspace=str(paths.honeydew),
                 shared_artifacts_path=str(paths.shared_artifacts),
@@ -885,14 +887,17 @@ class ResearchOrchestrator:
                 action=requested,
                 ordinal=turn_number * 100 + index,
             )
-            record = self.store.save_action(record)
-            records.append(record)
-            self._event(
-                run_id,
-                source=agent.value,
-                event_type='action.proposed',
-                payload=self._approval_event_payload(record),
+            payload = self._approval_event_payload(record)
+            record, created = self.store.save_action_with_event(
+                record, source=agent.value, payload=payload,
             )
+            records.append(record)
+            if created:
+                self._publish_latest(run_id)
+            else:
+                self._repair_action_proposed_event(
+                    record, source=agent.value, payload=payload,
+                )
         return records
 
     def _approval_event_payload(
@@ -1042,17 +1047,31 @@ class ResearchOrchestrator:
             action=requested,
             ordinal=run.turn_number * 1000 + len(self.store.list_actions(run_id)),
         )
-        record = self.store.save_action(candidate)
-        # save_action can return a pre-crash action by its deterministic key.
-        # Do not duplicate its append-only proposal event during recovery.
-        if record.action_id == candidate.action_id:
-            self._event(
-                run_id,
-                source='orchestrator',
-                event_type='action.proposed',
-                payload=self._approval_event_payload(record),
+        payload = self._approval_event_payload(candidate)
+        record, created = self.store.save_action_with_event(
+            candidate, source='orchestrator', payload=payload,
+        )
+        if created:
+            self._publish_latest(run_id)
+        else:
+            self._repair_action_proposed_event(
+                record, source='orchestrator', payload=payload,
             )
         return record
+
+    def _repair_action_proposed_event(
+        self, action: ActionRecord, *, source: str, payload: dict[str, Any],
+    ) -> None:
+        if any(
+            event.event_type == 'action.proposed'
+            and event.payload.get('action_id') == action.action_id
+            for event in self.store.list_events(action.run_id)
+        ):
+            return
+        self._event(
+            action.run_id, source=source, event_type='action.proposed',
+            payload=payload,
+        )
 
     def retry_terminal_run(
         self, parent_run_id: str, request: TerminalRetryRequest,
@@ -1065,23 +1084,35 @@ class ResearchOrchestrator:
             existing_child = self.store.get_terminal_retry_child(parent_run_id)
             if existing_child is not None:
                 return existing_child
-            protocol_artifacts = [
-                artifact for artifact in self.store.list_artifacts(parent_run_id)
-                if artifact.type == 'protocol'
-            ]
-            if len(protocol_artifacts) != 1:
-                raise WorkflowError('terminal retry requires exactly one approved protocol artifact')
-            if not any(
-                action.type == 'approve_protocol'
-                and action.approval_status == ApprovalStatus.APPROVED
-                for action in self.store.list_actions(parent_run_id)
-            ):
-                raise WorkflowError('terminal retry requires a human-approved protocol checkpoint')
-            protocol = protocol_artifacts[0]
             source_protocol = Path(parent.protocol_path or '')
             if not source_protocol.is_file() or source_protocol.is_symlink():
                 raise WorkflowError('terminal retry protocol checkpoint is unavailable')
-            if sha256(source_protocol.read_bytes()).hexdigest() != protocol.sha256:
+            source_digest = sha256(source_protocol.read_bytes()).hexdigest()
+            protocol_artifacts = [
+                artifact for artifact in self.store.list_artifacts(parent_run_id)
+                if artifact.type == 'protocol'
+                and artifact.sha256 == source_digest
+                and artifact.metadata.get('path') == str(source_protocol)
+            ]
+            if len(protocol_artifacts) != 1:
+                raise WorkflowError('terminal retry requires the current approved protocol artifact')
+            approved_protocol_actions = {
+                action.action_id
+                for action in self.store.list_actions(parent_run_id)
+                if action.type == 'approve_protocol'
+                and action.approval_status == ApprovalStatus.APPROVED
+            }
+            if not any(
+                event.event_type == 'action.proposed'
+                and event.payload.get('action_id') in approved_protocol_actions
+                and event.payload.get('protocol_version') == parent.protocol_version
+                and isinstance(event.payload.get('artifact'), dict)
+                and event.payload['artifact'].get('sha256') == source_digest
+                for event in self.store.list_events(parent_run_id)
+            ):
+                raise WorkflowError('terminal retry requires a human-approved protocol checkpoint')
+            protocol = protocol_artifacts[0]
+            if source_digest != protocol.sha256:
                 raise WorkflowError('terminal retry protocol checksum mismatch')
             # Resolve again; a record of a contract is not proof that the
             # immutable contract still exists or has the same content.
@@ -1095,8 +1126,12 @@ class ResearchOrchestrator:
                 task = self.task_bundles.get(parent.task_id, parent.task_bundle_digest)
                 if task.digest != parent.task_bundle_digest:
                     raise WorkflowError('terminal retry task binding checksum mismatch')
+            parent_base_commit = (
+                parent.workspace_base_commit
+                or self.workspaces.worktree_base_commit(parent_run_id)
+            )
             child_id = uuid4().hex
-            paths = self.workspaces.prepare(child_id)
+            paths = self.workspaces.prepare(child_id, repo_ref=parent_base_commit)
             if task:
                 self.workspaces.install_task_bundle(
                     run_id=child_id, problem_path=task.problem_path,
@@ -1107,6 +1142,7 @@ class ResearchOrchestrator:
                 child_run_id=child_id,
                 protocol_digest=protocol.sha256,
                 contract={'contract_id': parent.evaluation_contract_id, 'version': parent.evaluation_contract_version, 'digest': parent.evaluation_contract_digest},
+                base_commit=parent_base_commit,
             )
             retry_key = request.idempotency_key or sha256(
                 f'terminal-retry-v1:{parent_run_id}:{checkpoint_digest}'.encode()
@@ -1115,6 +1151,7 @@ class ResearchOrchestrator:
             child = RunRecord(
                 run_id=child_id, parent_run_id=parent_run_id,
                 retry_checkpoint_digest=checkpoint_digest, objective=parent.objective,
+                workspace_base_commit=parent_base_commit,
                 state=RunState.PREPARING, protocol_path=str(paths.protocol / 'program.md'),
                 protocol_version=parent.protocol_version,
                 evaluation_contract_id=parent.evaluation_contract_id,
@@ -1154,9 +1191,41 @@ class ResearchOrchestrator:
         contract = manifest.get('contract', {})
         if contract != {'contract_id': run.evaluation_contract_id, 'version': run.evaluation_contract_version, 'digest': run.evaluation_contract_digest}:
             raise WorkflowError('retry checkpoint contract binding is invalid')
+        if manifest.get('base_commit') != run.workspace_base_commit:
+            raise WorkflowError('retry checkpoint base commit is invalid')
         descriptor = self.contracts.resolve(run.evaluation_contract_id, run.evaluation_contract_version)
         if descriptor.digest != run.evaluation_contract_digest:
             raise WorkflowError('retry contract digest no longer matches')
+        # The original contract-promotion decision is not inherited as an
+        # approval.  Its already-promoted immutable contract is re-projected
+        # deterministically so the child's fresh protocol approval can verify
+        # the same binding without trusting an old mutable proposal artifact.
+        proposal_payload = self._proposal_from_bound_contract(
+            descriptor.descriptor
+        ).model_dump(mode='json')
+        proposal_path = (
+            Path(run.shared_artifacts_path) / 'evaluation-contract-proposal.json'
+        )
+        proposal_path.write_bytes(
+            (json.dumps(proposal_payload, indent=2, sort_keys=True) + '\n').encode()
+        )
+        proposal_digest = sha256(proposal_path.read_bytes()).hexdigest()
+        self._save_local_artifact(
+            run_id=run_id, artifact_type='evaluation_contract_proposal',
+            uri=(f'artifact://{run_id}/shared-artifacts/'
+                 'evaluation-contract-proposal.json'),
+            digest=proposal_digest,
+            metadata={
+                'path': str(proposal_path), 'proposal': proposal_payload,
+                'origin': 'terminal_retry_bound_contract',
+                'technical_binding': {
+                    'status': 'compatible',
+                    'contract_id': run.evaluation_contract_id,
+                    'version': run.evaluation_contract_version,
+                    'digest': run.evaluation_contract_digest,
+                },
+            },
+        )
         self._save_local_artifact(
             run_id=run_id, artifact_type='protocol',
             uri=f'artifact://{run_id}/protocol/program.md',
@@ -1578,6 +1647,7 @@ class ResearchOrchestrator:
                 'path': str(destination),
                 'sha256': digest,
                 'turn_id': turn.turn_id,
+                'protocol_version': current.protocol_version + 1,
             },
         )
         technical_primary_metric = str(

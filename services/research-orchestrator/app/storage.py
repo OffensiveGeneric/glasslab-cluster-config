@@ -731,6 +731,31 @@ class SqliteStore:
             )
         return record
 
+    def save_action_with_event(
+        self, record: ActionRecord, *, source: str, payload: dict[str, Any],
+    ) -> tuple[ActionRecord, bool]:
+        """Persist an action and its proposal event in one transaction."""
+        with self.transaction() as connection:
+            existing = connection.execute(
+                'SELECT payload FROM actions WHERE idempotency_key = ?',
+                (record.idempotency_key,),
+            ).fetchone()
+            if existing is not None:
+                return ActionRecord.model_validate_json(existing['payload']), False
+            connection.execute(
+                '''INSERT INTO actions (action_id, run_id, approval_status,
+                   idempotency_key, payload, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                (record.action_id, record.run_id, record.approval_status.value,
+                 record.idempotency_key, _dump(record),
+                 record.created_at.isoformat(), record.updated_at.isoformat()),
+            )
+            self._append_event_conn(
+                connection, run_id=record.run_id, source=source,
+                event_type='action.proposed', payload=payload,
+            )
+        return record, True
+
     def update_action(
         self,
         action_id: str,
