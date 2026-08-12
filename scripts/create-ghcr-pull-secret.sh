@@ -5,7 +5,7 @@ KUBECTL="${KUBECTL:-kubectl}"
 NAMESPACE="${GLASSLAB_V2_NAMESPACE:-glasslab-v2}"
 SECRET_NAME="${GLASSLAB_GHCR_PULL_SECRET_NAME:-glasslab-ghcr-pull}"
 REGISTRY_HOST="${GLASSLAB_WORKFLOW_API_REGISTRY_HOST:-ghcr.io}"
-REGISTRY_USERNAME="${GHCR_USERNAME:-${GITHUB_ACTOR:-OffensiveGeneric}}"
+REGISTRY_USERNAME="${GHCR_USERNAME:-${GITHUB_ACTOR:-ccny-glasslab}}"
 REGISTRY_TOKEN="${GHCR_TOKEN:-}"
 
 usage() {
@@ -16,7 +16,7 @@ Create or refresh the private GHCR Docker registry secret used by Glasslab v2.
 
 Environment:
   GHCR_TOKEN    GitHub token with package read access
-  GHCR_USERNAME Registry username. Defaults to OffensiveGeneric.
+  GHCR_USERNAME Registry username. Defaults to ccny-glasslab.
 USAGE
 }
 

@@ -5,10 +5,8 @@ metadata:
   namespace: glasslab-v2
 spec:
   replicas: 1
-  # SQLite WAL supports one orchestrator process. Do not overlap old and new
-  # pods during an update until the service moves to PostgreSQL.
   strategy:
-    type: Recreate
+    type: RollingUpdate
   selector:
     matchLabels:
       app.kubernetes.io/name: glasslab-research-orchestrator
@@ -38,7 +36,7 @@ spec:
               mkdir -p "$(dirname "$target")"
               if [ ! -d "$target/.git" ]; then
                 git clone --branch main --single-branch \
-                  https://github.com/OffensiveGeneric/glasslab-cluster-config.git \
+                  https://github.com/ccny-glasslab/glasslab-cluster-config.git \
                   "$target"
               fi
               git -C "$target" fetch origin main
@@ -55,7 +53,7 @@ spec:
               mountPath: /mnt/artifacts
       containers:
         - name: orchestrator
-          image: ghcr.io/offensivegeneric/glasslab-research-orchestrator:0.1.0
+          image: ghcr.io/ccny-glasslab/glasslab-research-orchestrator:0.1.0
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:
@@ -63,6 +61,12 @@ spec:
             - secretRef:
                 name: glasslab-research-orchestrator
                 optional: true
+          env:
+            - name: GLASSLAB_ORCHESTRATOR_STORE_POSTGRES_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: glasslab-research-orchestrator
+                  key: GLASSLAB_ORCHESTRATOR_STORE_POSTGRES_DSN
           ports:
             - containerPort: 8080
               name: http

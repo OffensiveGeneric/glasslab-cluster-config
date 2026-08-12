@@ -135,3 +135,14 @@ def test_comma_separated_image_allowlist_from_environment(
         'ghcr.io/example/runner:a',
         'ghcr.io/example/runner:b',
     ]
+
+
+def test_postgres_backend_requires_an_explicit_dsn() -> None:
+    with pytest.raises(ValueError, match='non-empty store_postgres_dsn'):
+        Settings(store_backend='postgres')
+
+    settings = Settings(
+        store_backend='postgres',
+        store_postgres_dsn='postgresql://glasslab:test@localhost/glasslab',
+    )
+    assert settings.store_backend == 'postgres'

@@ -91,7 +91,7 @@ Request body shape:
   "workload_id": "metric-search-v0",
   "parent_run_id": "run-123",
   "campaign_id": "campaign-abc",
-  "image_ref": "ghcr.io/offensivegeneric/glasslab-metric-search:928f3be",
+  "image_ref": "ghcr.io/ccny-glasslab/glasslab-metric-search:928f3be",
   "entrypoint": [
     "python3",
     "scripts/run_experiment.py",

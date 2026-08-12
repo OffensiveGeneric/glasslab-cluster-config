@@ -17,7 +17,7 @@ spec:
         - name: glasslab-ghcr-pull
       containers:
         - name: intake-agent
-          image: ghcr.io/offensivegeneric/glasslab-intake-agent:0.1.0
+          image: ghcr.io/ccny-glasslab/glasslab-intake-agent:0.1.0
           imagePullPolicy: IfNotPresent
           env:
             - name: GLASSLAB_INTAKE_AGENT_PROVIDER_API

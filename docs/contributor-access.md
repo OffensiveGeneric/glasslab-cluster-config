@@ -66,7 +66,7 @@ After authenticating the GitHub CLI, create a personal checkout:
 
 ```bash
 cd ~
-gh repo clone OffensiveGeneric/glasslab-cluster-config cluster-config
+gh repo clone ccny-glasslab/glasslab-cluster-config cluster-config
 cd ~/cluster-config
 git switch -c <personal-feature-branch>
 ```

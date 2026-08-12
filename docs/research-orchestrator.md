@@ -1,12 +1,12 @@
 # Glasslab Research Orchestrator
 
 Status: deployed as a single-replica MVP. The complete workflow is covered with
-mocked OpenCode and cluster adapters. OpenCode against the two-node exo model,
+mocked Hermes and cluster adapters. Hermes against the two-node exo model,
 Discord threads and role-gated controls, restart recovery, and live Kubernetes
 deployment were tested on 2026-07-29. Three imported ML benchmark task types
 now have bounded CPU/GPU workload definitions and immutable evaluator contracts;
 their live end-to-end execution status is recorded below. Generic TaskSpec
-compilation and preflight were validated against live OpenCode and Qwen with a
+compilation and preflight were validated against the live agent runtime and Qwen with a
 synthetic task; a complete arbitrary-dataset run remains outstanding.
 
 For the concise operator surface, read
@@ -28,7 +28,7 @@ existing bounded execution plane:
       |             |
       v             v
  Honeydew        Beaker
- OpenCode        OpenCode
+ Hermes          Hermes
  runtime         runtime
       |             |
       +------+------+
@@ -46,7 +46,7 @@ existing bounded execution plane:
   artifacts + evaluation output
 ```
 
-OpenCode is the inner runtime. It performs each agent's model call, local tool
+Hermes is the inner runtime. It performs each agent's model call, local tool
 loop, file changes, and structured response. The orchestrator is the outer
 scientific workflow. It owns turn-taking, approvals, durable state, privileged
 actions, evidence, interruption, and recovery.
@@ -111,20 +111,20 @@ Beaker for analysis. It does not automatically fail the research run.
 
 ## Durable Records
 
-The service stores runs, turns, actions, jobs, artifacts, and append-only events
-in SQLite with WAL enabled. Each event receives a monotonically increasing
-per-run sequence inside the same transaction as its state change.
+The production service stores runs, turns, actions, jobs, artifacts, knowledge
+records, and append-only events in PostgreSQL. Records are JSONB with typed
+query columns; each event receives a monotonically increasing per-run sequence
+inside the same transaction as its state change. A transaction-scoped advisory
+lock makes the one-active-run policy and event ordering correct across process
+boundaries. SQLite with WAL remains the local-development and smoke-test
+backend, plus a one-time import source for the previous deployment.
 
-The deployment is deliberately fixed at one replica. SQLite is placed on the
-shared artifacts PVC. PostgreSQL is the expected next storage step before
-horizontal scaling.
-
-Normalized event names form the stable external contract. Raw OpenCode event
+Normalized event names form the stable external contract. Raw runtime event
 names are translated into events such as `agent.tool_started`,
 `agent.turn_completed`, `action.proposed`, `job.completed`, and
 `artifact.recorded`.
 
-## Workspaces And OpenCode
+## Workspaces And Hermes
 
 Each run has this layout:
 
@@ -147,15 +147,12 @@ The snapshot rejects symlinks and path escapes, enforces file and byte limits,
 records SHA-256 digests, and is read-only. Honeydew therefore reviews Beaker's
 actual candidate without gaining write access to Beaker's worktree.
 
-The OpenCode adapter starts one authenticated `opencode serve` child process
-per agent. Each process receives a separate workspace, XDG configuration and
-data directory, system prompt, permission configuration, server port, and
-session ID. Sessions are recorded in the database and reconnected after an
-orchestrator restart. Active turns have an explicit abort path.
-
-The adapter uses the installed OpenCode HTTP API for server health, session
-creation, structured message output, event streaming, and abort. Runtime event
-names are not persisted directly.
+The Hermes adapter starts one isolated Hermes process per agent. Each process
+receives a separate workspace, configuration/data directory, system prompt,
+permission configuration, server port, and session ID. Sessions are recorded
+in the database and reconstructed after an orchestrator restart. Active turns
+have an explicit abort path. Runtime event names are normalized before they are
+persisted.
 
 The current deployment configuration points both runtimes at:
 
@@ -275,8 +272,9 @@ evidence URI of the form `knowledge://<source_id>`. Re-ingesting identical
 content from the same canonical URI deduplicates to the original source row so
 its evidence URI stays stable; sources are invalidated explicitly by digest.
 
-Retrieval is lexical and quality-ranked. It uses SQLite FTS5 with BM25 ranking,
-weighted by exact query-term overlap. The final ranking preserves the anchor
+Retrieval is lexical and quality-ranked. The production backend uses PostgreSQL
+full-text ranking; SQLite FTS5 remains the local fallback. Ranking is weighted
+by exact query-term overlap. The final ranking preserves the anchor
 behavior of lexical exact-match for distinct-topic queries so a
 distinct-topic result cannot be displaced by a generic near-match. Embedding-
 based semantic similarity and reranking are planned but not yet implemented.
@@ -300,7 +298,7 @@ exact context packet that grounded a claim; a claim about knowledge requires a
 
 The generic contribution path accepts a ZIP with exactly one `problem.md` and
 zero or one `eval_agent_prompt.md`; its filename has no semantic meaning.
-Honeydew reads the normalized files in a temporary isolated OpenCode session
+Honeydew reads the normalized files in a temporary isolated Hermes session
 and returns a validated `glasslab-task-spec-v1` containing:
 
 - a human-facing name
@@ -318,7 +316,7 @@ repository-controlled `generic-task-integrity-v1` contract.
 
 Local datasets are ingested separately from task ZIPs. The HTTP and Discord
 surfaces accept a bounded file, store it read-only under the shared artifact
-mount, and register its SHA-256 digest in SQLite. The returned
+mount, and register its SHA-256 digest in the durable store. The returned
 `glasslab-dataset://<sha256>` reference is the model-facing identifier. Task
 compilation resolves it to an `s3://artifacts/...` contract; preflight verifies
 the file and digest, and `workflow-api` mounts the exact PVC subpath read-only
@@ -444,7 +442,7 @@ gap.
 
 ## Long Jobs And Recovery
 
-Agent turns end before submission. While jobs run, OpenCode is idle and the
+Agent turns end before submission. While jobs run, Hermes is idle and the
 watcher reconciles authoritative job state. Completion records exit details and
 artifacts before beginning a new agent turn.
 
@@ -457,14 +455,14 @@ At startup the service:
 4. reconciles `JOB_QUEUED` and `JOB_RUNNING` jobs, and
 5. advances workflows only after authoritative evidence is stored.
 
-Cancellation aborts active OpenCode turns and requests cancellation for every
+Cancellation aborts active Hermes turns and requests cancellation for every
 nonterminal job. Prior events are retained.
 
 Pause records the exact state to resume. If recovery after resume fails, the
-orchestrator records the failed turn, terminates that agent's OpenCode process,
+orchestrator records the failed turn, terminates that agent's Hermes process,
 clears the stale session ID, writes
 `events/<agent>-recovery-checkpoint.json`, and returns the run to `PAUSED`.
-Resume creates a fresh OpenCode session, injects the compact checkpoint, and
+Resume creates a fresh Hermes session, injects the compact checkpoint, and
 continues from the unchanged worktree. Successful sessions remain reusable
 across normal turns. Resume also detects older paused records whose latest
 failed turn still references the attached session and rotates them before
@@ -621,7 +619,7 @@ Cancel an active run from its Discord thread:
 ```
 
 From the configured main channel, provide `run_id`. Cancellation aborts active
-OpenCode turns, requests cancellation of active cluster jobs, records the
+Hermes turns, requests cancellation of active cluster jobs, records the
 administrator identity and reason, and publishes the durable cancellation
 event back to the run thread.
 
@@ -658,7 +656,7 @@ are under `kubeadm/glasslab-v2/research-orchestrator` and are included by
 `scripts/deploy-glasslab-v2.sh`.
 
 The manifest enforces one replica, disables service-account token mounting,
-runs as a non-root user, and stores SQLite and workspaces on
+runs as a non-root user, and stores workspaces on
 `glasslab-shared-artifacts`. An init container maintains the approved
 repository checkout.
 
@@ -678,7 +676,7 @@ Before deployment:
 The Titanic agent stack remains under `services/agent-api`, `services/runner`,
 and `kubeadm/agent-stack`. It is preserved as v1 reference material.
 
-The orchestrator does not copy its Titanic-specific intent parser, SQLite
+The orchestrator does not copy its Titanic-specific intent parser, legacy SQLite
 schema, or direct Kubernetes submission model. It reuses the lessons and the
 bounded execution boundary represented by `workflow-api` and
 `research-workspace-runner`. The old stack can continue to run during migration.
@@ -688,7 +686,7 @@ bounded execution boundary represented by `workflow-api` and
 Implemented:
 
 - state machine, durable records, ordered events, approvals, and recovery
-- isolated worktree and OpenCode runtime adapters
+- isolated worktree and Hermes runtime adapters
 - structured turn validation and normalized runtime events
 - contract digest checks and read-only job rendering
 - policy, quotas, matrix expansion, fake and workflow-api cluster adapters
@@ -702,17 +700,17 @@ Implemented:
 Covered by mocks:
 
 - the full Honeydew/Beaker workflow
-- structured OpenCode turn completion and abort behavior
+- structured Hermes turn completion and abort behavior
 - parallel fake jobs, completion, failure evidence, and artifacts
 - restart reconciliation and cancellation
 - knowledge ingestion, retrieval scoping, and context attachment
 
 Manually tested:
 
-- OpenCode `1.4.6` headless health and session create/delete on this laptop
-- the non-root service image build, OpenCode version, application import, and
+- Hermes runtime health and structured turn completion against Qwen
+- the non-root service image build, Hermes version, application import, and
   `/ready` response
-- a real structured Honeydew turn through OpenCode `1.4.6` and the exo-served
+- a real structured Honeydew turn through Hermes and the exo-served
   `mlx-community/Qwen3-Coder-Next-4bit` model from `.44`
 - live Discord public-thread creation, editable status publication, and
   Honeydew/Beaker webhook identities in the configured guild and channel
@@ -734,7 +732,7 @@ Not yet tested:
 ## MVP Limitations
 
 - one orchestrator replica and one active research run
-- SQLite WAL rather than PostgreSQL
+- PostgreSQL live migration and recovery against the cluster database
 - one approved repository and fixed agent profiles
 - one process per agent, not a separate pod or Unix identity
 - no Git push, PR creation, arbitrary SSH, or raw Kubernetes access

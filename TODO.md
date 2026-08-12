@@ -8,33 +8,33 @@ duplicate complete task specifications or maintain an independent status.
 
 Current issues:
 
-- [all open work](https://github.com/OffensiveGeneric/glasslab-cluster-config/issues)
-- [ready work](https://github.com/OffensiveGeneric/glasslab-cluster-config/issues?q=is%3Aissue%20state%3Aopen%20label%3Astate%3Aready)
-- [newcomer work](https://github.com/OffensiveGeneric/glasslab-cluster-config/issues?q=is%3Aissue%20state%3Aopen%20label%3A%22good%20first%20issue%22)
+- [all open work](https://github.com/ccny-glasslab/glasslab-cluster-config/issues)
+- [ready work](https://github.com/ccny-glasslab/glasslab-cluster-config/issues?q=is%3Aissue%20state%3Aopen%20label%3Astate%3Aready)
+- [newcomer work](https://github.com/ccny-glasslab/glasslab-cluster-config/issues?q=is%3Aissue%20state%3Aopen%20label%3A%22good%20first%20issue%22)
 
 ## P0: Restore The End-To-End Research Loop
 
-- [#104 Prevent missing Honeydew contract metadata from failing a run](https://github.com/OffensiveGeneric/glasslab-cluster-config/issues/104)
-- [#92 Add terminal research-run checkpoint retry](https://github.com/OffensiveGeneric/glasslab-cluster-config/issues/92)
-- [#100 Complete corrected Wine clustering run](https://github.com/OffensiveGeneric/glasslab-cluster-config/issues/100), blocked by #92
+- [#104 Prevent missing Honeydew contract metadata from failing a run](https://github.com/ccny-glasslab/glasslab-cluster-config/issues/104)
+- [#92 Add terminal research-run checkpoint retry](https://github.com/ccny-glasslab/glasslab-cluster-config/issues/92)
+- [#100 Complete corrected Wine clustering run](https://github.com/ccny-glasslab/glasslab-cluster-config/issues/100), blocked by #92
 
 ## P1: Make Operation Observable And Faster
 
-- [#95 Expose structured research-run turn inspection](https://github.com/OffensiveGeneric/glasslab-cluster-config/issues/95)
-- [#94 Add Discord research run status and discovery commands](https://github.com/OffensiveGeneric/glasslab-cluster-config/issues/94)
-- [#93 Compact research-agent evidence prompts](https://github.com/OffensiveGeneric/glasslab-cluster-config/issues/93)
-- [#99 Add research runtime storage retention and cache cleanup](https://github.com/OffensiveGeneric/glasslab-cluster-config/issues/99)
+- [#95 Expose structured research-run turn inspection](https://github.com/ccny-glasslab/glasslab-cluster-config/issues/95)
+- [#94 Add Discord research run status and discovery commands](https://github.com/ccny-glasslab/glasslab-cluster-config/issues/94)
+- [#93 Compact research-agent evidence prompts](https://github.com/ccny-glasslab/glasslab-cluster-config/issues/93)
+- [#99 Add research runtime storage retention and cache cleanup](https://github.com/ccny-glasslab/glasslab-cluster-config/issues/99)
 
 ## P1: Validate General Research Tasks
 
-- [#98 Validate an arbitrary-dataset research workflow end to end](https://github.com/OffensiveGeneric/glasslab-cluster-config/issues/98)
-- [#101 Complete Fashion-MNIST compatibility run](https://github.com/OffensiveGeneric/glasslab-cluster-config/issues/101)
-- [#96 Evaluate Hermes as a research-agent runtime adapter](https://github.com/OffensiveGeneric/glasslab-cluster-config/issues/96)
+- [#98 Validate an arbitrary-dataset research workflow end to end](https://github.com/ccny-glasslab/glasslab-cluster-config/issues/98)
+- [#101 Complete Fashion-MNIST compatibility run](https://github.com/ccny-glasslab/glasslab-cluster-config/issues/101)
+- [#96 Evaluate Hermes as a research-agent runtime adapter](https://github.com/ccny-glasslab/glasslab-cluster-config/issues/96)
 
 ## P2: Durability And Maintenance
 
-- [#97 Plan PostgreSQL migration for the research orchestrator](https://github.com/OffensiveGeneric/glasslab-cluster-config/issues/97)
-- [#102 Consolidate current docs and triage legacy issues](https://github.com/OffensiveGeneric/glasslab-cluster-config/issues/102)
+- [#97 Plan PostgreSQL migration for the research orchestrator](https://github.com/ccny-glasslab/glasslab-cluster-config/issues/97)
+- [#102 Consolidate current docs and triage legacy issues](https://github.com/ccny-glasslab/glasslab-cluster-config/issues/102)
 
 ## Maintenance Rule
 

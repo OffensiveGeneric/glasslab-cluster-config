@@ -2,9 +2,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-IMAGE_REF="${GLASSLAB_METRIC_SEARCH_IMAGE_REF:-ghcr.io/offensivegeneric/glasslab-metric-search:latest}"
+IMAGE_REF="${GLASSLAB_METRIC_SEARCH_IMAGE_REF:-ghcr.io/ccny-glasslab/glasslab-metric-search:latest}"
 REGISTRY_HOST="${GLASSLAB_METRIC_SEARCH_REGISTRY_HOST:-ghcr.io}"
-REGISTRY_USERNAME="${GHCR_USERNAME:-${GITHUB_ACTOR:-OffensiveGeneric}}"
+REGISTRY_USERNAME="${GHCR_USERNAME:-${GITHUB_ACTOR:-ccny-glasslab}}"
 REGISTRY_TOKEN="${GHCR_TOKEN:-}"
 
 usage() {
@@ -16,7 +16,7 @@ Build the metric-search image locally and push it to GHCR.
 Environment:
   GLASSLAB_METRIC_SEARCH_IMAGE_REF  Image reference with tag
   GHCR_TOKEN    GitHub token with package write access
-  GHCR_USERNAME Registry username. Defaults to OffensiveGeneric.
+  GHCR_USERNAME Registry username. Defaults to ccny-glasslab.
 USAGE
 }
 

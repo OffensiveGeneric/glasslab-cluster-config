@@ -2,9 +2,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-IMAGE_REF="${GLASSLAB_TABULAR_RUNNER_IMAGE_REF:-ghcr.io/offensivegeneric/glasslab-tabular-runner:0.1.2}"
+IMAGE_REF="${GLASSLAB_TABULAR_RUNNER_IMAGE_REF:-ghcr.io/ccny-glasslab/glasslab-tabular-runner:0.1.2}"
 REGISTRY_HOST="${GLASSLAB_TABULAR_RUNNER_REGISTRY_HOST:-ghcr.io}"
-REGISTRY_USERNAME="${GHCR_USERNAME:-${GITHUB_ACTOR:-OffensiveGeneric}}"
+REGISTRY_USERNAME="${GHCR_USERNAME:-${GITHUB_ACTOR:-ccny-glasslab}}"
 REGISTRY_TOKEN="${GHCR_TOKEN:-}"
 
 usage() {
@@ -15,7 +15,7 @@ Build the tabular runner image locally and push it to GHCR.
 
 Environment:
   GHCR_TOKEN    GitHub token with package write access
-  GHCR_USERNAME Registry username. Defaults to OffensiveGeneric.
+  GHCR_USERNAME Registry username. Defaults to ccny-glasslab.
 USAGE
 }
 

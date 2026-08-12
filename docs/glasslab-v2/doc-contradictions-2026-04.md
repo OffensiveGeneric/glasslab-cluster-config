@@ -115,7 +115,7 @@ This report documents contradictions between older historical documents and the 
 | File | Contradictory Claim | Conflicts With |
 |------|---------------------|----------------|
 | `docs/glasslab-v2/node02-role-decision.md` (lines 9-119) | "Keep Legacy vLLM As Active Fallback... preserve the old cluster-local tool-capable path as a standby lane" | `canonical-stack-2026-04.md` (lines 159-161, 163-167) |
-| `docs/glasslab-v2/live-state-2026-04-03.md` (lines 11-12) | Workflow-api rolled live as `ghcr.io/offensivegeneric/glasslab-workflow-api:0.1.84-local` on `.44` | `canonical-stack-2026-04.md` (lines 127-128, 136-142) |
+| `docs/glasslab-v2/live-state-2026-04-03.md` (lines 11-12) | Workflow-api rolled live as `ghcr.io/ccny-glasslab/glasslab-workflow-api:0.1.84-local` on `.44` | `canonical-stack-2026-04.md` (lines 127-128, 136-142) |
 
 **Current State (2026-04):** The "vLLM as a current product lane" is explicitly legacy (product-cleanup-2026-04.md line 253). The "old in-cluster `vllm` story is legacy" (product-cleanup-2026-04.md line 254). The canonical backend is exo OpenAI-compatible serving, not vLLM (product-cleanup-2026-04.md line 51). Node02 vLLM should be "retired or repurposed" (node02-role-decision.md line 37).
 

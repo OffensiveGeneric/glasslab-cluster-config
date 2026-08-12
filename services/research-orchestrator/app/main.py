@@ -59,6 +59,7 @@ from .schemas import (
     SourceType,
 )
 from .storage import ConcurrencyConflict, RecordNotFound, SqliteStore
+from .postgres_store import PostgresStore
 from .task_bundles import (
     TaskBundleError,
     TaskBundleManager,
@@ -85,7 +86,11 @@ def build_engine(
     # Composition root: wires every subsystem against the same store so all
     # mutations share one transaction boundary and one event log. The cluster
     # executor is swapped for a fake when running without a live API.
-    store = SqliteStore(settings.database_path)
+    store = (
+        PostgresStore(settings.store_postgres_dsn)
+        if settings.store_backend == 'postgres'
+        else SqliteStore(settings.database_path)
+    )
     if runtime is None:
         runtime = build_agent_runtime(settings)
     if cluster is None:

@@ -18,7 +18,7 @@ spec:
         kubernetes.io/hostname: node03
       containers:
         - name: api
-          image: ghcr.io/offensivegeneric/glasslab-agent-api:0.1.0
+          image: ghcr.io/ccny-glasslab/glasslab-agent-api:0.1.0
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:

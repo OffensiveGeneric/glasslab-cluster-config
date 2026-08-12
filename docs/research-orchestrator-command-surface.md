@@ -20,7 +20,7 @@ and approval role or explicit administrator allowlist.
 | `/research-artifacts [run_id:<id>] [include_source:<bool>]` | Run thread, or main channel with `run_id` | Downloads a digest-verified ZIP of the latest run-level artifacts and successful-job outputs. |
 | `/research-pause [run_id:<id>] [reason:<text>]` | Run thread, or main channel with `run_id` | Aborts an active model turn, preserves state, and records where to resume. |
 | `/research-resume [run_id:<id>] [reason:<text>]` | Run thread, or main channel with `run_id` | Restores a paused run to its prior state and restarts workflow recovery. |
-| `/research-cancel [run_id:<id>] [reason:<text>]` | Run thread, or main channel with `run_id` | Cancels the run, aborts active OpenCode turns, requests cancellation of active jobs, and records the Discord actor and reason. |
+| `/research-cancel [run_id:<id>] [reason:<text>]` | Run thread, or main channel with `run_id` | Cancels the run, aborts active Hermes turns, requests cancellation of active jobs, and records the Discord actor and reason. |
 
 Inside a run thread, pause, resume, and cancel resolve the run from the thread
 and do not require an ID.
@@ -71,7 +71,7 @@ reference in `problem.md` or the objective.
 - If verification finds missing or invalid evidence, a fresh bounded revision
   budget begins and Beaker receives the failure details.
 - `/research-pause` aborts an active model turn but preserves the worktree and
-  recovery checkpoint. `/research-resume` starts a fresh OpenCode session from
+  recovery checkpoint. `/research-resume` starts a fresh Hermes session from
   that checkpoint.
 - `FAILED`, `CANCELLED`, and `TIMED_OUT` are terminal. They cannot currently be
   resumed. Retry-from-terminal-checkpoint is a known missing capability.
@@ -209,7 +209,7 @@ When structural validation is insufficient:
 4. Honeydew reviews the read-only sealed copy.
 5. A human approves promotion into the trusted contract catalog.
 
-Neither OpenCode agent can edit a promoted contract or substitute an evaluator
+Neither Hermes agent can edit a promoted contract or substitute an evaluator
 entry point in a job request.
 
 ## HTTP Operator API
@@ -280,12 +280,12 @@ curl -fsS "http://127.0.0.1:18080/runs/$RUN/artifacts" | jq
 curl -N "http://127.0.0.1:18080/runs/$RUN/events/stream"
 ```
 
-The run's workspaces, protocol, reports, OpenCode data, and recovery checkpoints
+The run's workspaces, protocol, reports, Hermes data, and recovery checkpoints
 are stored beneath
 `/mnt/artifacts/research-orchestrator/runs/<run-id>/` in the orchestrator pod.
 Use `kubectl exec` from the provisioner to inspect them. The HTTP API does not
 yet expose a dedicated full-turn endpoint; normalized events are the stable
-external record, while raw OpenCode storage is an implementation detail.
+external record, while raw runtime storage is an implementation detail.
 
 ## Deployment Commands
 
@@ -293,8 +293,8 @@ GitHub Actions publishes a matched pair of immutable images under the full
 commit SHA:
 
 ```text
-ghcr.io/offensivegeneric/glasslab-workflow-api:<full-sha>
-ghcr.io/offensivegeneric/glasslab-research-orchestrator:<full-sha>
+ghcr.io/ccny-glasslab/glasslab-workflow-api:<full-sha>
+ghcr.io/ccny-glasslab/glasslab-research-orchestrator:<full-sha>
 ```
 
 Deploy that release from the canonical `.44` checkout:
@@ -318,7 +318,7 @@ runs live readiness checks.
 
 Implemented and live:
 
-- separate Honeydew and Beaker OpenCode sessions and workspaces
+- separate Honeydew and Beaker Hermes sessions and workspaces
 - fresh-session recovery after failed or interrupted agent turns, with compact
   persisted checkpoints and unchanged worktrees
 - a bounded Beaker planning turn before implementation, without a fixed
@@ -339,7 +339,7 @@ Validated:
 - 98 research-orchestrator tests
 - 159 workflow-api tests
 - mocked complete research workflow
-- live OpenCode/Qwen structured task compilation
+- live Hermes/Qwen structured task compilation
 - live Discord threads, identities, approvals, rejection feedback, and
   cancellation projection
 - live Discord registration of dataset upload, pause, and resume commands
@@ -370,7 +370,9 @@ path is `/task-start`, not another hardcoded task entry.
 ## Current Limitations
 
 - one active research run
-- one orchestrator replica and SQLite WAL
+- one orchestrator replica; PostgreSQL is durable, but horizontal scaling is
+  deliberately deferred until active-run and Discord ownership policies are
+  broadened
 - fixed approved repository and runtime profiles
 - no authenticated remote dataset download or private object-store browser
 - no Discord list or status commands

@@ -163,7 +163,7 @@ if os.uname().sysname != "Darwin":
 
 ### Image Used
 
-`ghcr.io/offensivegeneric/glasslab-metric-search:faa46eb`
+`ghcr.io/ccny-glasslab/glasslab-metric-search:faa46eb`
 
 This image includes:
 - PyTorch

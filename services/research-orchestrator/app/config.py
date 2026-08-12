@@ -29,6 +29,8 @@ class Settings(BaseSettings):
 
     app_name: str = 'glasslab-research-orchestrator'
     app_version: str = '0.1.0'
+    store_backend: Literal['sqlite', 'postgres'] = 'sqlite'
+    store_postgres_dsn: str | None = None
     database_path: str = '/tmp/glasslab-research-orchestrator/orchestrator.db'
     workspace_root: str = '/tmp/glasslab-research-orchestrator/runs'
     artifact_root: str = '/tmp/glasslab-research-orchestrator/artifacts'
@@ -91,7 +93,7 @@ class Settings(BaseSettings):
     qwen_base_url: str = 'http://192.168.1.17:52415/v1'
     qwen_model_name: str = 'mlx-community/Qwen3-Coder-Next-4bit'
     opencode_runtime_image: str = (
-        'ghcr.io/offensivegeneric/glasslab-research-orchestrator:0.1.0'
+        'ghcr.io/ccny-glasslab/glasslab-research-orchestrator:0.1.0'
     )
     hermes_executable: str = '/usr/local/bin/hermes'
     hermes_server_host: str = '127.0.0.1'
@@ -112,7 +114,7 @@ class Settings(BaseSettings):
     cluster_execution_experiment_type: str = 'gpu-training-job'
     kubernetes_namespace: str = 'glasslab-v2'
     permitted_job_images: Annotated[list[str], NoDecode] = [
-        'ghcr.io/offensivegeneric/glasslab-metric-search:latest',
+        'ghcr.io/ccny-glasslab/glasslab-metric-search:latest',
     ]
 
     maximum_turns: int = 20
@@ -140,6 +142,13 @@ class Settings(BaseSettings):
     @property
     def effective_agent_model_name(self) -> str:
         return self.agent_model_name or self.qwen_model_name
+
+    @field_validator('store_postgres_dsn')
+    @classmethod
+    def require_postgres_dsn(cls, value: str | None, info) -> str | None:
+        if info.data.get('store_backend') == 'postgres' and not (value or '').strip():
+            raise ValueError('postgres store backend requires a non-empty store_postgres_dsn')
+        return value
 
     @field_validator('permitted_job_images', mode='before')
     @classmethod
