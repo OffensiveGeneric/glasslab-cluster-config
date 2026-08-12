@@ -6,6 +6,7 @@ from hashlib import sha256
 from pathlib import Path
 import sqlite3
 import subprocess
+import shutil
 import zipfile
 
 import pytest
@@ -437,6 +438,61 @@ def test_retry_recovery_accepts_matching_worktree_protocol(orchestrator_bundle):
     store.replace_run(current.model_copy(update={'state': RunState.PREPARING}), expected_version=current.version)
     engine._resume_terminal_retry(child.run_id)
     assert store.get_run(child.run_id).state == RunState.AWAITING_PROTOCOL_APPROVAL
+
+
+@pytest.mark.parametrize('workspace_name', ['beaker_workspace', 'honeydew_workspace'])
+@pytest.mark.parametrize('target_exists', [False, True])
+def test_retry_rejects_live_and_dangling_worktree_protocol_symlinks(
+    orchestrator_bundle, tmp_path, workspace_name, target_exists,
+):
+    _, store, _, _, engine = orchestrator_bundle
+    parent = _terminal_parent(engine, store)
+    child = engine.retry_terminal_run(parent.run_id, TerminalRetryRequest())
+    outside = tmp_path / f'outside-{workspace_name}-{target_exists}.md'
+    sentinel = 'outside sentinel\n'
+    if target_exists:
+        outside.write_text(sentinel)
+    target = Path(getattr(child, workspace_name)) / 'program.md'
+    target.symlink_to(outside)
+    current = store.get_run(child.run_id)
+    store.replace_run(current.model_copy(update={'state': RunState.PREPARING}), expected_version=current.version)
+    with pytest.raises(Exception, match='must not be a symlink'):
+        engine._resume_terminal_retry(child.run_id)
+    # Defense in depth: approval must also reject the link rather than making
+    # copy2 follow it outside the isolated worktree.
+    with pytest.raises(Exception, match='must not be a symlink'):
+        engine.workspaces.freeze_protocol(child.run_id)
+    if target_exists:
+        assert outside.read_text() == sentinel
+    else:
+        assert not outside.exists()
+
+
+@pytest.mark.parametrize('task_bound', [False, True])
+@pytest.mark.parametrize('target_exists', [False, True])
+def test_retry_rejects_live_and_dangling_benchmark_task_root_symlinks(
+    orchestrator_bundle, tmp_path, task_bound, target_exists,
+):
+    _, store, _, _, engine = orchestrator_bundle
+    if task_bound:
+        _, parent = _terminal_task_parent(engine, store)
+    else:
+        parent = _terminal_parent(engine, store)
+    child = engine.retry_terminal_run(parent.run_id, TerminalRetryRequest())
+    outside = tmp_path / f'outside-task-{task_bound}-{target_exists}'
+    if target_exists:
+        outside.mkdir()
+        (outside / 'sentinel.txt').write_text('outside\n')
+    for workspace_name in ('beaker_workspace', 'honeydew_workspace'):
+        task_root = Path(getattr(child, workspace_name)) / 'benchmark-task'
+        if task_root.exists():
+            task_root.chmod(0o755)
+            shutil.rmtree(task_root)
+        task_root.symlink_to(outside, target_is_directory=True)
+    current = store.get_run(child.run_id)
+    store.replace_run(current.model_copy(update={'state': RunState.PREPARING}), expected_version=current.version)
+    with pytest.raises(Exception, match='benchmark-task root must not be a symlink'):
+        engine._resume_terminal_retry(child.run_id)
 
 
 @pytest.mark.parametrize('mutation, expected', [

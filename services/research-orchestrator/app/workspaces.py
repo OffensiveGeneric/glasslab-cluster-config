@@ -156,7 +156,7 @@ class WorkspaceManager:
 
     def freeze_protocol(self, run_id: str) -> None:
         protocol = self.paths(run_id).protocol / 'program.md'
-        if not protocol.is_file():
+        if protocol.is_symlink() or not protocol.is_file():
             raise WorkspaceError('program.md does not exist')
         protocol.chmod(0o444)
         # After approval the protocol is immutable everywhere (protocol dir and
@@ -167,6 +167,11 @@ class WorkspaceManager:
             self.paths(run_id).honeydew,
         ):
             target = workspace / 'program.md'
+            # exists() is false for a dangling link, so test link identity
+            # before existence or chmod/copy2 could follow it outside the
+            # isolated worktree.
+            if target.is_symlink():
+                raise WorkspaceError('worktree program.md must not be a symlink')
             if target.exists():
                 target.chmod(target.stat().st_mode | 0o200)
             shutil.copy2(protocol, target)
@@ -256,21 +261,24 @@ class WorkspaceManager:
             raise WorkspaceError('retry worktree base commit mismatch')
         protocol = manifest.get('protocol', {})
         protocol_path = self.paths(run_id).root / str(protocol.get('path', ''))
-        if not protocol_path.is_file() or protocol_path.is_symlink() or sha256(protocol_path.read_bytes()).hexdigest() != protocol.get('sha256'):
+        if protocol_path.is_symlink() or not protocol_path.is_file() or sha256(protocol_path.read_bytes()).hexdigest() != protocol.get('sha256'):
             raise WorkspaceError('retry protocol checksum mismatch')
         managed_task_files = manifest.get('managed_task_files')
         if not isinstance(managed_task_files, list):
             raise WorkspaceError('retry managed task manifest is invalid')
         for workspace in (self.paths(run_id).beaker, self.paths(run_id).honeydew):
             worktree_protocol = workspace / 'program.md'
+            if worktree_protocol.is_symlink():
+                raise WorkspaceError('retry worktree protocol must not be a symlink')
             if worktree_protocol.exists() and (
                 not worktree_protocol.is_file()
-                or worktree_protocol.is_symlink()
                 or sha256(worktree_protocol.read_bytes()).hexdigest()
                 != protocol.get('sha256')
             ):
                 raise WorkspaceError('retry worktree protocol does not match authoritative protocol')
             task_root = workspace / 'benchmark-task'
+            if task_root.is_symlink():
+                raise WorkspaceError('retry benchmark-task root must not be a symlink')
             if not managed_task_files:
                 if task_root.exists() and any(task_root.rglob('*')):
                     raise WorkspaceError('taskless retry contains benchmark-task content')
