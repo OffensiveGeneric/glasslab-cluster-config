@@ -25,6 +25,7 @@ from app.config import Settings
 import app.autoresearch as autoresearch_module
 import app.main as main_module
 import app.source_documents as source_documents
+from app.job_submission import LiveStatusUnavailableError, NullJobSubmitter
 from app.schemas import AutoresearchDecisionRecord, AutoresearchIterationRecord, EvaluatorContract
 from app.stage_interpretation import build_interpretation_record_from_agent_draft, validate_interpretation_agent_draft
 from app.main import create_app
@@ -6787,3 +6788,48 @@ def test_autoresearch_notebook_refinement_uses_coding_model_response(tmp_path, m
 
     path = Path(payload['storage_uri'].removeprefix('file://'))
     assert path.exists()
+
+
+def test_run_status_route_returns_200_during_kube_outage() -> None:
+    settings = Settings(
+        registry_dir=str(REPO_ROOT / 'services' / 'workflow-registry' / 'definitions'),
+    )
+    registry = WorkflowRegistry(settings.registry_dir)
+    store = InMemoryRunStore()
+
+    class OutageSubmitter(NullJobSubmitter):
+        def get_live_status(self, record):
+            raise LiveStatusUnavailableError(
+                'Kubernetes transport failure during live status lookup'
+            )
+
+    client = TestClient(
+        create_app(
+            settings=settings,
+            registry=registry,
+            store=store,
+            submitter=OutageSubmitter(namespace='default'),
+        )
+    )
+
+    create = client.post(
+        '/experiments/runs',
+        json={
+            'objective': 'Observe a run during a Kubernetes outage.',
+            'experiment_type': 'gpu-training-job',
+            'workload_id': 'metric-search-v0',
+            'entrypoint': ['python3', 'scripts/run_experiment.py'],
+            'config_payload': {'search_space_id': 'art-metric-baseline'},
+            'dataset_bindings': {'train_uri': 's3://datasets/art/train.parquet'},
+            'budget': {'max_epochs': 1, 'max_wallclock_minutes': 5},
+            'submitted_by': 'test-suite',
+        },
+    )
+    assert create.status_code == 201
+    run_id = create.json()['run_id']
+
+    got = client.get(f'/runs/{run_id}')
+    assert got.status_code == 200
+    status = got.json()['status']
+    assert 'Live Kubernetes status unavailable' in status['detail']
+    assert 'showing durable stored status' in status['detail']

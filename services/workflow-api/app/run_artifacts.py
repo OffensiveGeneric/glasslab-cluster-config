@@ -17,7 +17,7 @@ from pathlib import Path
 from services.common.schemas import ArtifactIndexEntry, ArtifactsIndex, RunStatus
 
 from .config import Settings
-from .job_submission import JobSubmitter
+from .job_submission import JobSubmitter, LiveStatusUnavailableError
 from .schemas import LogEntry, RunRecord
 
 MEDIA_TYPES = {
@@ -183,11 +183,26 @@ def _path_is_within(path: Path, root: Path) -> bool:
 def resolve_run_status(record: RunRecord, settings: Settings, submitter: JobSubmitter) -> RunStatus:
     # Prefer on-disk terminal status first (authoritative once written), then
     # live Kubernetes status (for in-flight jobs), falling back to the stored
-    # record (accepted but not yet scheduled).
+    # record (accepted but not yet scheduled). A Kubernetes API/transport
+    # outage degrades to the stored record with an explicit note rather than
+    # surfacing an HTTP 500.
     disk_status = load_status_from_disk(settings, record.run_id)
     if disk_status is not None:
         return disk_status
-    live_status = submitter.get_live_status(record)
+    try:
+        live_status = submitter.get_live_status(record)
+    except LiveStatusUnavailableError as exc:
+        durable = record.status
+        durable_detail = f'{durable.detail}; ' if durable.detail else ''
+        return RunStatus(
+            run_id=record.run_id,
+            status=durable.status,
+            updated_at=durable.updated_at,
+            detail=(
+                f'{durable_detail}Live Kubernetes status unavailable '
+                f'({exc}); showing durable stored status.'
+            ),
+        )
     if live_status is not None:
         return live_status
     return record.status
