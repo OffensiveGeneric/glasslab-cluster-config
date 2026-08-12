@@ -118,15 +118,18 @@ class ResearchOrchestrator:
         self._advance_lock = RLock()
 
     def _publish_latest(self, run_id: str) -> None:
-        run = self.store.get_run(run_id)
         events = self.store.list_events(run_id)
         if not events:
             return
+        self._publish_event(run_id, events[-1])
+
+    def _publish_event(self, run_id: str, event) -> None:
+        run = self.store.get_run(run_id)
         try:
             status_message_id = self.discord.publish(
                 thread_id=run.discord_thread_id,
                 status_message_id=run.discord_status_message_id,
-                event=events[-1],
+                event=event,
             )
             if (
                 status_message_id
@@ -144,6 +147,21 @@ class ResearchOrchestrator:
         except Exception:
             # Discord is a replaceable projection and cannot fail the workflow.
             return
+
+    def _republish_pending_approval(self, run_id: str) -> bool:
+        pending_ids = {
+            action.action_id
+            for action in self.store.list_actions(run_id)
+            if action.approval_status == ApprovalStatus.PENDING
+        }
+        for event in reversed(self.store.list_events(run_id)):
+            if (
+                event.event_type == 'action.proposed'
+                and event.payload.get('action_id') in pending_ids
+            ):
+                self._publish_event(run_id, event)
+                return True
+        return False
 
     def _attach_discord_thread(self, run_id: str) -> RunRecord:
         """Attach one independent, best-effort transcript thread to a run."""
@@ -1280,13 +1298,23 @@ class ResearchOrchestrator:
             digest=str(manifest['protocol']['sha256']),
             metadata={'path': str(self.workspaces.paths(run_id).protocol / 'program.md'), 'parent_run_id': run.parent_run_id, 'retry_checkpoint_digest': run.retry_checkpoint_digest},
         )
-        if not any(
-            action.type == 'approve_protocol'
-            for action in self.store.list_actions(run_id)
-        ):
+        existing_protocol_action = next(
+            (
+                action for action in self.store.list_actions(run_id)
+                if action.type == 'approve_protocol'
+            ),
+            None,
+        )
+        if existing_protocol_action is None:
             self._create_human_action(
                 run_id=run_id, action_type='approve_protocol',
                 reason='A terminal retry reuses a verified protocol but requires fresh human approval.',
+            )
+        else:
+            self._repair_action_proposed_event(
+                existing_protocol_action,
+                source='orchestrator',
+                payload=self._approval_event_payload(existing_protocol_action),
             )
         self._transition(run_id, RunState.AWAITING_PROTOCOL_APPROVAL, payload={'retry_parent_run_id': run.parent_run_id})
 
@@ -4126,6 +4154,14 @@ class ResearchOrchestrator:
             self._backfill_local_artifacts(run.run_id)
         recovered: list[str] = []
         for run in self.store.list_active_runs():
+            # A retry child can survive a Discord outage during its initial
+            # attach. On recovery, attach a fresh thread and project the last
+            # durable event; Discord remains non-authoritative throughout.
+            if run.parent_run_id and not run.discord_thread_id:
+                attached = self._attach_discord_thread(run.run_id)
+                if attached.discord_thread_id:
+                    if not self._republish_pending_approval(run.run_id):
+                        self._publish_latest(run.run_id)
             running_turns = [
                 turn
                 for turn in self.store.list_turns(run.run_id)

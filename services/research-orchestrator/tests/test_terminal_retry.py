@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import io
+import json
+from hashlib import sha256
 from pathlib import Path
+import sqlite3
 import subprocess
 import zipfile
 
@@ -26,6 +29,18 @@ class RecordingDiscord(DiscordAdapter):
         return status_message_id
 
 
+class FlakyDiscord(RecordingDiscord):
+    def __init__(self, *, fail_creates: int) -> None:
+        super().__init__()
+        self.fail_creates = fail_creates
+
+    def create_thread(self, *, run_id: str, objective: str) -> str | None:
+        if self.fail_creates:
+            self.fail_creates -= 1
+            raise RuntimeError('Discord unavailable')
+        return super().create_thread(run_id=run_id, objective=objective)
+
+
 def _terminal_parent(engine, store):
     parent = engine.create_run(RunCreateRequest(objective='Verify terminal retry checkpoint isolation.'))
     protocol_action = next(
@@ -47,6 +62,23 @@ def _task_archive() -> bytes:
         archive.writestr('task/problem.md', '# Task\n')
         archive.writestr('task/eval_agent_prompt.md', '# Evaluator\n')
     return content.getvalue()
+
+
+def _terminal_task_parent(engine, store):
+    task = engine.import_task_bundle(filename='task.zip', content=_task_archive())
+    engine.policy.permitted_images.add(task.runner_image)
+    parent = engine.create_run(
+        RunCreateRequest(
+            objective='Retry a verified task-bound research run.',
+            task_id=task.task_id,
+            task_bundle_digest=task.digest,
+        )
+    )
+    approval = next(action for action in store.list_actions(parent.run_id) if action.type == 'approve_protocol')
+    engine.approve_action(approval.action_id, reviewer='test-reviewer', reason='Approve task protocol.')
+    parent = store.get_run(parent.run_id)
+    store.replace_run(parent.model_copy(update={'state': RunState.FAILED}), expected_version=parent.version)
+    return task, store.get_run(parent.run_id)
 
 
 def test_terminal_retry_creates_fresh_child_and_renews_protocol_approval(orchestrator_bundle):
@@ -191,6 +223,52 @@ def test_task_bound_retry_copies_real_delta_and_allows_fresh_approval(orchestrat
     assert Path(child.beaker_workspace, 'program.md').stat().st_mode & 0o200 == 0
 
 
+def test_task_bound_retry_rejects_tampered_archive(orchestrator_bundle):
+    _, store, _, _, engine = orchestrator_bundle
+    task, parent = _terminal_task_parent(engine, store)
+    archive = Path(task.archive_path)
+    archive.chmod(archive.stat().st_mode | 0o200)
+    archive.write_bytes(archive.read_bytes() + b'tampered')
+
+    with pytest.raises(WorkflowError, match='preflight'):
+        engine.retry_terminal_run(parent.run_id, TerminalRetryRequest())
+
+
+def test_task_bound_retry_rejects_missing_verified_asset(orchestrator_bundle):
+    settings, store, _, _, engine = orchestrator_bundle
+    task, parent = _terminal_task_parent(engine, store)
+    metadata = Path(task.archive_path).with_name('task.json')
+    metadata.chmod(metadata.stat().st_mode | 0o200)
+    payload = task.model_dump(mode='json')
+    payload['datasets'] = [{
+        'name': 'required-data',
+        'uri': 's3://artifacts/missing.csv',
+        'sha256': sha256(b'expected').hexdigest(),
+        'role': 'train',
+        'contains_labels': True,
+    }]
+    metadata.write_text(json.dumps(payload), encoding='utf-8')
+
+    with pytest.raises(WorkflowError, match='preflight'):
+        engine.retry_terminal_run(parent.run_id, TerminalRetryRequest())
+
+
+def test_task_bound_retry_rebinds_current_runner_metadata(orchestrator_bundle):
+    _, store, _, _, engine = orchestrator_bundle
+    task, parent = _terminal_task_parent(engine, store)
+    metadata = Path(task.archive_path).with_name('task.json')
+    metadata.chmod(metadata.stat().st_mode | 0o200)
+    payload = task.model_dump(mode='json')
+    payload['runner_image'] = 'ghcr.io/ccny-glasslab/obsolete-runner:old'
+    metadata.write_text(json.dumps(payload), encoding='utf-8')
+    rebound = engine.task_bundles.get(task.task_id, task.digest)
+    engine.policy.permitted_images.add(rebound.runner_image)
+
+    child = engine.retry_terminal_run(parent.run_id, TerminalRetryRequest())
+    assert child.task_definition['runner_image'] == rebound.runner_image
+    assert child.task_definition['runner_image'] != payload['runner_image']
+
+
 def test_retry_uses_recorded_historical_base_commit(orchestrator_bundle):
     settings, store, _, _, engine = orchestrator_bundle
     parent = _terminal_parent(engine, store)
@@ -240,6 +318,27 @@ def test_retry_creates_a_fresh_discord_thread_and_projects_approval(orchestrator
     )
 
 
+def test_retry_recovers_missing_child_discord_thread(orchestrator_bundle):
+    _, store, _, _, engine = orchestrator_bundle
+    parent = _terminal_parent(engine, store)
+    discord = FlakyDiscord(fail_creates=1)
+    engine.discord = discord
+
+    child = engine.retry_terminal_run(parent.run_id, TerminalRetryRequest())
+    assert child.discord_thread_id is None
+    assert store.get_run(child.run_id).state == RunState.AWAITING_PROTOCOL_APPROVAL
+
+    engine.recover()
+    recovered = store.get_run(child.run_id)
+    assert recovered.discord_thread_id == 'thread-1'
+    approval = next(action for action in store.list_actions(child.run_id) if action.type == 'approve_protocol')
+    assert any(
+        thread_id == 'thread-1'
+        and event.payload.get('action_id') == approval.action_id
+        for thread_id, event in discord.published
+    )
+
+
 def test_retry_recovery_rejects_extra_child_worktree_delta(orchestrator_bundle):
     _, store, _, _, engine = orchestrator_bundle
     parent = _terminal_parent(engine, store)
@@ -248,6 +347,33 @@ def test_retry_recovery_rejects_extra_child_worktree_delta(orchestrator_bundle):
     current = store.get_run(child.run_id)
     store.replace_run(current.model_copy(update={'state': RunState.PREPARING}), expected_version=current.version)
     with pytest.raises(Exception, match='delta'):
+        engine._resume_terminal_retry(child.run_id)
+
+
+@pytest.mark.parametrize('mutation, expected', [
+    ('changed', 'checksum'),
+    ('missing', 'checksum'),
+    ('head', 'base commit'),
+])
+def test_retry_recovery_rejects_changed_or_missing_checkpoint_material(
+    orchestrator_bundle, mutation, expected,
+):
+    _, store, _, _, engine = orchestrator_bundle
+    parent = _terminal_parent(engine, store)
+    source = Path(parent.beaker_workspace) / 'checkpoint.py'
+    source.write_text('value = 1\n')
+    child = engine.retry_terminal_run(parent.run_id, TerminalRetryRequest())
+    target = Path(child.beaker_workspace) / 'checkpoint.py'
+    if mutation == 'changed':
+        target.write_text('value = 2\n')
+    elif mutation == 'missing':
+        target.unlink()
+    else:
+        subprocess.run(['git', 'add', 'checkpoint.py'], cwd=child.beaker_workspace, check=True)
+        subprocess.run(['git', 'commit', '-m', 'Alter retry checkpoint'], cwd=child.beaker_workspace, check=True)
+    current = store.get_run(child.run_id)
+    store.replace_run(current.model_copy(update={'state': RunState.PREPARING}), expected_version=current.version)
+    with pytest.raises(Exception, match=expected):
         engine._resume_terminal_retry(child.run_id)
 
 
@@ -269,3 +395,30 @@ def test_legacy_action_without_event_is_repaired_with_persisted_identity(orchest
     assert repaired.action_id == legacy.action_id
     proposals = [event for event in store.list_events(run.run_id) if event.event_type == 'action.proposed']
     assert any(event.payload.get('action_id') == legacy.action_id for event in proposals)
+
+
+def test_preparing_retry_repair_restores_one_missing_protocol_proposal_event(orchestrator_bundle):
+    settings, store, _, _, engine = orchestrator_bundle
+    parent = _terminal_parent(engine, store)
+    child = engine.retry_terminal_run(parent.run_id, TerminalRetryRequest())
+    action = next(action for action in store.list_actions(child.run_id) if action.type == 'approve_protocol')
+    with sqlite3.connect(settings.database_path) as connection:
+        connection.execute(
+            "DELETE FROM events WHERE run_id = ? AND event_type = 'action.proposed'",
+            (child.run_id,),
+        )
+    current = store.get_run(child.run_id)
+    store.replace_run(current.model_copy(update={'state': RunState.PREPARING}), expected_version=current.version)
+
+    engine.recover()
+    proposals = [
+        event for event in store.list_events(child.run_id)
+        if event.event_type == 'action.proposed'
+    ]
+    assert [event.payload.get('action_id') for event in proposals] == [action.action_id]
+    engine.recover()
+    proposals = [
+        event for event in store.list_events(child.run_id)
+        if event.event_type == 'action.proposed'
+    ]
+    assert [event.payload.get('action_id') for event in proposals] == [action.action_id]
