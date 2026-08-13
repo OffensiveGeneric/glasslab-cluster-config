@@ -1,53 +1,29 @@
 # Glasslab Current Handoff
 
-Last updated: 2026-08-06
+Last updated: 2026-08-13
 
 This is the compact current-state checkpoint for switching human or coding
-agents. Read `AGENTS.md` first for stable rules and architecture. Read
-`TODO.md` for the prioritized work queue.
+agents. Read `AGENTS.md` first for stable rules, architecture, vocabulary,
+access paths, and live inspection commands. Read `TODO.md` for the prioritized
+work queue.
 
-## Current Direction
+## Live Infrastructure Facts
 
-The active research path is:
+The research orchestrator runs as a single pod on `node05`. Its state and
+per-run workspaces are on `glasslab-shared-artifacts`, backed by NFS at:
 
 ```text
-Discord
-  -> research-orchestrator
-  -> Honeydew and Beaker agent runtimes
-  -> workflow-api
-  -> bounded Kubernetes Jobs
-  -> immutable evaluation and artifacts
+192.168.1.207:/volume1/backup/glasslab-v2/shared-artifacts
 ```
 
-Honeydew owns protocol, methodology review, evidence verification, and the
-final report. Beaker owns implementation, experiment proposals, and result
-analysis. The orchestrator, not either model, owns state transitions,
-approvals, policy, job submission, and durable records.
+Both agent runtimes point at the exo OpenAI-compatible service at
+`192.168.1.17:52415`. The cabled exo pair is `.17` and `.18`.
 
 OpenCode currently supplies the inner agent loop. Hermes Agent is being
-considered as a replacement for the custom OpenCode runtime/API integration
-and possibly the Discord transport. It is not approved as a replacement for
-the Glasslab state machine, evaluation contracts, artifact provenance, or
+evaluated as a replacement for the OpenCode runtime/API integration and
+possibly the Discord transport. It is not approved as a replacement for the
+Glasslab state machine, evaluation contracts, artifact provenance, or
 `workflow-api`.
-
-## Authority And Access
-
-- GitHub is committed state.
-- The provisioner at `192.168.1.44` is the canonical live checkout and cluster
-  operations host.
-- Actual live state must be checked from the provisioner; laptop state and docs
-  alone are insufficient.
-- Canonical checkout on the provisioner:
-  `/home/glasslab/cluster-config`.
-- Normal access aliases are `glasslab-gateway` and `glasslab-provisioner`.
-- Cluster workers are not normal contributor login targets.
-
-The research orchestrator is a single pod on `node05`. Its state and per-run
-workspaces are on `glasslab-shared-artifacts`, backed by NFS at
-`192.168.1.207:/volume1/backup/glasslab-v2/shared-artifacts`.
-
-Both agent runtimes are configured to use the exo OpenAI-compatible service at
-`192.168.1.17:52415`. The cabled exo pair is `.17` and `.18`.
 
 ## Latest Implemented Changes
 
@@ -69,10 +45,10 @@ This summarized handoff and the issue-backed work queue are follow-up changes
 on branch `docs/contributor-agent-handoff`; do not treat them as merged until
 their follow-up pull request is on `main`.
 
-GitHub Issues are again the authoritative work queue. The active backlog was
-reset on 2026-08-06: obsolete OpenClaw, WhatsApp, literature, and old
-autoresearch issues were closed with their history preserved. Current work is
-indexed in `TODO.md` and tracked in issues #92 through #102.
+GitHub Issues are the authoritative work queue. The active backlog was reset
+on 2026-08-06: obsolete OpenClaw, WhatsApp, literature, and old autoresearch
+issues were closed with their history preserved. Current work is indexed in
+`TODO.md`.
 
 ## Current Research Runs
 
@@ -124,51 +100,18 @@ Then use that path to continue the preserved one-job Wine proposal through
 Honeydew review, Discord execution approval, one corrected cluster job,
 evaluation, report, and final acceptance.
 
-## Inspect Live State
-
-From a contributor workstation:
-
-```bash
-ssh glasslab-provisioner
-sudo -n env KUBECONFIG=/home/glasslab/.kube/config \
-  kubectl -n glasslab-v2 get pods,jobs -o wide
-```
-
-For the internal orchestrator API, create a tunnel:
-
-```bash
-ssh -L 18080:127.0.0.1:18080 glasslab-provisioner \
-  'sudo -n env KUBECONFIG=/home/glasslab/.kube/config \
-   kubectl -n glasslab-v2 port-forward \
-   svc/glasslab-research-orchestrator 18080:8080'
-```
-
-Then:
-
-```bash
-RUN=39101d9c9d3d4753bcd74e93e6106819
-curl -fsS "http://127.0.0.1:18080/runs/$RUN" | jq
-curl -fsS "http://127.0.0.1:18080/runs/$RUN/events" | jq
-curl -fsS "http://127.0.0.1:18080/runs/$RUN/artifacts" | jq
-```
-
-Per-run files are available inside the orchestrator pod at:
-
-```text
-/mnt/artifacts/research-orchestrator/runs/<run-id>/
-```
-
 ## Known Risks
 
 - One orchestrator replica and SQLite WAL remain a scaling limitation.
 - Agent turns can be slow against the shared exo model; large evidence bundles
   amplify the problem.
-- Terminal checkpoint retry is missing.
-- Complete structured turns do not have a first-class read-only HTTP endpoint.
-- OpenCode runtime caches consume substantial shared storage per run.
-- Discord has no explicit list or status slash command; the editable thread
-  message is the normal status surface.
-- A generic arbitrary-dataset run has not yet completed end to end.
+- Terminal checkpoint retry is missing (tracked in #92).
+- Complete structured turns do not have a first-class read-only HTTP endpoint
+  (tracked in #95).
+- OpenCode runtime caches consume substantial shared storage per run (tracked
+  in #99).
+- A generic arbitrary-dataset run has not yet completed end to end (tracked
+  in #98).
 
 Update this file whenever the active deployment, current blocker, or next legal
 workflow step materially changes. Keep historical detail in dated docs or run
