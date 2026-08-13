@@ -191,6 +191,7 @@ Then inspect authoritative read APIs:
 curl -fsS http://127.0.0.1:18080/runs | jq
 curl -fsS http://127.0.0.1:18080/runs/<run-id>/events | jq
 curl -fsS http://127.0.0.1:18080/runs/<run-id>/artifacts | jq
+curl -fsS http://127.0.0.1:18080/runs/<run-id>/turns | jq
 ```
 
 Per-run durable files are mounted in the orchestrator pod at:

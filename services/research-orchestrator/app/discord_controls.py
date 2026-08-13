@@ -24,6 +24,12 @@ from .schemas import (
     RunCreateRequest,
     RunRecord,
 )
+from .turn_inspection import (
+    DEFAULT_DISCORD_TURN_LIMIT,
+    MAXIMUM_DISCORD_TURN_LIMIT,
+    format_turn_history,
+    summarize_turns,
+)
 
 if TYPE_CHECKING:
     from .engine import ResearchOrchestrator
@@ -212,6 +218,21 @@ def execute_discord_artifact_export(
     )
 
 
+def execute_discord_turn_history(
+    engine: ResearchOrchestrator,
+    *,
+    run_id: str,
+    limit: int,
+) -> str:
+    # Same redaction and bounding as GET /runs/{run_id}/turns (see
+    # turn_inspection.py) so the Discord view can never show more, or less
+    # safely, than the HTTP API does.
+    run = engine.store.get_run(run_id)
+    turns = engine.store.list_turns(run_id)
+    summaries = summarize_turns(turns, limit=limit)
+    return format_turn_history(run, summaries, total_turns=len(turns))
+
+
 # Compatibility name for callers that predate generic task compilation.
 execute_discord_benchmark_creation = execute_discord_task_creation
 
@@ -382,6 +403,34 @@ class DiscordControlGateway:
                 interaction,
                 run_id=run_id,
                 include_source=include_source,
+            )
+
+        @self.tree.command(
+            name='research-turns',
+            description=(
+                'Show a Glasslab research run\'s redacted agent turn history.'
+            ),
+            guild=self.guild,
+        )
+        @app_commands.describe(
+            run_id='Optional in a run thread; required from the main channel.',
+            limit=(
+                f'Most recent turns to show (default '
+                f'{DEFAULT_DISCORD_TURN_LIMIT}, max '
+                f'{MAXIMUM_DISCORD_TURN_LIMIT}).'
+            ),
+        )
+        async def research_turns(
+            interaction: discord.Interaction,
+            run_id: str | None = None,
+            limit: app_commands.Range[
+                int, 1, MAXIMUM_DISCORD_TURN_LIMIT
+            ] = DEFAULT_DISCORD_TURN_LIMIT,
+        ) -> None:
+            await self._on_research_turns(
+                interaction,
+                run_id=run_id,
+                limit=int(limit),
             )
 
     def _register_run_control_command(self, operation: str) -> None:
@@ -799,6 +848,49 @@ class DiscordControlGateway:
         except Exception as exc:
             await interaction.followup.send(
                 f'Artifact export failed: {exc}',
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+
+    async def _on_research_turns(
+        self,
+        interaction: discord.Interaction,
+        *,
+        run_id: str | None,
+        limit: int,
+    ) -> None:
+        actor = self._actor(interaction)
+        if not self.policy.is_authorized(actor):
+            await self._respond(
+                interaction,
+                'You are not authorized to inspect Glasslab research turns.',
+            )
+            return
+        try:
+            run = self._resolve_controlled_run(
+                channel_id=str(interaction.channel_id),
+                run_id=run_id,
+            )
+        except Exception as exc:
+            await self._respond(interaction, f'Turn inspection failed: {exc}')
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            message = await asyncio.to_thread(
+                execute_discord_turn_history,
+                self.engine,
+                run_id=run.run_id,
+                limit=limit,
+            )
+            await interaction.followup.send(
+                message,
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except Exception as exc:
+            await interaction.followup.send(
+                f'Turn inspection failed: {exc}',
                 ephemeral=True,
                 allowed_mentions=discord.AllowedMentions.none(),
             )

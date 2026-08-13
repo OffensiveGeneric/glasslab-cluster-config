@@ -100,14 +100,47 @@ Then use that path to continue the preserved one-job Wine proposal through
 Honeydew review, Discord execution approval, one corrected cluster job,
 evaluation, report, and final acceptance.
 
+## Inspect Live State
+
+From a contributor workstation:
+
+```bash
+ssh glasslab-provisioner
+sudo -n env KUBECONFIG=/home/glasslab/.kube/config \
+  kubectl -n glasslab-v2 get pods,jobs -o wide
+```
+
+For the internal orchestrator API, create a tunnel:
+
+```bash
+ssh -L 18080:127.0.0.1:18080 glasslab-provisioner \
+  'sudo -n env KUBECONFIG=/home/glasslab/.kube/config \
+   kubectl -n glasslab-v2 port-forward \
+   svc/glasslab-research-orchestrator 18080:8080'
+```
+
+Then:
+
+```bash
+RUN=39101d9c9d3d4753bcd74e93e6106819
+curl -fsS "http://127.0.0.1:18080/runs/$RUN" | jq
+curl -fsS "http://127.0.0.1:18080/runs/$RUN/events" | jq
+curl -fsS "http://127.0.0.1:18080/runs/$RUN/artifacts" | jq
+curl -fsS "http://127.0.0.1:18080/runs/$RUN/turns" | jq
+```
+
+Per-run files are available inside the orchestrator pod at:
+
+```text
+/mnt/artifacts/research-orchestrator/runs/<run-id>/
+```
+
 ## Known Risks
 
 - One orchestrator replica and SQLite WAL remain a scaling limitation.
 - Agent turns can be slow against the shared exo model; large evidence bundles
   amplify the problem.
 - Terminal checkpoint retry is missing (tracked in #92).
-- Complete structured turns do not have a first-class read-only HTTP endpoint
-  (tracked in #95).
 - OpenCode runtime caches consume substantial shared storage per run (tracked
   in #99).
 - A generic arbitrary-dataset run has not yet completed end to end (tracked
@@ -119,6 +152,8 @@ evaluation, report, and final acceptance.
   own runtime storage does not yet have the same cache-sharing treatment
   (its on-disk layout under `HERMES_HOME` is not cleanly split into
   cache/data/state the way OpenCode's is), only cleanup.
+- Discord has no explicit list or status slash command; the editable thread
+  message is the normal status surface.
 
 Update this file whenever the active deployment, current blocker, or next legal
 workflow step materially changes. Keep historical detail in dated docs or run
