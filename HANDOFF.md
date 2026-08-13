@@ -112,6 +112,13 @@ evaluation, report, and final acceptance.
   in #99).
 - A generic arbitrary-dataset run has not yet completed end to end (tracked
   in #98).
+- OpenCode's package/model cache is now shared across runs instead of
+  copied per run, and terminal-run scratch space (worktrees, runtime/) is
+  eligible for cleanup after `terminal_run_retention_days`; see
+  `services/research-orchestrator/scripts/cleanup-run-storage.py`. Hermes's
+  own runtime storage does not yet have the same cache-sharing treatment
+  (its on-disk layout under `HERMES_HOME` is not cleanly split into
+  cache/data/state the way OpenCode's is), only cleanup.
 
 Update this file whenever the active deployment, current blocker, or next legal
 workflow step materially changes. Keep historical detail in dated docs or run
