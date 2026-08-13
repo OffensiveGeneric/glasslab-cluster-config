@@ -4166,8 +4166,15 @@ class ResearchOrchestrator:
             )
             return
         if state == RunState.PREPARING:
-            self._transition(run_id, RunState.HONEYDEW_DRAFTING_PROTOCOL)
-            self._draft_protocol(run_id)
+            if run.parent_run_id:
+                # Retry child crashed in PREPARING before reaching
+                # HONEYDEW_REVIEWING; skip protocol drafting and go straight
+                # to methodology review (the approved protocol is already frozen).
+                self._transition(run_id, RunState.HONEYDEW_REVIEWING)
+                self._honeydew_review(run_id, implementation_turn_id='recovered')
+            else:
+                self._transition(run_id, RunState.HONEYDEW_DRAFTING_PROTOCOL)
+                self._draft_protocol(run_id)
         elif state == RunState.HONEYDEW_DRAFTING_PROTOCOL:
             self._draft_protocol(run_id)
         elif state == RunState.BEAKER_DRAFTING_CONTRACT:

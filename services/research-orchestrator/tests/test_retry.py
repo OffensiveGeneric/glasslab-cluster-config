@@ -576,3 +576,92 @@ def test_run_retry_request_rejects_invalid_bounds() -> None:
         RunRetryRequest(maximum_turns=0)
     with pytest.raises(pydantic.ValidationError):
         RunRetryRequest(maximum_runtime_seconds=30)
+
+
+# ---------------------------------------------------------------------------
+# Recovery: PREPARING retry child routes to HONEYDEW_REVIEWING, not protocol
+# ---------------------------------------------------------------------------
+
+
+def test_recover_routes_retry_child_in_preparing_to_honeydew_reviewing(
+    orchestrator_bundle, monkeypatch
+) -> None:
+    # Simulate a crash between create_retry_run and the HONEYDEW_REVIEWING
+    # transition. Recovery must not start protocol drafting for a child run.
+    _, store, _, _, engine = orchestrator_bundle
+    now = utc_now()
+
+    parent_id = uuid4().hex
+    parent = RunRecord(
+        run_id=parent_id,
+        objective='Wine clustering.',
+        state=RunState.FAILED,
+        evaluation_contract_id='generic-research-v1',
+        evaluation_contract_version='1',
+        evaluation_contract_digest='a' * 64,
+        beaker_workspace='/x',
+        honeydew_workspace='/x',
+        shared_artifacts_path='/x',
+        reports_path='/x',
+        maximum_turns=20,
+        maximum_runtime_seconds=3600,
+        maximum_parallel_jobs=1,
+        active_since=None,
+        created_at=now,
+        updated_at=now,
+    )
+    store.create_run(parent, one_active_run=False)
+
+    child_id = uuid4().hex
+    child = RunRecord(
+        run_id=child_id,
+        parent_run_id=parent_id,
+        objective='Wine clustering.',
+        state=RunState.PREPARING,
+        evaluation_contract_id='generic-research-v1',
+        evaluation_contract_version='1',
+        evaluation_contract_digest='a' * 64,
+        beaker_workspace='/x',
+        honeydew_workspace='/x',
+        shared_artifacts_path='/x',
+        reports_path='/x',
+        maximum_turns=20,
+        maximum_runtime_seconds=3600,
+        maximum_parallel_jobs=1,
+        active_since=now,
+        created_at=now,
+        updated_at=now,
+    )
+    store.create_retry_run(child, parent_run_id=parent_id)
+
+    # Seed a pending matrix action so _honeydew_review doesn't raise.
+    from app.schemas import ActionRecord, AgentName, ApprovalStatus, PolicyClassification
+    action = ActionRecord(
+        run_id=child_id,
+        proposed_by=AgentName.BEAKER,
+        type='submit_experiment_matrix',
+        arguments={},
+        policy_classification=PolicyClassification.HONEYDEW_AND_HUMAN_APPROVAL,
+        approval_status=ApprovalStatus.PENDING,
+        idempotency_key=uuid4().hex,
+        reason='carried forward from parent',
+    )
+    store.save_action(action)
+
+    transitions_seen: list[str] = []
+
+    original_transition = engine._transition
+    def recording_transition(run_id, target, **kwargs):
+        transitions_seen.append(target.value)
+        return original_transition(run_id, target, **kwargs)
+    monkeypatch.setattr(engine, '_transition', recording_transition)
+
+    # _honeydew_review will fail (no real workspace), but we only care that
+    # the recovery entered HONEYDEW_REVIEWING, not HONEYDEW_DRAFTING_PROTOCOL.
+    try:
+        engine._recover_run(child_id)
+    except Exception:
+        pass
+
+    assert RunState.HONEYDEW_REVIEWING.value in transitions_seen
+    assert RunState.HONEYDEW_DRAFTING_PROTOCOL.value not in transitions_seen
