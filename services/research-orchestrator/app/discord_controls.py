@@ -619,24 +619,6 @@ class DiscordControlGateway:
                 limit=int(limit),
             )
 
-        )
-        async def research_status(
-            interaction: discord.Interaction,
-            run_id: str | None = None,
-        ) -> None:
-            await self._on_research_status(
-                interaction,
-                run_id=run_id,
-            )
-
-        @self.tree.command(
-            name='research-list',
-            description='List active and recent Glasslab research runs.',
-            guild=self.guild,
-        )
-        async def research_list(interaction: discord.Interaction) -> None:
-            await self._on_research_list(interaction)
-
         @self.tree.command(
             name='research-status',
             description='Show the durable status of a Glasslab research run.',
