@@ -309,7 +309,11 @@ class PostgresStore:
     def list_knowledge_chunks(self, source_id: str) -> list[KnowledgeChunk]:
         with self._connect() as conn: return [KnowledgeChunk.model_validate(r['payload']) for r in conn.execute('SELECT payload FROM orchestrator_knowledge_chunks WHERE source_id=%s ORDER BY chunk_index', (source_id,)).fetchall()]
     def search_knowledge_chunks(self, query: str, *, source_ids: list[str] | None = None, limit: int = 10) -> list[dict[str, Any]]:
-        params: list[Any] = [query]; clause = "to_tsvector('simple', text) @@ websearch_to_tsquery('simple', %s)"
+        # The rank expression and the WHERE predicate each bind the search
+        # query. Keep both parameters explicit; psycopg does not reuse a
+        # positional placeholder automatically.
+        params: list[Any] = [query, query]
+        clause = "to_tsvector('simple', text) @@ websearch_to_tsquery('simple', %s)"
         if source_ids: clause += ' AND source_id = ANY(%s)'; params.append(source_ids)
         params.append(limit)
         sql = "SELECT payload, ts_rank_cd(to_tsvector('simple', text), websearch_to_tsquery('simple', %s)) AS rank FROM orchestrator_knowledge_chunks WHERE " + clause + ' ORDER BY rank DESC, chunk_index LIMIT %s'
