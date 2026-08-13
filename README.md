@@ -138,11 +138,24 @@ If you are operating the lab:
    [Beaker/Honeydew board](https://github.com/orgs/ccny-glasslab/projects/3).
 2. Read its acceptance criteria, assign yourself, and clarify scope in the
    issue before starting.
-3. Create an issue-named branch and open one PR that references the issue.
+3. Create a short-lived branch from `testing` using a prefix such as
+   `feat/`, `fix/`, `docs/`, or `chore/`, and open one PR that references the
+   issue.
 4. Keep state labels current: `state:in-progress`, `state:review`,
    `state:blocked`, or `state:todo`.
-5. Treat CI as repository validation. Record live cluster checks and rollout
+5. Merge completed work into `testing` first. Promote `testing` to `main` only
+   after the integration state is ready for production.
+6. Treat CI as repository validation. Record live cluster checks and rollout
    separately in the PR; CI does not prove deployment.
+
+Branch policy:
+
+- `main` is the production branch and should contain only reviewed,
+  releasable commits.
+- `testing` is the shared integration branch for combining approved feature,
+  fix, documentation, and infrastructure changes.
+- Feature branches are disposable. Do not build long-lived personal or agent
+  branches; open a PR, merge it, and delete the branch.
 
 Issues define desired outcomes, PRs define canonical implementations, and the
 durable run records define actual research state.
