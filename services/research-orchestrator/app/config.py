@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     database_path: str = '/tmp/glasslab-research-orchestrator/orchestrator.db'
     workspace_root: str = '/tmp/glasslab-research-orchestrator/runs'
     artifact_root: str = '/tmp/glasslab-research-orchestrator/artifacts'
+    # How long a terminal (FAILED/CANCELLED/TIMED_OUT/COMPLETE) run's
+    # per-run runtime/worktree storage is kept before scripts/
+    # cleanup-run-storage.py is eligible to remove it. See
+    # app/storage_retention.py; this never affects protocol/reports/
+    # shared-artifacts, only agent process scratch space.
+    terminal_run_retention_days: int = 14
     # Knowledge store: chunk sizing and the per-turn retrieval budget bound
     # context cost regardless of model or content; the allowlist roots are the
     # only places ingestion may read from (in production these are the mounted
@@ -87,6 +93,15 @@ class Settings(BaseSettings):
     opencode_structured_repair_attempts: int = 1
     opencode_structured_output_mode: Literal['json_schema', 'prompt'] = (
         'json_schema'
+    )
+    # OpenCode's package/model download cache (XDG_CACHE_HOME) is shared
+    # across every run and both agents instead of copied per run: it is
+    # non-essential, regenerable data (the same OpenCode version and plugin
+    # set for everyone), unlike XDG_DATA_HOME (session auth) or
+    # XDG_STATE_HOME (logs/history), which stay isolated per run. See
+    # opencode_runtime.py's _write_runtime_config.
+    opencode_shared_cache_root: str = (
+        '/tmp/glasslab-research-orchestrator/opencode-cache'
     )
     agent_model_provider_id: str = 'exo'
     agent_model_name: str | None = None

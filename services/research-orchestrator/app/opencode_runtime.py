@@ -377,7 +377,15 @@ class OpenCodeProcessRuntime(AgentRuntime):
         runtime_root = workspace.parent / 'runtime' / agent.value
         config_root = runtime_root / 'config'
         data_root = runtime_root / 'data'
-        cache_root = runtime_root / 'cache'
+        # XDG_CACHE_HOME is intentionally NOT under runtime_root: it holds
+        # OpenCode's own package/model download cache, which is the same
+        # regenerable content for every run and both agents (same OpenCode
+        # version, same plugin set). Sharing one location here is what stops
+        # it from being copied into every run directory (see config.py's
+        # opencode_shared_cache_root and issue #99). XDG_DATA_HOME (session
+        # auth), XDG_STATE_HOME (logs/history), and HOME stay per-run: those
+        # are run-specific state, not cache.
+        cache_root = Path(self.settings.opencode_shared_cache_root)
         state_root = runtime_root / 'state'
         home_root = runtime_root / 'home'
         opencode_config_root = config_root / 'opencode'

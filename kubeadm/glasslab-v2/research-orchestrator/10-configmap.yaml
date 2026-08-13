@@ -10,6 +10,10 @@ data:
   GLASSLAB_ORCHESTRATOR_DATABASE_PATH: /mnt/artifacts/research-orchestrator/state/orchestrator.db
   GLASSLAB_ORCHESTRATOR_WORKSPACE_ROOT: /mnt/artifacts/research-orchestrator/runs
   GLASSLAB_ORCHESTRATOR_ARTIFACT_ROOT: /mnt/artifacts/research-orchestrator/artifacts
+  # scripts/cleanup-run-storage.py eligibility window for a terminal run's
+  # worktree/runtime scratch space; protocol/reports/shared-artifacts/events
+  # are never affected regardless of this setting.
+  GLASSLAB_ORCHESTRATOR_TERMINAL_RUN_RETENTION_DAYS: "14"
   GLASSLAB_ORCHESTRATOR_EVIDENCE_EXCERPT_MAX_BYTES: "32768"
   GLASSLAB_ORCHESTRATOR_APPROVED_REPO_PATH: /mnt/artifacts/research-orchestrator/approved-repo
   GLASSLAB_ORCHESTRATOR_APPROVED_REPO_REF: main
@@ -37,6 +41,10 @@ data:
   GLASSLAB_ORCHESTRATOR_OPENCODE_REPEATED_TOOL_LIMIT: "6"
   GLASSLAB_ORCHESTRATOR_OPENCODE_STRUCTURED_REPAIR_ATTEMPTS: "1"
   GLASSLAB_ORCHESTRATOR_OPENCODE_STRUCTURED_OUTPUT_MODE: prompt
+  # One shared package/model download cache for every run and both agents
+  # instead of a copy per run (see issue #99); session/auth/log state stays
+  # per-run regardless of this setting.
+  GLASSLAB_ORCHESTRATOR_OPENCODE_SHARED_CACHE_ROOT: /mnt/artifacts/research-orchestrator/opencode-cache
   # OpenCode remains installed only as a rollback runtime.
   GLASSLAB_ORCHESTRATOR_AGENT_MODEL_PROVIDER_ID: exo
   GLASSLAB_ORCHESTRATOR_AGENT_MODEL_NAME: mlx-community/Qwen3-Coder-Next-4bit
