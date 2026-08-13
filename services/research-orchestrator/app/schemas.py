@@ -429,6 +429,7 @@ class RunRecord(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     run_id: str
+    parent_run_id: str | None = None
     objective: str
     state: RunState
     protocol_path: str | None = None
@@ -782,6 +783,14 @@ class RunCreateRequest(BaseModel):
         if bool(self.evaluation_contract_id) != bool(self.evaluation_contract_version):
             raise ValueError('evaluation contract ID and version must be supplied together')
         return self
+
+
+class RunRetryRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    maximum_turns: int | None = Field(default=None, ge=1)
+    maximum_runtime_seconds: int | None = Field(default=None, ge=60)
+    maximum_parallel_jobs: int | None = Field(default=None, ge=1)
 
 
 class ApprovalRequest(BaseModel):

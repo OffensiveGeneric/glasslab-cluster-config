@@ -112,6 +112,11 @@ class PostgresStore:
           packet_id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES orchestrator_runs(run_id),
           payload JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL);
         CREATE INDEX IF NOT EXISTS orchestrator_context_packets_run_idx ON orchestrator_context_packets(run_id, created_at);
+        CREATE TABLE IF NOT EXISTS orchestrator_run_lineage (
+          child_run_id TEXT PRIMARY KEY REFERENCES orchestrator_runs(run_id),
+          parent_run_id TEXT NOT NULL REFERENCES orchestrator_runs(run_id),
+          created_at TIMESTAMPTZ NOT NULL);
+        CREATE INDEX IF NOT EXISTS orchestrator_run_lineage_parent_idx ON orchestrator_run_lineage(parent_run_id);
         '''
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -144,6 +149,25 @@ class PostgresStore:
             conn.execute('INSERT INTO orchestrator_runs (run_id, state, version, payload, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s)', (record.run_id, record.state.value, record.version, self._payload(record), record.created_at, record.updated_at))
             self._append_event_conn(conn, run_id=record.run_id, source='orchestrator', event_type='run.created', payload={'objective': record.objective, 'state': record.state.value})
         return record
+
+    def create_retry_run(self, record: RunRecord, *, parent_run_id: str) -> RunRecord:
+        with self.transaction() as conn:
+            parent_row = conn.execute('SELECT state FROM orchestrator_runs WHERE run_id=%s FOR UPDATE', (parent_run_id,)).fetchone()
+            if parent_row is None:
+                raise RecordNotFound(parent_run_id)
+            parent_state = RunState(parent_row['state'])
+            if parent_state not in TERMINAL_STATES or parent_state == RunState.COMPLETE:
+                raise ConcurrencyConflict(f'parent run is not in a retryable terminal state: {parent_state}')
+            conn.execute('INSERT INTO orchestrator_runs (run_id, state, version, payload, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s)', (record.run_id, record.state.value, record.version, self._payload(record), record.created_at, record.updated_at))
+            now = utc_now()
+            conn.execute('INSERT INTO orchestrator_run_lineage (child_run_id, parent_run_id, created_at) VALUES (%s, %s, %s)', (record.run_id, parent_run_id, now))
+            self._append_event_conn(conn, run_id=record.run_id, source='orchestrator', event_type='run.created', payload={'objective': record.objective, 'state': record.state.value, 'parent_run_id': parent_run_id})
+        return record
+
+    def get_lineage(self, parent_run_id: str) -> list[RunRecord]:
+        with self._connect() as conn:
+            rows = conn.execute('SELECT r.payload FROM orchestrator_run_lineage l JOIN orchestrator_runs r ON r.run_id = l.child_run_id WHERE l.parent_run_id=%s ORDER BY l.created_at', (parent_run_id,)).fetchall()
+        return [RunRecord.model_validate(r['payload']) for r in rows]
 
     def _run(self, row: dict[str, Any] | None, run_id: str) -> RunRecord:
         if row is None: raise RecordNotFound(run_id)

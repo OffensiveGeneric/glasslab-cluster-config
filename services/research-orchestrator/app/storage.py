@@ -264,6 +264,14 @@ class SqliteStore:
                 -- URIs) even long after the turn finished.
                 CREATE INDEX IF NOT EXISTS context_packets_run_idx
                 ON context_packets(run_id, created_at);
+
+                CREATE TABLE IF NOT EXISTS run_lineage (
+                    child_run_id  TEXT PRIMARY KEY REFERENCES runs(run_id),
+                    parent_run_id TEXT NOT NULL REFERENCES runs(run_id),
+                    created_at    TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS run_lineage_parent_idx
+                ON run_lineage(parent_run_id);
                 '''
             )
 
@@ -376,6 +384,73 @@ class SqliteStore:
                 payload={'objective': record.objective, 'state': record.state.value},
             )
         return record
+
+    def create_retry_run(
+        self,
+        record: RunRecord,
+        *,
+        parent_run_id: str,
+    ) -> RunRecord:
+        with self.transaction() as connection:
+            parent_row = connection.execute(
+                'SELECT state FROM runs WHERE run_id = ?',
+                (parent_run_id,),
+            ).fetchone()
+            if parent_row is None:
+                raise RecordNotFound(parent_run_id)
+            parent_state = RunState(parent_row['state'])
+            if parent_state not in TERMINAL_STATES or parent_state == RunState.COMPLETE:
+                raise ConcurrencyConflict(
+                    f'parent run is not in a retryable terminal state: {parent_state}'
+                )
+            connection.execute(
+                '''
+                INSERT INTO runs (
+                    run_id, state, version, payload, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    record.run_id,
+                    record.state.value,
+                    record.version,
+                    _dump(record),
+                    record.created_at.isoformat(),
+                    record.updated_at.isoformat(),
+                ),
+            )
+            now = utc_now()
+            connection.execute(
+                '''
+                INSERT INTO run_lineage (child_run_id, parent_run_id, created_at)
+                VALUES (?, ?, ?)
+                ''',
+                (record.run_id, parent_run_id, now.isoformat()),
+            )
+            self._append_event_conn(
+                connection,
+                run_id=record.run_id,
+                source='orchestrator',
+                event_type='run.created',
+                payload={
+                    'objective': record.objective,
+                    'state': record.state.value,
+                    'parent_run_id': parent_run_id,
+                },
+            )
+        return record
+
+    def get_lineage(self, parent_run_id: str) -> list[RunRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                '''
+                SELECT r.payload FROM run_lineage l
+                JOIN runs r ON r.run_id = l.child_run_id
+                WHERE l.parent_run_id = ?
+                ORDER BY l.created_at
+                ''',
+                (parent_run_id,),
+            ).fetchall()
+        return [RunRecord.model_validate_json(row['payload']) for row in rows]
 
     def get_run(self, run_id: str) -> RunRecord:
         with self._connect() as connection:

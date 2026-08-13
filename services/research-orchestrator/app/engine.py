@@ -3,6 +3,7 @@ from __future__ import annotations
 from hashlib import sha256
 import json
 from pathlib import Path
+import shutil
 import subprocess
 from threading import RLock
 from typing import Any
@@ -38,6 +39,7 @@ from .schemas import (
     RequestedAction,
     RunCreateRequest,
     RunRecord,
+    RunRetryRequest,
     RunState,
     TERMINAL_STATES,
     TurnKind,
@@ -281,6 +283,138 @@ class ResearchOrchestrator:
                 self._fail_run(run_id, exc)
                 raise
             return self.store.get_run(run_id)
+
+    def retry_run(
+        self,
+        parent_run_id: str,
+        *,
+        request: RunRetryRequest,
+    ) -> RunRecord:
+        with self._advance_lock:
+            parent = self.store.get_run(parent_run_id)
+            if parent.state not in TERMINAL_STATES or parent.state == RunState.COMPLETE:
+                raise WorkflowError(
+                    f'cannot retry run in state {parent.state.value}; '
+                    'only FAILED, TIMED_OUT, or CANCELLED runs are retryable'
+                )
+            # Idempotency guard: refuse if a non-terminal child already exists.
+            existing_children = self.store.get_lineage(parent_run_id)
+            active_children = [
+                c for c in existing_children if c.state not in TERMINAL_STATES
+            ]
+            if active_children:
+                raise WorkflowError(
+                    f'parent run already has a non-terminal child: '
+                    f'{active_children[0].run_id}'
+                )
+            # Carry the latest pending matrix action forward into the child.
+            parent_action = self._latest_pending_matrix_action(parent_run_id)
+            child_run_id = uuid4().hex
+            paths = self.workspaces.prepare(child_run_id)
+            manifest = self.workspaces.clone_beaker_worktree(
+                parent_run_id=parent_run_id,
+                child_run_id=child_run_id,
+            )
+            # Copy and freeze the approved protocol. Prefer the durable
+            # protocol/ path; fall back to the Beaker worktree copy.
+            if parent.protocol_path:
+                parent_protocol = Path(parent.protocol_path)
+            else:
+                parent_protocol = Path(parent.beaker_workspace) / 'program.md'
+            if not parent_protocol.is_file():
+                raise WorkflowError(
+                    f'parent run has no readable protocol file: {parent_protocol}'
+                )
+            child_protocol_dest = paths.protocol / 'program.md'
+            shutil.copy2(parent_protocol, child_protocol_dest)
+            self.workspaces.freeze_protocol(child_run_id)
+            now = utc_now()
+            child_record = RunRecord(
+                run_id=child_run_id,
+                parent_run_id=parent_run_id,
+                objective=parent.objective,
+                state=RunState.CREATED,
+                evaluation_contract_id=parent.evaluation_contract_id,
+                evaluation_contract_version=parent.evaluation_contract_version,
+                evaluation_contract_digest=parent.evaluation_contract_digest,
+                task_id=parent.task_id,
+                task_bundle_digest=parent.task_bundle_digest,
+                task_bundle_path=parent.task_bundle_path,
+                task_definition=parent.task_definition,
+                beaker_workspace=str(paths.beaker),
+                honeydew_workspace=str(paths.honeydew),
+                shared_artifacts_path=str(paths.shared_artifacts),
+                reports_path=str(paths.reports),
+                maximum_turns=(
+                    request.maximum_turns
+                    or parent.maximum_turns
+                ),
+                maximum_runtime_seconds=(
+                    request.maximum_runtime_seconds
+                    or parent.maximum_runtime_seconds
+                ),
+                maximum_parallel_jobs=min(
+                    request.maximum_parallel_jobs
+                    or parent.maximum_parallel_jobs,
+                    self.settings.maximum_parallel_jobs,
+                ),
+                active_since=now,
+                created_at=now,
+                updated_at=now,
+            )
+            self.store.create_retry_run(
+                child_record,
+                parent_run_id=parent_run_id,
+            )
+            try:
+                thread_id = self.discord.create_thread(
+                    run_id=child_run_id,
+                    objective=parent.objective,
+                )
+            except Exception:
+                thread_id = None
+            if thread_id:
+                current = self.store.get_run(child_run_id)
+                child_record = self.store.replace_run(
+                    current.model_copy(update={'discord_thread_id': thread_id}),
+                    expected_version=current.version,
+                )
+            self._event(
+                child_run_id,
+                source='orchestrator',
+                event_type='run.retry_created',
+                payload={
+                    'parent_run_id': parent_run_id,
+                    'parent_state': parent.state.value,
+                    'contract_digest': parent.evaluation_contract_digest or '',
+                    'worktree_manifest_files': len(manifest),
+                },
+            )
+            # Seed child with a fresh copy of the parent's pending matrix action.
+            child_action = ActionRecord(
+                action_id=uuid4().hex,
+                run_id=child_run_id,
+                proposed_by=parent_action.proposed_by,
+                type=parent_action.type,
+                arguments=parent_action.arguments,
+                policy_classification=parent_action.policy_classification,
+                approval_status=ApprovalStatus.PENDING,
+                honeydew_approved=False,
+                idempotency_key=uuid4().hex,
+                reason=f'carried forward from parent run {parent_run_id}',
+            )
+            self.store.save_action(child_action)
+            self._transition(child_run_id, RunState.PREPARING)
+            self._transition(child_run_id, RunState.HONEYDEW_REVIEWING)
+            try:
+                self._honeydew_review(
+                    child_run_id,
+                    implementation_turn_id=f'retry:{parent_run_id}',
+                )
+            except Exception as exc:
+                self._fail_run(child_run_id, exc)
+                raise
+            return self.store.get_run(child_run_id)
 
     def import_task_bundle(
         self,

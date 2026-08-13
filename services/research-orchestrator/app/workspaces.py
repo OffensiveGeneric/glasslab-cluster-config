@@ -161,6 +161,44 @@ class WorkspaceManager:
             shutil.copy2(protocol, target)
             target.chmod(0o444)
 
+    def clone_beaker_worktree(
+        self,
+        *,
+        parent_run_id: str,
+        child_run_id: str,
+    ) -> dict[str, str]:
+        """Copy parent Beaker worktree into child's Beaker worktree.
+
+        Returns a path→sha256 manifest of every copied file. Raises
+        WorkspaceError if any destination digest does not match its source,
+        or if the source contains symlinks or path escapes.
+        """
+        source_root = self.paths(parent_run_id).beaker.resolve()
+        dest_root = self.paths(child_run_id).beaker.resolve()
+        manifest: dict[str, str] = {}
+        for source in sorted(source_root.rglob('*')):
+            if source.is_symlink():
+                raise WorkspaceError(
+                    f'parent Beaker worktree contains a symlink: {source}'
+                )
+            if not source.is_file():
+                continue
+            # Skip the git internal file that marks a worktree.
+            if source.name == '.git' or '.git' in source.parts:
+                continue
+            relative = source.relative_to(source_root)
+            source_digest = sha256(source.read_bytes()).hexdigest()
+            destination = dest_root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+            dest_digest = sha256(destination.read_bytes()).hexdigest()
+            if dest_digest != source_digest:
+                raise WorkspaceError(
+                    f'checksum mismatch after copy: {relative}'
+                )
+            manifest[relative.as_posix()] = dest_digest
+        return manifest
+
     def create_review_snapshot(
         self,
         *,

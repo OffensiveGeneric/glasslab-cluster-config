@@ -26,6 +26,7 @@ TRANSITIONS: dict[RunState, set[RunState]] = {
     RunState.CREATED: {RunState.PREPARING, RunState.CANCELLED, RunState.FAILED},
     RunState.PREPARING: {
         RunState.HONEYDEW_DRAFTING_PROTOCOL,
+        RunState.HONEYDEW_REVIEWING,
         RunState.PAUSED,
         RunState.CANCELLED,
         RunState.FAILED,

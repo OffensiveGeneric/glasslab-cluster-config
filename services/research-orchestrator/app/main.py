@@ -56,6 +56,7 @@ from .schemas import (
     RunCreateRequest,
     RunListResponse,
     RunRecord,
+    RunRetryRequest,
     SourceType,
 )
 from .storage import ConcurrencyConflict, RecordNotFound, SqliteStore
@@ -619,6 +620,21 @@ def create_app(
     ) -> RunRecord:
         try:
             return engine.cancel_run(run_id)
+        except Exception as exc:
+            raise map_error(exc) from exc
+
+    @app.post(
+        '/runs/{run_id}/retry',
+        response_model=RunRecord,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def retry_run(
+        run_id: str,
+        request: RunRetryRequest,
+        _: None = Depends(require_operator),
+    ) -> RunRecord:
+        try:
+            return engine.retry_run(run_id, request=request)
         except Exception as exc:
             raise map_error(exc) from exc
 

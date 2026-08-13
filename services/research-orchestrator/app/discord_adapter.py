@@ -310,6 +310,23 @@ class DiscordRenderer:
                 'Orchestrator',
                 f"Research run created: {payload.get('objective', '')}",
             )
+        if event_type == 'run.retry_created':
+            parent_id = str(payload.get('parent_run_id', 'unknown'))
+            parent_state = str(payload.get('parent_state', 'unknown'))
+            return DiscordMessage(
+                'Orchestrator',
+                '\n'.join([
+                    '**Retry run created from terminal checkpoint**',
+                    '',
+                    f'Parent run: `{parent_id[:16]}...` (ended `{parent_state}`)',
+                    f'Child run: `{event.run_id[:16]}...`',
+                    f"Contract digest: `{str(payload.get('contract_digest', ''))[:12]}...`",
+                    f"Worktree files copied: {payload.get('worktree_manifest_files', '?')}",
+                    '',
+                    'The approved protocol and Beaker checkpoint are cloned.',
+                    'Resuming at Honeydew methodology review.',
+                ]),
+            )
         if event_type == 'run.state_changed':
             return DiscordMessage(
                 'Orchestrator',
