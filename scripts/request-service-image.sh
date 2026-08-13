@@ -20,6 +20,7 @@ Services:
   research-orchestrator
   research-workspace-runner
   runner
+  autoresearch-runner
 USAGE
 }
 
@@ -32,7 +33,7 @@ SERVICE="$1"
 TAG="${2:-}"
 
 case "$SERVICE" in
-  workflow-api|whatsapp-gateway|research-ingress|research-command-router|research-orchestrator|research-workspace-runner|runner)
+  workflow-api|whatsapp-gateway|research-ingress|research-command-router|research-orchestrator|research-workspace-runner|runner|autoresearch-runner)
     ;;
   *)
     printf 'Unsupported service: %s\n' "$SERVICE" >&2

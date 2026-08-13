@@ -16,6 +16,7 @@ on:
           - research-orchestrator
           - research-workspace-runner
           - runner
+          - autoresearch-runner
       push:
         description: "Push image to GHCR"
         required: true
@@ -83,6 +84,11 @@ jobs:
               echo "context=services/runner" >> "$GITHUB_OUTPUT"
               echo "dockerfile=services/runner/Dockerfile.gpu" >> "$GITHUB_OUTPUT"
               echo "image=ghcr.io/${REPO_OWNER}/glasslab-gpu-experiment-runner" >> "$GITHUB_OUTPUT"
+              ;;
+            autoresearch-runner)
+              echo "context=services/autoresearch-runner" >> "$GITHUB_OUTPUT"
+              echo "dockerfile=services/autoresearch-runner/Dockerfile" >> "$GITHUB_OUTPUT"
+              echo "image=ghcr.io/${REPO_OWNER}/glasslab-autoresearch-runner" >> "$GITHUB_OUTPUT"
               ;;
             *)
               echo "Unsupported service: ${{ inputs.service }}" >&2

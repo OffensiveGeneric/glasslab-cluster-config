@@ -8,12 +8,25 @@ spec:
     spec:
       containers:
         - name: autoresearch
-          image: ghcr.io/offensivegeneric/glasslab-autoresearch:vanilla-v0
+          # Rebuild and republish via:
+          #   ./scripts/request-service-image.sh autoresearch-runner <tag>
+          # then update this tag (and GLASSLAB_IMAGE_DIGEST below) together --
+          # the previous manually-built glasslab-autoresearch:vanilla-v0 image
+          # predates the services/autoresearch-runner/Dockerfile move, the
+          # pinned AUTORESEARCH_COMMIT, and the cu128 torch fix, so it no
+          # longer matches what this Job expects.
+          image: ghcr.io/offensivegeneric/glasslab-autoresearch-runner:vanilla-v0
           env:
             - name: GLASSLAB_RUNNER_EXPERIMENT_ID
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            # Matches the image tag above. Kubernetes has no Downward API
+            # field for the running container's actual image digest, so this
+            # is operator-maintained -- the same convention baseline jobs use
+            # for GLASSLAB_IMAGE_COMMIT.
+            - name: GLASSLAB_IMAGE_DIGEST
+              value: "vanilla-v0"
           command: ["bash", "-c"]
           args:
             - |
@@ -22,6 +35,12 @@ spec:
               OUT="/mnt/artifacts/autoresearch-${GLASSLAB_RUNNER_EXPERIMENT_ID}"
               mkdir -p "$OUT"
 
+              # FA3->SDPA attention patch for pre-Hopper GPUs: node02's A4000
+              # (Ampere) cannot run the Hopper-only FA3 kernel train.py calls
+              # by default. This substitution is PENDING LIVE GPU
+              # VERIFICATION -- it has not yet been confirmed correct on
+              # real hardware -- and is left exactly as-is until that
+              # verification happens.
               OLD='fa3.flash_attn_func(q, k, v, causal=True, window_size=window_size)'
               NEW='torch.nn.functional.scaled_dot_product_attention(q.transpose(1,2), k.transpose(1,2), v.transpose(1,2), is_causal=True).transpose(1,2)'
               if grep -qF "$OLD" train.py; then
@@ -33,19 +52,116 @@ spec:
                 exit 1
               fi
 
+              # prepare.py caches its downloaded dataset shards and trained
+              # tokenizer under ~/.cache/autoresearch/{data,tokenizer} and
+              # already skips re-downloading/re-training anything already
+              # present there. Restore a prior run's cache before calling it
+              # so that skip logic actually triggers, keyed by the pinned
+              # upstream commit since prepare.py's download/tokenizer logic
+              # can change between commits.
+              DATASET_CACHE="/mnt/datasets/autoresearch-cache/${AUTORESEARCH_COMMIT}"
+              LOCAL_CACHE="${HOME}/.cache/autoresearch"
+              mkdir -p "$DATASET_CACHE" "$LOCAL_CACHE"
+              if [ -n "$(ls -A "$DATASET_CACHE" 2>/dev/null)" ]; then
+                echo "Restoring prepare.py cache from $DATASET_CACHE"
+                cp -a "$DATASET_CACHE/." "$LOCAL_CACHE/"
+              else
+                echo "No cached prepare.py output for commit ${AUTORESEARCH_COMMIT} yet"
+              fi
+
               echo "=== prepare.py ==="
               uv run prepare.py 2>&1 | tee "$OUT/prepare.log"
+
+              echo "Persisting prepare.py cache to $DATASET_CACHE"
+              cp -a "$LOCAL_CACHE/." "$DATASET_CACHE/"
 
               echo "=== train.py ==="
               uv run train.py 2>&1 | tee "$OUT/train.log"
 
-              grep -i "val_bpb" "$OUT/train.log" | tail -5 > "$OUT/val_bpb.txt" || true
-              cp -f results.tsv "$OUT/results.tsv" 2>/dev/null || true
+              echo "=== metrics.json ==="
+              GPU_MODEL="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n1 || true)"
+              python3 - "$OUT/train.log" "$OUT/metrics.json" "$GPU_MODEL" <<'PY'
+              import ast
+              import json
+              import os
+              import re
+              import sys
+
+              train_log_path, metrics_path, gpu_model = sys.argv[1], sys.argv[2], sys.argv[3]
+              log_text = open(train_log_path, encoding="utf-8", errors="replace").read()
+
+              def parse_field(pattern, cast):
+                  match = re.search(pattern, log_text)
+                  if not match:
+                      return None
+                  try:
+                      return cast(match.group(1))
+                  except ValueError:
+                      return None
+
+              val_bpb = parse_field(r"val_bpb:\s*([0-9.eE+-]+)", float)
+              training_seconds = parse_field(r"training_seconds:\s*([0-9.eE+-]+)", float)
+              peak_vram_mb = parse_field(r"peak_vram_mb:\s*([0-9.eE+-]+)", float)
+
+              # "Effective config" is read from train.py's own source rather
+              # than hardcoded here, so it stays accurate even if a future
+              # (separately reviewed) patch changes these constants -- there
+              # is no CLI/env override mechanism upstream to intercept
+              # instead.
+              CONFIG_KEYS = (
+                  "ASPECT_RATIO",
+                  "HEAD_DIM",
+                  "WINDOW_PATTERN",
+                  "DEPTH",
+                  "DEVICE_BATCH_SIZE",
+                  "TOTAL_BATCH_SIZE",
+              )
+              train_py_source = open("train.py", encoding="utf-8").read()
+              effective_config = {}
+              for node in ast.walk(ast.parse(train_py_source)):
+                  if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+                      continue
+                  target = node.targets[0]
+                  if isinstance(target, ast.Name) and target.id in CONFIG_KEYS:
+                      effective_config[target.id] = ast.get_source_segment(
+                          train_py_source, node.value
+                      )
+
+              required = {
+                  "val_bpb": val_bpb,
+                  "training_seconds": training_seconds,
+                  "peak_vram_mb": peak_vram_mb,
+                  "gpu_model": gpu_model or None,
+                  "upstream_commit": os.environ.get("AUTORESEARCH_COMMIT"),
+                  "image_digest": os.environ.get("GLASSLAB_IMAGE_DIGEST"),
+              }
+              missing = [name for name, value in required.items() if not value]
+              missing += [f"effective_config.{key}" for key in CONFIG_KEYS if key not in effective_config]
+              if missing:
+                  print(f"ERROR: cannot build metrics.json, missing: {', '.join(missing)}", file=sys.stderr)
+                  sys.exit(1)
+
+              metrics = {
+                  "val_bpb": val_bpb,
+                  "training_seconds": training_seconds,
+                  "peak_vram_mb": peak_vram_mb,
+                  "gpu_model": gpu_model,
+                  "upstream_commit": os.environ["AUTORESEARCH_COMMIT"],
+                  "image_digest": os.environ["GLASSLAB_IMAGE_DIGEST"],
+                  "effective_config": effective_config,
+              }
+              with open(metrics_path, "w", encoding="utf-8") as handle:
+                  json.dump(metrics, handle, indent=2, sort_keys=True)
+                  handle.write("\n")
+              print(f"wrote {metrics_path}")
+              PY
+
+              test -f "$OUT/metrics.json" || { echo "ERROR: metrics.json was not produced; failing the job" >&2; exit 1; }
 
               echo "=== output dir ==="
               ls -lh "$OUT"
-              echo "val_bpb summary:"
-              cat "$OUT/val_bpb.txt" || echo "no val_bpb line captured -- check train.log"
+              echo "metrics.json:"
+              cat "$OUT/metrics.json"
           resources:
             limits:
               nvidia.com/gpu: 1
@@ -57,14 +173,20 @@ spec:
           volumeMounts:
             - name: artifacts
               mountPath: /mnt/artifacts
+            - name: datasets
+              mountPath: /mnt/datasets
       restartPolicy: Never
       nodeSelector:
         glasslab.io/gpu-vendor: nvidia
+        kubernetes.io/hostname: node02
       imagePullSecrets:
         - name: glasslab-ghcr-pull
       volumes:
         - name: artifacts
           persistentVolumeClaim:
             claimName: glasslab-shared-artifacts
+        - name: datasets
+          persistentVolumeClaim:
+            claimName: glasslab-shared-datasets
   backoffLimit: 1
   ttlSecondsAfterFinished: 86400
