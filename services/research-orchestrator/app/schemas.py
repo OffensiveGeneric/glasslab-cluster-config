@@ -429,6 +429,15 @@ class RunRecord(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     run_id: str
+    # A retry is a distinct run.  This immutable link is the API-visible
+    # lineage edge; terminal parents are never reopened or rewritten.
+    parent_run_id: str | None = None
+    retry_checkpoint_digest: str | None = None
+    # The exact Git commit used to create both isolated worktrees.  Retry
+    # children are pinned here instead of resolving a moving branch name.
+    workspace_base_commit: str | None = Field(
+        default=None, pattern=r'^[a-f0-9]{40}$'
+    )
     objective: str
     state: RunState
     protocol_path: str | None = None
@@ -784,6 +793,14 @@ class RunCreateRequest(BaseModel):
         return self
 
 
+class TerminalRetryRequest(BaseModel):
+    """Optional caller key for an auditable, idempotent terminal retry."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=256)
+
+
 class ApprovalRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -808,3 +825,31 @@ class EventListResponse(BaseModel):
 
 class ArtifactListResponse(BaseModel):
     artifacts: list[ArtifactRecord]
+
+
+class TurnSummary(BaseModel):
+    """Redacted, read-only projection of a TurnRecord.
+
+    Returned by GET /runs/{run_id}/turns and the /research-turns Discord
+    command (see turn_inspection.py). ``input``/``output`` are the turn's
+    input_event and structured_output after app.redaction.redact_payload has
+    scrubbed credential-shaped content; this is a convenience view over the
+    persisted TurnRecord, not a new source of truth — the normalized event
+    log remains authoritative.
+    """
+
+    model_config = ConfigDict(extra='forbid')
+
+    turn_id: str
+    run_id: str
+    agent: AgentName
+    status: Literal['running', 'completed', 'failed', 'aborted']
+    error: str | None = None
+    input: dict[str, Any] = Field(default_factory=dict)
+    output: dict[str, Any] | None = None
+    started_at: datetime
+    ended_at: datetime | None = None
+
+
+class TurnListResponse(BaseModel):
+    turns: list[TurnSummary]

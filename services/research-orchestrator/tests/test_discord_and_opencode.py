@@ -27,6 +27,7 @@ from app.discord_controls import (
     execute_discord_run_control,
     execute_discord_run_cancellation,
     execute_discord_run_creation,
+    execute_discord_turn_history,
 )
 from app.opencode_runtime import (
     OpenCodeProcessRuntime,
@@ -37,7 +38,16 @@ from app.opencode_runtime import (
     normalize_structured_output,
     parse_json_text,
 )
-from app.schemas import AgentName, AgentTurnResult, EventRecord
+from app.schemas import (
+    AgentName,
+    AgentTurnResult,
+    EventRecord,
+    RunRecord,
+    RunState,
+    TurnKind,
+    TurnRecord,
+    utc_now,
+)
 
 
 def test_discord_renderer_has_no_live_api_dependency() -> None:
@@ -374,6 +384,7 @@ def test_discord_gateway_registers_component_handler() -> None:
         'research-pause',
         'research-resume',
         'research-artifacts',
+        'research-turns',
         'dataset-upload',
     ):
         assert gateway.tree.get_command(
@@ -478,6 +489,102 @@ def test_discord_dataset_ingestion_records_actor() -> None:
         media_type='text/csv',
         uploaded_by='discord:142100176322953216:Tyler',
     )
+
+
+def _run_record(**overrides) -> RunRecord:
+    now = utc_now()
+    fields = dict(
+        run_id='run-1',
+        objective='Inspect turn history through Discord.',
+        state=RunState.BEAKER_IMPLEMENTING,
+        evaluation_contract_id='contract-1',
+        evaluation_contract_version='1.0.0',
+        evaluation_contract_digest='a' * 64,
+        beaker_workspace='/tmp/beaker',
+        honeydew_workspace='/tmp/honeydew',
+        shared_artifacts_path='/tmp/shared',
+        reports_path='/tmp/reports',
+        maximum_turns=20,
+        maximum_runtime_seconds=86400,
+        maximum_parallel_jobs=1,
+        created_at=now,
+        updated_at=now,
+    )
+    fields.update(overrides)
+    return RunRecord(**fields)
+
+
+def test_discord_turn_history_redacts_credentials() -> None:
+    engine = Mock()
+    engine.store.get_run.return_value = _run_record()
+    engine.store.list_turns.return_value = [
+        TurnRecord(
+            run_id='run-1',
+            agent=AgentName.HONEYDEW,
+            input_event={'objective': 'Inspect turn history through Discord.'},
+            structured_output=AgentTurnResult(
+                kind=TurnKind.PROTOCOL_DRAFT,
+                summary='Drafted the initial protocol.',
+            ),
+            status='completed',
+        ),
+        TurnRecord(
+            run_id='run-1',
+            agent=AgentName.BEAKER,
+            input_event={
+                'objective': 'Inspect turn history through Discord.',
+                'discord_bot_token': 'should-not-appear',
+            },
+            status='failed',
+            error='provider rejected request: Bearer abcdefghijklmnop0123456789',
+        ),
+    ]
+
+    message = execute_discord_turn_history(engine, run_id='run-1', limit=5)
+
+    assert 'should-not-appear' not in message
+    assert 'abcdefghijklmnop0123456789' not in message
+    assert 'Honeydew' in message
+    assert 'Beaker' in message
+    assert 'Drafted the initial protocol.' in message
+    engine.store.get_run.assert_called_once_with('run-1')
+    engine.store.list_turns.assert_called_once_with('run-1')
+
+
+def test_discord_turn_history_message_is_bounded() -> None:
+    engine = Mock()
+    engine.store.get_run.return_value = _run_record()
+    engine.store.list_turns.return_value = [
+        TurnRecord(
+            run_id='run-1',
+            agent=AgentName.BEAKER if index % 2 else AgentName.HONEYDEW,
+            input_event={},
+            structured_output=AgentTurnResult(
+                kind=TurnKind.REVISION,
+                summary='x' * 500,
+            ),
+            status='completed',
+        )
+        for index in range(20)
+    ]
+
+    message = execute_discord_turn_history(engine, run_id='run-1', limit=20)
+
+    # Discord messages are capped at 2000 characters; the command must never
+    # produce a payload that Discord would itself reject.
+    assert len(message) < 2000
+    assert 'truncated' in message
+
+
+def test_discord_turn_history_reports_no_turns() -> None:
+    engine = Mock()
+    engine.store.get_run.return_value = _run_record()
+    engine.store.list_turns.return_value = []
+
+    message = execute_discord_turn_history(engine, run_id='run-1', limit=5)
+
+    assert 'run-1' in message
+    assert 'no recorded agent turns' in message
 
 
 def test_discord_run_creation_uses_objective_without_http() -> None:
@@ -798,25 +905,65 @@ def test_discord_failed_run_includes_authoritative_cause() -> None:
 def test_opencode_writable_runtime_directories_are_per_agent(
     tmp_path,
 ) -> None:
-    runtime = OpenCodeProcessRuntime(Settings())
+    # config/data/state/home are session-specific (auth, logs, conversation
+    # state) and must stay isolated per run; only the package/model download
+    # cache (see the next test) is intentionally shared.
+    runtime = OpenCodeProcessRuntime(
+        Settings(opencode_shared_cache_root=str(tmp_path / 'shared-cache'))
+    )
     workspace = tmp_path / 'run-1' / 'honeydew-worktree'
     workspace.mkdir(parents=True)
 
-    roots = runtime._write_runtime_config(
-        run_id='run-1',
-        agent=AgentName.HONEYDEW,
-        workspace=workspace,
+    config_root, data_root, cache_root, state_root, home_root = (
+        runtime._write_runtime_config(
+            run_id='run-1',
+            agent=AgentName.HONEYDEW,
+            workspace=workspace,
+        )
     )
 
-    assert all(path.is_dir() for path in roots)
-    assert all(path.is_relative_to(tmp_path / 'run-1') for path in roots)
-    config = json.loads((roots[0] / 'opencode' / 'opencode.json').read_text())
+    per_run_roots = (config_root, data_root, state_root, home_root)
+    assert all(path.is_dir() for path in per_run_roots)
+    assert all(path.is_relative_to(tmp_path / 'run-1') for path in per_run_roots)
+    assert cache_root.is_dir()
+    assert not cache_root.is_relative_to(tmp_path / 'run-1')
+    config = json.loads((config_root / 'opencode' / 'opencode.json').read_text())
     assert config['lsp'] is False
     assert config['permission']['task'] == 'deny'
     assert config['permission']['websearch'] == 'deny'
     assert config['permission']['external_directory'] == 'deny'
     assert config['model'].startswith('exo/')
     assert 'exo' in config['provider']
+
+
+def test_opencode_cache_directory_is_shared_across_runs_and_agents(
+    tmp_path,
+) -> None:
+    shared_cache = tmp_path / 'shared-cache'
+    runtime = OpenCodeProcessRuntime(
+        Settings(opencode_shared_cache_root=str(shared_cache))
+    )
+
+    roots = {}
+    for run_id, agent in (
+        ('run-1', AgentName.HONEYDEW),
+        ('run-1', AgentName.BEAKER),
+        ('run-2', AgentName.HONEYDEW),
+    ):
+        workspace = tmp_path / run_id / f'{agent.value}-worktree'
+        workspace.mkdir(parents=True)
+        _, _, cache_root, _, _ = runtime._write_runtime_config(
+            run_id=run_id,
+            agent=agent,
+            workspace=workspace,
+        )
+        roots[(run_id, agent)] = cache_root
+
+    # Every run and agent resolves to the exact same cache directory: the
+    # whole point is that OpenCode's package/model downloads are fetched
+    # once, not once per run.
+    assert len(set(roots.values())) == 1
+    assert next(iter(roots.values())) == shared_cache
 
 
 def test_opencode_uses_builtin_zen_provider_for_big_pickle(tmp_path) -> None:

@@ -191,6 +191,7 @@ Then inspect authoritative read APIs:
 curl -fsS http://127.0.0.1:18080/runs | jq
 curl -fsS http://127.0.0.1:18080/runs/<run-id>/events | jq
 curl -fsS http://127.0.0.1:18080/runs/<run-id>/artifacts | jq
+curl -fsS http://127.0.0.1:18080/runs/<run-id>/turns | jq
 ```
 
 Per-run durable files are mounted in the orchestrator pod at:
@@ -200,6 +201,7 @@ Per-run durable files are mounted in the orchestrator pod at:
   protocol/
   beaker-worktree/
   honeydew-worktree/
+  shared-artifacts/
   reports/
   events/
   runtime/beaker/
@@ -208,6 +210,33 @@ Per-run durable files are mounted in the orchestrator pod at:
 
 The shared PVC is backed by NFS. Inspect workspaces through the pod rather than
 assuming that path exists on the provisioner's local filesystem.
+
+`protocol/`, `reports/`, `shared-artifacts/`, and `events/` hold durable,
+artifact- and report-referenced material and are never touched by cleanup.
+`beaker-worktree/`, `honeydew-worktree/`, and `runtime/<agent>/` are agent
+process scratch space (git worktrees, OpenCode/Hermes session state and
+logs); nothing in the run/artifact database ever references a path inside
+them. OpenCode's own package/model download cache lives outside the per-run
+tree entirely, at the shared `opencode_shared_cache_root` (one copy for every
+run and both agents, since it is the same OpenCode version and plugin set
+each time) rather than being copied per run.
+
+Once a run reaches a terminal state (`COMPLETE`, `FAILED`, `CANCELLED`,
+`TIMED_OUT`) its scratch space is eligible for cleanup after
+`terminal_run_retention_days` (default 14). Run it manually from the
+orchestrator pod or a workstation with the same `GLASSLAB_ORCHESTRATOR_*`
+settings:
+
+```bash
+python services/research-orchestrator/scripts/cleanup-run-storage.py
+python services/research-orchestrator/scripts/cleanup-run-storage.py --apply
+```
+
+The default (and `--dry-run`) only reports what would be freed; `--apply` is
+required to actually delete anything. See
+`services/research-orchestrator/app/storage_retention.py` for the full
+safety design, including the per-subdirectory check against live artifact
+records applied immediately before every deletion.
 
 ## Development And Delivery
 

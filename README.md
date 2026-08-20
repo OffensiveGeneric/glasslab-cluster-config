@@ -56,7 +56,7 @@ The current bounded Honeydew/Beaker research workflow is documented in
 [`docs/research-orchestrator.md`](docs/research-orchestrator.md). It adds a
 durable research workflow around isolated Hermes-backed runtimes and the
 existing bounded cluster-execution service. The Titanic stack remains legacy
-v1 reference material; see [`docs/titanic-agent-stack.md`](docs/titanic-agent-stack.md).
+v1 reference material; see [`docs/glasslab-v2/historical/titanic-agent-stack.md`](docs/glasslab-v2/historical/titanic-agent-stack.md).
 
 The current Discord and operator commands, arbitrary-task intake limits, and
 live progress are summarized in

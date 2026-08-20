@@ -18,6 +18,7 @@ and approval role or explicit administrator allowlist.
 | `/benchmark-start archive:<zip> [objective:<text>]` | Main Glasslab channel | Compatibility alias for `/task-start`; do not build new integrations around this name. |
 | `/dataset-upload dataset:<file> name:<name> [role:<role>] [contains_labels:<bool>]` | Main Glasslab channel | Stores a file immutably and returns a checksum-addressed `glasslab-dataset://` reference. |
 | `/research-artifacts [run_id:<id>] [include_source:<bool>]` | Run thread, or main channel with `run_id` | Downloads a digest-verified ZIP of the latest run-level artifacts and successful-job outputs. |
+| `/research-turns [run_id:<id>] [limit:<int>]` | Run thread, or main channel with `run_id` | Shows the run's most recent redacted agent turns (default 5, max 20) with agent identity, status, and timestamps. |
 | `/research-pause [run_id:<id>] [reason:<text>]` | Run thread, or main channel with `run_id` | Aborts an active model turn, preserves state, and records where to resume. |
 | `/research-resume [run_id:<id>] [reason:<text>]` | Run thread, or main channel with `run_id` | Restores a paused run to its prior state and restarts workflow recovery. |
 | `/research-cancel [run_id:<id>] [reason:<text>]` | Run thread, or main channel with `run_id` | Cancels the run, aborts active Hermes turns, requests cancellation of active jobs, and records the Discord actor and reason. |
@@ -225,6 +226,7 @@ GET /runs/{run_id}
 GET /runs/{run_id}/events
 GET /runs/{run_id}/events/stream
 GET /runs/{run_id}/artifacts
+GET /runs/{run_id}/turns
 GET /task-bundles
 GET /task-bundles/{task_id}
 GET /task-bundles/{task_id}/preflight
@@ -241,6 +243,7 @@ deployment:
 
 ```text
 POST /runs
+POST /runs/{run_id}/retry
 POST /task-bundles/import
 POST /datasets/import
 POST /knowledge/sources
@@ -277,15 +280,24 @@ RUN=<run-id>
 curl -fsS "http://127.0.0.1:18080/runs/$RUN" | jq
 curl -fsS "http://127.0.0.1:18080/runs/$RUN/events" | jq
 curl -fsS "http://127.0.0.1:18080/runs/$RUN/artifacts" | jq
+curl -fsS "http://127.0.0.1:18080/runs/$RUN/turns?limit=20" | jq
 curl -N "http://127.0.0.1:18080/runs/$RUN/events/stream"
 ```
+
+`GET /runs/{run_id}/turns` is a bounded, redacted convenience view over
+already-persisted per-turn agent state (agent identity, structured input and
+output, status, and start/end timestamps), with `limit` capped at 100 turns
+per call. Secrets and credential-shaped content (Discord tokens, the operator
+token, kubeconfig contents, model API keys, and similar) are scrubbed from
+both input and output before the response is built. It is additive: the
+normalized event log remains the authoritative record, and `/turns` never
+supersedes it.
 
 The run's workspaces, protocol, reports, Hermes data, and recovery checkpoints
 are stored beneath
 `/mnt/artifacts/research-orchestrator/runs/<run-id>/` in the orchestrator pod.
-Use `kubectl exec` from the provisioner to inspect them. The HTTP API does not
-yet expose a dedicated full-turn endpoint; normalized events are the stable
-external record, while raw runtime storage is an implementation detail.
+Use `kubectl exec` from the provisioner to inspect raw runtime storage beyond
+what `/turns` exposes.
 
 ## Deployment Commands
 
@@ -326,7 +338,9 @@ Implemented and live:
 - durable state, actions, jobs, artifacts, and append-only events
 - protocol, evaluator-promotion, execution, and final-report approval gates
 - Discord start, task-start, dataset upload, approval, rejection, pause,
-  resume, cancellation, and artifact-download controls
+  resume, cancellation, artifact-download, and redacted turn-history controls
+- a bounded, redacted `GET /runs/{run_id}/turns` read endpoint over
+  already-persisted per-turn agent state
 - deterministic CPU/GPU task compilation, immutable uploaded datasets, and
   public asset ingestion
 - bounded Kubernetes execution through `workflow-api`
@@ -376,8 +390,10 @@ path is `/task-start`, not another hardcoded task entry.
 - fixed approved repository and runtime profiles
 - no authenticated remote dataset download or private object-store browser
 - no Discord list or status commands
-- no first-class HTTP endpoint for complete structured turn inspection
 - no retry or clone operation from a terminal run checkpoint
+- no first-class HTTP endpoint for complete structured turn inspection
+- terminal retries are limited to verified `FAILED`/`TIMED_OUT` protocol
+  checkpoints and always require fresh approvals
 - no automatic Git push or pull request creation
 - no arbitrary SSH, `kubectl`, secret access, or container publication for
   either agent
