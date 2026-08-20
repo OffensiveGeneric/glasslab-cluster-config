@@ -99,9 +99,18 @@ def test_hermes_profiles_are_isolated_and_bounded(tmp_path: Path) -> None:
     ]
     assert 'memory' in beaker_config['agent']['disabled_toolsets']
     assert 'web' in beaker_config['agent']['disabled_toolsets']
+    denied_commands = beaker_config['approvals']['deny']
+    assert 'pip3 *' in denied_commands
+    assert 'python3 -m pip *' in denied_commands
+    assert 'uv pip *' in denied_commands
+    assert 'apt-get *' in denied_commands
+    assert 'npm *' in denied_commands
     assert 'key' not in beaker_config['gateway']['api_server']
     assert (beaker_home / 'SOUL.md').read_text() != (
         honeydew_home / 'SOUL.md'
+    ).read_text()
+    assert 'Never install packages or dependencies' in (
+        beaker_home / 'SOUL.md'
     ).read_text()
 
 
