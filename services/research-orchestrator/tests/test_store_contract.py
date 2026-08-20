@@ -180,18 +180,35 @@ def test_honeydew_approval_and_execution_failure_are_durable(store) -> None:
 
 
 def test_retry_lineage_event_is_transactionally_visible(store) -> None:
-    parent = store.create_run(_run(), one_active_run=False)
+    parent = store.create_run(_run(state=RunState.FAILED), one_active_run=False)
     child = _run(state=RunState.PREPARING)
-    store.create_run(child, one_active_run=False)
-    store.append_event(
-        run_id=parent.run_id,
-        source='orchestrator',
-        event_type='run.retry_created',
-        payload={'parent_run_id': parent.run_id, 'child_run_id': child.run_id, 'idempotency_key': 'retry-1'},
+    stored, created = store.create_terminal_retry(
+        child,
+        parent_run_id=parent.run_id,
+        retry_key=_id('retry-key'),
+        checkpoint_digest='3' * 64,
+        one_active_run=False,
     )
-    event = store.list_events(parent.run_id)[-1]
-    assert event.payload == {'parent_run_id': parent.run_id, 'child_run_id': child.run_id, 'idempotency_key': 'retry-1'}
+    duplicate, created_again = store.create_terminal_retry(
+        child.model_copy(update={'run_id': _id('other-child')}),
+        parent_run_id=parent.run_id,
+        retry_key=_id('other-retry-key'),
+        checkpoint_digest='4' * 64,
+        one_active_run=False,
+    )
+
+    assert created is True and created_again is False
+    assert duplicate.run_id == stored.run_id == child.run_id
+    assert store.get_terminal_retry_child(parent.run_id).run_id == child.run_id
     assert store.get_run(child.run_id).state is RunState.PREPARING
+    parent_event = store.list_events(parent.run_id)[-1]
+    child_event = store.list_events(child.run_id)[-1]
+    assert parent_event.event_type == child_event.event_type == 'run.retry_created'
+    assert parent_event.payload == child_event.payload == {
+        'parent_run_id': parent.run_id,
+        'child_run_id': child.run_id,
+        'checkpoint_digest': '3' * 64,
+    }
 
 
 def test_knowledge_and_context_records_round_trip(store) -> None:
