@@ -35,6 +35,10 @@ This document records the remaining infrastructure primitives Glasslab v2 still 
 
 - `workflow-api` now uses a private GHCR pull path with the in-cluster `glasslab-ghcr-pull` secret and no longer depends on node-local import or `node03` pinning.
 - `workflow-api` no longer depends on `node03`-local image import and can reschedule onto other workers that can reach GHCR.
+- All active custom control services are published under
+  `ghcr.io/ccny-glasslab` with immutable commit tags. The deployment preflight
+  rejects remaining `OffensiveGeneric` references and `-local` tags before a
+  workload is submitted.
 
 ### Secrets durability and disaster recovery
 
@@ -52,7 +56,8 @@ This document records the remaining infrastructure primitives Glasslab v2 still 
 
 1. Keep the cluster-wide default `StorageClass` unset until a shared storage backend is deliberately chosen and documented.
 2. Keep backend services `ClusterIP` only and standardize internal-only access rules in repo docs before adding any ingress controller.
-3. Keep the private GHCR pull path healthy and reuse it for the next custom Glasslab images so `.44`-local imports stop being the default pattern.
+3. Keep the private GHCR pull path healthy and reuse it for every custom
+   Glasslab image so `.44`-local imports stop being the default pattern.
 4. Keep the encrypted off-host backup procedure for `.44`-local secret manifests as a required deploy dependency.
 5. Apply the same password-material cleanup on the live provisioner, then snapshot `.44` back into `live-config/provisioner`.
 

@@ -53,6 +53,18 @@ apply_yaml_dir() {
   done < <(find "$dir" -maxdepth 1 -type f -name '*.yaml' ! -name '*.example.yaml' | sort)
 }
 
+apply_storage_manifests() {
+  local dir="$MANIFEST_ROOT/storage"
+  while IFS= read -r file; do
+    printf '[deploy-glasslab-v2] applying durable storage %s\n' "$file"
+    "$KUBECTL" apply -f "$file"
+  done < <(
+    find "$dir" -maxdepth 1 -type f -name '*.yaml' \
+      ! -name '*.example.yaml' \
+      ! -name '*smoke*' | sort
+  )
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h)
@@ -74,6 +86,7 @@ printf '[deploy-glasslab-v2] validating workflow registry definitions\n'
 
 apply_yaml_dir "$MANIFEST_ROOT/namespaces"
 apply_yaml_dir "$MANIFEST_ROOT/priorityclasses"
+apply_storage_manifests
 apply_yaml_dir "$MANIFEST_ROOT/secrets"
 apply_yaml_dir "$MANIFEST_ROOT/config"
 apply_yaml_dir "$MANIFEST_ROOT/postgres"

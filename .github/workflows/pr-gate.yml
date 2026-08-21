@@ -24,6 +24,12 @@ jobs:
   python:
     uses: ./.github/workflows/ci-python.yml
 
+  service-images:
+    uses: ./.github/workflows/service-images.yml
+    permissions:
+      contents: read
+      packages: read
+
   required:
     name: Glasslab PR Gate
     if: ${{ always() }}
@@ -32,6 +38,7 @@ jobs:
       - docs
       - scripts
       - python
+      - service-images
     runs-on: ubuntu-latest
     steps:
       - name: Require every CI lane to pass
@@ -40,24 +47,27 @@ jobs:
           DOCS_RESULT: ${{ needs.docs.result }}
           SCRIPTS_RESULT: ${{ needs.scripts.result }}
           PYTHON_RESULT: ${{ needs.python.result }}
+          SERVICE_IMAGES_RESULT: ${{ needs.service-images.result }}
         run: |
           failed=0
           for result in \
             "$CONFIGS_RESULT" \
             "$DOCS_RESULT" \
             "$SCRIPTS_RESULT" \
-            "$PYTHON_RESULT"; do
+            "$PYTHON_RESULT" \
+            "$SERVICE_IMAGES_RESULT"; do
             if [[ "$result" != "success" ]]; then
               failed=1
             fi
           done
 
           if [[ "$failed" -ne 0 ]]; then
-            printf 'Required lane results: configs=%s docs=%s scripts=%s python=%s\n' \
+            printf 'Required lane results: configs=%s docs=%s scripts=%s python=%s service-images=%s\n' \
               "$CONFIGS_RESULT" \
               "$DOCS_RESULT" \
               "$SCRIPTS_RESULT" \
-              "$PYTHON_RESULT" >&2
+              "$PYTHON_RESULT" \
+              "$SERVICE_IMAGES_RESULT" >&2
             exit 1
           fi
 

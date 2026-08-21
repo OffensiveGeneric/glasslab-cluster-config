@@ -1,6 +1,7 @@
-name: Publish Service Images
+name: Service Images
 
 on:
+  workflow_call:
   push:
     branches: [main]
     paths:
@@ -8,6 +9,17 @@ on:
       - "services/workflow-api/**"
       - "services/workflow-registry/**"
       - "services/research-orchestrator/**"
+      - "services/research-command-router/**"
+      - "services/research-ingress/**"
+      - "services/intake-agent/**"
+      - "services/interpretation-agent/**"
+      - "services/assessment-agent/**"
+      - "services/design-agent/**"
+      - "services/schedule-worker/**"
+      - "services/whatsapp-gateway/**"
+      - "services/whatsapp-web-bridge/**"
+      - "kubeadm/glasslab-v2/**"
+      - "scripts/rollout-research-services.sh"
       - ".github/workflows/service-images.yml"
   workflow_dispatch:
 
@@ -30,18 +42,19 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
+        if: github.event_name != 'workflow_call'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and publish
+      - name: Build${{ github.event_name == 'workflow_call' && ' for PR validation' || ' and publish' }}
         uses: docker/build-push-action@v5
         with:
           context: .
           file: services/workflow-api/Dockerfile
-          push: true
+          push: ${{ github.event_name != 'workflow_call' }}
           tags: ghcr.io/ccny-glasslab/glasslab-workflow-api:${{ github.sha }}
           build-args: |
             GLASSLAB_GIT_SHA=${{ github.sha }}
@@ -59,21 +72,67 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
+        if: github.event_name != 'workflow_call'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and publish
+      - name: Build${{ github.event_name == 'workflow_call' && ' for PR validation' || ' and publish' }}
         uses: docker/build-push-action@v5
         with:
           context: services/research-orchestrator
           file: services/research-orchestrator/Dockerfile
-          push: true
+          push: ${{ github.event_name != 'workflow_call' }}
           tags: ghcr.io/ccny-glasslab/glasslab-research-orchestrator:${{ github.sha }}
           build-args: |
             GLASSLAB_GIT_SHA=${{ github.sha }}
             GLASSLAB_BUILD_SOURCE=github:${{ github.run_id }}
           cache-from: type=gha,scope=research-orchestrator
           cache-to: type=gha,mode=max,scope=research-orchestrator
+
+  supporting-control-services:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: research-command-router
+          - service: research-ingress
+          - service: intake-agent
+          - service: interpretation-agent
+          - service: assessment-agent
+          - service: design-agent
+          - service: schedule-worker
+          - service: whatsapp-gateway
+          - service: whatsapp-web-bridge
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'workflow_call'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build${{ github.event_name == 'workflow_call' && ' for PR validation' || ' and publish' }}
+        uses: docker/build-push-action@v5
+        with:
+          # These Dockerfiles deliberately copy from services/<name>, so the
+          # repository root is the required build context.
+          context: .
+          file: services/${{ matrix.service }}/Dockerfile
+          push: ${{ github.event_name != 'workflow_call' }}
+          tags: ghcr.io/ccny-glasslab/glasslab-${{ matrix.service }}:${{ github.sha }}
+          build-args: |
+            GLASSLAB_GIT_SHA=${{ github.sha }}
+            GLASSLAB_BUILD_SOURCE=github:${{ github.run_id }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
